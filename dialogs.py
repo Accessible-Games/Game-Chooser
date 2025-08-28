@@ -532,7 +532,13 @@ class PreferencesDialog(wx.Dialog):
         if libs_changed:
             # Rescan libraries
             try:
-                exc_count, removed_libraries = self.library_manager.validate_and_scan_all_with_dialog(self.GetParent())
+                result = self.library_manager.validate_and_scan_all_with_dialog(self.GetParent())
+                
+                # If scan was cancelled, just continue without showing dialogs
+                if result is None:
+                    return
+                
+                exc_count, removed_libraries = result
                 
                 # Check for removed libraries first
                 if removed_libraries:

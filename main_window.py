@@ -176,7 +176,13 @@ class MainFrame(wx.Frame):
         
         # Validate and scan
         try:
-            exc_count, removed_libraries = self.library_manager.validate_and_scan_all_with_dialog(self)
+            result = self.library_manager.validate_and_scan_all_with_dialog(self)
+            
+            # If scan was cancelled, just continue without showing any dialogs
+            if result is None:
+                return
+            
+            exc_count, removed_libraries = result
             
             # Check for removed libraries first
             if removed_libraries:
@@ -611,7 +617,15 @@ class MainFrame(wx.Frame):
     def on_refresh(self, event):
         """Refresh/rescan libraries"""
         try:
-            exc_count, removed_libraries = self.library_manager.validate_and_scan_all_with_dialog(self)
+            result = self.library_manager.validate_and_scan_all_with_dialog(self)
+            
+            # If scan was cancelled, just refresh the UI and continue without showing dialogs
+            if result is None:
+                self.refresh_game_list()
+                self.build_tree()
+                return
+            
+            exc_count, removed_libraries = result
             self.refresh_game_list()
             self.build_tree()
             

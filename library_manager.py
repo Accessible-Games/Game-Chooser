@@ -465,6 +465,10 @@ class GameLibraryManager:
                     else:
                         # Normal completion - show completion message and auto-close
                         progress_dialog.finish_scan(len(self.games), scan_result["exceptions_count"])
+                else:
+                    # Scan was cancelled - close dialog immediately
+                    import wx
+                    wx.CallAfter(progress_dialog.EndModal, wx.ID_CANCEL)
         
         # Start background thread
         thread = threading.Thread(target=background_scan, daemon=True)
@@ -482,6 +486,6 @@ class GameLibraryManager:
             raise scan_result["error"]
         
         if scan_result["cancelled"]:
-            return 0, []
+            return None  # Return None to indicate cancellation
             
         return scan_result["exceptions_count"], scan_result["removed_libraries"]
