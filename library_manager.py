@@ -300,6 +300,163 @@ class GameLibraryManager:
         scan_recursive(library_path)
         return found_games, new_exceptions
     
+    def scan_library_incremental(self, library_path, library_name, known_game_dirs, max_depth=10, progress_callback=None, cancel_check=None):
+        """Recursively scan a library path for NEW games, skipping known game directories"""
+        # Check if library path exists
+        library_path_obj = Path(library_path)
+        if not library_path_obj.exists():
+            print(f"Warning: Library path '{library_path}' does not exist. Skipping scan.")
+            return [], []
+        
+        if not library_path_obj.is_dir():
+            print(f"Warning: Library path '{library_path}' is not a directory. Skipping scan.")
+            return [], []
+        
+        found_games = []
+        new_exceptions = []
+        directories_to_scan = []
+        
+        # First pass: collect all directories to get total count for progress
+        if progress_callback:
+            def collect_directories(path, depth=0):
+                if depth > max_depth or (cancel_check and cancel_check()):
+                    return
+                try:
+                    for item in Path(path).iterdir():
+                        if item.name.startswith('.') or item.is_symlink():
+                            continue
+                        if item.is_dir():
+                            # Only add to scan list if not a known game directory
+                            if str(item) not in known_game_dirs:
+                                directories_to_scan.append(str(item))
+                                collect_directories(item, depth + 1)
+                except (PermissionError, OSError):
+                    pass
+            collect_directories(library_path)
+        
+        directories_processed = 0
+        
+        def scan_recursive(path, depth=0):
+            nonlocal directories_processed
+            
+            if depth > max_depth or (cancel_check and cancel_check()):
+                return
+            
+            # SKIP if this directory already contains a known game
+            if str(path) in known_game_dirs:
+                return
+            
+            # Update progress
+            if progress_callback and directories_to_scan:
+                progress = (directories_processed / len(directories_to_scan)) * 100
+                progress_callback(library_name, progress, len(found_games))
+                directories_processed += 1
+            
+            try:
+                # First, collect all executables in each directory to handle duplicates
+                directory_exes = {}
+                
+                for item in Path(path).iterdir():
+                    # Check for cancellation
+                    if cancel_check and cancel_check():
+                        return
+                        
+                    # Skip hidden/system files and symlinks
+                    if item.name.startswith('.'):
+                        continue
+                    if item.is_symlink():
+                        continue
+                    
+                    if item.is_file() and self.is_executable(str(item)):
+                        # Build relative path
+                        rel_path = item.relative_to(Path(library_path).parent)
+                        rel_str = str(rel_path).replace(os.sep, '\\')
+                        
+                        # Check if in exceptions
+                        if rel_str in self.config["exceptions"]:
+                            continue
+                        
+                        # Group by directory
+                        dir_key = str(item.parent)
+                        if dir_key not in directory_exes:
+                            directory_exes[dir_key] = []
+                        directory_exes[dir_key].append((item, rel_str))
+                
+                # Process each directory's executables
+                for dir_path, exe_list in directory_exes.items():
+                    # Check for cancellation
+                    if cancel_check and cancel_check():
+                        return
+                        
+                    if not exe_list:
+                        continue
+                    
+                    # Find the first valid executable
+                    main_exe = None
+                    main_rel_str = None
+                    
+                    for exe_item, exe_rel_str in exe_list:
+                        if self.is_valid_game_executable(str(exe_item)):
+                            main_exe = exe_item
+                            main_rel_str = exe_rel_str
+                            break
+                    
+                    # If no valid executable found, use the first one
+                    if main_exe is None and exe_list:
+                        main_exe, main_rel_str = exe_list[0]
+                    
+                    if main_exe:
+                        # Create game entry for main executable
+                        title = main_exe.parent.name
+                        system = platform.system()
+                        plat = "Windows" if system == "Windows" else "macOS"
+                        
+                        # Check if game already exists
+                        existing = None
+                        for g in found_games:
+                            if g.launch_path == main_rel_str:
+                                existing = g
+                                break
+                        
+                        if existing:
+                            if plat not in existing.platforms:
+                                existing.platforms.append(plat)
+                        else:
+                            game = Game(
+                                title=title,
+                                platforms=[plat],
+                                launch_path=main_rel_str,
+                                library_name=library_name
+                            )
+                            found_games.append(game)
+                        
+                        # Add all other executables in the same directory to exceptions
+                        for exe_item, exe_rel_str in exe_list:
+                            if exe_rel_str != main_rel_str:
+                                new_exceptions.append(exe_rel_str)
+                
+                # Continue recursing into subdirectories
+                for item in Path(path).iterdir():
+                    # Check for cancellation
+                    if cancel_check and cancel_check():
+                        return
+                        
+                    if item.name.startswith('.'):
+                        continue
+                    if item.is_symlink():
+                        continue
+                    if item.is_dir():
+                        # Only recurse if not a known game directory
+                        if str(item) not in known_game_dirs:
+                            scan_recursive(item, depth + 1)
+            
+            except PermissionError:
+                # Handle permission errors
+                raise PermissionError(f"Permission denied: {path}")
+        
+        scan_recursive(library_path)
+        return found_games, new_exceptions
+    
     def validate_and_scan_all(self, progress_callback=None, cancel_check=None):
         """Validate existing games and scan for new ones"""
         validated_games = []
@@ -419,6 +576,140 @@ class GameLibraryManager:
         
         return len(all_new_exceptions), []  # No libraries removed in this case
     
+    def validate_and_scan_incrementally(self, progress_callback=None, cancel_check=None):
+        """Validate existing games and scan only new directories for faster startup"""
+        all_new_exceptions = []
+        
+        # FIRST: Check for missing libraries and remove them from config before any scanning
+        missing_libraries = []
+        valid_libraries = []
+        
+        for lib in self.config["libraries"]:
+            if lib["name"] == "manual":
+                valid_libraries.append(lib)  # Always keep manual library
+                continue
+                
+            if not Path(lib["path"]).exists():
+                missing_libraries.append(lib)
+            else:
+                valid_libraries.append(lib)
+        
+        # Remove missing libraries from config immediately
+        removed_libraries = []
+        if missing_libraries:
+            print(f"Removing {len(missing_libraries)} missing library path(s) from config:")
+            for lib in missing_libraries:
+                print(f"  - {lib['name']}: {lib['path']}")
+                removed_libraries.append(lib)
+            
+            # Update config to only contain valid libraries
+            self.config["libraries"] = valid_libraries
+            self.save_config()
+            
+            # Still need to validate existing games to remove ones from missing libraries
+            validated_games = []
+            for game in self.games:
+                if game.launch_path.startswith("http"):
+                    validated_games.append(game)
+                    continue
+                
+                # Always keep manual games (they manage their own paths)
+                if game.library_name == "manual":
+                    validated_games.append(game)
+                    continue
+                
+                # Only keep games from libraries that still exist
+                if game.library_name in [lib["name"] for lib in valid_libraries]:
+                    full_path = self.get_full_path(game)
+                    if full_path and Path(full_path).exists():
+                        validated_games.append(game)
+            
+            # Save updated games list and return early - no need to scan anything
+            self.games = validated_games
+            self.save_games()
+            return 0, removed_libraries
+        
+        # SECOND: Validate existing games (remove missing ones)
+        validated_games = []
+        for game in self.games:
+            if cancel_check and cancel_check():
+                return 0, []  # Return early if cancelled
+                
+            if game.launch_path.startswith("http"):
+                validated_games.append(game)
+                continue
+            
+            # Always keep manual games (they manage their own paths)
+            if game.library_name == "manual":
+                validated_games.append(game)
+                continue
+            
+            full_path = self.get_full_path(game)
+            if full_path and Path(full_path).exists():
+                validated_games.append(game)
+        
+        # THIRD: Build set of known game directories from validated games
+        known_game_dirs = set()
+        for game in validated_games:
+            if not game.launch_path.startswith("http") and game.library_name != "manual":
+                try:
+                    # Get the directory containing the game executable
+                    full_path = self.get_full_path(game)
+                    if full_path:
+                        game_dir = str(Path(full_path).parent)
+                        known_game_dirs.add(game_dir)
+                except:
+                    pass  # Skip if path processing fails
+        
+        # FOURTH: Scan for new games only (skip known directories)
+        for lib in valid_libraries:
+            if cancel_check and cancel_check():
+                return 0, []  # Return early if cancelled
+                
+            if lib["name"] == "manual":
+                continue  # Skip manual library from autodiscovery
+                
+            try:
+                new_games, new_exceptions = self.scan_library_incremental(
+                    lib["path"], lib["name"], known_game_dirs, 
+                    progress_callback=progress_callback, cancel_check=cancel_check
+                )
+                
+                # Add new exceptions
+                for exc in new_exceptions:
+                    if exc not in self.config["exceptions"]:
+                        self.config["exceptions"].append(exc)
+                        all_new_exceptions.append(exc)
+                
+                # Merge new games
+                for new_game in new_games:
+                    if cancel_check and cancel_check():
+                        return 0, []  # Return early if cancelled
+                        
+                    existing = None
+                    for val_game in validated_games:
+                        if val_game.launch_path == new_game.launch_path:
+                            existing = val_game
+                            break
+                    
+                    if existing:
+                        # Update platforms if needed
+                        for plat in new_game.platforms:
+                            if plat not in existing.platforms:
+                                existing.platforms.append(plat)
+                    else:
+                        validated_games.append(new_game)
+            
+            except PermissionError as e:
+                # Will be handled by caller
+                raise e
+        
+        self.games = validated_games
+        self.save_games()
+        self.save_config()
+        
+        return len(all_new_exceptions), []  # No libraries removed in this case
+    
     def validate_and_scan_all_with_dialog(self, parent_window):
         """Validate and scan all libraries with progress dialog"""
         # Import here to avoid circular dependency
@@ -448,6 +739,516 @@ class GameLibraryManager:
                     return progress_dialog.cancelled
                 
                 exceptions_count, removed_libraries = self.validate_and_scan_all(progress_callback, cancel_check)
+                scan_result["exceptions_count"] = exceptions_count
+                scan_result["removed_libraries"] = removed_libraries
+                scan_result["cancelled"] = progress_dialog.cancelled
+                
+            except Exception as e:
+                scan_result["error"] = e
+            finally:
+                # Close the progress dialog appropriately
+                if not scan_result["cancelled"]:
+                    if scan_result["removed_libraries"]:
+                        # Libraries were removed - close dialog immediately without completion message
+                        # Let the main window show the missing library dialog first
+                        import wx
+                        wx.CallAfter(progress_dialog.EndModal, wx.ID_OK)
+                    else:
+                        # Normal completion - show completion message and auto-close
+                        progress_dialog.finish_scan(len(self.games), scan_result["exceptions_count"])
+                else:
+                    # Scan was cancelled - close dialog immediately
+                    import wx
+                    wx.CallAfter(progress_dialog.EndModal, wx.ID_CANCEL)
+        
+        # Start background thread
+        thread = threading.Thread(target=background_scan, daemon=True)
+        thread.start()
+        
+        # Show dialog modally
+        result = progress_dialog.ShowModal()
+        progress_dialog.Destroy()
+        
+        # Wait for thread to finish if still running
+        thread.join(timeout=1.0)
+        
+        # Handle results
+        if scan_result["error"]:
+            raise scan_result["error"]
+        
+        if scan_result["cancelled"]:
+            return None  # Return None to indicate cancellation
+            
+        return scan_result["exceptions_count"], scan_result["removed_libraries"]
+    
+    def validate_and_scan_targeted(self, new_library_names, progress_callback=None, cancel_check=None):
+        """Validate existing games and scan only targeted libraries"""
+        all_new_exceptions = []
+        
+        # FIRST: Check for missing libraries and remove them from config before any scanning
+        missing_libraries = []
+        valid_libraries = []
+        
+        for lib in self.config["libraries"]:
+            if lib["name"] == "manual":
+                valid_libraries.append(lib)  # Always keep manual library
+                continue
+                
+            if not Path(lib["path"]).exists():
+                missing_libraries.append(lib)
+            else:
+                valid_libraries.append(lib)
+        
+        # Remove missing libraries from config immediately
+        removed_libraries = []
+        if missing_libraries:
+            print(f"Removing {len(missing_libraries)} missing library path(s) from config:")
+            for lib in missing_libraries:
+                print(f"  - {lib['name']}: {lib['path']}")
+                removed_libraries.append(lib)
+            
+            # Update config to only contain valid libraries
+            self.config["libraries"] = valid_libraries
+            self.save_config()
+            
+            # Still need to validate existing games to remove ones from missing libraries
+            validated_games = []
+            for game in self.games:
+                if game.launch_path.startswith("http"):
+                    validated_games.append(game)
+                    continue
+                
+                # Always keep manual games (they manage their own paths)
+                if game.library_name == "manual":
+                    validated_games.append(game)
+                    continue
+                
+                # Only keep games from libraries that still exist
+                if game.library_name in [lib["name"] for lib in valid_libraries]:
+                    full_path = self.get_full_path(game)
+                    if full_path and Path(full_path).exists():
+                        validated_games.append(game)
+            
+            # Save updated games list and return early - no need to scan anything
+            self.games = validated_games
+            self.save_games()
+            return 0, removed_libraries
+        
+        # SECOND: Validate existing games (remove missing ones)
+        validated_games = []
+        for game in self.games:
+            if cancel_check and cancel_check():
+                return 0, []  # Return early if cancelled
+                
+            if game.launch_path.startswith("http"):
+                validated_games.append(game)
+                continue
+            
+            # Always keep manual games (they manage their own paths)
+            if game.library_name == "manual":
+                validated_games.append(game)
+                continue
+            
+            full_path = self.get_full_path(game)
+            if full_path and Path(full_path).exists():
+                validated_games.append(game)
+        
+        # THIRD: Build set of known game directories from validated games
+        known_game_dirs = set()
+        for game in validated_games:
+            if not game.launch_path.startswith("http") and game.library_name != "manual":
+                try:
+                    # Get the directory containing the game executable
+                    full_path = self.get_full_path(game)
+                    if full_path:
+                        game_dir = str(Path(full_path).parent)
+                        known_game_dirs.add(game_dir)
+                except:
+                    pass  # Skip if path processing fails
+        
+        # FOURTH: Scan libraries (full scan for new ones, incremental for existing)
+        for lib in valid_libraries:
+            if cancel_check and cancel_check():
+                return 0, []  # Return early if cancelled
+                
+            if lib["name"] == "manual":
+                continue  # Skip manual library from autodiscovery
+                
+            try:
+                if lib["name"] in new_library_names:
+                    # New library - use full scan to discover all games
+                    new_games, new_exceptions = self.scan_library(
+                        lib["path"], lib["name"], progress_callback=progress_callback, cancel_check=cancel_check
+                    )
+                else:
+                    # Existing library - use incremental scan (skip known game directories)
+                    new_games, new_exceptions = self.scan_library_incremental(
+                        lib["path"], lib["name"], known_game_dirs, 
+                        progress_callback=progress_callback, cancel_check=cancel_check
+                    )
+                
+                # Add new exceptions
+                for exc in new_exceptions:
+                    if exc not in self.config["exceptions"]:
+                        self.config["exceptions"].append(exc)
+                        all_new_exceptions.append(exc)
+                
+                # Merge new games
+                for new_game in new_games:
+                    if cancel_check and cancel_check():
+                        return 0, []  # Return early if cancelled
+                        
+                    existing = None
+                    for val_game in validated_games:
+                        if val_game.launch_path == new_game.launch_path:
+                            existing = val_game
+                            break
+                    
+                    if existing:
+                        # Update platforms if needed
+                        for plat in new_game.platforms:
+                            if plat not in existing.platforms:
+                                existing.platforms.append(plat)
+                    else:
+                        validated_games.append(new_game)
+            
+            except PermissionError as e:
+                # Will be handled by caller
+                raise e
+        
+        self.games = validated_games
+        self.save_games()
+        self.save_config()
+        
+        return len(all_new_exceptions), []  # No libraries removed in this case
+    
+    def validate_and_scan_targeted_with_dialog(self, parent_window, new_library_names=None):
+        """Validate existing games and scan targeted libraries with progress dialog"""
+        if new_library_names is None:
+            new_library_names = set()
+        
+        # Import here to avoid circular dependency
+        from dialogs import ScanProgressDialog
+        
+        # Count libraries excluding manual
+        library_count = sum(1 for lib in self.config["libraries"] if lib["name"] != "manual")
+        
+        if library_count == 0:
+            return self.validate_and_scan_targeted(new_library_names)
+        
+        # Create and show progress dialog
+        progress_dialog = ScanProgressDialog(parent_window)
+        progress_dialog.set_library_count(library_count)
+        
+        # Use standard scanning text
+        progress_dialog.status_text.SetLabel("Scanning for games...")
+        
+        # Variables to store results from background thread
+        scan_result = {"exceptions_count": 0, "removed_libraries": [], "error": None, "cancelled": False}
+        
+        def background_scan():
+            """Background thread function for targeted scanning"""
+            try:
+                def progress_callback(library_name, progress, games_found):
+                    if not progress_dialog.cancelled:
+                        progress_dialog.update_progress(library_name, progress, games_found)
+                
+                def cancel_check():
+                    return progress_dialog.cancelled
+                
+                exceptions_count, removed_libraries = self.validate_and_scan_targeted(new_library_names, progress_callback, cancel_check)
+                scan_result["exceptions_count"] = exceptions_count
+                scan_result["removed_libraries"] = removed_libraries
+                scan_result["cancelled"] = progress_dialog.cancelled
+                
+            except Exception as e:
+                scan_result["error"] = e
+            finally:
+                # Close the progress dialog appropriately
+                if not scan_result["cancelled"]:
+                    if scan_result["removed_libraries"]:
+                        # Libraries were removed - close dialog immediately without completion message
+                        # Let the main window show the missing library dialog first
+                        import wx
+                        wx.CallAfter(progress_dialog.EndModal, wx.ID_OK)
+                    else:
+                        # Normal completion - show completion message and auto-close
+                        progress_dialog.finish_scan(len(self.games), scan_result["exceptions_count"])
+                else:
+                    # Scan was cancelled - close dialog immediately
+                    import wx
+                    wx.CallAfter(progress_dialog.EndModal, wx.ID_CANCEL)
+        
+        # Start background thread
+        thread = threading.Thread(target=background_scan, daemon=True)
+        thread.start()
+        
+        # Show dialog modally
+        result = progress_dialog.ShowModal()
+        progress_dialog.Destroy()
+        
+        # Wait for thread to finish if still running
+        thread.join(timeout=1.0)
+        
+        # Handle results
+        if scan_result["error"]:
+            raise scan_result["error"]
+        
+        if scan_result["cancelled"]:
+            return None  # Return None to indicate cancellation
+            
+        return scan_result["exceptions_count"], scan_result["removed_libraries"]
+    
+    def validate_and_scan_incrementally_with_dialog(self, parent_window):
+        """Validate existing games and scan incrementally with progress dialog (faster startup)"""
+        # Import here to avoid circular dependency
+        from dialogs import ScanProgressDialog
+        
+        # Count libraries excluding manual
+        library_count = sum(1 for lib in self.config["libraries"] if lib["name"] != "manual")
+        
+        if library_count == 0:
+            return self.validate_and_scan_incrementally()
+        
+        # Create and show progress dialog
+        progress_dialog = ScanProgressDialog(parent_window)
+        progress_dialog.set_library_count(library_count)
+        
+        # Use standard scanning text
+        progress_dialog.status_text.SetLabel("Scanning for games...")
+        
+        # Variables to store results from background thread
+        scan_result = {"exceptions_count": 0, "removed_libraries": [], "error": None, "cancelled": False}
+        
+        def background_scan():
+            """Background thread function for incremental scanning"""
+            try:
+                def progress_callback(library_name, progress, games_found):
+                    if not progress_dialog.cancelled:
+                        progress_dialog.update_progress(library_name, progress, games_found)
+                
+                def cancel_check():
+                    return progress_dialog.cancelled
+                
+                exceptions_count, removed_libraries = self.validate_and_scan_incrementally(progress_callback, cancel_check)
+                scan_result["exceptions_count"] = exceptions_count
+                scan_result["removed_libraries"] = removed_libraries
+                scan_result["cancelled"] = progress_dialog.cancelled
+                
+            except Exception as e:
+                scan_result["error"] = e
+            finally:
+                # Close the progress dialog appropriately
+                if not scan_result["cancelled"]:
+                    if scan_result["removed_libraries"]:
+                        # Libraries were removed - close dialog immediately without completion message
+                        # Let the main window show the missing library dialog first
+                        import wx
+                        wx.CallAfter(progress_dialog.EndModal, wx.ID_OK)
+                    else:
+                        # Normal completion - show completion message and auto-close
+                        progress_dialog.finish_scan(len(self.games), scan_result["exceptions_count"])
+                else:
+                    # Scan was cancelled - close dialog immediately
+                    import wx
+                    wx.CallAfter(progress_dialog.EndModal, wx.ID_CANCEL)
+        
+        # Start background thread
+        thread = threading.Thread(target=background_scan, daemon=True)
+        thread.start()
+        
+        # Show dialog modally
+        result = progress_dialog.ShowModal()
+        progress_dialog.Destroy()
+        
+        # Wait for thread to finish if still running
+        thread.join(timeout=1.0)
+        
+        # Handle results
+        if scan_result["error"]:
+            raise scan_result["error"]
+        
+        if scan_result["cancelled"]:
+            return None  # Return None to indicate cancellation
+            
+        return scan_result["exceptions_count"], scan_result["removed_libraries"]
+    
+    def validate_and_scan_targeted(self, new_library_names, progress_callback=None, cancel_check=None):
+        """Validate existing games and scan only targeted libraries"""
+        all_new_exceptions = []
+        
+        # FIRST: Check for missing libraries and remove them from config before any scanning
+        missing_libraries = []
+        valid_libraries = []
+        
+        for lib in self.config["libraries"]:
+            if lib["name"] == "manual":
+                valid_libraries.append(lib)  # Always keep manual library
+                continue
+                
+            if not Path(lib["path"]).exists():
+                missing_libraries.append(lib)
+            else:
+                valid_libraries.append(lib)
+        
+        # Remove missing libraries from config immediately
+        removed_libraries = []
+        if missing_libraries:
+            print(f"Removing {len(missing_libraries)} missing library path(s) from config:")
+            for lib in missing_libraries:
+                print(f"  - {lib['name']}: {lib['path']}")
+                removed_libraries.append(lib)
+            
+            # Update config to only contain valid libraries
+            self.config["libraries"] = valid_libraries
+            self.save_config()
+            
+            # Still need to validate existing games to remove ones from missing libraries
+            validated_games = []
+            for game in self.games:
+                if game.launch_path.startswith("http"):
+                    validated_games.append(game)
+                    continue
+                
+                # Always keep manual games (they manage their own paths)
+                if game.library_name == "manual":
+                    validated_games.append(game)
+                    continue
+                
+                # Only keep games from libraries that still exist
+                if game.library_name in [lib["name"] for lib in valid_libraries]:
+                    full_path = self.get_full_path(game)
+                    if full_path and Path(full_path).exists():
+                        validated_games.append(game)
+            
+            # Save updated games list and return early - no need to scan anything
+            self.games = validated_games
+            self.save_games()
+            return 0, removed_libraries
+        
+        # SECOND: Validate existing games (remove missing ones)
+        validated_games = []
+        for game in self.games:
+            if cancel_check and cancel_check():
+                return 0, []  # Return early if cancelled
+                
+            if game.launch_path.startswith("http"):
+                validated_games.append(game)
+                continue
+            
+            # Always keep manual games (they manage their own paths)
+            if game.library_name == "manual":
+                validated_games.append(game)
+                continue
+            
+            full_path = self.get_full_path(game)
+            if full_path and Path(full_path).exists():
+                validated_games.append(game)
+        
+        # THIRD: Build set of known game directories from validated games
+        known_game_dirs = set()
+        for game in validated_games:
+            if not game.launch_path.startswith("http") and game.library_name != "manual":
+                try:
+                    # Get the directory containing the game executable
+                    full_path = self.get_full_path(game)
+                    if full_path:
+                        game_dir = str(Path(full_path).parent)
+                        known_game_dirs.add(game_dir)
+                except:
+                    pass  # Skip if path processing fails
+        
+        # FOURTH: Scan libraries (full scan for new ones, incremental for existing)
+        for lib in valid_libraries:
+            if cancel_check and cancel_check():
+                return 0, []  # Return early if cancelled
+                
+            if lib["name"] == "manual":
+                continue  # Skip manual library from autodiscovery
+                
+            try:
+                if lib["name"] in new_library_names:
+                    # New library - use full scan to discover all games
+                    new_games, new_exceptions = self.scan_library(
+                        lib["path"], lib["name"], progress_callback=progress_callback, cancel_check=cancel_check
+                    )
+                else:
+                    # Existing library - use incremental scan (skip known game directories)
+                    new_games, new_exceptions = self.scan_library_incremental(
+                        lib["path"], lib["name"], known_game_dirs, 
+                        progress_callback=progress_callback, cancel_check=cancel_check
+                    )
+                
+                # Add new exceptions
+                for exc in new_exceptions:
+                    if exc not in self.config["exceptions"]:
+                        self.config["exceptions"].append(exc)
+                        all_new_exceptions.append(exc)
+                
+                # Merge new games
+                for new_game in new_games:
+                    if cancel_check and cancel_check():
+                        return 0, []  # Return early if cancelled
+                        
+                    existing = None
+                    for val_game in validated_games:
+                        if val_game.launch_path == new_game.launch_path:
+                            existing = val_game
+                            break
+                    
+                    if existing:
+                        # Update platforms if needed
+                        for plat in new_game.platforms:
+                            if plat not in existing.platforms:
+                                existing.platforms.append(plat)
+                    else:
+                        validated_games.append(new_game)
+            
+            except PermissionError as e:
+                # Will be handled by caller
+                raise e
+        
+        self.games = validated_games
+        self.save_games()
+        self.save_config()
+        
+        return len(all_new_exceptions), []  # No libraries removed in this case
+    
+    def validate_and_scan_targeted_with_dialog(self, parent_window, new_library_names=None):
+        """Validate existing games and scan targeted libraries with progress dialog"""
+        if new_library_names is None:
+            new_library_names = set()
+        
+        # Import here to avoid circular dependency
+        from dialogs import ScanProgressDialog
+        
+        # Count libraries excluding manual
+        library_count = sum(1 for lib in self.config["libraries"] if lib["name"] != "manual")
+        
+        if library_count == 0:
+            return self.validate_and_scan_targeted(new_library_names)
+        
+        # Create and show progress dialog
+        progress_dialog = ScanProgressDialog(parent_window)
+        progress_dialog.set_library_count(library_count)
+        
+        # Use standard scanning text
+        progress_dialog.status_text.SetLabel("Scanning for games...")
+        
+        # Variables to store results from background thread
+        scan_result = {"exceptions_count": 0, "removed_libraries": [], "error": None, "cancelled": False}
+        
+        def background_scan():
+            """Background thread function for targeted scanning"""
+            try:
+                def progress_callback(library_name, progress, games_found):
+                    if not progress_dialog.cancelled:
+                        progress_dialog.update_progress(library_name, progress, games_found)
+                
+                def cancel_check():
+                    return progress_dialog.cancelled
+                
+                exceptions_count, removed_libraries = self.validate_and_scan_targeted(new_library_names, progress_callback, cancel_check)
                 scan_result["exceptions_count"] = exceptions_count
                 scan_result["removed_libraries"] = removed_libraries
                 scan_result["cancelled"] = progress_dialog.cancelled

@@ -32,7 +32,7 @@ class ScanProgressDialog(wx.Dialog):
         main_sizer = wx.BoxSizer(wx.VERTICAL)
         
         # Status text
-        self.status_text = wx.StaticText(panel, label="Initializing scan...")
+        self.status_text = wx.StaticText(panel, label="Scanning for games...")
         main_sizer.Add(self.status_text, 0, wx.ALL | wx.EXPAND, 10)
         
         # Current library text
@@ -86,7 +86,7 @@ class ScanProgressDialog(wx.Dialog):
         """Set total number of libraries to process"""
         self.total_libraries = total
         if total > 0:
-            self.status_text.SetLabel(f"Scanning {total} game libraries...")
+            self.status_text.SetLabel("Scanning for games...")
     
     def finish_scan(self, games_found, exceptions_added):
         """Called when scan is complete"""
@@ -530,9 +530,19 @@ class PreferencesDialog(wx.Dialog):
         self.library_manager.save_config()
         
         if libs_changed:
-            # Rescan libraries
+            # Determine which libraries are completely new
+            old_lib_names = set(lib["name"] for lib in old_libs)
+            new_lib_names = set(lib["name"] for lib in new_libs)
+            
+            # Find new libraries that need full scan
+            new_libraries_added = new_lib_names - old_lib_names
+            
             try:
-                result = self.library_manager.validate_and_scan_all_with_dialog(self.GetParent())
+                # Use targeted scanning - full scan only new libraries, incremental for existing
+                result = self.library_manager.validate_and_scan_targeted_with_dialog(
+                    self.GetParent(), 
+                    new_libraries_added
+                )
                 
                 # If scan was cancelled, just continue without showing dialogs
                 if result is None:

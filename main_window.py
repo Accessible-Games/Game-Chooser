@@ -174,9 +174,14 @@ class MainFrame(wx.Frame):
                 return
             dlg.Destroy()
         
-        # Validate and scan
+        # Validate and scan (use full scan only on first run when no games.json exists)
         try:
-            result = self.library_manager.validate_and_scan_all_with_dialog(self)
+            if not self.library_manager.games_file.exists():
+                # First run - need full scan to discover all games
+                result = self.library_manager.validate_and_scan_all_with_dialog(self)
+            else:
+                # Subsequent runs - use incremental scan for faster startup
+                result = self.library_manager.validate_and_scan_incrementally_with_dialog(self)
             
             # If scan was cancelled, just continue without showing any dialogs
             if result is None:
@@ -617,7 +622,7 @@ class MainFrame(wx.Frame):
     def on_refresh(self, event):
         """Refresh/rescan libraries"""
         try:
-            result = self.library_manager.validate_and_scan_all_with_dialog(self)
+            result = self.library_manager.validate_and_scan_incrementally_with_dialog(self)
             
             # If scan was cancelled, just refresh the UI and continue without showing dialogs
             if result is None:
