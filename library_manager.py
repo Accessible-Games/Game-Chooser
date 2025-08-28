@@ -305,10 +305,58 @@ class GameLibraryManager:
         validated_games = []
         all_new_exceptions = []
         
-        # First, validate existing games
+        # FIRST: Check for missing libraries and remove them from config before any scanning
+        missing_libraries = []
+        valid_libraries = []
+        
+        for lib in self.config["libraries"]:
+            if lib["name"] == "manual":
+                valid_libraries.append(lib)  # Always keep manual library
+                continue
+                
+            if not Path(lib["path"]).exists():
+                missing_libraries.append(lib)
+            else:
+                valid_libraries.append(lib)
+        
+        # Remove missing libraries from config immediately
+        removed_libraries = []
+        if missing_libraries:
+            print(f"Removing {len(missing_libraries)} missing library path(s) from config:")
+            for lib in missing_libraries:
+                print(f"  - {lib['name']}: {lib['path']}")
+                removed_libraries.append(lib)
+            
+            # Update config to only contain valid libraries
+            self.config["libraries"] = valid_libraries
+            self.save_config()
+            
+            # Still need to validate existing games to remove ones from missing libraries
+            for game in self.games:
+                if game.launch_path.startswith("http"):
+                    validated_games.append(game)
+                    continue
+                
+                # Always keep manual games (they manage their own paths)
+                if game.library_name == "manual":
+                    validated_games.append(game)
+                    continue
+                
+                # Only keep games from libraries that still exist
+                if game.library_name in [lib["name"] for lib in valid_libraries]:
+                    full_path = self.get_full_path(game)
+                    if full_path and Path(full_path).exists():
+                        validated_games.append(game)
+            
+            # Save updated games list and return early - no need to scan anything
+            self.games = validated_games
+            self.save_games()
+            return 0, removed_libraries
+        
+        # SECOND: Validate existing games (only if no libraries were removed)
         for game in self.games:
             if cancel_check and cancel_check():
-                return 0  # Return early if cancelled
+                return 0, []  # Return early if cancelled
                 
             if game.launch_path.startswith("http"):
                 validated_games.append(game)
@@ -323,19 +371,13 @@ class GameLibraryManager:
             if full_path and Path(full_path).exists():
                 validated_games.append(game)
         
-        # Then scan all libraries for new games (exclude manual library)
-        missing_libraries = []
-        for lib in self.config["libraries"]:
+        # THIRD: Scan all valid libraries for new games (exclude manual library)
+        for lib in valid_libraries:
             if cancel_check and cancel_check():
-                return 0  # Return early if cancelled
+                return 0, []  # Return early if cancelled
                 
             if lib["name"] == "manual":
                 continue  # Skip manual library from autodiscovery
-            
-            # Check if library path exists before scanning
-            if not Path(lib["path"]).exists():
-                missing_libraries.append(lib)
-                continue
                 
             try:
                 new_games, new_exceptions = self.scan_library(
@@ -351,7 +393,7 @@ class GameLibraryManager:
                 # Merge new games
                 for new_game in new_games:
                     if cancel_check and cancel_check():
-                        return 0  # Return early if cancelled
+                        return 0, []  # Return early if cancelled
                         
                     existing = None
                     for val_game in validated_games:
@@ -371,17 +413,11 @@ class GameLibraryManager:
                 # Will be handled by caller
                 raise e
         
-        # Handle missing libraries
-        if missing_libraries:
-            print(f"Warning: {len(missing_libraries)} library path(s) not found:")
-            for lib in missing_libraries:
-                print(f"  - {lib['name']}: {lib['path']}")
-        
         self.games = validated_games
         self.save_games()
         self.save_config()
         
-        return len(all_new_exceptions)
+        return len(all_new_exceptions), []  # No libraries removed in this case
     
     def validate_and_scan_all_with_dialog(self, parent_window):
         """Validate and scan all libraries with progress dialog"""
@@ -399,7 +435,7 @@ class GameLibraryManager:
         progress_dialog.set_library_count(library_count)
         
         # Variables to store results from background thread
-        scan_result = {"exceptions_count": 0, "error": None, "cancelled": False}
+        scan_result = {"exceptions_count": 0, "removed_libraries": [], "error": None, "cancelled": False}
         
         def background_scan():
             """Background thread function for scanning"""
@@ -411,16 +447,24 @@ class GameLibraryManager:
                 def cancel_check():
                     return progress_dialog.cancelled
                 
-                exceptions_count = self.validate_and_scan_all(progress_callback, cancel_check)
+                exceptions_count, removed_libraries = self.validate_and_scan_all(progress_callback, cancel_check)
                 scan_result["exceptions_count"] = exceptions_count
+                scan_result["removed_libraries"] = removed_libraries
                 scan_result["cancelled"] = progress_dialog.cancelled
                 
             except Exception as e:
                 scan_result["error"] = e
             finally:
-                # Signal completion
+                # Close the progress dialog appropriately
                 if not scan_result["cancelled"]:
-                    progress_dialog.finish_scan(len(self.games), scan_result["exceptions_count"])
+                    if scan_result["removed_libraries"]:
+                        # Libraries were removed - close dialog immediately without completion message
+                        # Let the main window show the missing library dialog first
+                        import wx
+                        wx.CallAfter(progress_dialog.EndModal, wx.ID_OK)
+                    else:
+                        # Normal completion - show completion message and auto-close
+                        progress_dialog.finish_scan(len(self.games), scan_result["exceptions_count"])
         
         # Start background thread
         thread = threading.Thread(target=background_scan, daemon=True)
@@ -438,6 +482,6 @@ class GameLibraryManager:
             raise scan_result["error"]
         
         if scan_result["cancelled"]:
-            return 0
+            return 0, []
             
-        return scan_result["exceptions_count"]
+        return scan_result["exceptions_count"], scan_result["removed_libraries"]

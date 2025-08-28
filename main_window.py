@@ -176,9 +176,17 @@ class MainFrame(wx.Frame):
         
         # Validate and scan
         try:
-            exc_count = self.library_manager.validate_and_scan_all_with_dialog(self)
+            exc_count, removed_libraries = self.library_manager.validate_and_scan_all_with_dialog(self)
             
-            if len(self.library_manager.games) == 0:
+            # Check for removed libraries first
+            if removed_libraries:
+                lib_names = ", ".join([lib["name"] for lib in removed_libraries])
+                lib_paths = "\n".join([f"• {lib['name']}: {lib['path']}" for lib in removed_libraries])
+                message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}\n\nWould you like to update your library settings?"
+                if wx.MessageBox(message, "Missing Library Paths Removed", 
+                                wx.YES_NO | wx.ICON_WARNING) == wx.YES:
+                    self.on_preferences(None)
+            elif len(self.library_manager.games) == 0:
                 if wx.MessageBox("No games found in currently added libraries. Open preferences?",
                                 "No Games Found", 
                                 wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
@@ -603,11 +611,18 @@ class MainFrame(wx.Frame):
     def on_refresh(self, event):
         """Refresh/rescan libraries"""
         try:
-            exc_count = self.library_manager.validate_and_scan_all_with_dialog(self)
+            exc_count, removed_libraries = self.library_manager.validate_and_scan_all_with_dialog(self)
             self.refresh_game_list()
             self.build_tree()
             
-            if exc_count > 0:
+            # Check for removed libraries first
+            if removed_libraries:
+                lib_paths = "\n".join([f"• {lib['name']}: {lib['path']}" for lib in removed_libraries])
+                message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}\n\nWould you like to update your library settings?"
+                if wx.MessageBox(message, "Missing Library Paths Removed", 
+                                wx.YES_NO | wx.ICON_WARNING) == wx.YES:
+                    self.on_preferences(None)
+            elif exc_count > 0:
                 if wx.MessageBox(f"Added {exc_count} executables to exceptions. Open preferences?",
                                 "Exceptions Added",
                                 wx.YES_NO | wx.ICON_QUESTION) == wx.YES:

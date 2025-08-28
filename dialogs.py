@@ -532,8 +532,19 @@ class PreferencesDialog(wx.Dialog):
         if libs_changed:
             # Rescan libraries
             try:
-                exc_count = self.library_manager.validate_and_scan_all_with_dialog(self.GetParent())
-                if exc_count > 0:
+                exc_count, removed_libraries = self.library_manager.validate_and_scan_all_with_dialog(self.GetParent())
+                
+                # Check for removed libraries first
+                if removed_libraries:
+                    lib_paths = "\n".join([f"• {lib['name']}: {lib['path']}" for lib in removed_libraries])
+                    message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}"
+                    wx.MessageBox(message, "Missing Library Paths Removed", wx.OK | wx.ICON_WARNING)
+                    # Refresh the libraries list in the dialog
+                    self.lib_list.DeleteAllItems()
+                    for lib in self.library_manager.config["libraries"]:
+                        index = self.lib_list.InsertItem(self.lib_list.GetItemCount(), lib["name"])
+                        self.lib_list.SetItem(index, 1, lib["path"])
+                elif exc_count > 0:
                     if wx.MessageBox(f"Added {exc_count} executables to exceptions. Open preferences?",
                                     "Exceptions Added", 
                                     wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
