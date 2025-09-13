@@ -119,12 +119,16 @@ class MainFrame(wx.Frame):
         
         # File menu
         file_menu = wx.Menu()
-        exit_item = file_menu.Append(wx.ID_EXIT, "E&xit\tAlt+F4")
+        # Use platform-appropriate exit shortcut (wxPython handles Ctrl->Cmd mapping on macOS)
+        system = platform.system()
+        exit_shortcut = "Ctrl+Q" if system == "Darwin" else "Alt+F4"
+        exit_item = file_menu.Append(wx.ID_EXIT, f"E&xit\t{exit_shortcut}")
         self.Bind(wx.EVT_MENU, self.on_exit, exit_item)
         menu_bar.Append(file_menu, "&File")
         
         # Edit menu
         edit_menu = wx.Menu()
+        # Use Ctrl for both platforms (wxPython maps to Cmd on macOS automatically)
         pref_item = edit_menu.Append(wx.ID_PREFERENCES, "&Preferences\tCtrl+,")
         self.Bind(wx.EVT_MENU, self.on_preferences, pref_item)
         menu_bar.Append(edit_menu, "&Edit")
@@ -187,7 +191,7 @@ class MainFrame(wx.Frame):
             if result is None:
                 return
             
-            exc_count, removed_libraries = result
+            removed_libraries = result
             
             # Check for removed libraries first
             if removed_libraries:
@@ -200,11 +204,6 @@ class MainFrame(wx.Frame):
             elif len(self.library_manager.games) == 0:
                 if wx.MessageBox("No games found in currently added libraries. Open preferences?",
                                 "No Games Found", 
-                                wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
-                    self.on_preferences(None)
-            elif exc_count > 0:
-                if wx.MessageBox(f"Added {exc_count} executables to exceptions. Open preferences?",
-                                "Exceptions Added", 
                                 wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
                     self.on_preferences(None)
         
@@ -479,7 +478,7 @@ class MainFrame(wx.Frame):
                         if new_path.startswith(lib["path"]):
                             # Update game path
                             rel_path = Path(new_path).relative_to(Path(lib["path"]).parent)
-                            game.launch_path = str(rel_path).replace(os.sep, '\\')
+                            game.launch_path = str(rel_path).replace(os.sep, '/')
                             self.library_manager.save_games()
                             valid = True
                             break
@@ -541,6 +540,7 @@ class MainFrame(wx.Frame):
         if wx.MessageBox(f"Delete '{game.title}' from library?",
                         "Confirm Delete",
                         wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
+            self.library_manager.add_to_exceptions(game)
             self.library_manager.games.remove(game)
             self.library_manager.save_games()
             self.refresh_game_list()
@@ -630,7 +630,7 @@ class MainFrame(wx.Frame):
                 self.build_tree()
                 return
             
-            exc_count, removed_libraries = result
+            removed_libraries = result
             self.refresh_game_list()
             self.build_tree()
             
@@ -640,11 +640,6 @@ class MainFrame(wx.Frame):
                 message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}\n\nWould you like to update your library settings?"
                 if wx.MessageBox(message, "Missing Library Paths Removed", 
                                 wx.YES_NO | wx.ICON_WARNING) == wx.YES:
-                    self.on_preferences(None)
-            elif exc_count > 0:
-                if wx.MessageBox(f"Added {exc_count} executables to exceptions. Open preferences?",
-                                "Exceptions Added",
-                                wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
                     self.on_preferences(None)
         
         except PermissionError as e:

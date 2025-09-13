@@ -200,8 +200,15 @@ class EditManualGameDialog(wx.Dialog):
     
     def on_browse(self, event):
         """Browse for executable file"""
-        dlg = wx.FileDialog(self, "Select Game Executable", 
-                           wildcard="Executable files (*.exe)|*.exe|All files (*.*)|*.*")
+        system = platform.system()
+        if system == "Windows":
+            wildcard = "Executable files (*.exe)|*.exe|Batch files (*.bat)|*.bat|All files (*.*)|*.*"
+        elif system == "Darwin":  # macOS
+            wildcard = "Applications (*.app)|*.app|Scripts (*.sh;*.command)|*.sh;*.command|All files (*.*)|*.*"
+        else:  # Linux/Unix
+            wildcard = "Scripts (*.sh;*.run)|*.sh;*.run|All files (*.*)|*.*"
+        
+        dlg = wx.FileDialog(self, "Select Game Executable", wildcard=wildcard)
         if dlg.ShowModal() == wx.ID_OK:
             self.path_ctrl.SetValue(dlg.GetPath())
         dlg.Destroy()
