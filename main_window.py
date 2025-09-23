@@ -66,6 +66,7 @@ class MainFrame(wx.Frame):
         
         # Game list
         self.game_list = GameListCtrl(splitter, self.library_manager)
+        self.game_list.SetLabel("Games")
         self.game_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_game_selected)
         self.game_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.on_game_activated)
         self.game_list.Bind(wx.EVT_CONTEXT_MENU, self.on_list_context)
@@ -74,8 +75,13 @@ class MainFrame(wx.Frame):
         # Tree control
         tree_panel = wx.Panel(splitter)
         tree_sizer = wx.BoxSizer(wx.VERTICAL)
-        
-        self.tree_ctrl = wx.TreeCtrl(tree_panel, 
+
+        # Add hidden label for accessibility
+        tree_label = wx.StaticText(tree_panel, label="Filter games by:")
+        tree_label.Hide()
+        tree_sizer.Add(tree_label, 0, wx.ALL, 0)
+
+        self.tree_ctrl = wx.TreeCtrl(tree_panel,
                                     style=wx.TR_DEFAULT_STYLE | wx.TR_MULTIPLE)
         self.tree_ctrl.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_selection)
         self.tree_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_tree_key)

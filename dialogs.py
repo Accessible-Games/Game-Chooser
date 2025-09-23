@@ -416,6 +416,7 @@ class PreferencesDialog(wx.Dialog):
         lib_sizer = wx.BoxSizer(wx.HORIZONTAL)
         
         self.lib_list = wx.ListCtrl(lib_panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        self.lib_list.SetLabel("Game Library Paths")
         self.lib_list.AppendColumn("Name", width=100)
         self.lib_list.AppendColumn("Path", width=300)
         
@@ -443,13 +444,14 @@ class PreferencesDialog(wx.Dialog):
         self.right_sizer.Add(lib_panel, 1, wx.EXPAND | wx.ALL, 5)
         
         # Exceptions section
-        exc_label = wx.StaticText(self.right_panel, label="Excluded Executables:")
+        exc_label = wx.StaticText(self.right_panel, label="Exceptions:")
         self.right_sizer.Add(exc_label, 0, wx.ALL, 5)
         
         exc_panel = wx.Panel(self.right_panel)
         exc_sizer = wx.BoxSizer(wx.HORIZONTAL)
         
         self.exc_list = wx.ListCtrl(exc_panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        self.exc_list.SetLabel("Exceptions")
         self.exc_list.AppendColumn("Path", width=400)
         
         # Populate exceptions list
