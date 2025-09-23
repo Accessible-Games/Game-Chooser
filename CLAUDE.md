@@ -14,43 +14,166 @@ python game-chooser.py
 pip install wxPython
 ```
 
-## Architecture Overview
+### Testing Commands
+```bash
+# Test library manager functionality
+python3 -c "from library_manager import GameLibraryManager; manager = GameLibraryManager(); print('✓ Library manager loads successfully')"
 
-This is a single-file Python desktop application built with wxPython for cross-platform game library management. The application follows a traditional GUI architecture with these key components:
+# Test auto-exclusion patterns
+python3 -c "from library_manager import GameLibraryManager; from pathlib import Path; manager = GameLibraryManager(); print('setup.exe excluded:', manager._should_auto_exclude(Path('setup.exe')))"
+```
 
-### Core Classes
+## Project Structure
 
-- **Game**: Data model representing individual games with metadata (title, genre, developer, year, platforms, launch_path, library_name)
-- **GameLibraryManager**: Central data management class handling game library operations, configuration, and persistence
-- **MainFrame**: Primary application window containing the main UI layout with splitter panels
-- **GameListCtrl**: Custom list control for displaying games with sorting and selection capabilities
-- **ScanProgressDialog**: Modal dialog showing scanning progress with cancellation support
+This is a multi-file Python desktop application built with wxPython for cross-platform game library management.
 
-### Data Management
+### File Structure (2,836 total lines)
+- **game-chooser.py** (21 lines) - Application entry point
+- **models.py** (41 lines) - Data models (Game class)
+- **game_list.py** (144 lines) - Custom list control for game display
+- **main_window.py** (705 lines) - Primary application window and UI logic
+- **dialogs.py** (586 lines) - Dialog classes for various UI operations
+- **library_manager.py** (1,339 lines) - Core data management and scanning logic
 
-- **games.json**: Portable game library stored in application directory with relative paths
-- **config.json**: User-specific configuration stored in platform-appropriate locations:
+### Configuration Files
+- **games.json** - Portable game library with library-relative paths
+- **config.json** - User-specific configuration in platform directories:
   - Windows: `%APPDATA%\GameChooser\`
   - macOS: `~/Library/Application Support/GameChooser/`
   - Linux: `~/.config/GameChooser/`
 
-### Key Features
+## Architecture Overview
 
-- **Auto-discovery**: Scans configured folders to find game executables
-- **Smart detection**: Identifies game launchers while filtering out tools/updaters
-- **Hierarchical filtering**: Tree-based browsing by Platform → Genre → Developer → Year
-- **Cross-platform support**: Handles Windows (.exe, .bat) and macOS/Linux executables
-- **Web games**: Support for browser-based games with URL launching
-- **Persistent state**: Remembers window layout, sort preferences, and selections
+### Core Classes
 
-### UI Structure
+#### Data Models
+- **Game**: Represents individual games with metadata (title, genre, developer, year, platforms, launch_path, library_name)
+  - `to_dict()` / `from_dict()` for JSON serialization
+  - Supports web games (HTTP URLs) and manual games
 
-The main window uses a splitter layout:
-- Left panel: Tree control for hierarchical filtering
-- Right panel: List control displaying filtered games
-- Top: Search box with real-time filtering
-- Context menus for game management operations
+#### Main Application
+- **GameChooserApp**: wxPython application entry point
+- **MainFrame**: Primary window with splitter layout, search, menus, and keyboard shortcuts
+- **GameListCtrl**: Enhanced list control with sorting, keyboard navigation, and persistent state
 
-### Threading
+#### Data Management
+- **GameLibraryManager**: Central class for all library operations
+  - Configuration management (load/save config)
+  - Game library persistence (games.json)
+  - Multiple scanning strategies (full, incremental, targeted)
+  - Comprehensive auto-exception system
+  - Cross-platform path handling
 
-Scanning operations use background threads with progress dialogs to prevent UI blocking during library discovery.
+#### Dialog Classes
+- **ScanProgressDialog**: Threaded scanning with progress and cancellation
+- **EditGameDialog**: Game metadata editing
+- **EditManualGameDialog**: Manual game entry (outside libraries)
+- **PreferencesDialog**: Library paths and exceptions management
+
+### Exception Handling System
+
+The application features a sophisticated auto-exclusion system to filter out non-game executables:
+
+#### Pattern Categories (900+ total patterns)
+- **AUTO_EXCEPTION_KEYWORDS** (314 patterns): Utility-related keywords (setup, install, config, etc.)
+- **AUTO_EXCEPTION_EXACT_STEMS** (522 patterns): Specific filenames to exclude (unins000, git, bash, etc.)
+- **AUTO_EXCEPTION_SUFFIXES** (64 patterns): Common utility filename endings (-setup, -installer, etc.)
+
+#### Exception Storage
+- Exceptions are stored as **library-relative paths** (e.g., `tools/setup.exe`)
+- User-friendly display without library folder clutter
+- Only actual discovered files are added to exceptions (not patterns)
+
+### Scanning Strategies
+
+#### Full Scan (`validate_and_scan_all`)
+- Validates existing games and scans all libraries completely
+- Used for comprehensive library refresh
+
+#### Incremental Scan (`validate_and_scan_incrementally`)
+- Skips directories that already contain known games
+- Faster startup and preference changes
+
+#### Targeted Scan (`validate_and_scan_targeted`)
+- Scans only new libraries while using incremental for existing ones
+- Optimal for adding new library paths
+
+### UI Architecture
+
+#### Main Window Layout
+```
+┌─────────────────────────────────────┐
+│ Menu Bar + Search Box               │
+├─────────────────┬───────────────────┤
+│ Game List       │ Tree Filter       │
+│ (sortable)      │ Platform→Genre    │
+│                 │ →Developer→Year   │
+├─────────────────┴───────────────────┤
+│ Launch Button                       │
+└─────────────────────────────────────┘
+```
+
+#### Key Features
+- **Persistent State**: Window size, position, splitter, sort preferences, selections
+- **Real-time Search**: 0.5s delay, searches all metadata fields
+- **Keyboard Navigation**: Full keyboard shortcuts for accessibility
+- **Context Menus**: Right-click operations for game management
+- **Multi-select Filtering**: Tree control supports OR filtering
+
+### Cross-Platform Support
+
+#### Executable Detection
+- **Windows**: `.exe`, `.bat` files
+- **macOS**: `.app` bundles, executable files with permissions
+- **Linux**: Executable files with permissions
+
+#### Path Handling
+- Library-relative paths for portability
+- Platform-specific config directories
+- Normalized path separators
+
+### Threading Model
+
+- **UI Thread**: Main application and user interactions
+- **Background Threads**: Library scanning operations
+- **Progress Callbacks**: Real-time scanning feedback
+- **Cancellation**: User can cancel long-running scans
+
+### Recent Improvements
+
+#### Exception System Enhancements
+- Expanded from ~87 to 900+ auto-exception patterns
+- Library-relative path storage for user-friendly exceptions list
+- Word boundary matching to prevent false positives
+- Comprehensive utility detection (system tools, dev tools, compression, etc.)
+
+#### Performance Optimizations
+- Multiple scanning strategies for different use cases
+- Incremental scanning to avoid re-scanning known game directories
+- Efficient exception checking during scanning
+
+### Key Implementation Details
+
+#### Game Detection Logic
+1. Look for preferred executables: `game`, `launch`, `play`
+2. Check for executable matching parent directory name
+3. If none found, use first executable in directory
+4. Apply auto-exception filters during scanning
+5. Store library-relative paths for portability
+
+#### Configuration Management
+- Graceful handling of missing/corrupted config files
+- Default configuration fallbacks
+- Automatic migration of config format changes
+
+#### Error Handling
+- Permission error handling during scanning
+- Missing library path detection and cleanup
+- Graceful degradation for invalid game paths
+
+### Development Notes
+
+- File paths should always use forward slashes internally (normalized)
+- Exception patterns are case-insensitive
+- Library scanning is depth-limited (MAX_SCAN_DEPTH = 10)
+- Games are stored with relative paths but displayed with full context

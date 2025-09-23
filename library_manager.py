@@ -8,6 +8,7 @@ import os
 import sys
 import platform
 import threading
+import fnmatch
 from pathlib import Path
 from typing import List, Dict, Any, Optional, Callable
 
@@ -20,6 +21,239 @@ class GameLibraryManager:
     # Constants for scanning behavior
     MAX_SCAN_DEPTH = 10
     VALID_GAME_NAMES = ["game", "launch", "play"]
+    AUTO_EXCEPTION_KEYWORDS = [
+        "setup", "install", "installer", "installshield", "unins", "uninstall",
+        "update", "updater", "upgrade", "patch", "patcher", "patchnotes",
+        "config", "configure", "configurator", "settings", "option", "options",
+        "helper", "tool", "utility", "manager", "launcher", "launchpad",
+        "register", "registration", "reg", "checkup", "checker", "checksum",
+        "check", "diagnostic", "diagnose", "repair", "cleanup", "clean", "fix",
+        "debug", "benchmark", "profile", "test", "tester", "sample", "demo",
+        "tutorial", "manual", "readme", "license", "credit", "credits", "docs",
+        "documentation", "keygen", "crack", "trainer", "cheat", "cheater", "editor",
+        "configtool", "configtools", "unpack", "extract", "unzip", "zip", "rar",
+        "lha", "7z", "tar", "gzip", "redis", "redist", "vcredist", "directx",
+        "dxsetup", "runtime", "dotnet", "msvc", "prereq", "prerequisite",
+        "bootstrap", "maintenance", "service", "agent",
+        # System utilities
+        "rebase", "scalar", "hostname", "productid", "productidmanager",
+        # Compression tools
+        "bzip", "bunzip", "bzcat", "lzma", "lzmadec", "lzmainfo", "funzip", "zipinfo",
+        "brotli", "bspatch", "antiword",
+        # Shell/system tools
+        "bash", "sh", "cygwin", "mintty", "dash", "compat", "winpty", "console",
+        # Development tools
+        "perl", "python", "w9xpopen", "emake", "gettext", "envsubst", "gencat",
+        "msgattrib", "msgcat", "msgcmp", "msgcomm", "msgconv", "msgen", "msgexec",
+        "msgfilter", "msgfmt", "msggrep", "msginit", "msgmerge", "msgunfmt", "msguniq",
+        "ngettext", "xgettext",
+        # Security/crypto tools
+        "gpg", "pinentry", "kbxutil", "dirmngr", "scdaemon", "gpgconf", "gpgparsemail",
+        "gpgscm", "gpgsm", "gpgsplit", "gpgtar", "gpgv", "hmac", "nettle", "pbkdf2",
+        "trust", "preset", "passphrase", "pkcs", "sexp",
+        # Text processing tools
+        "grep", "sed", "awk", "cut", "sort", "cat", "echo", "less", "lessecho", "lesskey",
+        "head", "tail", "wc", "tr", "uniq", "comm", "join", "split", "csplit", "fold",
+        "fmt", "pr", "nl", "od", "xxd", "hexdump",
+        # File utilities
+        "find", "locate", "ls", "cp", "mv", "rm", "mkdir", "rmdir", "chmod", "chown",
+        "chgrp", "chroot", "touch", "ln", "link", "unlink", "stat", "file", "which",
+        "dirname", "basename", "readlink", "realpath", "pathchk", "mkfifo", "mknod",
+        "mount", "umount", "sync", "df", "du", "mktemp", "env", "printenv", "id",
+        "who", "whoami", "users", "groups", "logname", "pinky", "hostname", "hostid",
+        "uname", "arch", "nproc", "uptime", "date", "sleep", "timeout", "nice", "nohup",
+        "kill", "killall", "pkill", "pgrep", "ps", "top", "jobs", "bg", "fg", "disown",
+        # Network tools
+        "ssh", "scp", "sftp", "curl", "wget", "ftp", "telnet", "ping", "netstat",
+        "nslookup", "dig", "host", "whois",
+        # Archive/compression
+        "unrar", "p7zip", "lha", "cabextract", "rpm2cpio", "cpio",
+        # System monitoring
+        "iostat", "vmstat", "sar", "mpstat", "pidstat", "iotop", "htop",
+        # Version control
+        "svn", "hg", "mercurial", "bzr", "cvs", "rcs", "sccs",
+        # Build tools
+        "make", "cmake", "autoconf", "automake", "libtool", "pkg", "pkgconfig",
+        # Scripting
+        "ruby", "node", "npm", "yarn", "php", "lua", "tcl", "tclsh", "wish",
+        # Database
+        "mysql", "sqlite", "postgres", "redis", "mongo",
+        # Multimedia
+        "ffmpeg", "imagemagick", "convert", "identify", "mogrify", "composite",
+        # Other common utilities
+        "cron", "at", "batch", "mail", "mailx", "sendmail", "rsync", "screen",
+        "tmux", "watch", "yes", "true", "false", "tee", "xargs", "parallel"
+    ]
+    AUTO_EXCEPTION_EXACT_STEMS = {
+        "pcssb", "pcssbpc", "pcspc", "pcsend", "pcswsb", "pcspcv", "cwsdpmi",
+        "w9xpopen", "ag_say", "zqds", "zquake", "zquake-gl", "zquake-vidnull",
+        "bunzip2", "bzcat", "bzip2", "bzip2recover", "envsubst", "gettext",
+        "openssl", "pkcs1-conv", "sexp-conv", "hostname", "curl", "perl", "less",
+        "odt2txt", "pdftotext", "proxy-lookup", "xmlwf", "xz", "xzcat", "xzdec",
+        "unxz", "lzmadec", "lzmainfo", "blocked-file-util", "create-shortcut",
+        "github.ui", "gitlab.ui", "git", "git-bash", "git-cmd", "git-gui", "gitk",
+        "git-lfs", "git-askpass", "git-askyesno", "git-credential",
+        "git-credential-helper-selector", "git-credential-manager",
+        "git-credential-manager-core", "git-credential-manager-ui",
+        "git-credential-cache", "git-credential-cache--daemon",
+        "git-credential-store", "git-credential-wincred", "git-receive-pack",
+        "git-upload-pack", "git-upload-archive", "git-daemon", "git-http-backend",
+        "git-http-fetch", "git-http-push", "gettext.sh", "tclsh", "tclsh86", "wish",
+        "wish86",
+        # Common uninstaller names
+        "unins000", "unins001", "checkup",
+        # System utilities
+        "server", "sb", "id", "scalar", "rebase", "hostname", "productidmanager",
+        # Shell and system tools
+        "bash", "sh", "dash", "mintty", "cygwin-console-helper", "winpty-agent",
+        "winpty-debugserver", "winpty", "headless-git", "edit-git-bash",
+        # Text processing
+        "sed", "awk", "grep", "less", "lessecho", "lesskey", "nano", "rnano",
+        "vim", "view", "rview", "rvim", "vimdiff", "ex",
+        # File utilities
+        "ls", "cp", "mv", "rm", "mkdir", "rmdir", "chmod", "chown", "chgrp",
+        "chroot", "touch", "ln", "link", "unlink", "stat", "file", "which",
+        "dirname", "basename", "readlink", "realpath", "pathchk", "mkfifo",
+        "mknod", "mount", "umount", "sync", "df", "du", "mktemp", "vdir", "dir",
+        # Text utilities
+        "cat", "head", "tail", "wc", "tr", "uniq", "comm", "join", "split",
+        "csplit", "fold", "fmt", "pr", "nl", "od", "xxd", "cut", "sort", "shuf",
+        "factor", "seq", "yes", "true", "false", "echo", "printf", "test",
+        "expr", "tee", "timeout", "truncate",
+        # Environment/process utilities
+        "env", "printenv", "id", "who", "whoami", "users", "groups", "logname",
+        "pinky", "hostname", "hostid", "uname", "arch", "nproc", "date", "sleep",
+        "nice", "nohup", "kill", "ps", "stty", "tty", "strace", "pldd",
+        # Archive utilities
+        "tar", "unzip", "zip", "funzip", "unzipsfx", "zipinfo", "gzip", "gunzip",
+        "zcat", "compress", "uncompress", "lha", "rar", "unrar", "7z", "p7zip",
+        # Networking
+        "ssh", "ssh-add", "ssh-agent", "ssh-keygen", "ssh-keyscan", "ssh-keysign",
+        "ssh-pkcs11-helper", "ssh-sk-helper", "ssh-pageant", "scp", "sftp",
+        "sftp-server", "sshd", "curl", "wget", "ftp", "nc", "netcat",
+        # Checksums and hashing
+        "md5sum", "sha1sum", "sha224sum", "sha256sum", "sha384sum", "sha512sum",
+        "cksum", "sum", "b2sum", "base32", "base64", "basenc",
+        # Locale and text conversion
+        "iconv", "locale", "dos2unix", "unix2dos", "unix2mac", "mac2unix", "u2d", "d2u",
+        "recode-sr-latin", "antiword", "odt2txt", "pdftotext",
+        # System info and monitoring
+        "ldd", "ldh", "cygcheck", "cygpath", "getconf", "getfacl", "setfacl",
+        "lsattr", "chattr", "getopt", "getprocaddr32", "getprocaddr64",
+        # Crypto and security
+        "gpg", "gpg-agent", "gpg-check-pattern", "gpg-connect-agent", "gpg-error",
+        "gpg-preset-passphrase", "gpg-protect-tool", "gpg-wks-client", "gpg-wks-server",
+        "gpgconf", "gpgparsemail", "gpgscm", "gpgsm", "gpgsplit", "gpgtar", "gpgv",
+        "pinentry", "pinentry-w32", "scdaemon", "dirmngr", "dirmngr-client",
+        "kbxutil", "watchgnupg", "yat2m", "hmac256", "nettle-hash", "nettle-lfib-stream",
+        "nettle-pbkdf2", "p11-kit", "p11-kit-remote", "p11-kit-server", "trust",
+        # Development tools
+        "make", "cmake", "autoconf", "automake", "libtool", "pkg-config",
+        "perl", "perl5.36.0", "python", "python3", "node", "npm", "yarn",
+        "ruby", "php", "lua", "tcl", "tclsh", "tclsh86", "wish", "wish86",
+        # Git commands (all git subcommands)
+        "git-add", "git-am", "git-annotate", "git-apply", "git-archive",
+        "git-bisect--helper", "git-blame", "git-branch", "git-bugreport",
+        "git-bundle", "git-cat-file", "git-check-attr", "git-check-ignore",
+        "git-check-mailmap", "git-check-ref-format", "git-checkout--worker",
+        "git-checkout-index", "git-checkout", "git-cherry-pick", "git-cherry",
+        "git-clean", "git-clone", "git-column", "git-commit-graph",
+        "git-commit-tree", "git-commit", "git-config", "git-count-objects",
+        "git-describe", "git-diagnose", "git-diff-files", "git-diff-index",
+        "git-diff-tree", "git-diff", "git-difftool", "git-env--helper",
+        "git-fast-export", "git-fast-import", "git-fetch-pack", "git-fetch",
+        "git-fmt-merge-msg", "git-for-each-ref", "git-for-each-repo",
+        "git-format-patch", "git-fsck-objects", "git-fsck", "git-fsmonitor--daemon",
+        "git-gc", "git-get-tar-commit-id", "git-grep", "git-hash-object",
+        "git-help", "git-hook", "git-imap-send", "git-index-pack", "git-init-db",
+        "git-init", "git-interpret-trailers", "git-log", "git-ls-files",
+        "git-ls-remote", "git-ls-tree", "git-mailinfo", "git-mailsplit",
+        "git-maintenance", "git-merge-base", "git-merge-file", "git-merge-index",
+        "git-merge-ours", "git-merge-recursive", "git-merge-subtree",
+        "git-merge-tree", "git-merge", "git-mktag", "git-mktree",
+        "git-multi-pack-index", "git-mv", "git-name-rev", "git-notes",
+        "git-pack-objects", "git-pack-redundant", "git-pack-refs", "git-patch-id",
+        "git-prune-packed", "git-prune", "git-pull", "git-push", "git-range-diff",
+        "git-read-tree", "git-rebase", "git-reflog", "git-remote-ext",
+        "git-remote-fd", "git-remote-ftp", "git-remote-ftps", "git-remote-http",
+        "git-remote-https", "git-remote", "git-repack", "git-replace", "git-rerere",
+        "git-reset", "git-restore", "git-rev-list", "git-rev-parse", "git-revert",
+        "git-rm", "git-send-pack", "git-sh-i18n--envsubst", "git-shortlog",
+        "git-show-branch", "git-show-index", "git-show-ref", "git-show",
+        "git-sparse-checkout", "git-stage", "git-stash", "git-status",
+        "git-stripspace", "git-submodule--helper", "git-switch", "git-symbolic-ref",
+        "git-tag", "git-unpack-file", "git-unpack-objects", "git-update-index",
+        "git-update-ref", "git-update-server-info", "git-var", "git-verify-commit",
+        "git-verify-pack", "git-verify-tag", "git-version", "git-whatchanged",
+        "git-worktree", "git-wrapper", "git-write-tree",
+        # Text processing tools
+        "msgattrib", "msgcat", "msgcmp", "msgcomm", "msgconv", "msgen", "msgexec",
+        "msgfilter", "msgfmt", "msggrep", "msginit", "msgmerge", "msgunfmt",
+        "msguniq", "ngettext", "xgettext",
+        # Terminal/display utilities
+        "tic", "toe", "infocmp", "infotocap", "captoinfo", "tabs", "tput", "tset",
+        "clear", "reset", "column", "expand", "unexpand", "runcon", "chcon",
+        # System utilities
+        "passwd", "pwcat", "mkgroup", "mkpasswd", "regtool", "setmetamode",
+        "minidumper", "dumpsexp", "profiler", "gkill", "gmondump",
+        # Package/module tools
+        "pluginviewer", "glib-compile-schemas", "gobject-query", "gsettings",
+        "gapplication", "gdbus", "gio-querymodules", "psl",
+        # Other system tools
+        "tig", "cldr-plurals", "frcode", "locate", "updatedb", "cmp", "diff", "diff3",
+        "sdiff", "patch", "ptx", "tsort", "shred", "sync", "dircolors", "install",
+        "ln", "mkfifo", "mknod", "pathchk", "rm", "rmdir", "shred", "sync", "touch",
+        "unlink", "vdir", "chcon", "chgrp", "chmod", "chown", "chroot", "cp",
+        "dd", "df", "dir", "du", "install", "link", "ls", "mkdir", "mv", "readlink",
+        "realpath", "stat", "stty", "tac", "tzset", "uname", "uniq", "wc",
+        # Additional utilities from the games.json analysis
+        "adig", "ahost", "acountry", "arch", "awk", "gawk", "gawk-5.0.0",
+        "brotli", "captoinfo", "column", "cmp", "diff", "diff3", "dircolors",
+        "edit-git-bash", "edit_test", "edit_test_dll", "factor", "false",
+        "find", "fmt", "fold", "frcode", "gapplication", "gencat", "getconf",
+        "getfacl", "getopt", "getprocaddr32", "getprocaddr64", "gettext",
+        "gio-querymodules", "glib-compile-schemas", "gmondump", "gobject-query",
+        "gsettings", "gtc", "hostname", "infocmp", "infotocap", "install",
+        "locale", "logname", "lsattr", "mac2unix", "minidumper", "mount",
+        "mpicalc", "nano", "nettle-hash", "nettle-lfib-stream", "nettle-pbkdf2",
+        "nice", "nohup", "numfmt", "od", "p11-kit", "p11-kit-remote", "p11-kit-server",
+        "paste", "pathchk", "pinky", "pr", "printf", "profiler", "psl", "ptx",
+        "pwd", "readlink", "realpath", "recode-sr-latin", "reset", "rm", "rmdir",
+        "rnano", "runcon", "rview", "rvim", "scalar", "sdiff", "setfacl",
+        "setmetamode", "shred", "shuf", "sleep", "split", "strace", "stty",
+        "sum", "sync", "tabs", "tac", "timeout", "toe", "touch", "truncate",
+        "tsort", "tty", "tzset", "umount", "unexpand", "unix2dos", "unix2mac",
+        "unlink", "urlget", "users", "vdir", "view", "vim", "vimdiff", "watchgnupg",
+        "which", "who", "whoami", "xxd", "yat2m", "yes"
+    }
+    AUTO_EXCEPTION_PREFIXES = [
+        "git", "pcssb", "pcspc", "pcsend", "pcswsb", "pcspcv", "ag_say",
+        "zqds", "zquake", "curl", "perl", "openssl", "gettext", "envsubst",
+        "pkcs1", "sexp", "hostname", "tclsh", "wish", "blocked-file-util",
+        "create-shortcut", "github", "gitlab", "odt2txt", "pdftotext", "proxy-lookup",
+        "xmlwf"
+    ]
+    AUTO_EXCEPTION_BATCH_STEMS = {
+        "help", "readme", "change", "site", "emake"
+    }
+    AUTO_EXCEPTION_SUFFIXES = [
+        # Common utility suffixes
+        "-setup", "-installer", "-install", "-uninstall", "-unins",
+        "-update", "-updater", "-upgrade", "-patch", "-patcher",
+        "-config", "-configure", "-configurator", "-register", "-registration",
+        "-checkup", "-checker", "-diagnostic", "-repair", "-cleanup",
+        "-tool", "-utility", "-helper", "-manager", "-launcher",
+        "-editor", "-viewer", "-monitor", "-scanner", "-tester",
+        # Version/build suffixes
+        "-debug", "-release", "-beta", "-alpha", "-demo", "-trial",
+        "-lite", "-full", "-pro", "-premium", "-server", "-client",
+        # Platform/architecture suffixes
+        "-32bit", "-64bit", "-x86", "-x64", "-win32", "-win64",
+        "-console", "-gui", "-cli", "-ui", "-api",
+        # File/data suffixes
+        "-data", "-backup", "-temp", "-tmp", "-cache", "-log",
+        "-crash", "-dump", "-report", "-export", "-import"
+    ]
     
     def __init__(self):
         self.games = []
@@ -29,6 +263,7 @@ class GameLibraryManager:
         self.config_file = self.get_config_path()
         self.load_config()
         self.load_games()
+        self._last_auto_exception_count = 0
     
     def get_config_path(self):
         """Get platform-specific config path"""
@@ -85,12 +320,169 @@ class GameLibraryManager:
         """Save configuration to JSON file"""
         with open(self.config_file, 'w') as f:
             json.dump(self.config, f, indent=2)
-    
+
+    def _normalize_exception_entry(self, entry: str) -> str:
+        return entry.replace('\\', '/').strip()
+
+    def _normalize_for_match(self, entry: str) -> str:
+        return self._normalize_exception_entry(entry).lower()
+
+    def _is_path_exception(self, rel_path: str) -> bool:
+        rel_norm = self._normalize_for_match(rel_path)
+        for exc in self.config["exceptions"]:
+            pattern_norm = self._normalize_exception_entry(exc)
+            pattern_lower = pattern_norm.lower()
+            if any(ch in pattern_norm for ch in ['*', '?', '[', ']']):
+                if fnmatch.fnmatch(rel_norm, pattern_lower):
+                    return True
+            elif rel_norm == pattern_lower:
+                return True
+        return False
+
+    def _add_exception_entry(self, entry: str) -> bool:
+        normalized = self._normalize_exception_entry(entry)
+        candidate_lower = normalized.lower()
+
+        for existing in self.config["exceptions"]:
+            existing_norm = self._normalize_exception_entry(existing)
+            existing_lower = existing_norm.lower()
+            if existing_lower == candidate_lower:
+                return False
+            if fnmatch.fnmatch(candidate_lower, existing_lower):
+                return False
+
+        self.config["exceptions"].append(normalized)
+        return True
+
+    def _build_keyword_pattern(self, keyword: str, suffix: str) -> str:
+        keyword = keyword.lower()
+        suffix = suffix.lower()
+        if suffix:
+            return f"*{keyword}*{suffix}"
+        return f"*{keyword}*"
+
+    def _build_filename_pattern(self, name: str) -> str:
+        return f"*{name.lower()}"
+
+    def _generate_auto_exception_patterns(self, item: Path) -> List[str]:
+        patterns: List[str] = []
+        name = item.name
+        suffix = item.suffix.lower()
+        stem = item.stem.lower()
+
+        def add_pattern(pattern: Optional[str]):
+            if pattern and pattern not in patterns:
+                patterns.append(pattern)
+
+        # Check exact stem matches
+        if stem in self.AUTO_EXCEPTION_EXACT_STEMS:
+            add_pattern(self._build_filename_pattern(name))
+
+        # Check batch file specific stems
+        if suffix in {'.bat', '.cmd'} and stem in self.AUTO_EXCEPTION_BATCH_STEMS:
+            add_pattern(self._build_filename_pattern(name))
+
+        # Check keyword matches within the stem
+        for keyword in self.AUTO_EXCEPTION_KEYWORDS:
+            if keyword in stem:
+                add_pattern(self._build_keyword_pattern(keyword, suffix))
+
+        # Check prefix matches
+        for prefix in self.AUTO_EXCEPTION_PREFIXES:
+            if stem == prefix:
+                add_pattern(self._build_keyword_pattern(prefix, suffix))
+            elif stem.startswith(f"{prefix}-") or stem.startswith(f"{prefix}_"):
+                add_pattern(self._build_keyword_pattern(prefix, suffix))
+            elif stem.startswith(prefix) and prefix in {"git"}:
+                add_pattern(self._build_keyword_pattern(prefix, suffix))
+
+        # Check suffix patterns (e.g., filename ends with -setup, -installer, etc.)
+        for exception_suffix in self.AUTO_EXCEPTION_SUFFIXES:
+            if stem.endswith(exception_suffix):
+                # Create pattern that matches the suffix
+                add_pattern(f"*{exception_suffix}{suffix}")
+
+        # Fallback for batch files that don't match valid game names
+        if not patterns and suffix in {'.bat', '.cmd'} and stem not in self.VALID_GAME_NAMES:
+            add_pattern(self._build_filename_pattern(name))
+
+        return patterns
+
+    def _should_auto_exclude(self, item: Path) -> bool:
+        """Check if a file should be automatically excluded based on patterns.
+
+        This method contains all the pattern-matching logic but doesn't modify
+        the exceptions list. It's used internally to determine if a file should
+        be excluded during scanning.
+
+        Args:
+            item: Path object representing the file to check
+
+        Returns:
+            bool: True if the file should be excluded, False otherwise
+        """
+        name = item.name
+        suffix = item.suffix.lower()
+        stem = item.stem.lower()
+
+        # Check exact stem matches
+        if stem in self.AUTO_EXCEPTION_EXACT_STEMS:
+            return True
+
+        # Check batch file specific stems
+        if suffix in {'.bat', '.cmd'} and stem in self.AUTO_EXCEPTION_BATCH_STEMS:
+            return True
+
+        # Check keyword matches within the stem
+        # Use word boundaries to avoid false positives (e.g., "rm" in "normal_game")
+        for keyword in self.AUTO_EXCEPTION_KEYWORDS:
+            if keyword in stem:
+                # Check if it's a word boundary match to avoid false positives
+                # For very short keywords (1-2 chars), require exact word match
+                if len(keyword) <= 2:
+                    # Require word boundaries for short keywords
+                    import re
+                    pattern = r'\b' + re.escape(keyword) + r'\b'
+                    if re.search(pattern, stem):
+                        return True
+                else:
+                    # For longer keywords, substring match is more reliable
+                    return True
+
+        # Check prefix matches
+        for prefix in self.AUTO_EXCEPTION_PREFIXES:
+            if stem == prefix:
+                return True
+            elif stem.startswith(f"{prefix}-") or stem.startswith(f"{prefix}_"):
+                return True
+            elif stem.startswith(prefix) and prefix in {"git"}:
+                return True
+
+        # Check suffix patterns (e.g., filename ends with -setup, -installer, etc.)
+        for exception_suffix in self.AUTO_EXCEPTION_SUFFIXES:
+            if stem.endswith(exception_suffix):
+                return True
+
+        # Fallback for batch files that don't match valid game names
+        if suffix in {'.bat', '.cmd'} and stem not in self.VALID_GAME_NAMES:
+            return True
+
+        return False
+
     def add_to_exceptions(self, game):
         """Add a game's launch path to exceptions when user deletes it"""
         if game and game.launch_path:
-            if game.launch_path not in self.config["exceptions"]:
-                self.config["exceptions"].append(game.launch_path)
+            # Strip library prefix from launch_path to get library-relative path
+            path_parts = game.launch_path.split('/')
+            if len(path_parts) > 1:
+                # Remove the first part (library name) to get library-relative path
+                library_relative_path = '/'.join(path_parts[1:])
+            else:
+                # If no slash, use the path as-is (shouldn't happen for scanned games)
+                library_relative_path = game.launch_path
+
+            normalized_path = self._normalize_exception_entry(library_relative_path)
+            if self._add_exception_entry(normalized_path):
                 self.save_config()
     
     def load_games(self):
@@ -294,9 +686,10 @@ class GameLibraryManager:
         
         return known_game_dirs
     
-    def scan_library(self, library_path, library_name, known_game_dirs=None, max_depth=None, progress_callback=None, cancel_check=None):
-        """Recursively scan a library path for games
-        
+    def scan_library(self, library_path, library_name, known_game_dirs=None, max_depth=None,
+                     progress_callback=None, cancel_check=None):
+        """Recursively scan a library path for games.
+
         Args:
             library_path: Path to library directory to scan
             library_name: Name of the library
@@ -304,6 +697,9 @@ class GameLibraryManager:
             max_depth: Maximum scan depth
             progress_callback: Optional progress callback function
             cancel_check: Optional cancellation check function
+
+        Returns:
+            tuple[list[Game], int]: Newly discovered games and number of auto exceptions added.
         """
         if max_depth is None:
             max_depth = self.MAX_SCAN_DEPTH
@@ -319,10 +715,11 @@ class GameLibraryManager:
         if not library_path_obj.is_dir():
             print(f"Warning: Library path '{library_path}' is not a directory. Skipping scan.")
             return [], []
-        
+
         found_games = []
         directories_to_scan = []
-        
+        auto_exceptions_added = 0
+
         # First pass: collect all directories to get total count for progress
         if progress_callback:
             def collect_directories(path, depth=0):
@@ -340,15 +737,15 @@ class GameLibraryManager:
                 except (PermissionError, OSError):
                     pass
             collect_directories(library_path)
-        
+
         directories_processed = 0
-        
+
         def scan_recursive(path, depth=0):
-            nonlocal directories_processed
-            
+            nonlocal directories_processed, auto_exceptions_added
+
             if depth > max_depth or (cancel_check and cancel_check()):
                 return
-            
+
             # SKIP if this directory already contains a known game (incremental scanning)
             if str(path) in known_game_dirs:
                 return
@@ -375,14 +772,21 @@ class GameLibraryManager:
                         continue
                     
                     if self.is_executable(str(item)):
-                        # Build relative path
-                        rel_path = item.relative_to(Path(library_path).parent)
+                        # Build relative path (relative to library, not library parent)
+                        rel_path = item.relative_to(Path(library_path))
                         rel_str = str(rel_path).replace(os.sep, '/')
-                        
+
                         # Check if in exceptions
-                        if rel_str in self.config["exceptions"]:
+                        if self._is_path_exception(rel_str):
                             continue
-                        
+
+                        # Check if file should be auto-excluded
+                        if self._should_auto_exclude(item):
+                            # Add the exact path to exceptions (not a pattern)
+                            if self._add_exception_entry(rel_str):
+                                auto_exceptions_added += 1
+                            continue
+
                         # Group by directory
                         dir_key = str(item.parent)
                         if dir_key not in directory_exes:
@@ -456,7 +860,7 @@ class GameLibraryManager:
                 raise PermissionError(f"Permission denied: {path}")
         
         scan_recursive(library_path)
-        return found_games
+        return found_games, auto_exceptions_added
     
     def validate_and_scan_all(self, progress_callback=None, cancel_check=None):
         """Validate existing games and scan for new ones"""
@@ -464,43 +868,52 @@ class GameLibraryManager:
         # FIRST: Check for missing libraries and remove them from config
         valid_libraries, missing_libraries = self._validate_libraries()
         removed_libraries = self._remove_missing_libraries(missing_libraries)
-        
+
         if removed_libraries:
             # Validate existing games to remove ones from missing libraries
             valid_library_names = {lib["name"] for lib in valid_libraries}
             validated_games = self._validate_existing_games(valid_library_names, cancel_check)
-            
+
             # Save updated games list and return early - no need to scan anything
             self.games = validated_games
             self.save_games()
+            self._last_auto_exception_count = 0
             return removed_libraries
-        
+
         # SECOND: Validate existing games (only if no libraries were removed)
         valid_library_names = {lib["name"] for lib in valid_libraries}
         validated_games = self._validate_existing_games(valid_library_names, cancel_check)
-        
+
         if cancel_check and cancel_check():
+            self._last_auto_exception_count = 0
             return []
-        
+
         # THIRD: Scan all valid libraries for new games (exclude manual library)
+        total_auto_exceptions = 0
         for lib in valid_libraries:
             if cancel_check and cancel_check():
+                self._last_auto_exception_count = total_auto_exceptions
                 return []  # Return early if cancelled
-                
+
             if lib["name"] == "manual":
                 continue  # Skip manual library from autodiscovery
-                
+
             try:
-                new_games = self.scan_library(
-                    lib["path"], lib["name"], progress_callback=progress_callback, cancel_check=cancel_check
+                new_games, added_exceptions = self.scan_library(
+                    lib["path"],
+                    lib["name"],
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check
                 )
-                
-                
+                total_auto_exceptions += added_exceptions
+
+
                 # Merge new games
                 for new_game in new_games:
                     if cancel_check and cancel_check():
+                        self._last_auto_exception_count = total_auto_exceptions
                         return []  # Return early if cancelled
-                        
+
                     existing = None
                     for val_game in validated_games:
                         if val_game.launch_path == new_game.launch_path:
@@ -522,7 +935,9 @@ class GameLibraryManager:
         self.games = validated_games
         self.save_games()
         self.save_config()
-        
+
+        self._last_auto_exception_count = total_auto_exceptions
+
         return []  # No libraries removed in this case
     
     def validate_and_scan_incrementally(self, progress_callback=None, cancel_check=None):
@@ -531,47 +946,56 @@ class GameLibraryManager:
         # FIRST: Check for missing libraries and remove them from config
         valid_libraries, missing_libraries = self._validate_libraries()
         removed_libraries = self._remove_missing_libraries(missing_libraries)
-        
+
         if removed_libraries:
             # Validate existing games to remove ones from missing libraries
             valid_library_names = {lib["name"] for lib in valid_libraries}
             validated_games = self._validate_existing_games(valid_library_names, cancel_check)
-            
+
             # Save updated games list and return early - no need to scan anything
             self.games = validated_games
             self.save_games()
+            self._last_auto_exception_count = 0
             return removed_libraries
-        
+
         # SECOND: Validate existing games (remove missing ones)
         valid_library_names = {lib["name"] for lib in valid_libraries}
         validated_games = self._validate_existing_games(valid_library_names, cancel_check)
-        
+
         if cancel_check and cancel_check():
+            self._last_auto_exception_count = 0
             return []
-        
+
         # THIRD: Build set of known game directories from validated games
         known_game_dirs = self._build_known_game_dirs(validated_games)
-        
+
         # FOURTH: Scan for new games only (skip known directories)
+        total_auto_exceptions = 0
         for lib in valid_libraries:
             if cancel_check and cancel_check():
+                self._last_auto_exception_count = total_auto_exceptions
                 return []  # Return early if cancelled
-                
+
             if lib["name"] == "manual":
                 continue  # Skip manual library from autodiscovery
-                
+
             try:
-                new_games = self.scan_library(
-                    lib["path"], lib["name"], known_game_dirs=known_game_dirs,
-                    progress_callback=progress_callback, cancel_check=cancel_check
+                new_games, added_exceptions = self.scan_library(
+                    lib["path"],
+                    lib["name"],
+                    known_game_dirs=known_game_dirs,
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check
                 )
-                
-                
+                total_auto_exceptions += added_exceptions
+
+
                 # Merge new games
                 for new_game in new_games:
                     if cancel_check and cancel_check():
+                        self._last_auto_exception_count = total_auto_exceptions
                         return []  # Return early if cancelled
-                        
+
                     existing = None
                     for val_game in validated_games:
                         if val_game.launch_path == new_game.launch_path:
@@ -593,7 +1017,9 @@ class GameLibraryManager:
         self.games = validated_games
         self.save_games()
         self.save_config()
-        
+
+        self._last_auto_exception_count = total_auto_exceptions
+
         return []  # No libraries removed in this case
     
     def validate_and_scan_all_with_dialog(self, parent_window):
@@ -623,12 +1049,12 @@ class GameLibraryManager:
                 
                 def cancel_check():
                     return progress_dialog.cancelled
-                
+
                 removed_libraries = self.validate_and_scan_all(progress_callback, cancel_check)
-                scan_result["exceptions_count"] = 0
+                scan_result["exceptions_count"] = self._last_auto_exception_count
                 scan_result["removed_libraries"] = removed_libraries
                 scan_result["cancelled"] = progress_dialog.cancelled
-                
+
             except Exception as e:
                 scan_result["error"] = e
             finally:
@@ -678,49 +1104,61 @@ class GameLibraryManager:
             # Validate existing games to remove ones from missing libraries
             valid_library_names = {lib["name"] for lib in valid_libraries}
             validated_games = self._validate_existing_games(valid_library_names, cancel_check)
-            
+
             # Save updated games list and return early - no need to scan anything
             self.games = validated_games
             self.save_games()
+            self._last_auto_exception_count = 0
             return removed_libraries
-        
+
         # SECOND: Validate existing games (remove missing ones)
         valid_library_names = {lib["name"] for lib in valid_libraries}
         validated_games = self._validate_existing_games(valid_library_names, cancel_check)
-        
+
         if cancel_check and cancel_check():
+            self._last_auto_exception_count = 0
             return []
-        
+
         # THIRD: Build set of known game directories from validated games
         known_game_dirs = self._build_known_game_dirs(validated_games)
-        
+
         # FOURTH: Scan libraries (full scan for new ones, incremental for existing)
+        total_auto_exceptions = 0
         for lib in valid_libraries:
             if cancel_check and cancel_check():
+                self._last_auto_exception_count = total_auto_exceptions
                 return []  # Return early if cancelled
-                
+
             if lib["name"] == "manual":
                 continue  # Skip manual library from autodiscovery
-                
+
             try:
                 if lib["name"] in new_library_names:
                     # New library - use full scan to discover all games
-                    new_games = self.scan_library(
-                        lib["path"], lib["name"], progress_callback=progress_callback, cancel_check=cancel_check
+                    new_games, added_exceptions = self.scan_library(
+                        lib["path"],
+                        lib["name"],
+                        progress_callback=progress_callback,
+                        cancel_check=cancel_check
                     )
                 else:
                     # Existing library - use incremental scan (skip known game directories)
-                    new_games = self.scan_library(
-                        lib["path"], lib["name"], known_game_dirs=known_game_dirs, 
-                        progress_callback=progress_callback, cancel_check=cancel_check
+                    new_games, added_exceptions = self.scan_library(
+                        lib["path"],
+                        lib["name"],
+                        known_game_dirs=known_game_dirs,
+                        progress_callback=progress_callback,
+                        cancel_check=cancel_check
                     )
-                
-                
+                total_auto_exceptions += added_exceptions
+
+
                 # Merge new games
                 for new_game in new_games:
                     if cancel_check and cancel_check():
+                        self._last_auto_exception_count = total_auto_exceptions
                         return []  # Return early if cancelled
-                        
+
                     existing = None
                     for val_game in validated_games:
                         if val_game.launch_path == new_game.launch_path:
@@ -742,7 +1180,9 @@ class GameLibraryManager:
         self.games = validated_games
         self.save_games()
         self.save_config()
-        
+
+        self._last_auto_exception_count = total_auto_exceptions
+
         return []  # No libraries removed in this case
     
     def validate_and_scan_targeted_with_dialog(self, parent_window, new_library_names=None):
@@ -778,12 +1218,14 @@ class GameLibraryManager:
                 
                 def cancel_check():
                     return progress_dialog.cancelled
-                
-                removed_libraries = self.validate_and_scan_targeted(new_library_names, progress_callback, cancel_check)
-                scan_result["exceptions_count"] = 0
+
+                removed_libraries = self.validate_and_scan_targeted(
+                    new_library_names, progress_callback, cancel_check
+                )
+                scan_result["exceptions_count"] = self._last_auto_exception_count
                 scan_result["removed_libraries"] = removed_libraries
                 scan_result["cancelled"] = progress_dialog.cancelled
-                
+
             except Exception as e:
                 scan_result["error"] = e
             finally:
@@ -852,12 +1294,12 @@ class GameLibraryManager:
                 
                 def cancel_check():
                     return progress_dialog.cancelled
-                
+
                 removed_libraries = self.validate_and_scan_incrementally(progress_callback, cancel_check)
-                scan_result["exceptions_count"] = 0
+                scan_result["exceptions_count"] = self._last_auto_exception_count
                 scan_result["removed_libraries"] = removed_libraries
                 scan_result["cancelled"] = progress_dialog.cancelled
-                
+
             except Exception as e:
                 scan_result["error"] = e
             finally:
