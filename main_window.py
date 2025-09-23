@@ -233,18 +233,19 @@ class MainFrame(wx.Frame):
                 if platform not in tree_data:
                     tree_data[platform] = {}
                 
-                genre = game.genre or "Unknown"
+                genre = game.genre or "Unknown Genre"
                 if "genre" in filters:
                     if genre not in tree_data[platform]:
                         tree_data[platform][genre] = {}
-                    
-                    developer = game.developer or "Unknown"
+
+                    developer = game.developer or "Unknown Developer"
                     if "developer" in filters:
                         if developer not in tree_data[platform][genre]:
                             tree_data[platform][genre][developer] = set()
                         
                         if "year" in filters:
-                            tree_data[platform][genre][developer].add(game.year)
+                            year = game.year or "Unknown Year"
+                            tree_data[platform][genre][developer].add(year)
         
         # Build tree control
         root = self.tree_ctrl.AddRoot("Games")
@@ -328,12 +329,13 @@ class MainFrame(wx.Frame):
                                 any(p in tree_criteria["platforms"] for p in game.platforms)
                 genre_match = not tree_criteria["genres"] or \
                              game.genre in tree_criteria["genres"] or \
-                             (game.genre == "" and "Unknown" in tree_criteria["genres"])
+                             (game.genre == "" and "Unknown Genre" in tree_criteria["genres"])
                 dev_match = not tree_criteria["developers"] or \
                            game.developer in tree_criteria["developers"] or \
-                           (game.developer == "" and "Unknown" in tree_criteria["developers"])
+                           (game.developer == "" and "Unknown Developer" in tree_criteria["developers"])
                 year_match = not tree_criteria["years"] or \
-                            game.year in tree_criteria["years"]
+                            game.year in tree_criteria["years"] or \
+                            (game.year == "" and "Unknown Year" in tree_criteria["years"])
                 
                 if not (platform_match and genre_match and dev_match and year_match):
                     continue

@@ -14,14 +14,70 @@ python game-chooser.py
 pip install wxPython
 ```
 
-### Testing Commands
+### Testing Strategy
+
+#### Comprehensive Logic Testing (Without Dependencies)
+When wxPython or other dependencies are unavailable, use isolated logic testing to verify core functionality:
+
 ```bash
 # Test library manager functionality
 python3 -c "from library_manager import GameLibraryManager; manager = GameLibraryManager(); print('✓ Library manager loads successfully')"
 
 # Test auto-exclusion patterns
 python3 -c "from library_manager import GameLibraryManager; from pathlib import Path; manager = GameLibraryManager(); print('setup.exe excluded:', manager._should_auto_exclude(Path('setup.exe')))"
+
+# Test tree building logic with mock data
+python3 -c "
+class Game:
+    def __init__(self, genre=None, developer=None, year=None):
+        self.genre = genre
+        self.developer = developer
+        self.year = year
+        self.platforms = ['PC']
+
+# Test unknown handling
+games = [Game(), Game(genre='Action'), Game(developer='Studio'), Game(genre='RPG', developer='Big Studio', year='2024')]
+for i, game in enumerate(games):
+    genre = game.genre or 'Unknown Genre'
+    developer = game.developer or 'Unknown Developer'
+    year = game.year or 'Unknown Year'
+    print(f'Game {i}: genre=\"{genre}\", developer=\"{developer}\", year=\"{year}\"')
+"
+
+# Test filtering logic with edge cases
+python3 -c "
+class Game:
+    def __init__(self, genre='', developer='', year=''):
+        self.genre = genre
+        self.developer = developer
+        self.year = year
+        self.platforms = ['PC']
+
+games = [Game('', '', ''), Game('Action', '', '2023'), Game('', 'Studio', ''), Game('RPG', 'Big Studio', '2024')]
+
+# Test criteria matching
+tree_criteria = {'genres': {'Unknown Genre', 'Action'}, 'developers': {'Unknown Developer'}, 'years': {'Unknown Year', '2023'}}
+
+for i, game in enumerate(games):
+    genre_match = (not tree_criteria['genres'] or game.genre in tree_criteria['genres'] or (game.genre == '' and 'Unknown Genre' in tree_criteria['genres']))
+    dev_match = (not tree_criteria['developers'] or game.developer in tree_criteria['developers'] or (game.developer == '' and 'Unknown Developer' in tree_criteria['developers']))
+    year_match = (not tree_criteria['years'] or game.year in tree_criteria['years'] or (game.year == '' and 'Unknown Year' in tree_criteria['years']))
+    matches = genre_match and dev_match and year_match
+    print(f'Game {i}: matches={matches}')
+"
 ```
+
+#### Testing Principles
+1. **Mock Data Approach**: Create minimal test classes that simulate real data structures
+2. **Edge Case Coverage**: Test empty/None values, mixed data states, and boundary conditions
+3. **Logic Isolation**: Test core algorithms separately from UI/dependency layers
+4. **Incremental Validation**: Test each logical component before integration
+5. **Real-world Scenarios**: Use realistic data combinations that mirror actual usage
+
+#### Important Testing Notes
+- **Avoid GUI Testing Without Dependencies**: When wxPython is unavailable, focus on logic testing rather than attempting to run the full application
+- **Dependency-Free Validation**: All core business logic should be testable without external dependencies
+- **Mock Classes Over Real Objects**: Use simple mock classes that implement only the required interface rather than complex test frameworks
 
 ## Project Structure
 
@@ -264,7 +320,8 @@ The application features a sophisticated auto-exclusion system to filter out non
 - **Mixed storage**: Both types coexist in `config["exceptions"]` list
 - **Recursive behavior**: Folder exceptions exclude all subdirectories automatically
 
-### Testing Commands
+### Additional Testing Commands
+
 ```bash
 # Test folder exception logic
 python3 -c "
