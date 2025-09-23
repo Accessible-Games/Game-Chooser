@@ -177,3 +177,102 @@ The application features a sophisticated auto-exclusion system to filter out non
 - Exception patterns are case-insensitive
 - Library scanning is depth-limited (MAX_SCAN_DEPTH = 10)
 - Games are stored with relative paths but displayed with full context
+
+## Key Methods Documentation
+
+### PreferencesDialog (dialogs.py)
+
+#### UI Structure
+- **Exception Management Section** (lines 445-484):
+  - `exc_list`: wx.ListCtrl displaying current exceptions (files and folders)
+  - Exception buttons: "Add" (files), "Add Folder" (folders), "Remove"
+  - Located in `create_path_management()` method
+
+#### Key Methods
+- **`on_add_exception(event)`** (lines 513-522):
+  - Opens text entry dialog for file exception paths
+  - Adds relative paths to `config["exceptions"]` list
+  - Validates and adds to UI list control
+
+- **`on_add_folder_exception(event)`** (lines 524-540):
+  - Opens directory picker dialog
+  - Converts absolute paths to library-relative using `_make_relative_to_library()`
+  - Appends trailing "/" to distinguish folder exceptions
+  - Validates folder is within configured library paths
+
+- **`_make_relative_to_library(folder_path)`** (lines 542-561):
+  - Converts absolute folder paths to library-relative paths
+  - Iterates through configured libraries to find containing library
+  - Returns normalized relative path with forward slashes
+  - Returns None if folder not within any library
+
+- **`on_apply(event)`** (lines 529-582):
+  - Saves configuration and triggers rescanning when libraries change
+  - Uses targeted scanning for new libraries, incremental for existing
+  - Refreshes exception list display after auto-exceptions added
+
+### GameLibraryManager (library_manager.py)
+
+#### Exception Handling Methods
+- **`_normalize_exception_entry(entry)`** (line 325):
+  - Normalizes paths by converting backslashes to forward slashes
+  - Strips whitespace from exception entries
+
+- **`_is_path_exception(rel_path)`** (lines 330-349):
+  - **Enhanced for folder support**: Checks if path matches any exception
+  - **Folder Logic**: If exception ends with "/", matches paths starting with folder path
+  - **File Logic**: Original exact match or wildcard (fnmatch) matching
+  - Takes library-relative path as input
+  - Returns True if path should be excluded
+
+- **`_add_exception_entry(entry)`** (lines 351-364):
+  - Adds new exception to config if not duplicate
+  - Prevents redundant exceptions with fnmatch overlap checking
+  - Returns True if actually added, False if duplicate/redundant
+
+#### Scanning Methods
+- **`scan_library(library_path, library_name, ...)`** (lines 710+):
+  - **Two-phase scanning**: collect_directories() then scan_recursive()
+  - **collect_directories()**: Builds directory list for progress tracking
+    - **Lines 742-750**: Added folder exception checking before adding to scan list
+  - **scan_recursive()**: Main scanning logic with executable detection
+    - **Lines 868-875**: Added folder exception checking before directory recursion
+  - Both phases skip directories matching folder exceptions
+
+#### Scanning Integration Points
+- **collect_directories() folder check** (lines 742-746):
+  ```python
+  # Check if this directory is excluded by folder exceptions
+  rel_path = item.relative_to(Path(library_path))
+  rel_str = str(rel_path).replace(os.sep, '/')
+  if self._is_path_exception(rel_str):
+      continue
+  ```
+
+- **scan_recursive() folder check** (lines 868-872):
+  ```python
+  # Check if this directory is excluded by folder exceptions
+  rel_path = item.relative_to(Path(library_path))
+  rel_str = str(rel_path).replace(os.sep, '/')
+  if self._is_path_exception(rel_str):
+      continue
+  ```
+
+#### Exception Storage Format
+- **File exceptions**: `"tools/setup.exe"` (no trailing slash)
+- **Folder exceptions**: `"tools/"` (trailing slash marker)
+- **Mixed storage**: Both types coexist in `config["exceptions"]` list
+- **Recursive behavior**: Folder exceptions exclude all subdirectories automatically
+
+### Testing Commands
+```bash
+# Test folder exception logic
+python3 -c "
+from library_manager import GameLibraryManager
+manager = GameLibraryManager()
+manager.config['exceptions'] = ['tools/', 'build/debug/']
+print('tools/setup.exe excluded:', manager._is_path_exception('tools/setup.exe'))
+print('build/debug/test.exe excluded:', manager._is_path_exception('build/debug/test.exe'))
+print('games/game.exe excluded:', manager._is_path_exception('games/game.exe'))
+"
+```

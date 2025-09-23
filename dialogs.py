@@ -461,11 +461,13 @@ class PreferencesDialog(wx.Dialog):
         # Exception buttons
         exc_btn_panel = wx.Panel(exc_panel)
         exc_btn_sizer = wx.BoxSizer(wx.VERTICAL)
-        
+
         add_exc_btn = wx.Button(exc_btn_panel, label="Add")
+        add_folder_btn = wx.Button(exc_btn_panel, label="Add Folder")
         remove_exc_btn = wx.Button(exc_btn_panel, label="Remove")
-        
+
         exc_btn_sizer.Add(add_exc_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
+        exc_btn_sizer.Add(add_folder_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
         exc_btn_sizer.Add(remove_exc_btn, 0, wx.EXPAND)
         
         exc_btn_panel.SetSizer(exc_btn_sizer)
@@ -478,6 +480,7 @@ class PreferencesDialog(wx.Dialog):
         add_lib_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
         remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
         add_exc_btn.Bind(wx.EVT_BUTTON, self.on_add_exception)
+        add_folder_btn.Bind(wx.EVT_BUTTON, self.on_add_folder_exception)
         remove_exc_btn.Bind(wx.EVT_BUTTON, self.on_remove_exception)
     
     def on_add_library(self, event):
@@ -509,7 +512,7 @@ class PreferencesDialog(wx.Dialog):
     
     def on_add_exception(self, event):
         """Add a new exception"""
-        dlg = wx.TextEntryDialog(self, "Enter exception path (e.g., games\\tool\\updater.exe):", 
+        dlg = wx.TextEntryDialog(self, "Enter exception path (e.g., games\\tool\\updater.exe):",
                                 "Add Exception")
         if dlg.ShowModal() == wx.ID_OK:
             exc_path = dlg.GetValue()
@@ -517,7 +520,46 @@ class PreferencesDialog(wx.Dialog):
                 self.exc_list.InsertItem(self.exc_list.GetItemCount(), exc_path)
                 self.library_manager.config["exceptions"].append(exc_path)
         dlg.Destroy()
-    
+
+    def on_add_folder_exception(self, event):
+        """Add a new folder exception"""
+        dlg = wx.DirDialog(self, "Choose Folder to Exclude from Scanning")
+        if dlg.ShowModal() == wx.ID_OK:
+            folder_path = dlg.GetPath()
+            if folder_path:
+                # Convert to relative path if within a library
+                relative_path = self._make_relative_to_library(folder_path)
+                if relative_path:
+                    # Add trailing slash to indicate this is a folder exception
+                    folder_exception = relative_path.rstrip('/') + '/'
+                    self.exc_list.InsertItem(self.exc_list.GetItemCount(), folder_exception)
+                    self.library_manager.config["exceptions"].append(folder_exception)
+                else:
+                    wx.MessageBox("Selected folder is not within any configured library path.",
+                                "Invalid Folder", wx.OK | wx.ICON_WARNING)
+        dlg.Destroy()
+
+    def _make_relative_to_library(self, folder_path):
+        """Convert absolute folder path to library-relative path"""
+        import os
+        from pathlib import Path
+
+        folder_path = Path(folder_path)
+
+        # Check if folder is within any configured library
+        for lib in self.library_manager.config["libraries"]:
+            lib_path = Path(lib["path"])
+            try:
+                # Check if folder_path is within lib_path
+                rel_path = folder_path.relative_to(lib_path)
+                # Return the relative path with forward slashes
+                return str(rel_path).replace(os.sep, '/')
+            except ValueError:
+                # folder_path is not within this library
+                continue
+
+        return None
+
     def on_remove_exception(self, event):
         """Remove selected exception"""
         selected = self.exc_list.GetFirstSelected()

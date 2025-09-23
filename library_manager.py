@@ -20,7 +20,7 @@ class GameLibraryManager:
     
     # Constants for scanning behavior
     MAX_SCAN_DEPTH = 10
-    VALID_GAME_NAMES = ["game", "launch", "play"]
+    VALID_GAME_NAMES = ["game", "launch", "play", "start", "run"]
     AUTO_EXCEPTION_KEYWORDS = [
         "setup", "install", "installer", "installshield", "unins", "uninstall",
         "update", "updater", "upgrade", "patch", "patcher", "patchnotes",
@@ -59,7 +59,7 @@ class GameLibraryManager:
         "find", "locate", "ls", "cp", "mv", "rm", "mkdir", "rmdir", "chmod", "chown",
         "chgrp", "chroot", "touch", "ln", "link", "unlink", "stat", "file", "which",
         "dirname", "basename", "readlink", "realpath", "pathchk", "mkfifo", "mknod",
-        "mount", "umount", "sync", "df", "du", "mktemp", "env", "printenv", "id",
+        "mount", "umount", "sync", "df", "du", "mktemp", "env", "printenv",
         "who", "whoami", "users", "groups", "logname", "pinky", "hostname", "hostid",
         "uname", "arch", "nproc", "uptime", "date", "sleep", "timeout", "nice", "nohup",
         "kill", "killall", "pkill", "pgrep", "ps", "top", "jobs", "bg", "fg", "disown",
@@ -103,7 +103,10 @@ class GameLibraryManager:
         # Common uninstaller names
         "unins000", "unins001", "checkup",
         # System utilities
-        "server", "sb", "id", "scalar", "rebase", "hostname", "productidmanager",
+        "server", "scalar", "rebase", "hostname", "productidmanager",
+        # Game utilities that are not games
+        "java", "oggenc2", "signtool", "joystick", "mapmaker", "myaccount",
+        "leinstaller", "leupdater", "ssceruntime-enu", "updater_dt",
         # Shell and system tools
         "bash", "sh", "dash", "mintty", "cygwin-console-helper", "winpty-agent",
         "winpty-debugserver", "winpty", "headless-git", "edit-git-bash",
@@ -121,7 +124,7 @@ class GameLibraryManager:
         "factor", "seq", "yes", "true", "false", "echo", "printf", "test",
         "expr", "tee", "timeout", "truncate",
         # Environment/process utilities
-        "env", "printenv", "id", "who", "whoami", "users", "groups", "logname",
+        "env", "printenv", "who", "whoami", "users", "groups", "logname",
         "pinky", "hostname", "hostid", "uname", "arch", "nproc", "date", "sleep",
         "nice", "nohup", "kill", "ps", "stty", "tty", "strace", "pldd",
         # Archive utilities
@@ -213,7 +216,7 @@ class GameLibraryManager:
         "find", "fmt", "fold", "frcode", "gapplication", "gencat", "getconf",
         "getfacl", "getopt", "getprocaddr32", "getprocaddr64", "gettext",
         "gio-querymodules", "glib-compile-schemas", "gmondump", "gobject-query",
-        "gsettings", "gtc", "hostname", "infocmp", "infotocap", "install",
+        "gsettings", "hostname", "infocmp", "infotocap", "install",
         "locale", "logname", "lsattr", "mac2unix", "minidumper", "mount",
         "mpicalc", "nano", "nettle-hash", "nettle-lfib-stream", "nettle-pbkdf2",
         "nice", "nohup", "numfmt", "od", "p11-kit", "p11-kit-remote", "p11-kit-server",
@@ -238,7 +241,7 @@ class GameLibraryManager:
     }
     AUTO_EXCEPTION_SUFFIXES = [
         # Common utility suffixes
-        "-setup", "-installer", "-install", "-uninstall", "-unins",
+        "setup", "-setup", "-installer", "-install", "-uninstall", "-unins",
         "-update", "-updater", "-upgrade", "-patch", "-patcher",
         "-config", "-configure", "-configurator", "-register", "-registration",
         "-checkup", "-checker", "-diagnostic", "-repair", "-cleanup",
@@ -332,11 +335,20 @@ class GameLibraryManager:
         for exc in self.config["exceptions"]:
             pattern_norm = self._normalize_exception_entry(exc)
             pattern_lower = pattern_norm.lower()
-            if any(ch in pattern_norm for ch in ['*', '?', '[', ']']):
-                if fnmatch.fnmatch(rel_norm, pattern_lower):
+
+            # Check if this is a folder exception (ends with /)
+            if pattern_norm.endswith('/'):
+                # For folder exceptions, check if the path starts with the folder path
+                folder_pattern = pattern_lower.rstrip('/')
+                if rel_norm.startswith(folder_pattern + '/') or rel_norm == folder_pattern:
                     return True
-            elif rel_norm == pattern_lower:
-                return True
+            else:
+                # Original file exception logic
+                if any(ch in pattern_norm for ch in ['*', '?', '[', ']']):
+                    if fnmatch.fnmatch(rel_norm, pattern_lower):
+                        return True
+                elif rel_norm == pattern_lower:
+                    return True
         return False
 
     def _add_exception_entry(self, entry: str) -> bool:
@@ -421,12 +433,18 @@ class GameLibraryManager:
         Returns:
             bool: True if the file should be excluded, False otherwise
         """
+        import re
         name = item.name
         suffix = item.suffix.lower()
         stem = item.stem.lower()
 
         # Check exact stem matches
         if stem in self.AUTO_EXCEPTION_EXACT_STEMS:
+            return True
+
+        # Check stem without parentheses and numbers for variations like "oggenc2 (1)"
+        stem_clean = re.sub(r'\s*\([^)]*\)', '', stem).strip()
+        if stem_clean in self.AUTO_EXCEPTION_EXACT_STEMS:
             return True
 
         # Check batch file specific stems
@@ -437,16 +455,9 @@ class GameLibraryManager:
         # Use word boundaries to avoid false positives (e.g., "rm" in "normal_game")
         for keyword in self.AUTO_EXCEPTION_KEYWORDS:
             if keyword in stem:
-                # Check if it's a word boundary match to avoid false positives
-                # For very short keywords (1-2 chars), require exact word match
-                if len(keyword) <= 2:
-                    # Require word boundaries for short keywords
-                    import re
-                    pattern = r'\b' + re.escape(keyword) + r'\b'
-                    if re.search(pattern, stem):
-                        return True
-                else:
-                    # For longer keywords, substring match is more reliable
+                # Use word boundaries for all keywords to prevent false positives
+                pattern = r'\b' + re.escape(keyword) + r'\b'
+                if re.search(pattern, stem):
                     return True
 
         # Check prefix matches
@@ -463,8 +474,44 @@ class GameLibraryManager:
             if stem.endswith(exception_suffix):
                 return True
 
+        # Check additional specific patterns for utilities
+        name_lower = name.lower()
+
+        # Runtime libraries
+        if stem.startswith('msvc') or stem.startswith('vbrun'):
+            return True
+
+        # Update/installer patterns
+        if stem.startswith('update_'):
+            return True
+
+        # Uninstaller variations (catches "unins000 (1)", "uninst*" etc.)
+        if stem.startswith('unins') or stem.startswith('uninst'):
+            return True
+
+        # Server pattern (e.g., "Server3000")
+        if re.match(r'^server\d+$', stem):
+            return True
+
+        # Map maker pattern (with space)
+        if 'map maker' in name_lower:
+            return True
+
+        # Additional installer/updater patterns as substrings for compound words
+        if ('installer' in stem or 'updater' in stem or
+            ('install' in stem and len(stem) > 7) or  # avoid matching "install" alone
+            ('runtime' in stem)):
+            return True
+
         # Fallback for batch files that don't match valid game names
-        if suffix in {'.bat', '.cmd'} and stem not in self.VALID_GAME_NAMES:
+        if suffix in {'.bat', '.cmd'}:
+            # Allow if stem exactly matches valid game names
+            if stem in self.VALID_GAME_NAMES:
+                return False
+            # Allow if stem starts with valid game name followed by space (compound launcher names)
+            if any(stem.startswith(valid_name + ' ') for valid_name in self.VALID_GAME_NAMES):
+                return False
+            # Otherwise exclude batch file
             return True
 
         return False
@@ -513,21 +560,17 @@ class GameLibraryManager:
         """Construct full path from relative path and library"""
         if game.launch_path.startswith("http"):
             return game.launch_path
-        
+
         # Handle manual games - return the direct path
         if game.library_name == "manual":
             return game.launch_path
-        
-        parts = Path(game.launch_path).parts
-        if not parts:
-            return None
-        
-        lib_name = parts[0]
+
+        # Find the library by name and append the relative path
         for lib in self.config["libraries"]:
-            if lib["name"] == lib_name:
-                full_path = Path(lib["path"]) / Path(*parts[1:])
+            if lib["name"] == game.library_name:
+                full_path = Path(lib["path"]) / game.launch_path
                 return str(full_path)
-        
+
         return None
     
     def is_executable(self, path):
@@ -730,6 +773,11 @@ class GameLibraryManager:
                         if item.name.startswith('.') or item.is_symlink():
                             continue
                         if item.is_dir():
+                            # Check if this directory is excluded by folder exceptions
+                            rel_path = item.relative_to(Path(library_path))
+                            rel_str = str(rel_path).replace(os.sep, '/')
+                            if self._is_path_exception(rel_str):
+                                continue
                             # Only add to scan list if not a known game directory (for incremental scanning)
                             if str(item) not in known_game_dirs:
                                 directories_to_scan.append(str(item))
@@ -851,6 +899,11 @@ class GameLibraryManager:
                     if item.is_symlink():
                         continue
                     if item.is_dir():
+                        # Check if this directory is excluded by folder exceptions
+                        rel_path = item.relative_to(Path(library_path))
+                        rel_str = str(rel_path).replace(os.sep, '/')
+                        if self._is_path_exception(rel_str):
+                            continue
                         # Only recurse if not a known game directory (for incremental scanning)
                         if str(item) not in known_game_dirs:
                             scan_recursive(item, depth + 1)
