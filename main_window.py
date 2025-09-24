@@ -222,55 +222,61 @@ class MainFrame(wx.Frame):
                 pass
     
     def build_tree(self, filters=None):
-        """Build the tree control hierarchy"""
+        """Build the tree control hierarchy with flat 2-level structure"""
         self.tree_ctrl.DeleteAllItems()
-        
+
         if filters is None:
             filters = ["platform", "genre", "developer", "year"]
-        
-        # Build tree structure from games
-        tree_data = {}
-        
-        for game in self.library_manager.games:
-            for platform in game.platforms:
-                if "platform" not in filters:
-                    continue
-                    
-                if platform not in tree_data:
-                    tree_data[platform] = {}
-                
-                genre = game.genre or "Unknown Genre"
-                if "genre" in filters:
-                    if genre not in tree_data[platform]:
-                        tree_data[platform][genre] = {}
 
-                    developer = game.developer or "Unknown Developer"
-                    if "developer" in filters:
-                        if developer not in tree_data[platform][genre]:
-                            tree_data[platform][genre][developer] = set()
-                        
-                        if "year" in filters:
-                            year = game.year or "Unknown Year"
-                            tree_data[platform][genre][developer].add(year)
-        
-        # Build tree control
-        root = self.tree_ctrl.AddRoot("Games")
-        
-        for platform in sorted(tree_data.keys()):
-            plat_node = self.tree_ctrl.AppendItem(root, platform)
-            
+        # Collect unique values for each category
+        categories = {
+            "platform": set(),
+            "genre": set(),
+            "developer": set(),
+            "year": set()
+        }
+
+        for game in self.library_manager.games:
+            # Collect platforms
+            if "platform" in filters:
+                for platform in game.platforms:
+                    categories["platform"].add(platform)
+
+            # Collect genres
             if "genre" in filters:
-                for genre in sorted(tree_data[platform].keys()):
-                    genre_node = self.tree_ctrl.AppendItem(plat_node, genre)
-                    
-                    if "developer" in filters:
-                        for developer in sorted(tree_data[platform][genre].keys()):
-                            dev_node = self.tree_ctrl.AppendItem(genre_node, developer)
-                            
-                            if "year" in filters:
-                                for year in sorted(tree_data[platform][genre][developer]):
-                                    self.tree_ctrl.AppendItem(dev_node, year)
-        
+                genre = game.genre or "Unknown Genre"
+                categories["genre"].add(genre)
+
+            # Collect developers
+            if "developer" in filters:
+                developer = game.developer or "Unknown Developer"
+                categories["developer"].add(developer)
+
+            # Collect years
+            if "year" in filters:
+                year = game.year or "Unknown Year"
+                categories["year"].add(year)
+
+        # Build tree control with 2-level structure
+        root = self.tree_ctrl.AddRoot("Filters")
+
+        # Category labels and their children
+        category_labels = {
+            "platform": "Platform",
+            "genre": "Genre",
+            "developer": "Developer",
+            "year": "Release Year"
+        }
+
+        for category_key in ["platform", "genre", "developer", "year"]:
+            if category_key in filters and categories[category_key]:
+                # Add category node
+                category_node = self.tree_ctrl.AppendItem(root, category_labels[category_key])
+
+                # Add all values under this category
+                for value in sorted(categories[category_key]):
+                    self.tree_ctrl.AppendItem(category_node, value)
+
         self.tree_ctrl.ExpandAll()
     
     def on_tree_selection(self, event):
@@ -295,30 +301,37 @@ class MainFrame(wx.Frame):
         selections = self.tree_ctrl.GetSelections()
         if not selections:
             return None
-        
+
         criteria = {
             "platforms": set(),
             "genres": set(),
             "developers": set(),
             "years": set()
         }
-        
+
+        # Category label mapping
+        category_mapping = {
+            "Platform": "platforms",
+            "Genre": "genres",
+            "Developer": "developers",
+            "Release Year": "years"
+        }
+
         for item in selections:
-            path = []
-            current = item
-            while current and current != self.tree_ctrl.GetRootItem():
-                path.insert(0, self.tree_ctrl.GetItemText(current))
-                current = self.tree_ctrl.GetItemParent(current)
-            
-            if len(path) >= 1:
-                criteria["platforms"].add(path[0])
-            if len(path) >= 2:
-                criteria["genres"].add(path[1])
-            if len(path) >= 3:
-                criteria["developers"].add(path[2])
-            if len(path) >= 4:
-                criteria["years"].add(path[3])
-        
+            item_text = self.tree_ctrl.GetItemText(item)
+            parent = self.tree_ctrl.GetItemParent(item)
+
+            # Skip root node
+            if parent == self.tree_ctrl.GetRootItem() or not parent:
+                # This is a category node - ignore for now (could add "select all" logic later)
+                continue
+
+            # Get parent category
+            parent_text = self.tree_ctrl.GetItemText(parent)
+            if parent_text in category_mapping:
+                criteria_key = category_mapping[parent_text]
+                criteria[criteria_key].add(item_text)
+
         return criteria
     
     def apply_filters(self):
