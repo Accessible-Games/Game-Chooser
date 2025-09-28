@@ -151,7 +151,7 @@ class EditManualGameDialog(wx.Dialog):
         # Platform
         sizer.Add(wx.StaticText(panel, label="Platform:"), 
                  pos=(2, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        platforms = ["Windows", "macOS", "Linux"]
+        platforms = ["Windows", "macOS"]
         self.platform_ctrl = wx.ComboBox(panel, choices=platforms, style=wx.CB_DROPDOWN)
         if game.platforms:
             self.platform_ctrl.SetValue(game.platforms[0])
@@ -204,10 +204,8 @@ class EditManualGameDialog(wx.Dialog):
         system = platform.system()
         if system == "Windows":
             wildcard = "Executable files (*.exe)|*.exe|Batch files (*.bat)|*.bat|All files (*.*)|*.*"
-        elif system == "Darwin":  # macOS
-            wildcard = "Applications (*.app)|*.app|Scripts (*.sh;*.command)|*.sh;*.command|All files (*.*)|*.*"
-        else:  # Linux/Unix
-            wildcard = "Scripts (*.sh;*.run)|*.sh;*.run|All files (*.*)|*.*"
+        else:  # macOS
+            wildcard = "Applications (*.app)|*.app|All files (*.*)|*.*"
         
         dlg = wx.FileDialog(self, "Select Game Executable", wildcard=wildcard)
         if dlg.ShowModal() == wx.ID_OK:

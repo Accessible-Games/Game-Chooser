@@ -77,55 +77,23 @@ class PathManager:
     @staticmethod
     def is_executable(path):
         """
-        Check if a path is an executable file.
+        Check if a path is an executable game file.
+
+        Only detects Windows (.exe, .bat) and macOS (.app) games.
+        Linux support has been removed for simplicity.
 
         Args:
             path: Path object to check
 
         Returns:
-            bool: True if file is executable
+            bool: True if file is a game executable
         """
-        if not path.is_file():
-            return False
+        # macOS .app bundles (directories)
+        if path.suffix.lower() == '.app' and path.is_dir():
+            return True
 
-        # Platform-specific checks
-        system = platform.system()
-
-        if system == "Windows":
-            return path.suffix.lower() in ['.exe', '.bat']
-        elif system == "Darwin":  # macOS
-            # Check for .app bundles (directories)
-            if path.suffix.lower() == '.app' and path.is_dir():
-                return True
-
-            # Check for executable files with common game extensions
-            if path.suffix.lower() in ['.sh', '.command']:
-                return True
-
-            # Check if it's an executable file (has execute permission and is a regular file)
-            try:
-                if path.is_file() and os.access(str(path), os.X_OK):
-                    # Additional check: skip obvious non-game executables
-                    name = path.name.lower()
-                    if any(skip in name for skip in ['uninstall', 'install', 'setup', 'update', 'crash', 'log']):
-                        return False
-                    return True
-            except:
-                return False
-        else:  # Linux/Unix
-            # Check for executable files with common extensions
-            if path.suffix.lower() in ['.sh', '.run']:
-                return True
-
-            # Check if it's an executable file
-            try:
-                if path.is_file() and os.access(str(path), os.X_OK):
-                    # Skip obvious non-game executables
-                    name = path.name.lower()
-                    if any(skip in name for skip in ['uninstall', 'install', 'setup', 'update', 'crash', 'log']):
-                        return False
-                    return True
-            except:
-                return False
+        # Windows executables and batch files only
+        if path.is_file() and path.suffix.lower() in ['.exe', '.bat']:
+            return True
 
         return False

@@ -45,8 +45,8 @@ class GameLibraryManager:
             config_dir = app_data / "GameChooser"
         elif system == "Darwin":  # macOS
             config_dir = Path.home() / "Library" / "Application Support" / "GameChooser"
-        else:  # Linux/Unix
-            config_dir = Path.home() / ".config" / "GameChooser"
+        else:  # Fallback for other systems - use macOS style
+            config_dir = Path.home() / "Library" / "Application Support" / "GameChooser"
         
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "config.json"
@@ -373,7 +373,7 @@ class GameLibraryManager:
             # Only keep games from libraries that still exist
             if game.library_name in valid_library_names:
                 full_path = self.get_full_path(game)
-                if full_path and Path(full_path).exists():
+                if full_path and Path(full_path).exists() and self.is_executable(full_path):
                     validated_games.append(game)
         
         return validated_games
@@ -445,6 +445,9 @@ class GameLibraryManager:
                         if item.name.startswith('.') or item.is_symlink():
                             continue
                         if item.is_dir():
+                            # Skip .app bundles on macOS - they're executables, not folders to scan
+                            if item.suffix.lower() == '.app':
+                                continue
                             # Check if this directory is excluded by folder exceptions
                             rel_path = item.relative_to(Path(library_path))
                             rel_str = self.path_manager.normalize(rel_path)
@@ -523,6 +526,9 @@ class GameLibraryManager:
                     if item.is_symlink():
                         continue
                     if item.is_dir():
+                        # Skip .app bundles on macOS - they're executables, not folders to scan
+                        if item.suffix.lower() == '.app':
+                            continue
                         # Check if this directory is excluded by folder exceptions
                         rel_path = item.relative_to(Path(library_path))
                         rel_str = self.path_manager.normalize(rel_path)
@@ -554,7 +560,8 @@ class GameLibraryManager:
                 continue
             if item.is_symlink():
                 continue
-            if not item.is_file():
+            # Skip directories unless they are .app bundles on macOS
+            if not item.is_file() and not (item.suffix.lower() == '.app' and item.is_dir()):
                 continue
 
             # Check if it's an executable
