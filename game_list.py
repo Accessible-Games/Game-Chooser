@@ -8,10 +8,10 @@ import wx.lib.mixins.listctrl as listmix
 
 
 class GameListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
-    """Custom ListCtrl for game display"""
-    
+    """Custom Virtual ListCtrl for game display - only renders visible items for better performance"""
+
     def __init__(self, parent, library_manager):
-        super().__init__(parent, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        super().__init__(parent, style=wx.LC_REPORT | wx.LC_SINGLE_SEL | wx.LC_VIRTUAL)
         listmix.ListCtrlAutoWidthMixin.__init__(self)
         
         self.library_manager = library_manager
@@ -38,52 +38,58 @@ class GameListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
         # Bind events
         self.Bind(wx.EVT_LIST_COL_CLICK, self.on_column_click)
         self.Bind(wx.EVT_CHAR, self.on_char)
+
+    def OnGetItemText(self, row, col):
+        """Virtual list method - return text for given row/column"""
+        if row >= len(self.games_displayed):
+            return ""
+
+        game = self.games_displayed[row]
+        if col == 0:
+            return game.title
+        elif col == 1:
+            return game.genre
+        elif col == 2:
+            return game.developer
+        elif col == 3:
+            return game.year
+        elif col == 4:
+            return ", ".join(game.platforms)
+        return ""
     
     def populate(self, games):
-        """Populate list with games"""
-        self.DeleteAllItems()
+        """Populate virtual list with games"""
         self.games_displayed = games
-        
-        for game in games:
-            index = self.InsertItem(self.GetItemCount(), game.title)
-            self.SetItem(index, 1, game.genre)
-            self.SetItem(index, 2, game.developer)
-            self.SetItem(index, 3, game.year)
-            self.SetItem(index, 4, ", ".join(game.platforms))
-        
         self.sort_list()
+        # Set the virtual list size - this tells wxPython how many items we have
+        self.SetItemCount(len(self.games_displayed))
     
     def sort_list(self):
         """Sort the list by current column and direction"""
         if not self.games_displayed:
             return
-        
-        # Sort games
+
+        # Sort games in-place
         if self.sort_column == 0:  # Title
-            self.games_displayed.sort(key=lambda g: g.title.lower(), 
+            self.games_displayed.sort(key=lambda g: g.title.lower(),
                                      reverse=not self.sort_ascending)
         elif self.sort_column == 1:  # Genre
-            self.games_displayed.sort(key=lambda g: g.genre.lower(), 
+            self.games_displayed.sort(key=lambda g: g.genre.lower(),
                                      reverse=not self.sort_ascending)
         elif self.sort_column == 2:  # Developer
-            self.games_displayed.sort(key=lambda g: g.developer.lower(), 
+            self.games_displayed.sort(key=lambda g: g.developer.lower(),
                                      reverse=not self.sort_ascending)
         elif self.sort_column == 3:  # Year
-            self.games_displayed.sort(key=lambda g: (g.year == "unknown", g.year), 
+            self.games_displayed.sort(key=lambda g: (g.year == "unknown", g.year),
                                      reverse=not self.sort_ascending)
         elif self.sort_column == 4:  # Platform
-            self.games_displayed.sort(key=lambda g: len(g.platforms), 
+            self.games_displayed.sort(key=lambda g: len(g.platforms),
                                      reverse=not self.sort_ascending)
-        
-        # Repopulate
-        self.DeleteAllItems()
-        for game in self.games_displayed:
-            index = self.InsertItem(self.GetItemCount(), game.title)
-            self.SetItem(index, 1, game.genre)
-            self.SetItem(index, 2, game.developer)
-            self.SetItem(index, 3, game.year)
-            self.SetItem(index, 4, ", ".join(game.platforms))
-        
+
+        # Refresh the virtual list display
+        if self.games_displayed:
+            self.RefreshItems(0, len(self.games_displayed) - 1)
+
         # Update column headers with arrows
         for col in range(self.GetColumnCount()):
             info = self.GetColumn(col)

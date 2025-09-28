@@ -8,12 +8,67 @@ import os
 import subprocess
 import platform
 import webbrowser
+import threading
 from pathlib import Path
 
 from models import Game
 from library_manager import GameLibraryManager
 from game_list import GameListCtrl
 from dialogs import EditGameDialog, EditManualGameDialog, PreferencesDialog, DeleteGameDialog
+
+
+class FilterWorker(threading.Thread):
+    """Background thread for filtering games to prevent UI freezing"""
+
+    def __init__(self, games, search_term, tree_criteria, callback):
+        super().__init__(daemon=True)
+        self.games = games
+        self.search_term = search_term.lower().strip() if search_term else ""
+        self.tree_criteria = tree_criteria
+        self.callback = callback
+        self._stop_event = threading.Event()
+
+    def stop(self):
+        """Signal the thread to stop"""
+        self._stop_event.set()
+
+    def run(self):
+        """Filter games in background"""
+        filtered = []
+
+        for game in self.games:
+            # Check if we should stop
+            if self._stop_event.is_set():
+                return
+
+            # Apply tree filter first
+            if self.tree_criteria:
+                platform_match = not self.tree_criteria["platforms"] or \
+                                any(p in self.tree_criteria["platforms"] for p in game.platforms)
+                genre_match = not self.tree_criteria["genres"] or \
+                             game.genre in self.tree_criteria["genres"] or \
+                             (game.genre == "" and "Unknown Genre" in self.tree_criteria["genres"])
+                dev_match = not self.tree_criteria["developers"] or \
+                           game.developer in self.tree_criteria["developers"] or \
+                           (game.developer == "" and "Unknown Developer" in self.tree_criteria["developers"])
+                year_match = not self.tree_criteria["years"] or \
+                            game.year in self.tree_criteria["years"] or \
+                            (game.year == "" and "Unknown Year" in self.tree_criteria["years"])
+
+                if not (platform_match and genre_match and dev_match and year_match):
+                    continue
+
+            # Apply search filter
+            if self.search_term:
+                if not any(self.search_term in field.lower() for field in
+                          [game.title, game.genre, game.developer, game.year] + game.platforms):
+                    continue
+
+            filtered.append(game)
+
+        # Call the callback with results if not stopped
+        if not self._stop_event.is_set():
+            wx.CallAfter(self.callback, filtered)
 
 
 class MainFrame(wx.Frame):
@@ -24,7 +79,9 @@ class MainFrame(wx.Frame):
         
         self.library_manager = GameLibraryManager()
         self.filtered_games = []
-        self.search_timer = None
+        self.filter_worker = None  # Background filtering thread
+        self._tree_cache = None  # Cache for tree categories
+        self._games_hash = None  # Hash to detect when games list changes
         
         # Set up UI
         self.init_ui()
@@ -216,43 +273,58 @@ class MainFrame(wx.Frame):
                 # (Would need to identify which one caused the error)
                 pass
     
-    def build_tree(self, filters=None):
-        """Build the tree control hierarchy with flat 2-level structure"""
-        self.tree_ctrl.DeleteAllItems()
-
+    def build_tree(self, filters=None, force_rebuild=False):
+        """Build the tree control hierarchy with flat 2-level structure using cache"""
         if filters is None:
             filters = ["platform", "genre", "developer", "year"]
 
-        # Collect unique values for each category
-        categories = {
-            "platform": set(),
-            "genre": set(),
-            "developer": set(),
-            "year": set()
-        }
+        # Generate a simple hash of games to detect changes
+        current_hash = len(self.library_manager.games)
+        if current_hash > 0:
+            # Include first and last game titles for better change detection
+            current_hash = hash((current_hash,
+                               self.library_manager.games[0].title if self.library_manager.games else "",
+                               self.library_manager.games[-1].title if self.library_manager.games else ""))
 
-        for game in self.library_manager.games:
-            # Collect platforms
-            if "platform" in filters:
-                for platform in game.platforms:
-                    categories["platform"].add(platform)
+        # Check if we can use cached data
+        if not force_rebuild and self._tree_cache is not None and self._games_hash == current_hash:
+            categories = self._tree_cache
+        else:
+            # Collect unique values for each category
+            categories = {
+                "platform": set(),
+                "genre": set(),
+                "developer": set(),
+                "year": set()
+            }
 
-            # Collect genres
-            if "genre" in filters:
-                genre = game.genre or "Unknown Genre"
-                categories["genre"].add(genre)
+            for game in self.library_manager.games:
+                # Collect platforms
+                if "platform" in filters:
+                    for platform in game.platforms:
+                        categories["platform"].add(platform)
 
-            # Collect developers
-            if "developer" in filters:
-                developer = game.developer or "Unknown Developer"
-                categories["developer"].add(developer)
+                # Collect genres
+                if "genre" in filters:
+                    genre = game.genre or "Unknown Genre"
+                    categories["genre"].add(genre)
 
-            # Collect years
-            if "year" in filters:
-                year = game.year or "Unknown Year"
-                categories["year"].add(year)
+                # Collect developers
+                if "developer" in filters:
+                    developer = game.developer or "Unknown Developer"
+                    categories["developer"].add(developer)
 
-        # Build tree control with 2-level structure
+                # Collect years
+                if "year" in filters:
+                    year = game.year or "Unknown Year"
+                    categories["year"].add(year)
+
+            # Cache the results
+            self._tree_cache = categories
+            self._games_hash = current_hash
+
+        # Clear and rebuild tree control
+        self.tree_ctrl.DeleteAllItems()
         root = self.tree_ctrl.AddRoot("Filters")
 
         # Category labels and their children
@@ -330,43 +402,31 @@ class MainFrame(wx.Frame):
         return criteria
     
     def apply_filters(self):
-        """Apply search and tree filters"""
-        search_term = self.search_combo.GetValue().lower().strip()
+        """Apply search and tree filters using background thread"""
+        # Stop any existing filter operation
+        if self.filter_worker and self.filter_worker.is_alive():
+            self.filter_worker.stop()
+            self.filter_worker.join(timeout=0.1)  # Brief wait for cleanup
+
+        search_term = self.search_combo.GetValue()
         tree_criteria = self.get_tree_selection_criteria()
-        
-        filtered = []
-        
-        for game in self.library_manager.games:
-            # Apply tree filter first
-            if tree_criteria:
-                platform_match = not tree_criteria["platforms"] or \
-                                any(p in tree_criteria["platforms"] for p in game.platforms)
-                genre_match = not tree_criteria["genres"] or \
-                             game.genre in tree_criteria["genres"] or \
-                             (game.genre == "" and "Unknown Genre" in tree_criteria["genres"])
-                dev_match = not tree_criteria["developers"] or \
-                           game.developer in tree_criteria["developers"] or \
-                           (game.developer == "" and "Unknown Developer" in tree_criteria["developers"])
-                year_match = not tree_criteria["years"] or \
-                            game.year in tree_criteria["years"] or \
-                            (game.year == "" and "Unknown Year" in tree_criteria["years"])
-                
-                if not (platform_match and genre_match and dev_match and year_match):
-                    continue
-            
-            # Apply search filter
-            if search_term:
-                if not any(search_term in field.lower() for field in 
-                          [game.title, game.genre, game.developer, game.year] + game.platforms):
-                    continue
-            
-            filtered.append(game)
-        
-        self.filtered_games = filtered
-        self.game_list.populate(filtered)
-        
+
+        # Start new filter operation in background
+        self.filter_worker = FilterWorker(
+            self.library_manager.games,
+            search_term,
+            tree_criteria,
+            self.on_filter_complete
+        )
+        self.filter_worker.start()
+
+    def on_filter_complete(self, filtered_games):
+        """Called when background filtering is complete"""
+        self.filtered_games = filtered_games
+        self.game_list.populate(filtered_games)
+
         # Select first item if any
-        if filtered:
+        if filtered_games:
             self.game_list.Select(0)
     
     def refresh_game_list(self):
@@ -375,39 +435,8 @@ class MainFrame(wx.Frame):
         self.update_title()
     
     def on_search_text(self, event):
-        """Handle search text changes with delay"""
-        # Cancel previous timer
-        if self.search_timer:
-            self.search_timer.Stop()
-        
-        # Start new timer for 0.5 second delay
-        self.search_timer = wx.Timer(self)
-        self.Bind(wx.EVT_TIMER, self.on_search_timer)
-        self.search_timer.Start(500, wx.TIMER_ONE_SHOT)
-    
-    def on_search_timer(self, event):
-        """Execute search after delay"""
-        search_term = self.search_combo.GetValue().lower().strip()
-        
-        # Find matching values for combo box
-        matches = set()
-        for game in self.library_manager.games:
-            if search_term in game.title.lower():
-                matches.add(game.title)
-            if search_term in game.genre.lower():
-                matches.add(game.genre)
-            if search_term in game.developer.lower():
-                matches.add(game.developer)
-            if search_term in game.year.lower():
-                matches.add(game.year)
-            for platform in game.platforms:
-                if search_term in platform.lower():
-                    matches.add(platform)
-        
-        # Update combo box choices
-        self.search_combo.SetItems(sorted(matches))
-        
-        # Apply filters
+        """Handle search text changes immediately"""
+        # Apply filters immediately - virtual list makes this fast
         self.apply_filters()
     
     def on_search_select(self, event):
@@ -640,9 +669,14 @@ class MainFrame(wx.Frame):
         """Show preferences dialog"""
         dlg = PreferencesDialog(self, self.library_manager)
         if dlg.ShowModal() == wx.ID_OK:
-            self.refresh_game_list()
-            self.build_tree()
+            # Defer UI refresh to avoid blocking the dialog close
+            wx.CallAfter(self.refresh_ui_after_preferences)
         dlg.Destroy()
+
+    def refresh_ui_after_preferences(self):
+        """Refresh UI after preferences dialog closes"""
+        self.refresh_game_list()
+        self.build_tree(force_rebuild=True)
     
     def on_refresh(self, event):
         """Refresh/rescan libraries"""
@@ -652,12 +686,12 @@ class MainFrame(wx.Frame):
             # If scan was cancelled, just refresh the UI and continue without showing dialogs
             if result is None:
                 self.refresh_game_list()
-                self.build_tree()
+                self.build_tree(force_rebuild=True)
                 return
 
             exceptions_count, removed_libraries = result
             self.refresh_game_list()
-            self.build_tree()
+            self.build_tree(force_rebuild=True)
             
             # Check for removed libraries first
             if removed_libraries:
