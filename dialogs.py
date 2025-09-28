@@ -8,6 +8,7 @@ import json
 import os
 import platform
 from models import Game
+from validation_service import ValidationService
 
 
 class ScanProgressDialog(wx.Dialog):
@@ -215,28 +216,47 @@ class EditManualGameDialog(wx.Dialog):
     
     def on_ok(self, event):
         """Validate and save changes"""
-        if not self.title_ctrl.GetValue().strip():
-            wx.MessageBox("Title is required", "Error", wx.OK | wx.ICON_ERROR)
+        # Validate title
+        title = self.title_ctrl.GetValue().strip()
+        is_valid, error = ValidationService.validate_title(title)
+        if not is_valid:
+            wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
             return
-        
-        if not self.path_ctrl.GetValue().strip():
-            wx.MessageBox("Launch path is required", "Error", wx.OK | wx.ICON_ERROR)
+
+        # Validate launch path
+        path = self.path_ctrl.GetValue().strip()
+        if path.startswith("http://") or path.startswith("https://"):
+            is_valid, error = ValidationService.validate_url(path)
+        else:
+            is_valid, error = ValidationService.validate_path(path, must_exist=False)
+        if not is_valid:
+            wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
             return
-        
-        if not self.platform_ctrl.GetValue().strip():
+
+        # Validate platform
+        platform = self.platform_ctrl.GetValue().strip()
+        if not platform:
             wx.MessageBox("Platform is required", "Error", wx.OK | wx.ICON_ERROR)
             return
-        
-        self.game.title = self.title_ctrl.GetValue().strip()
-        self.game.launch_path = self.path_ctrl.GetValue().strip()
-        self.game.platforms = [self.platform_ctrl.GetValue().strip()]
+
+        # Validate year if provided
+        year_val = self.year_ctrl.GetValue()
+        year_str = str(year_val) if year_val != 2000 else ""
+        if year_str:
+            is_valid, error = ValidationService.validate_year(year_str)
+            if not is_valid:
+                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
+                return
+
+        # Save validated data
+        self.game.title = title
+        self.game.launch_path = path
+        self.game.platforms = [platform]
         self.game.genre = self.genre_ctrl.GetValue().strip()
         self.game.developer = self.developer_ctrl.GetValue().strip()
         self.game.library_name = "manual"
-        
-        year_val = self.year_ctrl.GetValue()
-        self.game.year = str(year_val) if year_val != 2000 else "unknown"
-        
+        self.game.year = year_str or "unknown"
+
         self.EndModal(wx.ID_OK)
 
 
@@ -318,26 +338,38 @@ class EditGameDialog(wx.Dialog):
     
     def on_ok(self, event):
         """Validate and save changes"""
-        if not self.title_ctrl.GetValue().strip():
-            wx.MessageBox("Title is required", "Error", wx.OK | wx.ICON_ERROR)
+        # Validate title
+        title = self.title_ctrl.GetValue().strip()
+        is_valid, error = ValidationService.validate_title(title)
+        if not is_valid:
+            wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
             return
-        
+
+        # Handle web game URL validation
         if self.is_web:
             url = self.url_ctrl.GetValue().strip()
-            if not (url.startswith("http://") or url.startswith("https://")):
-                wx.MessageBox("URL must start with http:// or https://", 
-                            "Error", wx.OK | wx.ICON_ERROR)
+            is_valid, error = ValidationService.validate_url(url)
+            if not is_valid:
+                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
                 return
             self.game.launch_path = url
             self.game.platforms = ["Web"]
-        
-        self.game.title = self.title_ctrl.GetValue().strip()
+
+        # Validate year if provided
+        year_val = self.year_ctrl.GetValue()
+        year_str = str(year_val) if year_val != 2000 else ""
+        if year_str:
+            is_valid, error = ValidationService.validate_year(year_str)
+            if not is_valid:
+                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
+                return
+
+        # Save validated data
+        self.game.title = title
         self.game.genre = self.genre_ctrl.GetValue().strip()
         self.game.developer = self.developer_ctrl.GetValue().strip()
-        
-        year_val = self.year_ctrl.GetValue()
-        self.game.year = str(year_val) if year_val != 2000 else "unknown"
-        
+        self.game.year = year_str or "unknown"
+
         self.EndModal(wx.ID_OK)
 
 
