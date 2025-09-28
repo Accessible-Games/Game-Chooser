@@ -906,7 +906,121 @@ class GameLibraryManager:
         
         scan_recursive(library_path)
         return found_games, auto_exceptions_added
-    
+
+    def _merge_games(self, existing_games, new_games, cancel_check=None):
+        """Merge new games into existing games list, updating platforms if needed."""
+        for new_game in new_games:
+            if cancel_check and cancel_check():
+                return False
+
+            # Find existing game with same launch path
+            existing = None
+            for game in existing_games:
+                if game.launch_path == new_game.launch_path:
+                    existing = game
+                    break
+
+            if existing:
+                # Update platforms if needed
+                for platform in new_game.platforms:
+                    if platform not in existing.platforms:
+                        existing.platforms.append(platform)
+            else:
+                existing_games.append(new_game)
+
+        return True
+
+    def validate_and_scan(self, libraries_to_scan=None, progress_callback=None, cancel_check=None):
+        """
+        Unified scanning method that intelligently handles all scanning scenarios.
+
+        Args:
+            libraries_to_scan: Optional set of library names to scan. If None, scans all.
+            progress_callback: Optional callback for progress updates
+            cancel_check: Optional callback to check for cancellation
+
+        Returns:
+            List of removed libraries (empty if none removed)
+        """
+        # Step 1: Validate libraries and handle missing ones
+        valid_libraries, missing_libraries = self._validate_libraries()
+        removed_libraries = self._remove_missing_libraries(missing_libraries)
+
+        if removed_libraries:
+            valid_library_names = {lib["name"] for lib in valid_libraries}
+            validated_games = self._validate_existing_games(valid_library_names, cancel_check)
+            self.games = validated_games
+            self.save_games()
+            self._last_auto_exception_count = 0
+            return removed_libraries
+
+        # Step 2: Validate existing games
+        valid_library_names = {lib["name"] for lib in valid_libraries}
+        validated_games = self._validate_existing_games(valid_library_names, cancel_check)
+
+        if cancel_check and cancel_check():
+            self._last_auto_exception_count = 0
+            return []
+
+        # Step 3: Determine scanning strategy
+        # If games.json doesn't exist, do full scan (no optimization)
+        # Otherwise, build known_game_dirs for incremental scanning
+        known_game_dirs = None
+        if self.games_file.exists() and len(validated_games) > 0:
+            known_game_dirs = self._build_known_game_dirs(validated_games)
+
+        # Step 4: Filter libraries to scan
+        if libraries_to_scan is not None:
+            libraries_to_process = [lib for lib in valid_libraries if lib["name"] in libraries_to_scan]
+        else:
+            libraries_to_process = valid_libraries
+
+        # Step 5: Scan libraries
+        total_auto_exceptions = 0
+        for lib in libraries_to_process:
+            if cancel_check and cancel_check():
+                self._last_auto_exception_count = total_auto_exceptions
+                return []
+
+            if lib["name"] == "manual":
+                continue  # Skip manual library
+
+            try:
+                # Determine if this library should use incremental scanning
+                use_incremental = known_game_dirs is not None
+
+                # If specific libraries were requested and this is a new one, don't use incremental
+                if libraries_to_scan and lib["name"] in libraries_to_scan:
+                    # Check if this library has any existing games
+                    has_existing_games = any(g.library_name == lib["name"] for g in validated_games)
+                    if not has_existing_games:
+                        use_incremental = False
+
+                new_games, added_exceptions = self.scan_library(
+                    lib["path"],
+                    lib["name"],
+                    known_game_dirs=known_game_dirs if use_incremental else None,
+                    progress_callback=progress_callback,
+                    cancel_check=cancel_check
+                )
+                total_auto_exceptions += added_exceptions
+
+                # Merge new games
+                if not self._merge_games(validated_games, new_games, cancel_check):
+                    self._last_auto_exception_count = total_auto_exceptions
+                    return []  # Cancelled during merge
+
+            except PermissionError as e:
+                raise e
+
+        # Step 6: Save results
+        self.games = validated_games
+        self.save_games()
+        self.save_config()
+        self._last_auto_exception_count = total_auto_exceptions
+
+        return []
+
     def validate_and_scan_all(self, progress_callback=None, cancel_check=None):
         """Validate existing games and scan for new ones"""
         
@@ -1382,3 +1496,95 @@ class GameLibraryManager:
             return None  # Return None to indicate cancellation
             
         return scan_result["removed_libraries"]
+
+
+    def scan_with_dialog(self, parent_window, libraries_to_scan=None):
+        """
+        Unified dialog wrapper for scanning with progress display.
+
+        Args:
+            parent_window: Parent window for the dialog
+            libraries_to_scan: Optional set of library names to scan
+
+        Returns:
+            Tuple of (exceptions_count, removed_libraries) or None if cancelled
+        """
+        from dialogs import ScanProgressDialog
+
+        # Count libraries (excluding manual)
+        library_count = sum(1 for lib in self.config["libraries"] if lib["name"] != "manual")
+
+        # If no libraries with UI needed, run without dialog
+        if library_count == 0:
+            removed_libraries = self.validate_and_scan(libraries_to_scan)
+            return (self._last_auto_exception_count, removed_libraries)
+
+        # Create progress dialog
+        progress_dialog = ScanProgressDialog(parent_window)
+        progress_dialog.set_library_count(library_count)
+
+        # Result storage for background thread
+        scan_result = {
+            "exceptions_count": 0,
+            "removed_libraries": [],
+            "error": None,
+            "cancelled": False
+        }
+
+        def background_scan():
+            """Background thread for scanning"""
+            try:
+                def progress_callback(library_name, progress, games_found):
+                    if not progress_dialog.cancelled:
+                        progress_dialog.update_progress(library_name, progress, games_found)
+
+                def cancel_check():
+                    return progress_dialog.cancelled
+
+                removed_libraries = self.validate_and_scan(
+                    libraries_to_scan, progress_callback, cancel_check
+                )
+                scan_result["exceptions_count"] = self._last_auto_exception_count
+                scan_result["removed_libraries"] = removed_libraries
+                scan_result["cancelled"] = progress_dialog.cancelled
+
+            except Exception as e:
+                scan_result["error"] = e
+            finally:
+                # Handle dialog closing
+                if not scan_result["cancelled"]:
+                    if scan_result["removed_libraries"]:
+                        import wx
+                        wx.CallAfter(progress_dialog.EndModal, wx.ID_OK)
+                    else:
+                        progress_dialog.finish_scan(len(self.games), scan_result["exceptions_count"])
+                else:
+                    import wx
+                    wx.CallAfter(progress_dialog.EndModal, wx.ID_CANCEL)
+
+        # Start background thread
+        import threading
+        thread = threading.Thread(target=background_scan, daemon=True)
+        thread.start()
+
+        # Show dialog
+        result = progress_dialog.ShowModal()
+        progress_dialog.Destroy()
+
+        # Handle results
+        if scan_result["error"]:
+            if isinstance(scan_result["error"], PermissionError):
+                import wx
+                wx.MessageBox(
+                    f"Permission denied accessing:\n{scan_result['error']}",
+                    "Permission Error",
+                    wx.OK | wx.ICON_ERROR
+                )
+            else:
+                raise scan_result["error"]
+
+        if scan_result["cancelled"]:
+            return None
+
+        return (scan_result["exceptions_count"], scan_result["removed_libraries"])
+

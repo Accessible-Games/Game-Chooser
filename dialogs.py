@@ -589,10 +589,10 @@ class PreferencesDialog(wx.Dialog):
             new_libraries_added = new_lib_names - old_lib_names
             
             try:
-                # Use targeted scanning - full scan only new libraries, incremental for existing
-                result = self.library_manager.validate_and_scan_targeted_with_dialog(
-                    self.GetParent(), 
-                    new_libraries_added
+                # Use unified scanning - method will handle new libraries intelligently
+                result = self.library_manager.scan_with_dialog(
+                    self.GetParent(),
+                    new_libraries_added if new_libraries_added else None
                 )
                 
                 # If scan was cancelled, just continue without showing dialogs
