@@ -14,6 +14,7 @@ from typing import List, Dict, Any, Optional, Callable
 
 from models import Game
 from exception_manager import ExceptionManager
+from path_manager import PathManager
 
 
 class GameLibraryManager:
@@ -30,6 +31,7 @@ class GameLibraryManager:
         self.games_file = self.app_dir / "games.json"
         self.config_file = self.get_config_path()
         self.exception_manager = ExceptionManager()
+        self.path_manager = PathManager()
         self.load_config()
         self.load_games()
         self._last_auto_exception_count = 0
@@ -91,7 +93,7 @@ class GameLibraryManager:
             json.dump(self.config, f, indent=2)
 
     def _normalize_exception_entry(self, entry: str) -> str:
-        return entry.replace('\\', '/').strip()
+        return self.path_manager.normalize(entry)
 
     def _normalize_for_match(self, entry: str) -> str:
         return self._normalize_exception_entry(entry).lower()
@@ -210,64 +212,16 @@ class GameLibraryManager:
     
     def get_full_path(self, game):
         """Construct full path from relative path and library"""
-        if game.launch_path.startswith("http"):
-            return game.launch_path
-
-        # Handle manual games - return the direct path
-        if game.library_name == "manual":
-            return game.launch_path
-
-        # Find the library by name and append the relative path
-        for lib in self.config["libraries"]:
-            if lib["name"] == game.library_name:
-                full_path = Path(lib["path"]) / game.launch_path
-                return str(full_path)
-
-        return None
+        return self.path_manager.get_full_path(
+            game.launch_path,
+            self.config["libraries"],
+            game.library_name
+        )
     
     def is_executable(self, path):
         """Check if file is an executable based on platform and extension"""
         path_obj = Path(path)
-        system = platform.system()
-        
-        if system == "Windows":
-            return path_obj.suffix.lower() in ['.exe', '.bat']
-        elif system == "Darwin":  # macOS
-            # Check for .app bundles (directories)
-            if path_obj.suffix.lower() == '.app' and path_obj.is_dir():
-                return True
-            
-            # Check for executable files with common game extensions
-            if path_obj.suffix.lower() in ['.sh', '.command']:
-                return True
-            
-            # Check if it's an executable file (has execute permission and is a regular file)
-            try:
-                if path_obj.is_file() and os.access(path, os.X_OK):
-                    # Additional check: skip obvious non-game executables
-                    name = path_obj.name.lower()
-                    if any(skip in name for skip in ['uninstall', 'install', 'setup', 'update', 'crash', 'log']):
-                        return False
-                    return True
-            except:
-                return False
-        else:  # Linux/Unix
-            # Check for executable files with common extensions
-            if path_obj.suffix.lower() in ['.sh', '.run']:
-                return True
-            
-            # Check if it's an executable file
-            try:
-                if path_obj.is_file() and os.access(path, os.X_OK):
-                    # Skip obvious non-game executables
-                    name = path_obj.name.lower()
-                    if any(skip in name for skip in ['uninstall', 'install', 'setup', 'update', 'crash', 'log']):
-                        return False
-                    return True
-            except:
-                return False
-        
-        return False
+        return self.path_manager.is_executable(path_obj)
     
     def is_valid_game_executable(self, path):
         """Check if executable matches valid game patterns"""
@@ -427,7 +381,7 @@ class GameLibraryManager:
                         if item.is_dir():
                             # Check if this directory is excluded by folder exceptions
                             rel_path = item.relative_to(Path(library_path))
-                            rel_str = str(rel_path).replace(os.sep, '/')
+                            rel_str = self.path_manager.normalize(rel_path)
                             if self._is_path_exception(rel_str):
                                 continue
                             # Only add to scan list if not a known game directory (for incremental scanning)
@@ -505,7 +459,7 @@ class GameLibraryManager:
                     if item.is_dir():
                         # Check if this directory is excluded by folder exceptions
                         rel_path = item.relative_to(Path(library_path))
-                        rel_str = str(rel_path).replace(os.sep, '/')
+                        rel_str = self.path_manager.normalize(rel_path)
                         if self._is_path_exception(rel_str):
                             continue
                         # Only recurse if not a known game directory (for incremental scanning)
@@ -543,7 +497,7 @@ class GameLibraryManager:
 
             # Get relative path
             rel_path = item.relative_to(Path(library_path))
-            rel_str = str(rel_path).replace(os.sep, '/')
+            rel_str = self.path_manager.normalize(rel_path)
 
             # Check exceptions
             if self._is_path_exception(rel_str):
