@@ -457,86 +457,38 @@ class GameLibraryManager:
                 directories_processed += 1
             
             try:
-                # First, collect all executables in each directory to handle duplicates
-                directory_exes = {}
-                
-                for item in Path(path).iterdir():
-                    # Check for cancellation
-                    if cancel_check and cancel_check():
-                        return
-                        
-                    # Skip hidden/system files and symlinks
-                    if item.name.startswith('.'):
-                        continue
-                    if item.is_symlink():
-                        continue
-                    
-                    if self.is_executable(str(item)):
-                        # Build relative path (relative to library, not library parent)
-                        rel_path = item.relative_to(Path(library_path))
-                        rel_str = str(rel_path).replace(os.sep, '/')
+                # Collect executables in this directory (also handles auto-exception counting)
+                executables, exceptions_added = self._collect_executables_with_exceptions(Path(path), library_path)
+                auto_exceptions_added += exceptions_added
 
-                        # Check if in exceptions
-                        if self._is_path_exception(rel_str):
-                            continue
+                if executables:
+                    # This directory has games
+                    directory_name = Path(path).name
 
-                        # Check if file should be auto-excluded
-                        if self._should_auto_exclude(item):
-                            # Add the exact path to exceptions (not a pattern)
-                            if self._add_exception_entry(rel_str):
-                                auto_exceptions_added += 1
-                            continue
-
-                        # Group by directory
-                        dir_key = str(item.parent)
-                        if dir_key not in directory_exes:
-                            directory_exes[dir_key] = []
-                        directory_exes[dir_key].append((item, rel_str))
-                
-                # Process each directory's executables - create a game for EACH executable
-                for dir_path, exe_list in directory_exes.items():
-                    # Check for cancellation
-                    if cancel_check and cancel_check():
-                        return
-                        
-                    if not exe_list:
-                        continue
-                    
-                    # Create a game for EVERY executable found (not just one per directory)
-                    for exe_item, exe_rel_str in exe_list:
+                    # Create games for all executables in directory
+                    for exe_path, rel_str in executables:
                         # Check for cancellation
                         if cancel_check and cancel_check():
                             return
-                            
-                        # Create descriptive title - use directory name, or add executable name if multiple exes
-                        base_title = exe_item.parent.name
-                        if len(exe_list) > 1:
-                            # Multiple executables in directory - add exe name to distinguish
-                            exe_name = exe_item.stem  # filename without extension
-                            title = f"{base_title} ({exe_name})"
-                        else:
-                            # Single executable - just use directory name
-                            title = base_title
-                            
-                        system = platform.system()
-                        plat = "Windows" if system == "Windows" else "macOS"
-                        
+
                         # Check if game already exists
                         existing = None
                         for g in found_games:
-                            if g.launch_path == exe_rel_str:
+                            if g.launch_path == rel_str:
                                 existing = g
                                 break
-                        
+
                         if existing:
-                            if plat not in existing.platforms:
-                                existing.platforms.append(plat)
+                            # Update platforms if needed
+                            import platform
+                            platform_name = "Windows" if platform.system() == "Windows" else "macOS"
+                            if platform_name not in existing.platforms:
+                                existing.platforms.append(platform_name)
                         else:
-                            game = Game(
-                                title=title,
-                                platforms=[plat],
-                                launch_path=exe_rel_str,
-                                library_name=library_name
+                            # Create new game
+                            game = self._create_game_from_executable(
+                                exe_path, rel_str, library_name,
+                                directory_name, len(executables) > 1
                             )
                             found_games.append(game)
                 
@@ -566,6 +518,107 @@ class GameLibraryManager:
         
         scan_recursive(library_path)
         return found_games, auto_exceptions_added
+
+    def _collect_executables_with_exceptions(self, directory_path, library_path):
+        """
+        Collect all valid executables in a directory and track auto-exceptions.
+
+        Returns:
+            Tuple of (executables_list, exceptions_added_count)
+        """
+        executables = []
+        exceptions_added = 0
+
+        for item in directory_path.iterdir():
+            if item.name.startswith('.'):
+                continue
+            if item.is_symlink():
+                continue
+            if not item.is_file():
+                continue
+
+            # Check if it's an executable
+            if not self.is_executable(str(item)):
+                continue
+
+            # Get relative path
+            rel_path = item.relative_to(Path(library_path))
+            rel_str = str(rel_path).replace(os.sep, '/')
+
+            # Check exceptions
+            if self._is_path_exception(rel_str):
+                continue
+
+            # Check auto-exclusions
+            if self._should_auto_exclude(item):
+                # Add to exceptions if not already there
+                if self._add_exception_entry(rel_str):
+                    exceptions_added += 1
+                continue
+
+            executables.append((item, rel_str))
+
+        return executables, exceptions_added
+
+    def _select_best_executable(self, executables, directory_name):
+        """
+        Select the best executable from a list based on preferences.
+
+        Returns:
+            Path to selected executable or None
+        """
+        if not executables:
+            return None
+
+        exe_paths = [exe[0] for exe in executables]
+
+        # First preference: game/launch/play named executables
+        for preferred in ['game', 'launch', 'play']:
+            for exe_path in exe_paths:
+                if exe_path.stem.lower() == preferred:
+                    return exe_path
+
+        # Second preference: executable matching directory name
+        dir_lower = directory_name.lower()
+        for exe_path in exe_paths:
+            if exe_path.stem.lower() == dir_lower:
+                return exe_path
+
+        # Default: first executable
+        return exe_paths[0]
+
+    def _create_game_from_executable(self, exe_path, rel_path_str, library_name, directory_name, multiple_exes):
+        """
+        Create a Game object from an executable.
+
+        Args:
+            exe_path: Path to executable
+            rel_path_str: Library-relative path string
+            library_name: Name of the library
+            directory_name: Name of the game directory
+            multiple_exes: Whether there are multiple executables in this directory
+
+        Returns:
+            Game object
+        """
+        # Create title
+        if multiple_exes:
+            title = f"{directory_name} ({exe_path.stem})"
+        else:
+            title = directory_name
+
+        # Determine platform
+        import platform
+        system = platform.system()
+        platform_name = "Windows" if system == "Windows" else "macOS"
+
+        from models import Game
+        return Game(
+            title=title,
+            platforms=[platform_name],
+            launch_path=rel_path_str,
+            library_name=library_name
+        )
 
     def _merge_games(self, existing_games, new_games, cancel_check=None):
         """Merge new games into existing games list, updating platforms if needed."""
