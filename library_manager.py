@@ -519,16 +519,8 @@ class GameLibraryManager:
     def add_to_exceptions(self, game):
         """Add a game's launch path to exceptions when user deletes it"""
         if game and game.launch_path:
-            # Strip library prefix from launch_path to get library-relative path
-            path_parts = game.launch_path.split('/')
-            if len(path_parts) > 1:
-                # Remove the first part (library name) to get library-relative path
-                library_relative_path = '/'.join(path_parts[1:])
-            else:
-                # If no slash, use the path as-is (shouldn't happen for scanned games)
-                library_relative_path = game.launch_path
-
-            normalized_path = self._normalize_exception_entry(library_relative_path)
+            # launch_path is already library-relative, use it directly
+            normalized_path = self._normalize_exception_entry(game.launch_path)
             if self._add_exception_entry(normalized_path):
                 self.save_config()
     

@@ -629,3 +629,66 @@ class PreferencesDialog(wx.Dialog):
         """Save and close"""
         self.on_apply(event)
         self.EndModal(wx.ID_OK)
+
+
+class DeleteGameDialog(wx.Dialog):
+    """Custom dialog for game deletion with exception option"""
+
+    # Return codes for different choices
+    ID_DELETE_ONLY = wx.ID_HIGHEST + 1
+    ID_DELETE_AND_EXCEPTION = wx.ID_HIGHEST + 2
+
+    def __init__(self, parent, game_title):
+        super().__init__(parent, title="Confirm Delete",
+                        style=wx.CAPTION | wx.SYSTEM_MENU)
+
+        self.game_title = game_title
+        self.init_ui()
+        self.CenterOnParent()
+
+    def init_ui(self):
+        """Initialize the dialog UI"""
+        sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # Message
+        message = wx.StaticText(self, label=f"Delete '{self.game_title}' from library?")
+        sizer.Add(message, 0, wx.ALL | wx.CENTER, 15)
+
+        # Explanation
+        explanation = wx.StaticText(self,
+            label="Adding to exceptions prevents re-discovery in future scans.")
+        explanation.SetFont(explanation.GetFont().Smaller())
+        sizer.Add(explanation, 0, wx.LEFT | wx.RIGHT | wx.CENTER, 15)
+
+        # Buttons
+        button_sizer = wx.BoxSizer(wx.HORIZONTAL)
+
+        yes_btn = wx.Button(self, wx.ID_YES, "Yes")
+        yes_exception_btn = wx.Button(self, self.ID_DELETE_AND_EXCEPTION, "Yes and add to exceptions")
+        no_btn = wx.Button(self, wx.ID_NO, "No")
+
+        button_sizer.Add(yes_btn, 0, wx.ALL, 5)
+        button_sizer.Add(yes_exception_btn, 0, wx.ALL, 5)
+        button_sizer.Add(no_btn, 0, wx.ALL, 5)
+
+        sizer.Add(button_sizer, 0, wx.ALL | wx.CENTER, 10)
+
+        # Bind events
+        self.Bind(wx.EVT_BUTTON, self.on_yes, yes_btn)
+        self.Bind(wx.EVT_BUTTON, self.on_yes_exception, yes_exception_btn)
+        self.Bind(wx.EVT_BUTTON, self.on_no, no_btn)
+
+        self.SetSizer(sizer)
+        sizer.Fit(self)
+
+    def on_yes(self, event):
+        """Handle Yes button"""
+        self.EndModal(wx.ID_YES)
+
+    def on_yes_exception(self, event):
+        """Handle Yes and add to exceptions button"""
+        self.EndModal(self.ID_DELETE_AND_EXCEPTION)
+
+    def on_no(self, event):
+        """Handle No button"""
+        self.EndModal(wx.ID_NO)

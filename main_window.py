@@ -13,7 +13,7 @@ from pathlib import Path
 from models import Game
 from library_manager import GameLibraryManager
 from game_list import GameListCtrl
-from dialogs import EditGameDialog, EditManualGameDialog, PreferencesDialog
+from dialogs import EditGameDialog, EditManualGameDialog, PreferencesDialog, DeleteGameDialog
 
 
 class MainFrame(wx.Frame):
@@ -557,10 +557,19 @@ class MainFrame(wx.Frame):
         game = self.game_list.get_selected_game()
         if not game:
             return
-        
-        if wx.MessageBox(f"Delete '{game.title}' from library?",
-                        "Confirm Delete",
-                        wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
+
+        # Show custom delete dialog
+        dlg = DeleteGameDialog(self, game.title)
+        result = dlg.ShowModal()
+        dlg.Destroy()
+
+        if result == wx.ID_YES:
+            # Delete without adding to exceptions
+            self.library_manager.games.remove(game)
+            self.library_manager.save_games()
+            self.refresh_game_list()
+        elif result == DeleteGameDialog.ID_DELETE_AND_EXCEPTION:
+            # Delete and add to exceptions
             self.library_manager.add_to_exceptions(game)
             self.library_manager.games.remove(game)
             self.library_manager.save_games()
