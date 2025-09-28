@@ -606,10 +606,15 @@ class PreferencesDialog(wx.Dialog):
         """Apply changes and rescan if needed"""
         old_libs = self.original_config["libraries"]
         new_libs = self.library_manager.config["libraries"]
-        
+
         # Check if libraries changed
         libs_changed = json.dumps(old_libs) != json.dumps(new_libs)
-        
+
+        # Check if exceptions changed
+        old_exceptions = self.original_config.get("exceptions", [])
+        new_exceptions = self.library_manager.config.get("exceptions", [])
+        exceptions_changed = old_exceptions != new_exceptions
+
         self.library_manager.save_config()
         
         if libs_changed:
@@ -653,7 +658,15 @@ class PreferencesDialog(wx.Dialog):
                             self.exc_list.InsertItem(self.exc_list.GetItemCount(), exc)
             except PermissionError as e:
                 wx.MessageBox(str(e), "Permission Denied", wx.OK | wx.ICON_ERROR)
-        
+        elif exceptions_changed:
+            # Only exceptions changed, not libraries - run cleanConfigs directly
+            self.library_manager.cleanConfigs()
+
+            # Refresh the exceptions list to show cleaned exceptions
+            self.exc_list.DeleteAllItems()
+            for exc in self.library_manager.config["exceptions"]:
+                self.exc_list.InsertItem(self.exc_list.GetItemCount(), exc)
+
         # Update original config
         self.original_config = json.loads(json.dumps(self.library_manager.config))
     

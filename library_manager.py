@@ -34,6 +34,7 @@ class GameLibraryManager:
         self.path_manager = PathManager()
         self.load_config()
         self.load_games()
+        self.cleanConfigs()
         self._last_auto_exception_count = 0
     
     def get_config_path(self):
@@ -202,7 +203,72 @@ class GameLibraryManager:
         """Save games to JSON file"""
         with open(self.games_file, 'w') as f:
             json.dump([g.to_dict() for g in self.games], f, indent=2)
-    
+
+    def cleanConfigs(self, progress_callback=None):
+        """Clean configuration by removing games with paths in exceptions and redundant exceptions.
+
+        Args:
+            progress_callback: Optional callback for progress updates
+        """
+        games_changed = False
+        exceptions_changed = False
+
+        if progress_callback:
+            progress_callback("Cleaning configuration...", 0, len(self.games))
+
+        # Remove games with paths matching exceptions
+        original_game_count = len(self.games)
+        games_to_remove = []
+
+        for game in self.games:
+            if game.launch_path and self._is_path_exception(game.launch_path):
+                games_to_remove.append(game)
+
+        if games_to_remove:
+            for game in games_to_remove:
+                self.games.remove(game)
+            games_changed = True
+            if progress_callback:
+                progress_callback(f"Removed {len(games_to_remove)} games matching exceptions", 0, len(self.games))
+
+        # Remove redundant file exceptions covered by folder exceptions
+        exceptions = self.config.get("exceptions", [])
+        folder_exceptions = []
+        file_exceptions = []
+
+        # Separate folder and file exceptions
+        for exc in exceptions:
+            if exc.endswith('/'):
+                folder_exceptions.append(exc)
+            else:
+                file_exceptions.append(exc)
+
+        # Find file exceptions that are covered by folder exceptions
+        redundant_exceptions = []
+        for file_exc in file_exceptions:
+            for folder_exc in folder_exceptions:
+                folder_path = folder_exc.rstrip('/')
+                if file_exc.startswith(folder_path + '/'):
+                    redundant_exceptions.append(file_exc)
+                    break
+
+        # Remove redundant exceptions
+        if redundant_exceptions:
+            for exc in redundant_exceptions:
+                self.config["exceptions"].remove(exc)
+            exceptions_changed = True
+            if progress_callback:
+                progress_callback(f"Removed {len(redundant_exceptions)} redundant exceptions", 0, len(self.games))
+
+        # Save changes if any were made
+        if games_changed:
+            self.save_games()
+        if exceptions_changed:
+            self.save_config()
+
+        if progress_callback and (games_changed or exceptions_changed):
+            progress_callback("Configuration cleaning completed", 0, len(self.games))
+
     def get_library_by_name(self, name):
         """Get library path by name"""
         for lib in self.config["libraries"]:
@@ -609,6 +675,9 @@ class GameLibraryManager:
         Returns:
             List of removed libraries (empty if none removed)
         """
+        # Step 0: Clean configuration before scanning
+        self.cleanConfigs(progress_callback)
+
         # Step 1: Validate libraries and handle missing ones
         valid_libraries, missing_libraries = self._validate_libraries()
         removed_libraries = self._remove_missing_libraries(missing_libraries)
