@@ -62,7 +62,7 @@ class PathManager:
         if launch_path.startswith("http"):
             return launch_path
 
-        if library_name == "manual":
+        if library_name == "manual" or library_name == "":
             return launch_path
 
         # Find library

@@ -365,8 +365,8 @@ class GameLibraryManager:
                 validated_games.append(game)
                 continue
             
-            # Always keep manual games (they manage their own paths)
-            if game.library_name == "manual":
+            # Always keep user-managed games (they manage their own paths)
+            if game.library_name == "manual" or game.library_name == "":
                 validated_games.append(game)
                 continue
             
@@ -390,7 +390,7 @@ class GameLibraryManager:
         known_game_dirs = set()
         
         for game in validated_games:
-            if not game.launch_path.startswith("http") and game.library_name != "manual":
+            if not game.launch_path.startswith("http") and game.library_name != "manual" and game.library_name != "":
                 try:
                     full_path = self.get_full_path(game)
                     if full_path:

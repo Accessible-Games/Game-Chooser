@@ -14,7 +14,7 @@ from pathlib import Path
 from models import Game
 from library_manager import GameLibraryManager
 from game_list import GameListCtrl
-from dialogs import EditGameDialog, EditManualGameDialog, PreferencesDialog, DeleteGameDialog
+from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog
 
 
 class FilterWorker(threading.Thread):
@@ -207,10 +207,10 @@ class MainFrame(wx.Frame):
         accel_entries.append((wx.ACCEL_CTRL, ord('F'), search_id))
         self.Bind(wx.EVT_MENU, lambda e: self.search_combo.SetFocus(), id=search_id)
         
-        # Ctrl+N for new web game
+        # Ctrl+N for new game
         new_game_id = wx.NewIdRef()
         accel_entries.append((wx.ACCEL_CTRL, ord('N'), new_game_id))
-        self.Bind(wx.EVT_MENU, self.on_add_web_game, id=new_game_id)
+        self.Bind(wx.EVT_MENU, self.on_add_game, id=new_game_id)
         
         # F5 for refresh
         refresh_id = wx.NewIdRef()
@@ -474,11 +474,8 @@ class MainFrame(wx.Frame):
             
             menu.AppendSeparator()
         
-        add_web_item = menu.Append(wx.ID_ANY, "Add Web Game")
-        self.Bind(wx.EVT_MENU, self.on_add_web_game, add_web_item)
-        
-        add_manual_item = menu.Append(wx.ID_ANY, "Add Manual Game")
-        self.Bind(wx.EVT_MENU, self.on_add_manual_game, add_manual_item)
+        add_game_item = menu.Append(wx.ID_ANY, "Add Game")
+        self.Bind(wx.EVT_MENU, self.on_add_game, add_game_item)
         
         self.PopupMenu(menu)
         menu.Destroy()
@@ -558,18 +555,7 @@ class MainFrame(wx.Frame):
         if not game:
             return
         
-        if game.launch_path.startswith("http"):
-            # Web game
-            dlg = EditGameDialog(self, game, self.library_manager, is_web=True)
-        elif game.library_name == "manual":
-            # Manual game - use manual edit dialog
-            dlg = EditManualGameDialog(self, game, self.library_manager)
-            dlg.SetTitle("Edit Manual Game")
-            # Pre-populate the path field with the full path
-            dlg.path_ctrl.SetValue(game.launch_path)
-        else:
-            # Regular auto-discovered game
-            dlg = EditGameDialog(self, game, self.library_manager, is_web=False)
+        dlg = GameDialog(self, self.library_manager, game)
         
         if dlg.ShowModal() == wx.ID_OK:
             self.library_manager.save_games()
@@ -599,24 +585,12 @@ class MainFrame(wx.Frame):
             self.library_manager.save_games()
             self.refresh_game_list()
     
-    def on_add_web_game(self, event):
-        """Add a new web game"""
-        game = Game(title="", platforms=["Web"], launch_path="https://")
-        dlg = EditGameDialog(self, game, self.library_manager, is_web=True)
-        
+    def on_add_game(self, event):
+        """Add a new game"""
+        dlg = GameDialog(self, self.library_manager)
+
         if dlg.ShowModal() == wx.ID_OK:
-            self.library_manager.games.append(game)
-            self.library_manager.save_games()
-            self.refresh_game_list()
-        dlg.Destroy()
-    
-    def on_add_manual_game(self, event):
-        """Add a new manual game"""
-        game = Game(title="", platforms=[], launch_path="")
-        dlg = EditManualGameDialog(self, game, self.library_manager)
-        
-        if dlg.ShowModal() == wx.ID_OK:
-            self.library_manager.games.append(game)
+            self.library_manager.games.append(dlg.game)
             self.library_manager.save_games()
             self.refresh_game_list()
         dlg.Destroy()
