@@ -82,7 +82,8 @@ class MainFrame(wx.Frame):
         self.filter_worker = None  # Background filtering thread
         self._tree_cache = None  # Cache for tree categories
         self._games_hash = None  # Hash to detect when games list changes
-        
+        self.dialog_active = False  # Flag to block spurious events when modal dialogs are open
+
         # Set up UI
         self.init_ui()
         
@@ -445,10 +446,14 @@ class MainFrame(wx.Frame):
     
     def on_game_selected(self, event):
         """Handle game selection in list"""
+        # Ignore spurious selection events when modal dialogs are active
+        if self.dialog_active:
+            return
+
         game = self.game_list.get_selected_game()
         if game:
             self.launch_btn.SetLabel(f"Launch {game.title}")
-            
+
             # Save selected game
             self.library_manager.config["SavedState"]["last_selected"] = game.title
             self.library_manager.save_config()
@@ -483,8 +488,8 @@ class MainFrame(wx.Frame):
     def on_list_key(self, event):
         """Handle list keyboard events"""
         key = event.GetKeyCode()
-        
-        if key == ord('E'):
+
+        if key == ord('E') and event.ControlDown():
             self.on_edit_game(None)
         elif key == wx.WXK_DELETE:
             self.on_delete_game(None)
@@ -555,13 +560,18 @@ class MainFrame(wx.Frame):
         game = self.game_list.get_selected_game()
         if not game:
             return
-        
+
         dlg = GameDialog(self, self.library_manager, game)
-        
-        if dlg.ShowModal() == wx.ID_OK:
-            self.library_manager.save_games()
-            self.refresh_game_list()
-        dlg.Destroy()
+
+        # Block spurious selection events while modal dialog is active
+        self.dialog_active = True
+        try:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.library_manager.save_games()
+                self.refresh_game_list()
+        finally:
+            self.dialog_active = False
+            dlg.Destroy()
     
     def on_delete_game(self, event):
         """Delete selected game"""
@@ -571,8 +581,14 @@ class MainFrame(wx.Frame):
 
         # Show custom delete dialog
         dlg = DeleteGameDialog(self, game.title)
-        result = dlg.ShowModal()
-        dlg.Destroy()
+
+        # Block spurious selection events while modal dialog is active
+        self.dialog_active = True
+        try:
+            result = dlg.ShowModal()
+        finally:
+            self.dialog_active = False
+            dlg.Destroy()
 
         if result == wx.ID_YES:
             # Delete without adding to exceptions
@@ -590,11 +606,16 @@ class MainFrame(wx.Frame):
         """Add a new game"""
         dlg = GameDialog(self, self.library_manager)
 
-        if dlg.ShowModal() == wx.ID_OK:
-            self.library_manager.games.append(dlg.game)
-            self.library_manager.save_games()
-            self.refresh_game_list()
-        dlg.Destroy()
+        # Block spurious selection events while modal dialog is active
+        self.dialog_active = True
+        try:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.library_manager.games.append(dlg.game)
+                self.library_manager.save_games()
+                self.refresh_game_list()
+        finally:
+            self.dialog_active = False
+            dlg.Destroy()
     
     def on_filter_tree(self, event):
         """Show filter tree dialog"""
@@ -643,10 +664,16 @@ class MainFrame(wx.Frame):
     def on_preferences(self, event):
         """Show preferences dialog"""
         dlg = PreferencesDialog(self, self.library_manager)
-        if dlg.ShowModal() == wx.ID_OK:
-            # Defer UI refresh to avoid blocking the dialog close
-            wx.CallAfter(self.refresh_ui_after_preferences)
-        dlg.Destroy()
+
+        # Block spurious selection events while modal dialog is active
+        self.dialog_active = True
+        try:
+            if dlg.ShowModal() == wx.ID_OK:
+                # Defer UI refresh to avoid blocking the dialog close
+                wx.CallAfter(self.refresh_ui_after_preferences)
+        finally:
+            self.dialog_active = False
+            dlg.Destroy()
 
     def refresh_ui_after_preferences(self):
         """Refresh UI after preferences dialog closes"""
