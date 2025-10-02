@@ -83,13 +83,16 @@ for i, game in enumerate(games):
 
 This is a multi-file Python desktop application built with wxPython for cross-platform game library management.
 
-### File Structure (2,836 total lines)
+### File Structure (3,038 total lines)
 - **game-chooser.py** (21 lines) - Application entry point
 - **models.py** (41 lines) - Data models (Game class)
-- **game_list.py** (144 lines) - Custom list control for game display
-- **main_window.py** (705 lines) - Primary application window and UI logic
-- **dialogs.py** (586 lines) - Dialog classes for various UI operations
-- **library_manager.py** (1,339 lines) - Core data management and scanning logic
+- **game_list.py** (150 lines) - Custom list control for game display
+- **main_window.py** (769 lines) - Primary application window and UI logic
+- **dialogs.py** (812 lines) - Dialog classes for various UI operations
+- **library_manager.py** (857 lines) - Core data management and scanning logic
+- **exception_manager.py** (203 lines) - Auto-exception pattern management
+- **validation_service.py** (87 lines) - Centralized validation logic
+- **path_manager.py** (98 lines) - Path normalization and operations
 
 ### Configuration Files
 - **games.json** - Portable game library with library-relative paths
@@ -120,11 +123,21 @@ This is a multi-file Python desktop application built with wxPython for cross-pl
   - Comprehensive auto-exception system
   - Cross-platform path handling
 
+#### Utility Classes
+- **ExceptionManager**: Auto-exception pattern matching and user exception handling
+- **ValidationService**: Centralized validation for titles, URLs, paths
+- **PathManager**: Path normalization and library-relative conversion
+
 #### Dialog Classes
 - **ScanProgressDialog**: Threaded scanning with progress and cancellation
-- **EditGameDialog**: Game metadata editing
-- **EditManualGameDialog**: Manual game entry (outside libraries)
-- **PreferencesDialog**: Library paths and exceptions management
+- **GameDialog**: Unified dialog for adding and editing all game types (Windows/macOS/Web)
+  - Replaces previous EditGameDialog and EditManualGameDialog
+  - Dynamic UI morphing based on platform selection
+  - Comprehensive validation pipeline with duplicate detection
+  - Converts library-managed games to user-managed when path is edited
+- **PreferencesDialog**: Tabbed interface for library paths and exceptions management
+  - Uses wx.Notebook with separate tabs instead of splitter layout
+- **DeleteGameDialog**: Confirmation dialog for game deletion
 
 ### Exception Handling System
 
@@ -171,7 +184,9 @@ The application features a sophisticated auto-exclusion system to filter out non
 
 #### Key Features
 - **Persistent State**: Window size, position, splitter, sort preferences, selections
-- **Real-time Search**: 0.5s delay, searches all metadata fields
+- **Real-time Search**: 0.5s delay, searches game title and developer fields only
+  - Automatically excludes searches containing "unknown" (returns no results)
+  - Case-insensitive matching
 - **Keyboard Navigation**: Full keyboard shortcuts for accessibility
 - **Context Menus**: Right-click operations for game management
 - **Multi-select Filtering**: Tree control supports OR filtering
@@ -191,11 +206,26 @@ The application features a sophisticated auto-exclusion system to filter out non
 ### Threading Model
 
 - **UI Thread**: Main application and user interactions
-- **Background Threads**: Library scanning operations
+- **Background Threads**:
+  - Library scanning operations (ScanProgressDialog)
+  - Game filtering operations (FilterWorker)
 - **Progress Callbacks**: Real-time scanning feedback
-- **Cancellation**: User can cancel long-running scans
+- **Cancellation**: User can cancel long-running scans and filter operations
 
 ### Recent Improvements
+
+#### Dialog System Improvements
+- Unified GameDialog replaces separate edit dialogs
+- Dynamic field validation with asynchronous duplicate checking
+- Tabbed preferences interface (wx.Notebook) replaces old splitter layout
+- Modal dialog protection with dialog_active flag to prevent spurious selection events
+
+#### Launch Enhancements
+- Proper working directory handling (sets cwd to game directory)
+- Platform-specific launch logic for .app bundles vs regular executables
+
+#### Keyboard Shortcuts
+- Edit Game changed from 'e' to 'Ctrl+E' to avoid wxPython type-ahead conflicts
 
 #### Exception System Enhancements
 - Expanded from ~87 to 900+ auto-exception patterns
@@ -236,89 +266,201 @@ The application features a sophisticated auto-exclusion system to filter out non
 
 ## Key Methods Documentation
 
-### PreferencesDialog (dialogs.py)
+### FilterWorker (main_window.py)
 
-#### UI Structure
-- **Exception Management Section** (lines 445-484):
-  - `exc_list`: wx.ListCtrl displaying current exceptions (files and folders)
-  - Exception buttons: "Add" (files), "Add Folder" (folders), "Remove"
-  - Located in `create_path_management()` method
+#### Overview
+Background thread class that handles game filtering based on tree selection and search criteria.
 
 #### Key Methods
-- **`on_add_exception(event)`** (lines 513-522):
+- **`run()`** (approximately lines 40-75):
+  - Main filtering loop executing in background thread
+  - **Tree Filter Phase**:
+    - Applies platform, genre, developer, and year filters from tree control
+    - Handles "Unknown" category matching for empty/null values
+    - Uses AND logic (all criteria must match)
+  - **Search Filter Phase**:
+    - **Field Scope**: Searches only `game.title` and `game.developer` fields
+    - **Unknown Exclusion**: Automatically rejects any search containing "unknown"
+    - **Case Handling**: Converts search term to lowercase for case-insensitive matching
+    - Returns no results if "unknown" appears anywhere in search term
+
+#### Search Behavior Details
+- **Included Fields**: title, developer
+- **Excluded Fields**: genre, year, platforms (not searchable)
+- **Special Handling**: "unknown" keyword triggers immediate exclusion
+- **Matching Logic**: Substring matching within included fields
+
+### GameDialog (dialogs.py)
+
+#### Overview
+Unified dialog that handles both adding and editing games of all types (Windows/macOS/Web).
+
+#### Key Features
+- **Dynamic UI**: Fields morph between path and URL input based on platform selection
+- **Validation Pipeline**: Title → Platform → Path format → File exists → Executable type → Async duplicate check
+- **Library Conversion**: Editing a library-managed game's path converts it to user-managed (empty library_name)
+- **Platform Support**: Windows (.exe, .bat), macOS (.app bundles, executables), Web (HTTP/HTTPS URLs)
+
+#### Key Methods
+- **`__init__(parent, library_manager, game=None)`** (around line 116):
+  - `is_new` flag distinguishes Add vs Edit mode
+  - Pre-populates fields from existing game if editing
+  - Builds genre/developer combo boxes from existing games
+
+- **`on_browse()`**:
+  - Opens file picker for desktop games
+  - Opens URL dialog for web games
+  - Updates path field with selected value
+
+- **`validate_and_save()`**:
+  - Runs comprehensive validation checks
+  - Performs asynchronous duplicate detection
+  - Updates game object if validation passes
+
+### PreferencesDialog (dialogs.py)
+
+#### UI Structure (Tabbed Layout)
+- **wx.Notebook with Two Tabs**:
+  - **Library Paths Tab** (`create_library_paths_tab()` at line 499):
+    - Library list control with Add/Remove buttons
+    - Browse dialog for adding new library folders
+  - **Exceptions Tab** (`create_exceptions_tab()` at line 546):
+    - Exception list control showing files and folders
+    - Buttons: "Add" (files), "Add Folder" (folders), "Remove"
+
+#### Key Methods
+- **`on_add_exception(event)`**:
   - Opens text entry dialog for file exception paths
   - Adds relative paths to `config["exceptions"]` list
   - Validates and adds to UI list control
 
-- **`on_add_folder_exception(event)`** (lines 524-540):
+- **`on_add_folder_exception(event)`**:
   - Opens directory picker dialog
   - Converts absolute paths to library-relative using `_make_relative_to_library()`
   - Appends trailing "/" to distinguish folder exceptions
   - Validates folder is within configured library paths
 
-- **`_make_relative_to_library(folder_path)`** (lines 542-561):
+- **`_make_relative_to_library(folder_path)`**:
   - Converts absolute folder paths to library-relative paths
   - Iterates through configured libraries to find containing library
   - Returns normalized relative path with forward slashes
   - Returns None if folder not within any library
 
-- **`on_apply(event)`** (lines 529-582):
+- **`on_apply(event)`**:
   - Saves configuration and triggers rescanning when libraries change
   - Uses targeted scanning for new libraries, incremental for existing
   - Refreshes exception list display after auto-exceptions added
 
+### MainFrame (main_window.py)
+
+#### Dialog Protection
+- **`dialog_active` flag** (line 88):
+  - Set to True when modal dialogs open
+  - Prevents spurious selection events during dialog lifecycle
+  - Used in `on_selection_changed()` to block unwanted refreshes
+
+#### Game Launch
+- **`on_launch(event)`**:
+  - **Web games**: Opens URL in default browser
+  - **Desktop games**:
+    - Resolves library-relative paths to absolute paths
+    - Sets working directory to game's parent directory (`cwd=game_dir`)
+    - Platform-specific handling for macOS .app bundles vs regular executables
+    - Minimizes window after successful launch
+
+#### Game Editing
+- **`on_edit_game(event)`**:
+  - Uses unified GameDialog for all game types
+  - Protected by dialog_active flag
+  - Refreshes game list on successful edit
+
+#### Keyboard Shortcuts
+- Edit Game: **Ctrl+E** (changed from 'e' to avoid wxPython type-ahead search conflicts)
+
 ### GameLibraryManager (library_manager.py)
 
 #### Exception Handling Methods
-- **`_normalize_exception_entry(entry)`** (line 325):
+- **`_normalize_exception_entry(entry)`**:
   - Normalizes paths by converting backslashes to forward slashes
   - Strips whitespace from exception entries
 
-- **`_is_path_exception(rel_path)`** (lines 330-349):
+- **`_is_path_exception(rel_path)`**:
   - **Enhanced for folder support**: Checks if path matches any exception
   - **Folder Logic**: If exception ends with "/", matches paths starting with folder path
   - **File Logic**: Original exact match or wildcard (fnmatch) matching
   - Takes library-relative path as input
   - Returns True if path should be excluded
 
-- **`_add_exception_entry(entry)`** (lines 351-364):
+- **`_add_exception_entry(entry)`**:
   - Adds new exception to config if not duplicate
   - Prevents redundant exceptions with fnmatch overlap checking
   - Returns True if actually added, False if duplicate/redundant
 
 #### Scanning Methods
-- **`scan_library(library_path, library_name, ...)`** (lines 710+):
+- **`scan_library(library_path, library_name, ...)`**:
   - **Two-phase scanning**: collect_directories() then scan_recursive()
   - **collect_directories()**: Builds directory list for progress tracking
-    - **Lines 742-750**: Added folder exception checking before adding to scan list
+    - Checks folder exceptions before adding to scan list
   - **scan_recursive()**: Main scanning logic with executable detection
-    - **Lines 868-875**: Added folder exception checking before directory recursion
+    - Checks folder exceptions before directory recursion
   - Both phases skip directories matching folder exceptions
-
-#### Scanning Integration Points
-- **collect_directories() folder check** (lines 742-746):
-  ```python
-  # Check if this directory is excluded by folder exceptions
-  rel_path = item.relative_to(Path(library_path))
-  rel_str = str(rel_path).replace(os.sep, '/')
-  if self._is_path_exception(rel_str):
-      continue
-  ```
-
-- **scan_recursive() folder check** (lines 868-872):
-  ```python
-  # Check if this directory is excluded by folder exceptions
-  rel_path = item.relative_to(Path(library_path))
-  rel_str = str(rel_path).replace(os.sep, '/')
-  if self._is_path_exception(rel_str):
-      continue
-  ```
 
 #### Exception Storage Format
 - **File exceptions**: `"tools/setup.exe"` (no trailing slash)
 - **Folder exceptions**: `"tools/"` (trailing slash marker)
 - **Mixed storage**: Both types coexist in `config["exceptions"]` list
 - **Recursive behavior**: Folder exceptions exclude all subdirectories automatically
+
+### ExceptionManager (exception_manager.py)
+
+#### Overview
+Extracted auto-exception logic from GameLibraryManager into standalone class for better organization.
+
+#### Pattern Categories
+- **AUTO_EXCEPTION_KEYWORDS**: Common utility keywords (setup, install, config, etc.)
+- **AUTO_EXCEPTION_EXACT_STEMS**: Specific filenames to exclude (unins000, vcredist, etc.)
+- **AUTO_EXCEPTION_SUFFIXES**: Filename endings (-setup, -installer, etc.)
+
+#### Key Methods
+- **`should_auto_exclude(path)`**: Checks if executable should be auto-excluded based on patterns
+- Uses word boundary matching to prevent false positives
+- Case-insensitive pattern matching
+
+### ValidationService (validation_service.py)
+
+#### Overview
+Centralized validation logic for game data, extracted for reusability and testing.
+
+#### Key Methods
+- **`validate_title(title)`**: Returns (is_valid, error_message) tuple
+  - Checks for empty/whitespace-only titles
+  - Enforces max length (255 characters)
+
+- **`validate_url(url)`**: Validates web game URLs
+  - Ensures proper HTTP/HTTPS format
+  - Basic URL structure validation
+
+- **`validate_path(path, platform)`**: Validates desktop game paths
+  - Checks file existence
+  - Validates executable type based on platform (.exe/.bat for Windows, .app for macOS)
+
+### PathManager (path_manager.py)
+
+#### Overview
+Centralized path operations and normalization.
+
+#### Key Methods
+- **`normalize(path)`**: Converts all paths to forward slashes
+  - Handles both string and Path objects
+  - Strips whitespace
+
+- **`to_library_relative(full_path, library_paths)`**: Converts absolute to library-relative
+  - Iterates through configured libraries to find containing path
+  - Returns normalized relative path
+
+- **`to_absolute(rel_path, library_paths)`**: Converts library-relative to absolute
+  - Resolves relative path against configured library paths
+  - Returns None if library not found
 
 ### Additional Testing Commands
 
