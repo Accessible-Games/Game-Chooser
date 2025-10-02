@@ -453,44 +453,23 @@ class GameDialog(wx.Dialog):
 
 
 class PreferencesDialog(wx.Dialog):
-    """Preferences dialog with dual-panel layout"""
-    
+    """Preferences dialog with tabbed layout"""
+
     def __init__(self, parent, library_manager):
         super().__init__(parent, title="Preferences", size=(700, 500))
-        
+
         self.library_manager = library_manager
-        
-        # Create main splitter
-        splitter = wx.SplitterWindow(self)
-        
-        # Left panel - navigation
-        left_panel = wx.Panel(splitter)
-        left_sizer = wx.BoxSizer(wx.VERTICAL)
-        
-        self.nav_list = wx.ListCtrl(left_panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        self.nav_list.AppendColumn("Settings", width=150)
-        self.nav_list.InsertItem(0, "Path Management")
-        self.nav_list.Select(0)
-        
-        left_sizer.Add(self.nav_list, 1, wx.EXPAND | wx.ALL, 5)
-        left_panel.SetSizer(left_sizer)
-        
-        # Right panel - content
-        self.right_panel = wx.Panel(splitter)
-        self.right_sizer = wx.BoxSizer(wx.VERTICAL)
-        
-        # Path Management content
-        self.create_path_management()
-        
-        self.right_panel.SetSizer(self.right_sizer)
-        
-        # Set up splitter
-        splitter.SplitVertically(left_panel, self.right_panel, 200)
-        splitter.SetMinimumPaneSize(150)
-        
+
+        # Create notebook
+        self.notebook = wx.Notebook(self)
+
+        # Create tabs
+        self.create_library_paths_tab()
+        self.create_exceptions_tab()
+
         # Main sizer with buttons
         main_sizer = wx.BoxSizer(wx.VERTICAL)
-        main_sizer.Add(splitter, 1, wx.EXPAND)
+        main_sizer.Add(self.notebook, 1, wx.EXPAND)
         
         # Buttons
         btn_panel = wx.Panel(self)
@@ -517,62 +496,77 @@ class PreferencesDialog(wx.Dialog):
         # Store original config for cancel
         self.original_config = json.loads(json.dumps(library_manager.config))
     
-    def create_path_management(self):
-        """Create path management panel"""
+    def create_library_paths_tab(self):
+        """Create library paths tab"""
+        tab_panel = wx.Panel(self.notebook)
+        tab_sizer = wx.BoxSizer(wx.VERTICAL)
+
         # Library paths section
-        lib_label = wx.StaticText(self.right_panel, label="Game Library Paths:")
-        self.right_sizer.Add(lib_label, 0, wx.ALL, 5)
-        
-        lib_panel = wx.Panel(self.right_panel)
+        lib_label = wx.StaticText(tab_panel, label="Game Library Paths:")
+        tab_sizer.Add(lib_label, 0, wx.ALL, 5)
+
+        lib_container = wx.Panel(tab_panel)
         lib_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        
-        self.lib_list = wx.ListCtrl(lib_panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+
+        self.lib_list = wx.ListCtrl(lib_container, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         self.lib_list.SetLabel("Game Library Paths")
         self.lib_list.AppendColumn("Name", width=100)
-        self.lib_list.AppendColumn("Path", width=300)
-        
+        self.lib_list.AppendColumn("Path", width=400)
+
         # Populate library list
         for lib in self.library_manager.config["libraries"]:
             index = self.lib_list.InsertItem(self.lib_list.GetItemCount(), lib["name"])
             self.lib_list.SetItem(index, 1, lib["path"])
-        
+
         lib_sizer.Add(self.lib_list, 1, wx.EXPAND | wx.RIGHT, 5)
-        
+
         # Library buttons
-        lib_btn_panel = wx.Panel(lib_panel)
+        lib_btn_panel = wx.Panel(lib_container)
         lib_btn_sizer = wx.BoxSizer(wx.VERTICAL)
-        
+
         add_lib_btn = wx.Button(lib_btn_panel, label="Add")
         remove_lib_btn = wx.Button(lib_btn_panel, label="Remove")
-        
+
         lib_btn_sizer.Add(add_lib_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
         lib_btn_sizer.Add(remove_lib_btn, 0, wx.EXPAND)
-        
+
         lib_btn_panel.SetSizer(lib_btn_sizer)
         lib_sizer.Add(lib_btn_panel, 0, wx.ALIGN_TOP)
-        
-        lib_panel.SetSizer(lib_sizer)
-        self.right_sizer.Add(lib_panel, 1, wx.EXPAND | wx.ALL, 5)
-        
+
+        lib_container.SetSizer(lib_sizer)
+        tab_sizer.Add(lib_container, 1, wx.EXPAND | wx.ALL, 5)
+
+        tab_panel.SetSizer(tab_sizer)
+        self.notebook.AddPage(tab_panel, "Library Paths")
+
+        # Bind events
+        add_lib_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
+        remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
+
+    def create_exceptions_tab(self):
+        """Create exceptions tab"""
+        tab_panel = wx.Panel(self.notebook)
+        tab_sizer = wx.BoxSizer(wx.VERTICAL)
+
         # Exceptions section
-        exc_label = wx.StaticText(self.right_panel, label="Exceptions:")
-        self.right_sizer.Add(exc_label, 0, wx.ALL, 5)
-        
-        exc_panel = wx.Panel(self.right_panel)
+        exc_label = wx.StaticText(tab_panel, label="Exceptions:")
+        tab_sizer.Add(exc_label, 0, wx.ALL, 5)
+
+        exc_container = wx.Panel(tab_panel)
         exc_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        
-        self.exc_list = wx.ListCtrl(exc_panel, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+
+        self.exc_list = wx.ListCtrl(exc_container, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         self.exc_list.SetLabel("Exceptions")
-        self.exc_list.AppendColumn("Path", width=400)
-        
+        self.exc_list.AppendColumn("Path", width=500)
+
         # Populate exceptions list
         for exc in self.library_manager.config["exceptions"]:
             self.exc_list.InsertItem(self.exc_list.GetItemCount(), exc)
-        
+
         exc_sizer.Add(self.exc_list, 1, wx.EXPAND | wx.RIGHT, 5)
-        
+
         # Exception buttons
-        exc_btn_panel = wx.Panel(exc_panel)
+        exc_btn_panel = wx.Panel(exc_container)
         exc_btn_sizer = wx.BoxSizer(wx.VERTICAL)
 
         add_exc_btn = wx.Button(exc_btn_panel, label="Add")
@@ -582,16 +576,17 @@ class PreferencesDialog(wx.Dialog):
         exc_btn_sizer.Add(add_exc_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
         exc_btn_sizer.Add(add_folder_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
         exc_btn_sizer.Add(remove_exc_btn, 0, wx.EXPAND)
-        
+
         exc_btn_panel.SetSizer(exc_btn_sizer)
         exc_sizer.Add(exc_btn_panel, 0, wx.ALIGN_TOP)
-        
-        exc_panel.SetSizer(exc_sizer)
-        self.right_sizer.Add(exc_panel, 1, wx.EXPAND | wx.ALL, 5)
-        
+
+        exc_container.SetSizer(exc_sizer)
+        tab_sizer.Add(exc_container, 1, wx.EXPAND | wx.ALL, 5)
+
+        tab_panel.SetSizer(tab_sizer)
+        self.notebook.AddPage(tab_panel, "Exceptions")
+
         # Bind events
-        add_lib_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
-        remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
         add_exc_btn.Bind(wx.EVT_BUTTON, self.on_add_exception)
         add_folder_btn.Bind(wx.EVT_BUTTON, self.on_add_folder_exception)
         remove_exc_btn.Bind(wx.EVT_BUTTON, self.on_remove_exception)
