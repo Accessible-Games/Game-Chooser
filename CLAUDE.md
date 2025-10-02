@@ -83,13 +83,13 @@ for i, game in enumerate(games):
 
 This is a multi-file Python desktop application built with wxPython for cross-platform game library management.
 
-### File Structure (3,038 total lines)
+### File Structure (3,138 total lines)
 - **game-chooser.py** (21 lines) - Application entry point
 - **models.py** (41 lines) - Data models (Game class)
 - **game_list.py** (150 lines) - Custom list control for game display
-- **main_window.py** (769 lines) - Primary application window and UI logic
+- **main_window.py** (868 lines) - Primary application window and UI logic
 - **dialogs.py** (812 lines) - Dialog classes for various UI operations
-- **library_manager.py** (857 lines) - Core data management and scanning logic
+- **library_manager.py** (858 lines) - Core data management and scanning logic
 - **exception_manager.py** (203 lines) - Auto-exception pattern management
 - **validation_service.py** (87 lines) - Centralized validation logic
 - **path_manager.py** (98 lines) - Path normalization and operations
@@ -183,7 +183,15 @@ The application features a sophisticated auto-exclusion system to filter out non
 ```
 
 #### Key Features
-- **Persistent State**: Window size, position, splitter, sort preferences, selections
+- **Persistent State**: Window size, position, splitter, sort preferences, game list selection, tree filter selections
+  - **Game List Selection**: Saved by game title in `SavedState.last_selected`, restored after filtering completes
+  - **Tree Filter Selections**: Saved as path strings (e.g., "Platform/Windows", "Genre/RPG") in `SavedState.tree_selections`
+  - Both selections persist across app restarts, preference changes, and manual refreshes
+- **Screen Reader Accessibility**: Proper focus management for assistive technology
+  - Calls `Select()`, `Focus()`, and `SetFocus()` on game list after filtering
+  - Skips `SetFocus()` during initialization to avoid stealing focus from scan dialog
+  - First-run behavior: defaults to selecting game list index 0 for immediate accessibility
+  - Game list receives keyboard focus at launch (not search field)
 - **Real-time Search**: 0.5s delay, searches game title and developer fields only
   - Automatically excludes searches containing "unknown" (returns no results)
   - Case-insensitive matching
@@ -213,6 +221,21 @@ The application features a sophisticated auto-exclusion system to filter out non
 - **Cancellation**: User can cancel long-running scans and filter operations
 
 ### Recent Improvements
+
+#### Selection Persistence and Accessibility (Latest)
+- **Tree Filter Selections**: Tree selections persist across app restarts and UI rebuilds
+  - Saved as path strings in `SavedState.tree_selections`
+  - Restored automatically after tree rebuilds via `restore_tree_selections()`
+  - Uses `restoring_tree` flag to prevent save loops during restoration
+- **Game List Selection**: Previously selected game restored after filtering
+  - Searches filtered results by title to find and restore selection
+  - Defaults to index 0 if previous selection not found
+- **Screen Reader Support**: Proper focus management for assistive technology
+  - Calls `Select()`, `Focus()`, `SetFocus()` sequence for screen reader announcement
+  - Uses `initializing` flag to prevent stealing focus from scan dialog during startup
+  - Game list receives keyboard focus at launch for immediate accessibility
+- **Selection Jumping Fix**: Edit Game dialog no longer causes selection to jump
+  - Dialog protection prevents spurious selection events during modal dialogs
 
 #### Dialog System Improvements
 - Unified GameDialog replaces separate edit dialogs
@@ -251,6 +274,10 @@ The application features a sophisticated auto-exclusion system to filter out non
 - Graceful handling of missing/corrupted config files
 - Default configuration fallbacks
 - Automatic migration of config format changes
+- **SavedState Structure**: Persistent UI state stored in config
+  - `last_selected`: Game title string for game list selection restoration
+  - `tree_selections`: List of path strings for tree filter selection restoration (e.g., ["Platform/Windows", "Genre/RPG"])
+  - Additional state fields: window size, position, splitter, sort preferences
 
 #### Error Handling
 - Permission error handling during scanning
@@ -353,11 +380,58 @@ Unified dialog that handles both adding and editing games of all types (Windows/
 
 ### MainFrame (main_window.py)
 
+#### Selection Persistence Flags
+- **`restoring_tree` flag** (line 89):
+  - Set to True during `restore_tree_selections()` execution
+  - Blocks `save_tree_selections()` calls during restoration to prevent save loops
+  - Always cleared in finally block to ensure cleanup
+
+- **`initializing` flag** (line 90):
+  - Set to True at startup, cleared after initial scan completes
+  - Prevents `SetFocus()` call in `on_filter_complete()` during initialization
+  - Avoids stealing focus from scan progress dialog
+  - Ensures scan dialog remains visible and accessible
+
 #### Dialog Protection
 - **`dialog_active` flag** (line 88):
   - Set to True when modal dialogs open
   - Prevents spurious selection events during dialog lifecycle
   - Used in `on_selection_changed()` to block unwanted refreshes
+
+#### Selection Persistence Methods
+- **`save_tree_selections()`** (lines 429-445):
+  - Extracts selected tree items and builds path strings ("Parent/Child")
+  - Skips root node selections (no parent)
+  - Saves paths to `config["SavedState"]["tree_selections"]`
+  - Called on tree selection changes (unless `restoring_tree` is True)
+  - Persists to disk via `library_manager.save_config()`
+
+- **`restore_tree_selections()`** (lines 450-487):
+  - Reads saved paths from `config["SavedState"]["tree_selections"]`
+  - Sets `restoring_tree` flag to prevent save loops
+  - Walks tree hierarchy to find matching items
+  - Uses `SelectItem(item, True)` to select multiple items
+  - Always clears `restoring_tree` flag in finally block
+  - Called after tree rebuilds to maintain user's filter state
+
+- **`on_filter_complete(filtered_games)`** (lines 508-529):
+  - Receives filtered game list from background worker thread
+  - Populates game list control with filtered results
+  - **Selection Restoration**:
+    - Retrieves `last_selected` game title from config
+    - Searches filtered games for matching title
+    - Defaults to index 0 if not found or no saved selection
+  - **Accessibility Focus Management**:
+    - Always calls `Select(index)` and `Focus(index)` on game list
+    - Calls `SetFocus()` only if `not self.initializing`
+    - Ensures screen readers announce selected item without disrupting scan dialog
+
+#### Tree Rebuilding
+- **`build_tree(filters=None, force_rebuild=False, restore_selections=True)`** (line 294):
+  - **`restore_selections` parameter**: Controls whether tree selections are restored after rebuild
+  - Defaults to True to maintain user's filter state
+  - When True, calls `restore_tree_selections()` after tree construction
+  - Used in `refresh_ui_after_preferences()` with `force_rebuild=True` to preserve selections through preference changes
 
 #### Game Launch
 - **`on_launch(event)`**:
@@ -473,5 +547,27 @@ manager.config['exceptions'] = ['tools/', 'build/debug/']
 print('tools/setup.exe excluded:', manager._is_path_exception('tools/setup.exe'))
 print('build/debug/test.exe excluded:', manager._is_path_exception('build/debug/test.exe'))
 print('games/game.exe excluded:', manager._is_path_exception('games/game.exe'))
+"
+
+# Test selection persistence configuration
+python3 -c "
+from library_manager import GameLibraryManager
+manager = GameLibraryManager()
+
+# Verify SavedState structure exists
+print('SavedState exists:', 'SavedState' in manager.config)
+print('last_selected field:', manager.config['SavedState']['last_selected'])
+print('tree_selections field:', manager.config['SavedState']['tree_selections'])
+
+# Test saving selections
+manager.config['SavedState']['last_selected'] = 'Half-Life 2'
+manager.config['SavedState']['tree_selections'] = ['Platform/Windows', 'Genre/FPS']
+manager.save_config()
+print('Config saved successfully')
+
+# Reload and verify persistence
+manager2 = GameLibraryManager()
+print('Restored last_selected:', manager2.config['SavedState']['last_selected'])
+print('Restored tree_selections:', manager2.config['SavedState']['tree_selections'])
 "
 ```

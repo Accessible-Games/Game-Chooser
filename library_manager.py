@@ -65,7 +65,8 @@ class GameLibraryManager:
                 "last_selected": None,
                 "last_search": "",
                 "column_widths": None,
-                "tree_expansion": {}
+                "tree_expansion": {},
+                "tree_selections": []
             }
         }
         

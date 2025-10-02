@@ -86,6 +86,8 @@ class MainFrame(wx.Frame):
         self._tree_cache = None  # Cache for tree categories
         self._games_hash = None  # Hash to detect when games list changes
         self.dialog_active = False  # Flag to block spurious events when modal dialogs are open
+        self.restoring_tree = False  # Flag to block saves during tree restoration
+        self.initializing = True  # Flag to prevent focus stealing during startup
 
         # Set up UI
         self.init_ui()
@@ -174,8 +176,8 @@ class MainFrame(wx.Frame):
         # Set up keyboard shortcuts
         self.setup_accelerators()
         
-        # Build initial tree
-        self.build_tree()
+        # Build initial tree (without restoring selections yet)
+        self.build_tree(restore_selections=False)
         
         # Populate initial game list
         self.refresh_game_list()
@@ -241,6 +243,7 @@ class MainFrame(wx.Frame):
                 self.library_manager.save_config()
             else:
                 # User cancelled, exit
+                self.initializing = False
                 self.Close()
                 return
             dlg.Destroy()
@@ -248,9 +251,11 @@ class MainFrame(wx.Frame):
         # Validate and scan - the unified method automatically determines the best strategy
         try:
             result = self.library_manager.scan_with_dialog(self)
-            
+
             # If scan was cancelled, just continue without showing any dialogs
             if result is None:
+                self.initializing = False
+                self.game_list.SetFocus()
                 return
 
             exceptions_count, removed_libraries = result
@@ -265,19 +270,28 @@ class MainFrame(wx.Frame):
                     self.on_preferences(None)
             elif len(self.library_manager.games) == 0:
                 if wx.MessageBox("No games found in currently added libraries. Open preferences?",
-                                "No Games Found", 
+                                "No Games Found",
                                 wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
                     self.on_preferences(None)
-        
+
+            # Restore tree selections now that initial scan is complete
+            self.restore_tree_selections()
+
+            # Mark initialization complete and set focus on game list
+            self.initializing = False
+            self.game_list.SetFocus()
+
         except PermissionError as e:
-            if wx.MessageBox(f"{e}\nRemove this library?", 
-                            "Permission Denied", 
+            self.initializing = False
+            self.game_list.SetFocus()
+            if wx.MessageBox(f"{e}\nRemove this library?",
+                            "Permission Denied",
                             wx.YES_NO | wx.ICON_ERROR) == wx.YES:
                 # Remove the problematic library
                 # (Would need to identify which one caused the error)
                 pass
     
-    def build_tree(self, filters=None, force_rebuild=False):
+    def build_tree(self, filters=None, force_rebuild=False, restore_selections=True):
         """Build the tree control hierarchy with flat 2-level structure using cache"""
         if filters is None:
             filters = ["platform", "genre", "developer", "year"]
@@ -349,9 +363,16 @@ class MainFrame(wx.Frame):
                     self.tree_ctrl.AppendItem(category_node, value)
 
         self.tree_ctrl.ExpandAll()
+
+        # Restore saved selections (only if requested)
+        if restore_selections:
+            self.restore_tree_selections()
     
     def on_tree_selection(self, event):
         """Handle tree selection changes"""
+        # Save tree selections (skip during restoration to avoid multiple saves)
+        if not self.restoring_tree:
+            self.save_tree_selections()
         self.apply_filters()
     
     def on_tree_key(self, event):
@@ -404,7 +425,67 @@ class MainFrame(wx.Frame):
                 criteria[criteria_key].add(item_text)
 
         return criteria
-    
+
+    def save_tree_selections(self):
+        """Save current tree selections to config"""
+        selections = self.tree_ctrl.GetSelections()
+        paths = []
+
+        for item in selections:
+            item_text = self.tree_ctrl.GetItemText(item)
+            parent = self.tree_ctrl.GetItemParent(item)
+
+            # Skip root node
+            if parent == self.tree_ctrl.GetRootItem() or not parent:
+                continue
+
+            # Build path: "Parent/Child"
+            parent_text = self.tree_ctrl.GetItemText(parent)
+            path = f"{parent_text}/{item_text}"
+            paths.append(path)
+
+        self.library_manager.config["SavedState"]["tree_selections"] = paths
+        self.library_manager.save_config()
+
+    def restore_tree_selections(self):
+        """Restore saved tree selections"""
+        saved_paths = self.library_manager.config["SavedState"]["tree_selections"]
+        if not saved_paths:
+            return
+
+        # Set flag to prevent saving during restoration
+        self.restoring_tree = True
+
+        try:
+            # Clear current selections
+            self.tree_ctrl.UnselectAll()
+
+            # Walk tree to find and select items
+            root = self.tree_ctrl.GetRootItem()
+            if not root:
+                return
+
+            # Iterate through category nodes
+            category_item, cookie = self.tree_ctrl.GetFirstChild(root)
+            while category_item:
+                category_text = self.tree_ctrl.GetItemText(category_item)
+
+                # Iterate through child items
+                child_item, child_cookie = self.tree_ctrl.GetFirstChild(category_item)
+                while child_item:
+                    child_text = self.tree_ctrl.GetItemText(child_item)
+                    path = f"{category_text}/{child_text}"
+
+                    if path in saved_paths:
+                        self.tree_ctrl.SelectItem(child_item, True)
+
+                    child_item, child_cookie = self.tree_ctrl.GetNextChild(category_item, child_cookie)
+
+                category_item, cookie = self.tree_ctrl.GetNextChild(root, cookie)
+        finally:
+            # Always clear the flag
+            self.restoring_tree = False
+
     def apply_filters(self):
         """Apply search and tree filters using background thread"""
         # Stop any existing filter operation
@@ -429,9 +510,24 @@ class MainFrame(wx.Frame):
         self.filtered_games = filtered_games
         self.game_list.populate(filtered_games)
 
-        # Select first item if any
+        # Select and focus item for screen reader accessibility
         if filtered_games:
-            self.game_list.Select(0)
+            # Try to restore previously selected game
+            last_selected = self.library_manager.config["SavedState"]["last_selected"]
+            selected_index = 0  # Default to first item
+
+            if last_selected:
+                # Search for the saved game in filtered results
+                for i, game in enumerate(filtered_games):
+                    if game.title == last_selected:
+                        selected_index = i
+                        break
+
+            # Select and focus (but skip SetFocus during initialization to avoid stealing focus from scan dialog)
+            self.game_list.Select(selected_index)
+            self.game_list.Focus(selected_index)
+            if not self.initializing:
+                self.game_list.SetFocus()
     
     def refresh_game_list(self):
         """Refresh the game list display"""
@@ -751,15 +847,18 @@ class MainFrame(wx.Frame):
     def save_state(self):
         """Save current window state"""
         state = self.library_manager.config["SavedState"]
-        
+
         state["window_size"] = list(self.GetSize())
         state["window_position"] = list(self.GetPosition())
         state["splitter_position"] = self.splitter.GetSashPosition()
         state["last_search"] = self.search_combo.GetValue()
-        
+
         # Save column widths
         self.game_list.save_column_widths()
-        
+
+        # Save tree selections
+        self.save_tree_selections()
+
         self.library_manager.save_config()
     
     def on_close(self, event):
