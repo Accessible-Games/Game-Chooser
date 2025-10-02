@@ -2,3 +2,4 @@ games.json
 __pycache__
 *:Zone.Identifier
 config.json
+errors.log

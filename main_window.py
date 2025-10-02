@@ -60,8 +60,11 @@ class FilterWorker(threading.Thread):
 
             # Apply search filter
             if self.search_term:
+                # Exclude "unknown" from all searches
+                if "unknown" in self.search_term:
+                    continue
                 if not any(self.search_term in field.lower() for field in
-                          [game.title, game.genre, game.developer, game.year] + game.platforms):
+                          [game.title, game.developer]):
                     continue
 
             filtered.append(game)
