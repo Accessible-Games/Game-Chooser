@@ -534,13 +534,14 @@ class MainFrame(wx.Frame):
             
             # Launch the game
             try:
+                game_dir = str(Path(full_path).parent)
                 system = platform.system()
                 if system == "Darwin" and full_path.endswith(".app"):
                     # macOS .app bundle
-                    subprocess.Popen(["open", "-a", full_path])
+                    subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
                 else:
                     # Regular executable
-                    subprocess.Popen([full_path])
+                    subprocess.Popen([full_path], cwd=game_dir)
                 
                 # Minimize window
                 self.Iconize(True)
