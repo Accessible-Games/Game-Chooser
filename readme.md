@@ -1,125 +1,226 @@
 # Game Chooser
 
-A cross-platform desktop application for organizing and launching your video game library, built with Python and wxPython.
+Game Chooser is a simple desktop app that helps you organize and launch your entire game collection from one place. Point it at your game folders, and it automatically discovers and catalogs everything—no manual entry needed.
 
-## Features
+## What Problem Does It Solve?
 
-### Core Functionality
-- **Auto-discovery** - Automatically scans configured folders to find and catalog games
-- **Smart Detection** - Intelligently identifies game executables while filtering out updaters and tools
-- **Multi-platform Support** - Works with Windows (.exe, .bat) and macOS (unix executables)
-- **Web Games** - Add browser-based games with URL launching support
-- **Portable Library** - Share your game database between computers with relative path storage
+If you have games scattered across multiple folders, external drives, or different launchers, Game Chooser brings them all together. Instead of hunting through folders or remembering where each game lives, you get a searchable, filterable library that launches games with a single click.
 
-### Organization & Search
-- **Hierarchical Filtering** - Browse games by Platform → Genre → Developer → Year
-- **Instant Search** - Real-time filtering across all game metadata fields
-- **Smart Sorting** - Click column headers to sort by any field
-- **Multi-select Filtering** - Select multiple tree nodes to see games matching any criteria
+## Key Features
 
-### User Experience
-- **Persistent State** - Remembers window size, position, sort preferences, and last selection
-- **Keyboard-First Design** - Full keyboard navigation for accessibility
-- **Context Menus** - Right-click access to all game management functions
-- **Batch Management** - Scan multiple library folders and manage exceptions
+- **Automatic Discovery** - Scans your game folders and finds all playable executables automatically
+- **Smart Filtering** - Installers, updaters, and other utility programs are automatically excluded
+- **Multiple Libraries** - Manage games from different folders, drives, or locations in one unified view
+- **Advanced Filtering** - Browse by platform (Windows, macOS, Linux), genre, developer, or release year
+- **Fast Search** - Instantly search by game title or developer as you type
+- **Manual Game Support** - Add web games (browser-based) or games outside your library folders
+- **Keyboard-Friendly** - Full keyboard navigation with shortcuts for every action
+- **Persistent Settings** - Remembers your window size, column sorting, selected game, and active filters between sessions
+- **Cross-Platform** - Works on Windows, macOS, and Linux
 
-## Installation
+## Getting Started
 
-### Requirements
-- Python 3.6 or higher
-- wxPython
+### First Launch
 
-### Install Dependencies
-```bash
-# Windows/macOS
-pip install wxPython
+When you first open Game Chooser, you'll see a welcome screen with four options:
 
-### Run the Application
-```bash
-python game_chooser.py
-```
+1. **Add Library** - Point to a folder containing games (recommended for most users)
+2. **Add Game** - Manually add a single game or web game
+3. **Preferences** - Configure libraries and exception filters
+4. **Exit** - Close the app
+
+**Most users should start with "Add Library"** to let the app scan and discover your games automatically.
+
+### Adding Game Libraries
+
+A game library is simply a folder where you keep games. Common examples:
+- `C:\Games`
+- `D:\Steam Games`
+- `/Applications/Games`
+- External hard drive game folders
+
+To add a library:
+1. Click **File → Preferences** (or press **Ctrl+,**)
+2. In the **Library Paths** tab, click **Add**
+3. Select the folder containing your games
+4. Click **Apply** to scan for games
+
+You can add as many libraries as you need. The app will scan all of them and combine the results.
+
+### Adding Manual Games
+
+For games outside your library folders or web-based games:
+
+1. Right-click anywhere in the game list
+2. Select **Add Game**
+3. Fill in the details:
+   - **Title**: Game name
+   - **Platform**: Choose Windows, macOS, Linux, or Web
+   - **Launch Path/URL**: For desktop games, browse to the .exe or executable; for web games, enter the URL
+   - **Genre, Developer, Year**: Optional metadata for filtering
+
+Manual games appear alongside auto-discovered games and can be launched the same way.
+
+## Using the App
+
+### Browsing Games
+
+The main window shows your games in a list on the left and a filter tree on the right. The tree organizes games by:
+- **Platform** (Windows, macOS, Linux, Web)
+- **Genre** (Action, RPG, Strategy, etc.)
+- **Developer** (Valve, Nintendo, etc.)
+- **Year** (2024, 2023, etc.)
+
+Click any category in the tree to filter the game list. You can select multiple categories (Ctrl+Click) to see games matching any of them.
+
+### Searching
+
+The search box at the top searches game titles and developers as you type. Just start typing—results appear automatically after a brief delay.
+
+**Note**: Searching for "unknown" returns no results, since that's a placeholder for missing metadata.
+
+### Launching Games
+
+Three ways to launch a game:
+1. **Double-click** the game in the list
+2. Select the game and press **Enter** or **Space**
+3. Select the game and click the **Launch** button at the bottom
+
+Desktop games open and the window minimizes automatically. Web games open in your default browser.
+
+### Editing Games
+
+To change a game's details:
+1. Select the game
+2. Press **Ctrl+E** or right-click and choose **Edit Game**
+3. Modify the details and click **OK**
+
+**Important**: Editing the launch path of an auto-discovered game converts it to a manually-managed game.
+
+### Managing Preferences
+
+Press **Ctrl+,** or go to **File → Preferences** to access:
+
+#### Library Paths Tab
+- Add or remove game library folders
+- Changes trigger an automatic rescan
+
+#### Exceptions Tab
+- Manage files and folders excluded from scanning
+- **Add**: Exclude a specific file (e.g., `tools/setup.exe`)
+- **Add Folder**: Exclude an entire folder and its contents (e.g., `build/`)
+- **Remove**: Un-exclude a file or folder
+
+The app has 900+ built-in auto-exclusion patterns for common installers and utilities, but you can add more if needed.
 
 ## Keyboard Shortcuts
 
 ### Global Shortcuts
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+F` | Focus search box |
-| `Ctrl+N` | Add new web game |
-| `Ctrl+,` | Open preferences |
-| `F5` | Refresh/rescan libraries |
-| `Alt+F4` | Exit application |
+| **Ctrl+F** | Jump to search box |
+| **Ctrl+N** | Add new game |
+| **Ctrl+,** | Open preferences |
+| **F5** | Refresh/rescan all libraries |
+| **Alt+F4** | Exit application |
 
-### List Control Shortcuts
+### Game List Shortcuts
 | Shortcut | Action |
 |----------|--------|
-| `E` | Edit selected game |
-| `Delete` | Delete selected game |
-| `Enter` / `Space` | Launch selected game |
-| `1-5` | Sort by column (1=Title, 2=Genre, 3=Developer, 4=Year, 5=Platform) |
-| `Right-click` | Open context menu |
+| **Ctrl+E** | Edit selected game |
+| **Delete** | Delete selected game |
+| **Enter** or **Space** | Launch selected game |
+| **Right-click** | Open context menu |
+| **Tab** | Move between game list and filter tree |
 
-### Tree Control Shortcuts
+### Filter Tree Shortcuts
 | Shortcut | Action |
 |----------|--------|
-| `Escape` | Clear tree selection (show all games) |
-| `Delete` | Delete selected game (if applicable) |
-| `Ctrl+Click` | Multi-select nodes for OR filtering |
+| **Escape** | Clear all filters (show all games) |
+| **Ctrl+Click** | Select multiple filters (OR logic) |
 
-### Search Box Behavior
-- Type to search across all fields (title, genre, developer, year, platform)
-- 0.5 second delay before search executes (prevents lag while typing)
-- Dropdown shows all matching values from your library
-- Select from dropdown to filter by that exact value
+### Column Sorting
+Click any column header to sort by that column. Click again to reverse the sort order.
 
-## File Structure
+## Tips & Tricks
 
-The application creates two JSON files:
+### Multi-Select Filtering
+Hold **Ctrl** while clicking tree items to select multiple filters. For example, select "Windows" and "macOS" under Platform to see games for both systems.
+
+### Managing Auto-Excluded Files
+If the scanner missed a game because it thought it was a utility:
+1. Go to **Preferences → Exceptions**
+2. Find and remove the auto-added exception
+3. Click **Apply** to rescan
+
+### Column Customization
+Drag column dividers to resize them. Your preferences are saved automatically.
+
+### Quick Re-scan
+Press **F5** to force a complete re-scan of all libraries. Use this after installing new games or if the library seems out of sync.
+
+### Portable Game Library
+The game database (`games.json`) uses relative paths, so you can copy your library folder and the database to another computer and everything still works.
+
+### Keyboard Navigation
+You can navigate the entire app without a mouse:
+- **Tab** to move between controls
+- **Arrow keys** to navigate lists and trees
+- **Enter/Space** to activate buttons and launch games
+- **Escape** to clear filters
+
+## File Locations
+
+Game Chooser creates two files:
 
 ### games.json (Portable)
-- Stored in the application directory
+- Located in the application folder
 - Contains your game library with relative paths
-- Can be shared between users/computers
+- Can be backed up or shared between computers
 
-### config.json (User-specific)
-- Stored in platform-specific app data folder:
-  - Windows: `%APPDATA%\GameChooser\`
-  - macOS: `~/Library/Application Support/GameChooser/`
-  - Linux: `~/.config/GameChooser/`
-- Contains library paths, exceptions, and UI preferences
-
-## Game Detection
-
-The scanner automatically identifies games by looking for executables named:
-- `game.exe` / `game`
-- `launch.exe` / `launch`
-- `play.exe` / `play`
-- Executable matching the parent folder name
-
-If none of these are found, the first executable found in the directory is presumed to be the launch path. All others are added to the exceptions list, which can be managed in preferences.
-
-## Usage Tips
-
-1. **First Launch** - You'll be prompted to select a game library folder
-2. **Multiple Libraries** - Add more folders via Edit → Preferences
-3. **Web or manual Games** - Right-click in the game list to add web-based games or to add a game manually if you have a game outside of your dedicated games directory.
-4. **Keyboard Navigation** - Press Tab to move between controls
-5. **Quick Launch** - Double-click any game to launch immediately
-6. **Filtering** - Combine tree selection and search for precise filtering
+### config.json (User-Specific)
+- **Windows**: `C:\Users\YourName\AppData\Roaming\GameChooser\`
+- **macOS**: `~/Library/Application Support/GameChooser/`
+- **Linux**: `~/.config/GameChooser/`
+- Contains library paths, exceptions, and window preferences
+- Not portable (contains system-specific paths)
 
 ## Troubleshooting
 
-### No games found
-- Check that your game folders contain valid executables
-- Verify folder permissions
-- Review the exceptions list in Preferences
+### No games found after scanning
+- Verify the library folder actually contains game executables (.exe files on Windows)
+- Check folder permissions—the app needs read access
+- Look in **Preferences → Exceptions** to see if games were auto-excluded
 
-### Games won't launch
-- The app will prompt you to relocate missing executables
-- Ensure games are within configured library paths or manual paths are valid.
-- Check file permissions on macOS/Linux
+### Game won't launch
+- If the executable moved, the app will prompt you to locate it
+- Verify the game executable still exists and hasn't been deleted
+- On macOS/Linux, check that the file has executable permissions
 
-### Performance issues
-- Large libraries (1000+ games) may take a moment to scan
-- The 0.5 second search delay prevents lag while typing
+### Scan takes a long time
+- Large libraries (1000+ games) take a minute or two to scan
+- Subsequent scans are faster due to incremental scanning
+- Add exclusion folders in Preferences to skip large non-game directories
 
+### Game metadata is wrong
+- Press **Ctrl+E** to edit the game and fix the metadata manually
+- Genre, developer, and year are user-editable for all games
+
+### Search isn't working
+- Search only looks at game title and developer fields (not genre or year)
+- Searches containing "unknown" return no results by design
+- Clear the search box to see all games again
+
+## How Game Detection Works
+
+When scanning a folder, Game Chooser looks for executables in this order:
+
+1. Files named `game`, `launch`, or `play` (with or without .exe)
+2. An executable matching the parent folder's name
+3. If none found, the first executable in the directory
+
+All other executables in that folder are automatically added to the exceptions list, which you can manage in Preferences.
+
+## Support
+
+Game Chooser is an open-source project. If you encounter issues or have suggestions, please check the project repository for support options.
