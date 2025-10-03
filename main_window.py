@@ -185,23 +185,39 @@ class MainFrame(wx.Frame):
     def create_menu_bar(self):
         """Create the menu bar"""
         menu_bar = wx.MenuBar()
-        
+
         # File menu
         file_menu = wx.Menu()
+        add_game_item = file_menu.Append(wx.ID_ANY, "&Add Game\tCtrl+N")
+        self.Bind(wx.EVT_MENU, self.on_add_game, add_game_item)
+
+        refresh_item = file_menu.Append(wx.ID_ANY, "&Refresh Library\tF5")
+        self.Bind(wx.EVT_MENU, self.on_refresh, refresh_item)
+
+        file_menu.AppendSeparator()
+
         # Use platform-appropriate exit shortcut (wxPython handles Ctrl->Cmd mapping on macOS)
         system = platform.system()
         exit_shortcut = "Ctrl+Q" if system == "Darwin" else "Alt+F4"
         exit_item = file_menu.Append(wx.ID_EXIT, f"E&xit\t{exit_shortcut}")
         self.Bind(wx.EVT_MENU, self.on_exit, exit_item)
         menu_bar.Append(file_menu, "&File")
-        
+
         # Edit menu
         edit_menu = wx.Menu()
+        edit_game_item = edit_menu.Append(wx.ID_ANY, "&Edit Game\tCtrl+E")
+        self.Bind(wx.EVT_MENU, self.on_edit_game, edit_game_item)
+
+        delete_game_item = edit_menu.Append(wx.ID_ANY, "&Delete Game\tDel")
+        self.Bind(wx.EVT_MENU, self.on_delete_game, delete_game_item)
+
+        edit_menu.AppendSeparator()
+
         # Use Ctrl for both platforms (wxPython maps to Cmd on macOS automatically)
         pref_item = edit_menu.Append(wx.ID_PREFERENCES, "&Preferences\tCtrl+,")
         self.Bind(wx.EVT_MENU, self.on_preferences, pref_item)
         menu_bar.Append(edit_menu, "&Edit")
-        
+
         self.SetMenuBar(menu_bar)
     
     def setup_accelerators(self):
