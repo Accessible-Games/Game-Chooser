@@ -16,8 +16,8 @@ class ScanProgressDialog(wx.Dialog):
     """Dialog showing scanning progress with cancel button"""
     
     def __init__(self, parent):
-        super().__init__(parent, title="Scanning for Games", 
-                        style=wx.CAPTION | wx.SYSTEM_MENU)
+        super().__init__(parent, title="Scanning for Games",
+                        style=wx.CAPTION | wx.CLOSE_BOX | wx.SYSTEM_MENU)
         
         self.cancelled = False
         self.current_library = ""
@@ -856,7 +856,7 @@ class DeleteGameDialog(wx.Dialog):
 
     def __init__(self, parent, game_title):
         super().__init__(parent, title="Confirm Delete",
-                        style=wx.CAPTION | wx.SYSTEM_MENU)
+                        style=wx.CAPTION | wx.CLOSE_BOX | wx.SYSTEM_MENU)
 
         self.game_title = game_title
         self.init_ui()
