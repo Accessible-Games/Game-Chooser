@@ -113,6 +113,10 @@ This is a multi-file Python desktop application built with wxPython for cross-pl
 #### Main Application
 - **GameChooserApp**: wxPython application entry point
 - **MainFrame**: Primary window with splitter layout, search, menus, and keyboard shortcuts
+  - **Initialization Flow**: On startup, `check_libraries()` detects first run via `library_manager.is_first_run`
+  - **First Run Behavior**: Shows `FirstTimeSetupDialog` if config.json doesn't exist
+  - **No Forced Actions**: App always proceeds to main window regardless of library configuration
+  - **No Auto-Scanning**: User must manually trigger scans via F5/Refresh menu
 - **GameListCtrl**: Enhanced list control with sorting, keyboard navigation, and persistent state
 
 #### Data Management
@@ -122,6 +126,9 @@ This is a multi-file Python desktop application built with wxPython for cross-pl
   - Multiple scanning strategies (full, incremental, targeted)
   - Comprehensive auto-exception system
   - Cross-platform path handling
+  - **First-Run Detection**: `is_first_run` instance variable (set in `__init__` at line 33)
+    - Checks if config.json exists before loading configuration
+    - Used by MainFrame to determine whether to show FirstTimeSetupDialog
 
 #### Utility Classes
 - **ExceptionManager**: Auto-exception pattern matching and user exception handling
@@ -129,6 +136,12 @@ This is a multi-file Python desktop application built with wxPython for cross-pl
 - **PathManager**: Path normalization and library-relative conversion
 
 #### Dialog Classes
+- **FirstTimeSetupDialog**: Welcome dialog shown on first run when config.json doesn't exist (lines 113-200)
+  - **Non-Blocking**: User can exit without adding anything - app continues to main window
+  - **Four Actions**: Add Library (dir picker), Add Game (GameDialog), Preferences (PreferencesDialog), Exit
+  - **Session-Based Reminder**: After first library OR game addition, shows one-time reminder about Ctrl+, preferences
+  - **No Persistence**: Reminder flag (`reminder_shown`) is session-only, not saved to config
+  - **No Forced Scanning**: App never auto-scans; user must manually refresh
 - **ScanProgressDialog**: Threaded scanning with progress and cancellation
 - **GameDialog**: Unified dialog for adding and editing all game types (Windows/macOS/Web)
   - Replaces previous EditGameDialog and EditManualGameDialog
@@ -137,6 +150,7 @@ This is a multi-file Python desktop application built with wxPython for cross-pl
   - Converts library-managed games to user-managed when path is edited
 - **PreferencesDialog**: Tabbed interface for library paths and exceptions management
   - Uses wx.Notebook with separate tabs instead of splitter layout
+  - **Scan Guard**: `on_apply()` only triggers scanning if libraries exist after changes (line 784+)
 - **DeleteGameDialog**: Confirmation dialog for game deletion
 
 ### Exception Handling System
@@ -222,7 +236,28 @@ The application features a sophisticated auto-exclusion system to filter out non
 
 ### Recent Improvements
 
-#### Selection Persistence and Accessibility (Latest)
+#### First-Time Setup Rewrite (Latest)
+- **Optional Library Configuration**: App no longer requires libraries to function
+  - Removed forced library selection and app exit behavior
+  - User can run app with zero libraries or games configured
+- **FirstTimeSetupDialog**: New non-blocking welcome dialog for first run
+  - Shown when config.json doesn't exist (`library_manager.is_first_run`)
+  - Four options: Add Library, Add Game, Preferences, Exit
+  - Session-based reminder (not persisted) after first addition
+  - User can exit dialog without adding anything
+- **Initialization Flow Changes** (`check_libraries()` at lines 229-241):
+  - Shows FirstTimeSetupDialog if first run
+  - Always continues to main window (never exits app)
+  - Refreshes UI after dialog closes in case user added content
+  - No automatic scanning on startup
+- **Scan Guards**: Prevent scanning when no libraries configured
+  - `MainFrame.on_refresh()` (lines 733-735): Returns early if no libraries
+  - `PreferencesDialog.on_apply()` (line 784+): Only scans if libraries exist after changes
+- **Manual Refresh Required**: User must explicitly trigger F5/Refresh to scan libraries
+  - App never auto-scans on startup or after preference changes if no libraries
+  - Gives user full control over when expensive scanning operations occur
+
+#### Selection Persistence and Accessibility
 - **Tree Filter Selections**: Tree selections persist across app restarts and UI rebuilds
   - Saved as path strings in `SavedState.tree_selections`
   - Restored automatically after tree rebuilds via `restore_tree_selections()`
@@ -274,6 +309,10 @@ The application features a sophisticated auto-exclusion system to filter out non
 - Graceful handling of missing/corrupted config files
 - Default configuration fallbacks
 - Automatic migration of config format changes
+- **First-Run Detection**: `GameLibraryManager.is_first_run` (line 33)
+  - Set during initialization by checking if config file exists
+  - Used to trigger FirstTimeSetupDialog in MainFrame
+  - Does not persist - only reflects state at app startup
 - **SavedState Structure**: Persistent UI state stored in config
   - `last_selected`: Game title string for game list selection restoration
   - `tree_selections`: List of path strings for tree filter selection restoration (e.g., ["Platform/Windows", "Genre/RPG"])
@@ -316,6 +355,51 @@ Background thread class that handles game filtering based on tree selection and 
 - **Excluded Fields**: genre, year, platforms (not searchable)
 - **Special Handling**: "unknown" keyword triggers immediate exclusion
 - **Matching Logic**: Substring matching within included fields
+
+### FirstTimeSetupDialog (dialogs.py)
+
+#### Overview
+Welcome dialog shown on first run when config.json doesn't exist. Provides non-blocking entry points for initial configuration.
+
+#### Key Features
+- **Non-Modal Behavior**: User can exit without taking action - app continues normally
+- **Session-Based State**: Reminder flag is not persisted to config
+- **No Forced Actions**: Unlike previous implementation, doesn't require library selection
+
+#### Key Methods
+- **`__init__(parent, library_manager)`** (line 113):
+  - Initializes dialog with parent frame reference
+  - Sets `reminder_shown` flag to False (session-only)
+  - Creates non-resizable dialog with close box
+
+- **`check_and_show_reminder()`** (around line 149):
+  - Called after `on_add_library()` and `on_add_game()` complete successfully
+  - Checks if user has added any libraries OR games
+  - Shows one-time reminder about Ctrl+, preferences if not already shown
+  - Sets `reminder_shown` to True to prevent repeated reminders in same session
+  - **Not Persisted**: Flag resets on app restart
+
+- **`on_add_library(event)`** (around line 161):
+  - Opens wx.DirDialog for directory selection
+  - Adds library to config with basename as name
+  - Saves config immediately via `library_manager.save_config()`
+  - Triggers reminder check after successful addition
+  - **No Scanning**: Does not trigger library scan
+
+- **`on_add_game(event)`** (around line 173):
+  - Opens GameDialog for manual game entry
+  - Appends new game to `library_manager.games` list
+  - Saves games.json via `library_manager.save_games()`
+  - Triggers reminder check after successful addition
+
+- **`on_preferences(event)`** (around line 181):
+  - Opens PreferencesDialog for full configuration access
+  - Allows exception management and library editing
+  - **Note**: PreferencesDialog.on_apply() has scan guard to prevent scanning if no libraries
+
+- **`on_exit(event)`**:
+  - Simply closes dialog - app continues to main window
+  - No validation or forced actions
 
 ### GameDialog (dialogs.py)
 
@@ -432,6 +516,21 @@ Unified dialog that handles both adding and editing games of all types (Windows/
   - Defaults to True to maintain user's filter state
   - When True, calls `restore_tree_selections()` after tree construction
   - Used in `refresh_ui_after_preferences()` with `force_rebuild=True` to preserve selections through preference changes
+
+#### Initialization and Scanning
+- **`check_libraries()`** (lines 229-241):
+  - Called during MainFrame initialization
+  - **First-Run Detection**: Shows FirstTimeSetupDialog if `library_manager.is_first_run` is True
+  - **Non-Blocking**: Always continues to main window after dialog closes
+  - **No Auto-Scan**: Never triggers automatic scanning
+  - **UI Refresh**: Calls `refresh_game_list()` and `build_tree()` after dialog in case user added content
+  - **Focus Management**: Clears `initializing` flag and sets focus to game list
+
+- **`on_refresh(event)`** (lines 733-735+):
+  - Triggered by F5 key or Refresh menu item
+  - **Scan Guard**: Returns early if no libraries configured
+  - Prevents error dialogs when user tries to scan empty library configuration
+  - Only proceeds to `scan_with_dialog()` if libraries exist
 
 #### Game Launch
 - **`on_launch(event)`**:
@@ -569,5 +668,21 @@ print('Config saved successfully')
 manager2 = GameLibraryManager()
 print('Restored last_selected:', manager2.config['SavedState']['last_selected'])
 print('Restored tree_selections:', manager2.config['SavedState']['tree_selections'])
+"
+
+# Test first-run detection
+python3 -c "
+from library_manager import GameLibraryManager
+import os
+from pathlib import Path
+
+# Test with existing config
+manager1 = GameLibraryManager()
+print('Config exists, is_first_run:', manager1.is_first_run)
+
+# Simulate first run by checking non-existent config
+config_path = Path.home() / '.config' / 'GameChooser_Test' / 'config.json'
+print('Test config exists:', config_path.exists())
+print('Would be first run:', not config_path.exists())
 "
 ```

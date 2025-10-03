@@ -30,6 +30,7 @@ class GameLibraryManager:
         self.app_dir = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
         self.games_file = self.app_dir / "games.json"
         self.config_file = self.get_config_path()
+        self.is_first_run = not self.config_file.exists()
         self.exception_manager = ExceptionManager()
         self.path_manager = PathManager()
         self.load_config()

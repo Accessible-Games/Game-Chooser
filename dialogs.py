@@ -110,6 +110,103 @@ class ScanProgressDialog(wx.Dialog):
             wx.CallLater(1000, self.EndModal, wx.ID_OK)
 
 
+class FirstTimeSetupDialog(wx.Dialog):
+    """First-time setup dialog shown when no config exists"""
+
+    def __init__(self, parent, library_manager):
+        super().__init__(parent, title="Welcome to Game Chooser",
+                        style=wx.CAPTION | wx.CLOSE_BOX | wx.SYSTEM_MENU)
+
+        self.library_manager = library_manager
+        self.parent_frame = parent
+        self.reminder_shown = False
+
+        self.init_ui()
+        self.CenterOnParent()
+
+    def init_ui(self):
+        """Initialize the dialog UI"""
+        panel = wx.Panel(self)
+        main_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        # Welcome message
+        welcome_text = wx.StaticText(panel,
+            label="Welcome to Game Chooser!\n\nChoose how you'd like to get started:")
+        main_sizer.Add(welcome_text, 0, wx.ALL, 20)
+
+        # Buttons
+        add_library_btn = wx.Button(panel, label="Add Library")
+        add_library_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
+        main_sizer.Add(add_library_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 20)
+
+        add_game_btn = wx.Button(panel, label="Add Game")
+        add_game_btn.Bind(wx.EVT_BUTTON, self.on_add_game)
+        main_sizer.Add(add_game_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 20)
+
+        preferences_btn = wx.Button(panel, label="Preferences")
+        preferences_btn.Bind(wx.EVT_BUTTON, self.on_preferences)
+        main_sizer.Add(preferences_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 20)
+
+        exit_btn = wx.Button(panel, label="Exit")
+        exit_btn.Bind(wx.EVT_BUTTON, self.on_exit)
+        main_sizer.Add(exit_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 20)
+
+        panel.SetSizer(main_sizer)
+        main_sizer.Fit(panel)
+        self.SetClientSize(panel.GetSize())
+
+    def check_and_show_reminder(self):
+        """Check if reminder should be shown after successful addition"""
+        if self.reminder_shown:
+            return
+
+        # Check if user has added anything
+        has_libraries = len(self.library_manager.config["libraries"]) > 0
+        has_games = len(self.library_manager.games) > 0
+
+        if has_libraries or has_games:
+            wx.MessageBox(
+                "Friendly reminder: you can add folders that should be excluded from a game library, "
+                "as well as manage other preferences, by clicking the button here or pressing "
+                "\"Ctrl+,\" at any time.",
+                "Reminder", wx.OK | wx.ICON_INFORMATION)
+            self.reminder_shown = True
+
+    def on_add_library(self, event):
+        """Open directory picker to add library"""
+        dlg = wx.DirDialog(self, "Choose Game Library Directory")
+        if dlg.ShowModal() == wx.ID_OK:
+            path = dlg.GetPath()
+            name = os.path.basename(path)
+            self.library_manager.config["libraries"].append({
+                "name": name,
+                "path": path
+            })
+            self.library_manager.save_config()
+            self.check_and_show_reminder()
+        dlg.Destroy()
+
+    def on_add_game(self, event):
+        """Open add game dialog"""
+        dlg = GameDialog(self, self.library_manager)
+        if dlg.ShowModal() == wx.ID_OK:
+            self.library_manager.games.append(dlg.game)
+            self.library_manager.save_games()
+            self.check_and_show_reminder()
+        dlg.Destroy()
+
+    def on_preferences(self, event):
+        """Open preferences dialog"""
+        dlg = PreferencesDialog(self, self.library_manager)
+        if dlg.ShowModal() == wx.ID_OK:
+            self.check_and_show_reminder()
+        dlg.Destroy()
+
+    def on_exit(self, event):
+        """Exit the setup dialog"""
+        self.EndModal(wx.ID_CANCEL)
+
+
 class GameDialog(wx.Dialog):
     """Unified dialog for adding and editing games"""
 
@@ -690,15 +787,15 @@ class PreferencesDialog(wx.Dialog):
         exceptions_changed = old_exceptions != new_exceptions
 
         self.library_manager.save_config()
-        
-        if libs_changed:
+
+        if libs_changed and self.library_manager.config["libraries"]:
             # Determine which libraries are completely new
             old_lib_names = set(lib["name"] for lib in old_libs)
             new_lib_names = set(lib["name"] for lib in new_libs)
-            
+
             # Find new libraries that need full scan
             new_libraries_added = new_lib_names - old_lib_names
-            
+
             try:
                 # Use unified scanning - method will handle new libraries intelligently
                 result = self.library_manager.scan_with_dialog(

@@ -14,7 +14,7 @@ from pathlib import Path
 from models import Game
 from library_manager import GameLibraryManager
 from game_list import GameListCtrl
-from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog
+from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
 
 
 class FilterWorker(threading.Thread):
@@ -227,69 +227,18 @@ class MainFrame(wx.Frame):
         self.SetAcceleratorTable(accel_table)
     
     def check_libraries(self):
-        """Check for game libraries on startup"""
-        if not self.library_manager.config["libraries"]:
-            wx.MessageBox("No game libraries defined. Please select a game library folder.", 
-                        "Setup Required", wx.OK | wx.ICON_INFORMATION)
-            
-            dlg = wx.DirDialog(self, "Choose Game Library Directory")
-            if dlg.ShowModal() == wx.ID_OK:
-                path = dlg.GetPath()
-                name = os.path.basename(path)
-                self.library_manager.config["libraries"].append({
-                    "name": name,
-                    "path": path
-                })
-                self.library_manager.save_config()
-            else:
-                # User cancelled, exit
-                self.initializing = False
-                self.Close()
-                return
+        """Check if first run and show setup dialog"""
+        if self.library_manager.is_first_run:
+            dlg = FirstTimeSetupDialog(self, self.library_manager)
+            dlg.ShowModal()
             dlg.Destroy()
-        
-        # Validate and scan - the unified method automatically determines the best strategy
-        try:
-            result = self.library_manager.scan_with_dialog(self)
+            # Refresh UI in case they added stuff
+            self.refresh_game_list()
+            self.build_tree(force_rebuild=True)
 
-            # If scan was cancelled, just continue without showing any dialogs
-            if result is None:
-                self.initializing = False
-                self.game_list.SetFocus()
-                return
-
-            exceptions_count, removed_libraries = result
-            
-            # Check for removed libraries first
-            if removed_libraries:
-                lib_names = ", ".join([lib["name"] for lib in removed_libraries])
-                lib_paths = "\n".join([f"• {lib['name']}: {lib['path']}" for lib in removed_libraries])
-                message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}\n\nWould you like to update your library settings?"
-                if wx.MessageBox(message, "Missing Library Paths Removed", 
-                                wx.YES_NO | wx.ICON_WARNING) == wx.YES:
-                    self.on_preferences(None)
-            elif len(self.library_manager.games) == 0:
-                if wx.MessageBox("No games found in currently added libraries. Open preferences?",
-                                "No Games Found",
-                                wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
-                    self.on_preferences(None)
-
-            # Restore tree selections now that initial scan is complete
-            self.restore_tree_selections()
-
-            # Mark initialization complete and set focus on game list
-            self.initializing = False
-            self.game_list.SetFocus()
-
-        except PermissionError as e:
-            self.initializing = False
-            self.game_list.SetFocus()
-            if wx.MessageBox(f"{e}\nRemove this library?",
-                            "Permission Denied",
-                            wx.YES_NO | wx.ICON_ERROR) == wx.YES:
-                # Remove the problematic library
-                # (Would need to identify which one caused the error)
-                pass
+        # Always continue to main window (no forced scanning)
+        self.initializing = False
+        self.game_list.SetFocus()
     
     def build_tree(self, filters=None, force_rebuild=False, restore_selections=True):
         """Build the tree control hierarchy with flat 2-level structure using cache"""
@@ -781,6 +730,10 @@ class MainFrame(wx.Frame):
     
     def on_refresh(self, event):
         """Refresh/rescan libraries"""
+        # Guard: do nothing if no libraries configured
+        if not self.library_manager.config["libraries"]:
+            return
+
         try:
             result = self.library_manager.scan_with_dialog(self)
 
