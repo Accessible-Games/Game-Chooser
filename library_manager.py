@@ -67,7 +67,8 @@ class GameLibraryManager:
                 "last_search": "",
                 "column_widths": None,
                 "tree_expansion": {},
-                "tree_selections": []
+                "tree_selections": [],
+                "tree_filters": ["platform", "genre", "developer", "year"]
             }
         }
         

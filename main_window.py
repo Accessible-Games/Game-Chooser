@@ -88,6 +88,7 @@ class MainFrame(wx.Frame):
         self.dialog_active = False  # Flag to block spurious events when modal dialogs are open
         self.restoring_tree = False  # Flag to block saves during tree restoration
         self.initializing = True  # Flag to prevent focus stealing during startup
+        self.current_tree_filters = ["platform", "genre", "developer", "year"]  # Track active tree filters
 
         # Set up UI
         self.init_ui()
@@ -175,10 +176,10 @@ class MainFrame(wx.Frame):
         
         # Set up keyboard shortcuts
         self.setup_accelerators()
-        
-        # Build initial tree (without restoring selections yet)
-        self.build_tree(restore_selections=False)
-        
+
+        # Note: Tree will be built after loading saved state
+        # to use the saved filter configuration
+
         # Populate initial game list
         self.refresh_game_list()
     
@@ -294,6 +295,9 @@ class MainFrame(wx.Frame):
         if filters is None:
             filters = ["platform", "genre", "developer", "year"]
 
+        # Store the current filters for dialog state
+        self.current_tree_filters = filters
+
         # Generate a simple hash of games to detect changes
         current_hash = len(self.library_manager.games)
         if current_hash > 0:
@@ -360,7 +364,8 @@ class MainFrame(wx.Frame):
                 for value in sorted(categories[category_key], key=str.lower):
                     self.tree_ctrl.AppendItem(category_node, value)
 
-        self.tree_ctrl.ExpandAll()
+        # Expand only the root to show categories, but keep all categories collapsed
+        self.tree_ctrl.Expand(root)
 
         # Restore saved selections (only if requested)
         if restore_selections:
@@ -795,17 +800,19 @@ class MainFrame(wx.Frame):
     def on_filter_tree(self, event):
         """Show filter tree dialog"""
         dlg = wx.Dialog(self, title="Filter Tree Levels", size=(300, 200))
-        
+
         panel = wx.Panel(dlg)
         sizer = wx.BoxSizer(wx.VERTICAL)
-        
+
         # Checkboxes for each level
         levels = ["Platform", "Genre", "Developer", "Year"]
+        filter_keys = ["platform", "genre", "developer", "year"]
         checkboxes = []
-        
-        for level in levels:
+
+        for level, filter_key in zip(levels, filter_keys):
             cb = wx.CheckBox(panel, label=level)
-            cb.SetValue(True)  # All checked by default
+            # Set checkbox based on current filter state
+            cb.SetValue(filter_key in self.current_tree_filters)
             checkboxes.append(cb)
             sizer.Add(cb, 0, wx.ALL, 5)
         
@@ -831,9 +838,13 @@ class MainFrame(wx.Frame):
                 filters.append("developer")
             if checkboxes[3].GetValue():
                 filters.append("year")
-            
+
             self.build_tree(filters)
-        
+
+            # Save filter state immediately
+            self.library_manager.config["SavedState"]["tree_filters"] = self.current_tree_filters
+            self.library_manager.save_config()
+
         dlg.Destroy()
     
     def on_preferences(self, event):
@@ -897,7 +908,7 @@ class MainFrame(wx.Frame):
     def load_saved_state(self):
         """Load saved window state"""
         state = self.library_manager.config["SavedState"]
-        
+
         # Window size and position
         if state["window_size"]:
             self.SetSize(state["window_size"])
@@ -906,12 +917,12 @@ class MainFrame(wx.Frame):
             display = wx.Display()
             rect = display.GetClientArea()
             self.SetSize(rect.width // 2, rect.height // 2)
-        
+
         if state["window_position"]:
             self.SetPosition(state["window_position"])
         else:
             self.Centre()
-        
+
         # Splitter position
         if state["splitter_position"]:
             self.splitter.SetSashPosition(state["splitter_position"])
@@ -919,10 +930,17 @@ class MainFrame(wx.Frame):
             # Default 50/50 split
             width = self.GetSize()[0]
             self.splitter.SetSashPosition(width // 2)
-        
+
         # Search term
         if state["last_search"]:
             self.search_combo.SetValue(state["last_search"])
+
+        # Tree filters
+        if state["tree_filters"]:
+            self.current_tree_filters = state["tree_filters"]
+
+        # Build tree with saved filters (without restoring selections yet)
+        self.build_tree(filters=self.current_tree_filters, restore_selections=False)
     
     def save_state(self):
         """Save current window state"""
@@ -932,6 +950,9 @@ class MainFrame(wx.Frame):
         state["window_position"] = list(self.GetPosition())
         state["splitter_position"] = self.splitter.GetSashPosition()
         state["last_search"] = self.search_combo.GetValue()
+
+        # Save tree filters
+        state["tree_filters"] = self.current_tree_filters
 
         # Save column widths
         self.game_list.save_column_widths()
