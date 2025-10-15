@@ -488,11 +488,11 @@ class MainFrame(wx.Frame):
                         selected_index = i
                         break
 
-            # Select and focus (but skip SetFocus during initialization to avoid stealing focus from scan dialog)
+            # Select and focus the item (for screen reader compatibility)
+            # But don't steal keyboard focus - let user stay where they are
             self.game_list.Select(selected_index)
             self.game_list.Focus(selected_index)
-            if not self.initializing:
-                self.game_list.SetFocus()
+            # Removed SetFocus() - was stealing focus from tree control on every filter change
     
     def refresh_game_list(self):
         """Refresh the game list display"""
