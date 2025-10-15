@@ -487,15 +487,35 @@ class GameLibraryManager:
                 auto_exceptions_added += exceptions_added
 
                 if executables:
-                    # This directory has games
-                    directory_name = Path(path).name
-
-                    # Extract developer from grandparent directory (if it exists and isn't the library root)
-                    developer_name = ""
+                    # Calculate depth of game directory relative to library root for hierarchical field extraction
                     path_obj = Path(path)
-                    if path_obj.parent != Path(library_path):
-                        # Grandparent exists and isn't the library root
+                    try:
+                        rel_path = path_obj.relative_to(Path(library_path))
+                        depth = len(rel_path.parts)
+                    except ValueError:
+                        # Path not relative to library - shouldn't happen, default to depth 1
+                        depth = 1
+
+                    # Extract genre, developer, and title based on directory depth
+                    genre_name = ""
+                    developer_name = ""
+                    directory_name = ""
+
+                    if depth == 0:
+                        # Executable directly in library root - title will come from exe name
+                        directory_name = ""  # Signal to use exe name
+                    elif depth == 1:
+                        # One level deep: just title from directory
+                        directory_name = path_obj.name
+                    elif depth == 2:
+                        # Two levels: developer/title
+                        directory_name = path_obj.name
                         developer_name = path_obj.parent.name
+                    else:  # depth >= 3
+                        # Three+ levels: genre/developer/title (only use top 3 levels)
+                        directory_name = path_obj.name
+                        developer_name = path_obj.parent.name
+                        genre_name = path_obj.parent.parent.name
 
                     # Create games for all executables in directory
                     for exe_path, rel_str in executables:
@@ -525,7 +545,7 @@ class GameLibraryManager:
                             # Create new game
                             game = self._create_game_from_executable(
                                 exe_path, rel_str, library_name,
-                                directory_name, len(executables) > 1, developer_name
+                                directory_name, len(executables) > 1, developer_name, genre_name
                             )
                             found_games.append(game)
                 
@@ -628,7 +648,7 @@ class GameLibraryManager:
         # Default: first executable
         return exe_paths[0]
 
-    def _create_game_from_executable(self, exe_path, rel_path_str, library_name, directory_name, multiple_exes, developer_name=""):
+    def _create_game_from_executable(self, exe_path, rel_path_str, library_name, directory_name, multiple_exes, developer_name="", genre_name=""):
         """
         Create a Game object from an executable.
 
@@ -639,14 +659,20 @@ class GameLibraryManager:
             directory_name: Name of the game directory
             multiple_exes: Whether there are multiple executables in this directory
             developer_name: Name of the developer (from grandparent directory)
+            genre_name: Name of the genre (from great-grandparent directory)
 
         Returns:
             Game object
         """
-        # Create title
-        if multiple_exes:
+        # Create title based on directory depth
+        if not directory_name:
+            # Depth 0: executable directly in library root, use exe name as title
+            title = exe_path.stem
+        elif multiple_exes:
+            # Multiple executables in directory, disambiguate with exe name
             title = f"{directory_name} ({exe_path.stem})"
         else:
+            # Single executable, use directory name as title
             title = directory_name
 
         # Determine platform based on file type, not system OS
@@ -662,6 +688,7 @@ class GameLibraryManager:
         from models import Game
         return Game(
             title=title,
+            genre=genre_name,
             developer=developer_name,
             platforms=[platform_name],
             launch_path=rel_path_str,
