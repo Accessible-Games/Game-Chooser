@@ -796,6 +796,18 @@ class PreferencesDialog(wx.Dialog):
             # Find new libraries that need full scan
             new_libraries_added = new_lib_names - old_lib_names
 
+            # Ask user if they want to scan now
+            response = wx.MessageBox(
+                "Library configuration has changed. Would you like to scan for games now?\n\n"
+                "You can also scan later using Refresh (F5).",
+                "Scan Libraries?",
+                wx.YES_NO | wx.ICON_QUESTION
+            )
+
+            if response != wx.YES:
+                # User declined - just save and return
+                return
+
             try:
                 # Use unified scanning - method will handle new libraries intelligently
                 result = self.library_manager.scan_with_dialog(
