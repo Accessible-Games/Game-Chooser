@@ -7,18 +7,23 @@ class ExceptionManager:
     """Manages auto-exception patterns and user exceptions for game scanning."""
 
     # Simplified auto-exception keywords - only relevant for Windows/Mac games
+    # Keywords match anywhere in the filename (substring matching, not word boundaries)
     AUTO_EXCEPTION_KEYWORDS = [
         # Installation and setup
         "setup", "install", "installer", "installshield", "unins", "uninstall",
         "update", "updater", "upgrade", "patch", "patcher",
         # Configuration
-        "config", "configure", "settings",
+        "config", "configure", "settings", "configtool",
         # System redistributables
         "vcredist", "directx", "dxsetup", "runtime", "dotnet", "redist",
         # Documentation
         "readme", "license", "credit", "credits", "docs",
         # Anti-piracy detection
-        "keygen", "crack", "trainer", "cheat"
+        "keygen", "crack", "trainer", "cheat",
+        # User-provided keywords
+        "registration", "register", "server", "mapuploader", "level editor",
+        "uploader", "leveltool", "pack_creater", "scoresystem",
+        "gamemenu", "(1)", "upnpc"
     ]
 
     AUTO_EXCEPTION_EXACT_STEMS = {
@@ -29,7 +34,17 @@ class ExceptionManager:
         # Common installer names
         "setup", "installer", "install",
         # Game utilities that are not games
-        "mapmaker", "myaccount", "joystick"
+        "mapmaker", "myaccount", "joystick",
+        # User-provided exact stems
+        "1oom_gfxconv", "1oom_lbxedit", "1oom_pbxdump", "1oom_pbxmake",
+        "1oom_saveconv", "unzip", "nvda", "ag_say", "cwsdpmi", "lha",
+        "perl", "qlaunch", "quake", "zqds", "zquake-gl", "zquake-vidnull",
+        "up", "checkup", "sayit", "rsb", "gthelp", "golfcourse-maker",
+        "lwparse", "lwwb2000", "speechconfig", "w9xpopen", "mazecreate",
+        "monopolyboardmaker", "pmthelp", "signtool", "scwhelp", "sodhelp",
+        "oggenc2", "sbhhelp", "swr", "reg",
+        "spacer", "reader", "waver", "encrypt", "elevate", "snowreg",
+        "firstrun", "remove", "tbecore", "tools", "lame", "cpsdistr"
     }
 
     AUTO_EXCEPTION_PREFIXES = [
@@ -76,9 +91,14 @@ class ExceptionManager:
         self.keyword_pattern = self._compile_keyword_pattern()
 
     def _compile_keyword_pattern(self):
-        """Compile keyword patterns into a single regex for efficiency."""
+        """Compile keyword patterns into a single regex for efficiency.
+
+        Keywords match anywhere in the filename (substring matching).
+        For example, 'server' will match 'server', 'gameserver', 'game-server', etc.
+        """
         escaped = [re.escape(kw) for kw in self.keywords]
-        pattern = r'\b(' + '|'.join(escaped) + r')\b'
+        # No word boundaries - match keywords anywhere as substrings
+        pattern = r'(' + '|'.join(escaped) + r')'
         return re.compile(pattern, re.IGNORECASE)
 
     def should_auto_exclude(self, path):
