@@ -716,14 +716,28 @@ class PreferencesDialog(wx.Dialog):
             self.lib_list.DeleteItem(selected)
     
     def on_add_exception(self, event):
-        """Add a new exception"""
-        dlg = wx.TextEntryDialog(self, "Enter exception path (e.g., games\\tool\\updater.exe):",
-                                "Add Exception")
+        """Add a new file exception"""
+        # Determine file filter based on platform
+        system = platform.system()
+        if system == "Windows":
+            wildcard = "Executable files (*.exe;*.bat)|*.exe;*.bat|All files (*.*)|*.*"
+        else:
+            wildcard = "All files (*.*)|*.*"
+
+        dlg = wx.FileDialog(self, "Select File to Exclude from Scanning",
+                           wildcard=wildcard,
+                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
         if dlg.ShowModal() == wx.ID_OK:
-            exc_path = dlg.GetValue()
-            if exc_path:
-                self.exc_list.InsertItem(self.exc_list.GetItemCount(), exc_path)
-                self.library_manager.config["exceptions"].append(exc_path)
+            file_path = dlg.GetPath()
+            if file_path:
+                # Convert to relative path if within a library
+                relative_path = self._make_relative_to_library(file_path)
+                if relative_path:
+                    self.exc_list.InsertItem(self.exc_list.GetItemCount(), relative_path)
+                    self.library_manager.config["exceptions"].append(relative_path)
+                else:
+                    wx.MessageBox("Selected file is not within any configured library path.",
+                                "Invalid File", wx.OK | wx.ICON_WARNING)
         dlg.Destroy()
 
     def on_add_folder_exception(self, event):
