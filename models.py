@@ -8,7 +8,7 @@ from typing import List, Dict, Any
 
 class Game:
     """Represents a game in the library"""
-    def __init__(self, title="", genre="", developer="", year="unknown", 
+    def __init__(self, title="", genre="", developer="", year="",
                  platforms=None, launch_path="", library_name=""):
         self.title = title
         self.genre = genre
@@ -35,7 +35,7 @@ class Game:
             title=data.get("title", ""),
             genre=data.get("genre", ""),
             developer=data.get("developer", ""),
-            year=data.get("year", "unknown"),
+            year=data.get("year", ""),
             platforms=data.get("platforms", []),
             launch_path=data.get("launch_path", ""),
             library_name=data.get("library_name", "")

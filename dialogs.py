@@ -279,7 +279,7 @@ class GameDialog(wx.Dialog):
         # Year
         sizer.Add(wx.StaticText(panel, label="Year:"),
                  pos=(5, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        year_val = 2000 if self.game.year == "unknown" else int(self.game.year) if self.game.year else 2000
+        year_val = 2000 if not self.game.year else int(self.game.year)
         self.year_ctrl = wx.SpinCtrl(panel, value=str(year_val),
                                     min=1000, max=9999, initial=year_val)
         sizer.Add(self.year_ctrl, pos=(5, 1), flag=wx.EXPAND)
@@ -522,7 +522,7 @@ class GameDialog(wx.Dialog):
         self.game.title = title
         self.game.genre = self.genre_ctrl.GetValue().strip()
         self.game.developer = self.developer_ctrl.GetValue().strip()
-        self.game.year = year_str or "unknown"
+        self.game.year = year_str or ""
 
         # Handle platform and path
         if platform_val == "Web Game":
