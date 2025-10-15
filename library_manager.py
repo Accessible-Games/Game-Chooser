@@ -490,6 +490,13 @@ class GameLibraryManager:
                     # This directory has games
                     directory_name = Path(path).name
 
+                    # Extract developer from grandparent directory (if it exists and isn't the library root)
+                    developer_name = ""
+                    path_obj = Path(path)
+                    if path_obj.parent != Path(library_path):
+                        # Grandparent exists and isn't the library root
+                        developer_name = path_obj.parent.name
+
                     # Create games for all executables in directory
                     for exe_path, rel_str in executables:
                         # Check for cancellation
@@ -518,7 +525,7 @@ class GameLibraryManager:
                             # Create new game
                             game = self._create_game_from_executable(
                                 exe_path, rel_str, library_name,
-                                directory_name, len(executables) > 1
+                                directory_name, len(executables) > 1, developer_name
                             )
                             found_games.append(game)
                 
@@ -621,7 +628,7 @@ class GameLibraryManager:
         # Default: first executable
         return exe_paths[0]
 
-    def _create_game_from_executable(self, exe_path, rel_path_str, library_name, directory_name, multiple_exes):
+    def _create_game_from_executable(self, exe_path, rel_path_str, library_name, directory_name, multiple_exes, developer_name=""):
         """
         Create a Game object from an executable.
 
@@ -631,6 +638,7 @@ class GameLibraryManager:
             library_name: Name of the library
             directory_name: Name of the game directory
             multiple_exes: Whether there are multiple executables in this directory
+            developer_name: Name of the developer (from grandparent directory)
 
         Returns:
             Game object
@@ -654,6 +662,7 @@ class GameLibraryManager:
         from models import Game
         return Game(
             title=title,
+            developer=developer_name,
             platforms=[platform_name],
             launch_path=rel_path_str,
             library_name=library_name
