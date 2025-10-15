@@ -251,8 +251,36 @@ class MainFrame(wx.Frame):
         """Check if first run and show setup dialog"""
         if self.library_manager.is_first_run:
             dlg = FirstTimeSetupDialog(self, self.library_manager)
-            dlg.ShowModal()
+            result = dlg.ShowModal()
             dlg.Destroy()
+
+            # If libraries were added, prompt user to scan
+            if result == wx.ID_OK and self.library_manager.config["libraries"]:
+                response = wx.MessageBox(
+                    "Would you like to scan your libraries for games now?\n\n"
+                    "You can also scan later using Refresh (F5).",
+                    "Scan Libraries?",
+                    wx.YES_NO | wx.ICON_QUESTION
+                )
+
+                if response == wx.YES:
+                    try:
+                        scan_result = self.library_manager.scan_with_dialog(self)
+
+                        # If scan wasn't cancelled, refresh UI
+                        if scan_result is not None:
+                            exceptions_count, removed_libraries = scan_result
+
+                            # Handle removed libraries
+                            if removed_libraries:
+                                lib_paths = "\n".join([f"• {lib['name']}: {lib['path']}" for lib in removed_libraries])
+                                message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}\n\nWould you like to update your library settings?"
+                                if wx.MessageBox(message, "Missing Library Paths Removed",
+                                                wx.YES_NO | wx.ICON_WARNING) == wx.YES:
+                                    self.on_preferences(None)
+                    except PermissionError as e:
+                        wx.MessageBox(str(e), "Permission Denied", wx.OK | wx.ICON_ERROR)
+
             # Refresh UI in case they added stuff
             self.refresh_game_list()
             self.build_tree(force_rebuild=True)

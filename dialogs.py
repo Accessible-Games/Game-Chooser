@@ -120,9 +120,13 @@ class FirstTimeSetupDialog(wx.Dialog):
         self.library_manager = library_manager
         self.parent_frame = parent
         self.reminder_shown = False
+        self.initial_library_count = len(library_manager.config["libraries"])
 
         self.init_ui()
         self.CenterOnParent()
+
+        # Handle close button (X) click
+        self.Bind(wx.EVT_CLOSE, self.on_close)
 
     def init_ui(self):
         """Initialize the dialog UI"""
@@ -166,10 +170,10 @@ class FirstTimeSetupDialog(wx.Dialog):
 
         if has_libraries or has_games:
             wx.MessageBox(
-                "Friendly reminder: you can add folders that should be excluded from a game library, "
+                "You can add folders that should be excluded from a game library, "
                 "as well as manage other preferences, by clicking the button here or pressing "
                 "\"Ctrl+,\" at any time.",
-                "Reminder", wx.OK | wx.ICON_INFORMATION)
+                "Friendly Reminder", wx.OK | wx.ICON_INFORMATION)
             self.reminder_shown = True
 
     def on_add_library(self, event):
@@ -202,9 +206,22 @@ class FirstTimeSetupDialog(wx.Dialog):
             self.check_and_show_reminder()
         dlg.Destroy()
 
+    def on_close(self, event):
+        """Handle close button (X) click"""
+        # Check if libraries were added during this session
+        current_library_count = len(self.library_manager.config["libraries"])
+        libraries_added = current_library_count > self.initial_library_count
+
+        # Return custom code if libraries were added, otherwise cancel
+        if libraries_added:
+            self.EndModal(wx.ID_OK)  # Indicate libraries were added
+        else:
+            self.EndModal(wx.ID_CANCEL)
+
     def on_exit(self, event):
         """Exit the setup dialog"""
-        self.EndModal(wx.ID_CANCEL)
+        # Use the same logic as close
+        self.on_close(event)
 
 
 class GameDialog(wx.Dialog):
