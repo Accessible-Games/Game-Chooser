@@ -9,6 +9,7 @@ import subprocess
 import platform
 import webbrowser
 import threading
+import random
 from pathlib import Path
 
 from models import Game
@@ -219,6 +220,12 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_preferences, pref_item)
         menu_bar.Append(edit_menu, "&Edit")
 
+        # Launch menu
+        launch_menu = wx.Menu()
+        random_game_item = launch_menu.Append(wx.ID_ANY, "&Random Game\tCtrl+R")
+        self.Bind(wx.EVT_MENU, self.on_random_game, random_game_item)
+        menu_bar.Append(launch_menu, "&Launch")
+
         self.SetMenuBar(menu_bar)
     
     def setup_accelerators(self):
@@ -244,6 +251,11 @@ class MainFrame(wx.Frame):
         refresh_id = wx.NewIdRef()
         accel_entries.append((wx.ACCEL_NORMAL, wx.WXK_F5, refresh_id))
         self.Bind(wx.EVT_MENU, self.on_refresh, id=refresh_id)
+
+        # Ctrl+R for random game
+        random_game_id = wx.NewIdRef()
+        accel_entries.append((wx.ACCEL_CTRL, ord('R'), random_game_id))
+        self.Bind(wx.EVT_MENU, self.on_random_game, id=random_game_id)
 
         accel_table = wx.AcceleratorTable(accel_entries)
         self.SetAcceleratorTable(accel_table)
@@ -636,12 +648,8 @@ class MainFrame(wx.Frame):
             wx.MessageBox(f"Failed to open folder: {e}",
                         "Error", wx.OK | wx.ICON_ERROR)
 
-    def on_launch(self, event):
-        """Launch selected game"""
-        game = self.game_list.get_selected_game()
-        if not game:
-            return
-
+    def launch_game(self, game):
+        """Launch a specific game"""
         # Check platform compatibility for non-web games
         if not game.launch_path.startswith("http"):
             # Get current platform
@@ -677,12 +685,12 @@ class MainFrame(wx.Frame):
             if not full_path or not Path(full_path).exists():
                 wx.MessageBox("Game executable not found. Please locate the game.",
                             "File Not Found", wx.OK | wx.ICON_ERROR)
-                
+
                 # File dialog to relocate
                 dlg = wx.FileDialog(self, "Locate Game Executable")
                 if dlg.ShowModal() == wx.ID_OK:
                     new_path = dlg.GetPath()
-                    
+
                     # Validate path is in a library
                     valid = False
                     for lib in self.library_manager.config["libraries"]:
@@ -693,14 +701,14 @@ class MainFrame(wx.Frame):
                             self.library_manager.save_games()
                             valid = True
                             break
-                    
+
                     if not valid:
                         wx.MessageBox("Selected file is not in a configured game library.",
                                     "Invalid Location", wx.OK | wx.ICON_ERROR)
                         return
                 dlg.Destroy()
                 return
-            
+
             # Launch the game
             try:
                 game_dir = str(Path(full_path).parent)
@@ -711,14 +719,65 @@ class MainFrame(wx.Frame):
                 else:
                     # Regular executable
                     subprocess.Popen([full_path], cwd=game_dir)
-                
+
                 # Minimize window
                 self.Iconize(True)
-            
+
             except Exception as e:
                 wx.MessageBox(f"Failed to launch game: {e}",
                             "Launch Error", wx.OK | wx.ICON_ERROR)
-    
+
+    def on_launch(self, event):
+        """Launch selected game"""
+        game = self.game_list.get_selected_game()
+        if not game:
+            return
+
+        self.launch_game(game)
+
+    def on_random_game(self, event):
+        """Pick a random game from filtered list and offer to launch it"""
+        if not self.filtered_games:
+            wx.MessageBox("No games available to choose from.",
+                        "No Games", wx.OK | wx.ICON_INFORMATION)
+            return
+
+        # Filter for platform-compatible games only
+        current_system = platform.system()
+        platform_map = {
+            "Windows": "Windows",
+            "Darwin": "macOS",
+            "Linux": "Linux"
+        }
+        current_platform = platform_map.get(current_system, current_system)
+
+        # Get games compatible with current platform (or web games)
+        compatible_games = [
+            game for game in self.filtered_games
+            if game.launch_path.startswith("http") or current_platform in game.platforms
+        ]
+
+        if not compatible_games:
+            wx.MessageBox(
+                f"No games compatible with {current_platform} in the current filtered list.",
+                "No Compatible Games",
+                wx.OK | wx.ICON_INFORMATION
+            )
+            return
+
+        # Pick random game
+        random_game = random.choice(compatible_games)
+
+        # Show dialog
+        response = wx.MessageBox(
+            f"Your game for today is...\n\n{random_game.title}\n\nLaunch now?",
+            "Random Game",
+            wx.YES_NO | wx.ICON_QUESTION
+        )
+
+        if response == wx.YES:
+            self.launch_game(random_game)
+
     def on_edit_game(self, event):
         """Edit selected game"""
         game = self.game_list.get_selected_game()
