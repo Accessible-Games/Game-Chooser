@@ -643,6 +643,9 @@ class MainFrame(wx.Frame):
         if not game:
             return
 
+        # Remember the current index position to maintain list position after deletion
+        current_index = self.game_list.GetFirstSelected()
+
         # Show custom delete dialog
         dlg = DeleteGameDialog(self, game.title)
 
@@ -659,12 +662,25 @@ class MainFrame(wx.Frame):
             self.library_manager.games.remove(game)
             self.library_manager.save_games()
             self.refresh_game_list()
+
+            # Select previous item to stay in same area of list
+            new_index = max(0, current_index - 1) if current_index > 0 else 0
+            if new_index < len(self.filtered_games):
+                self.game_list.Select(new_index)
+                self.game_list.Focus(new_index)
+
         elif result == DeleteGameDialog.ID_DELETE_AND_EXCEPTION:
             # Delete and add to exceptions
             self.library_manager.add_to_exceptions(game)
             self.library_manager.games.remove(game)
             self.library_manager.save_games()
             self.refresh_game_list()
+
+            # Select previous item to stay in same area of list
+            new_index = max(0, current_index - 1) if current_index > 0 else 0
+            if new_index < len(self.filtered_games):
+                self.game_list.Select(new_index)
+                self.game_list.Focus(new_index)
     
     def on_add_game(self, event):
         """Add a new game"""
