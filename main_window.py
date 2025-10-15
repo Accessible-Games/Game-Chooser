@@ -223,22 +223,27 @@ class MainFrame(wx.Frame):
     def setup_accelerators(self):
         """Set up keyboard accelerators"""
         accel_entries = []
-        
+
         # Ctrl+F for search
         search_id = wx.NewIdRef()
         accel_entries.append((wx.ACCEL_CTRL, ord('F'), search_id))
         self.Bind(wx.EVT_MENU, lambda e: self.search_combo.SetFocus(), id=search_id)
-        
+
         # Ctrl+N for new game
         new_game_id = wx.NewIdRef()
         accel_entries.append((wx.ACCEL_CTRL, ord('N'), new_game_id))
         self.Bind(wx.EVT_MENU, self.on_add_game, id=new_game_id)
-        
+
+        # Ctrl+Enter for open folder
+        open_folder_id = wx.NewIdRef()
+        accel_entries.append((wx.ACCEL_CTRL, wx.WXK_RETURN, open_folder_id))
+        self.Bind(wx.EVT_MENU, self.on_open_folder, id=open_folder_id)
+
         # F5 for refresh
         refresh_id = wx.NewIdRef()
         accel_entries.append((wx.ACCEL_NORMAL, wx.WXK_F5, refresh_id))
         self.Bind(wx.EVT_MENU, self.on_refresh, id=refresh_id)
-        
+
         accel_table = wx.AcceleratorTable(accel_entries)
         self.SetAcceleratorTable(accel_table)
     
@@ -529,23 +534,26 @@ class MainFrame(wx.Frame):
     def on_list_context(self, event):
         """Show context menu for list"""
         menu = wx.Menu()
-        
+
         game = self.game_list.get_selected_game()
         if game:
             launch_item = menu.Append(wx.ID_ANY, "Launch")
             self.Bind(wx.EVT_MENU, self.on_launch, launch_item)
-            
+
             edit_item = menu.Append(wx.ID_ANY, "Edit")
             self.Bind(wx.EVT_MENU, self.on_edit_game, edit_item)
-            
+
+            open_folder_item = menu.Append(wx.ID_ANY, "Open folder")
+            self.Bind(wx.EVT_MENU, self.on_open_folder, open_folder_item)
+
             delete_item = menu.Append(wx.ID_ANY, "Delete")
             self.Bind(wx.EVT_MENU, self.on_delete_game, delete_item)
-            
+
             menu.AppendSeparator()
-        
+
         add_game_item = menu.Append(wx.ID_ANY, "Add Game")
         self.Bind(wx.EVT_MENU, self.on_add_game, add_game_item)
-        
+
         self.PopupMenu(menu)
         menu.Destroy()
     
@@ -561,7 +569,40 @@ class MainFrame(wx.Frame):
             self.on_launch(None)
         else:
             event.Skip()
-    
+
+    def on_open_folder(self, event):
+        """Open the game's folder in the file manager"""
+        game = self.game_list.get_selected_game()
+        if not game:
+            return
+
+        # Skip web games - no local folder to open
+        if game.launch_path.startswith("http"):
+            return
+
+        # Get full path to game
+        full_path = self.library_manager.get_full_path(game)
+        if not full_path or not Path(full_path).exists():
+            wx.MessageBox("Game folder not found.",
+                        "Folder Not Found", wx.OK | wx.ICON_ERROR)
+            return
+
+        # Get the game directory
+        game_dir = str(Path(full_path).parent)
+
+        # Open folder with platform-specific command
+        try:
+            system = platform.system()
+            if system == "Windows":
+                # Open folder and highlight the executable
+                subprocess.Popen(['explorer', '/select,', full_path])
+            elif system == "Darwin":
+                # macOS - just open the folder
+                subprocess.Popen(['open', game_dir])
+        except Exception as e:
+            wx.MessageBox(f"Failed to open folder: {e}",
+                        "Error", wx.OK | wx.ICON_ERROR)
+
     def on_launch(self, event):
         """Launch selected game"""
         game = self.game_list.get_selected_game()
