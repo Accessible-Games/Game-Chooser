@@ -323,8 +323,8 @@ class MainFrame(wx.Frame):
                 # Add category node
                 category_node = self.tree_ctrl.AppendItem(root, category_labels[category_key])
 
-                # Add all values under this category
-                for value in sorted(categories[category_key]):
+                # Add all values under this category (case-insensitive sort)
+                for value in sorted(categories[category_key], key=str.lower):
                     self.tree_ctrl.AppendItem(category_node, value)
 
         self.tree_ctrl.ExpandAll()
