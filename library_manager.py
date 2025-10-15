@@ -673,10 +673,9 @@ class GameLibraryManager:
                     break
 
             if existing:
-                # Update platforms if needed
-                for platform in new_game.platforms:
-                    if platform not in existing.platforms:
-                        existing.platforms.append(platform)
+                # Replace platform based on current file type (don't accumulate)
+                # This fixes incorrect platform detection from previous scans
+                existing.platforms = new_game.platforms
             else:
                 existing_games.append(new_game)
 
@@ -694,9 +693,6 @@ class GameLibraryManager:
         Returns:
             List of removed libraries (empty if none removed)
         """
-        # Step 0: Clean configuration before scanning
-        self.cleanConfigs(progress_callback)
-
         # Step 1: Validate libraries and handle missing ones
         valid_libraries, missing_libraries = self._validate_libraries()
         removed_libraries = self._remove_missing_libraries(missing_libraries)
@@ -712,6 +708,13 @@ class GameLibraryManager:
         # Step 2: Validate existing games
         valid_library_names = {lib["name"] for lib in valid_libraries}
         validated_games = self._validate_existing_games(valid_library_names, cancel_check)
+
+        # Step 2.5: Remove games that match current exceptions
+        # This ensures games added to exceptions since last scan are removed
+        original_count = len(validated_games)
+        validated_games = [g for g in validated_games if not self._is_path_exception(g.launch_path)]
+        if len(validated_games) < original_count and progress_callback:
+            progress_callback(f"Removed {original_count - len(validated_games)} games matching exceptions", 0, len(validated_games))
 
         if cancel_check and cancel_check():
             self._last_auto_exception_count = 0
