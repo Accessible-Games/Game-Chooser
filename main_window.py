@@ -567,7 +567,33 @@ class MainFrame(wx.Frame):
         game = self.game_list.get_selected_game()
         if not game:
             return
-        
+
+        # Check platform compatibility for non-web games
+        if not game.launch_path.startswith("http"):
+            # Get current platform
+            current_system = platform.system()
+
+            # Map system name to our platform names
+            platform_map = {
+                "Windows": "Windows",
+                "Darwin": "macOS",
+                "Linux": "Linux"
+            }
+            current_platform = platform_map.get(current_system, current_system)
+
+            # Check if current platform is supported by the game
+            if current_platform not in game.platforms:
+                # Build supported platforms string
+                supported = ", ".join(game.platforms) if game.platforms else "no platforms"
+
+                # Show error dialog
+                wx.MessageBox(
+                    f"You're trying to run {game.title} on {current_platform}, but it only supports {supported}.",
+                    "Uh-oh",
+                    wx.OK | wx.ICON_ERROR
+                )
+                return
+
         if game.launch_path.startswith("http"):
             # Web game
             webbrowser.open(game.launch_path)
