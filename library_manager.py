@@ -504,9 +504,14 @@ class GameLibraryManager:
                                 break
 
                         if existing:
-                            # Update platforms if needed
-                            import platform
-                            platform_name = "Windows" if platform.system() == "Windows" else "macOS"
+                            # Update platforms if needed based on file type
+                            if exe_path.suffix.lower() == '.app':
+                                platform_name = "macOS"
+                            elif exe_path.suffix.lower() in ['.exe', '.bat']:
+                                platform_name = "Windows"
+                            else:
+                                platform_name = "macOS" if exe_path.is_dir() else "Windows"
+
                             if platform_name not in existing.platforms:
                                 existing.platforms.append(platform_name)
                         else:
@@ -636,10 +641,15 @@ class GameLibraryManager:
         else:
             title = directory_name
 
-        # Determine platform
-        import platform
-        system = platform.system()
-        platform_name = "Windows" if system == "Windows" else "macOS"
+        # Determine platform based on file type, not system OS
+        if exe_path.suffix.lower() == '.app':
+            platform_name = "macOS"
+        elif exe_path.suffix.lower() in ['.exe', '.bat']:
+            platform_name = "Windows"
+        else:
+            # Fallback for executables without extensions (typically Unix/Mac)
+            # .app bundles are directories, so check for that
+            platform_name = "macOS" if exe_path.is_dir() else "Windows"
 
         from models import Game
         return Game(
