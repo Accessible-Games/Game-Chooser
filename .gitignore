@@ -1,5 +1,7 @@
 games.json
 __pycache__
 *:Zone.Identifier
+*mshield
 config.json
 errors.log
+venv/
