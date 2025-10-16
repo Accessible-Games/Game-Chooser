@@ -212,3 +212,23 @@ All other executables in that folder are automatically added to the exceptions l
 ## Support
 
 Game Chooser is an open-source project. If you encounter issues or have suggestions, please check the project repository for support options.
+
+## License
+
+Game Chooser is free software licensed under the **GNU General Public License v3.0** (GPLv3).
+
+This means you are free to:
+- Use the software for any purpose
+- Study how it works and modify it
+- Share copies with others
+- Distribute modified versions
+
+Under the conditions that:
+- You provide source code with any distributed copies
+- You license derivative works under GPLv3
+- You state significant changes made to the software
+- You provide a copy of the license with the software
+
+For the complete license text, see the [LICENSE](LICENSE) file in this repository or visit [gnu.org/licenses/gpl-3.0.html](https://www.gnu.org/licenses/gpl-3.0.html).
+
+**Copyright (C) 2025 Alec Olson**
