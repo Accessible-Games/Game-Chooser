@@ -16,7 +16,7 @@ If you have games scattered across multiple folders, external drives, or differe
 - **Manual Game Support** - Add web games (browser-based) or games outside your library folders
 - **Keyboard-Friendly** - Full keyboard navigation with shortcuts for every action
 - **Persistent Settings** - Remembers your window size, column sorting, selected game, and active filters between sessions
-- **Cross-Platform** - Works on Windows, macOS, and Linux
+- **Cross-Platform** - Works on Windows and MacOS
 
 ## Getting Started
 
@@ -66,18 +66,17 @@ Manual games appear alongside auto-discovered games and can be launched the same
 ### Browsing Games
 
 The main window shows your games in a list on the left and a filter tree on the right. The tree organizes games by:
-- **Platform** (Windows, macOS, Linux, Web)
+- **Platform** (Windows, macOS, Web)
 - **Genre** (Action, RPG, Strategy, etc.)
 - **Developer** (Valve, Nintendo, etc.)
 - **Year** (2024, 2023, etc.)
 
-Click any category in the tree to filter the game list. You can select multiple categories (Ctrl+Click) to see games matching any of them.
+Click any category in the tree to filter the game list. You can select multiple categories (Ctrl+arrows to move without selecting, Ctrl+space to select) to see games matching any of them.
 
 ### Searching
 
 The search box at the top searches game titles and developers as you type. Just start typing—results appear automatically after a brief delay.
 
-**Note**: Searching for "unknown" returns no results, since that's a placeholder for missing metadata.
 
 ### Launching Games
 
@@ -99,7 +98,7 @@ To change a game's details:
 
 ### Managing Preferences
 
-Press **Ctrl+,** or go to **File → Preferences** to access:
+Press **Ctrl+ comma (,)** or go to **File → Preferences** to access:
 
 #### Library Paths Tab
 - Add or remove game library folders
@@ -111,7 +110,7 @@ Press **Ctrl+,** or go to **File → Preferences** to access:
 - **Add Folder**: Exclude an entire folder and its contents (e.g., `build/`)
 - **Remove**: Un-exclude a file or folder
 
-The app has 900+ built-in auto-exclusion patterns for common installers and utilities, but you can add more if needed.
+The app has built-in auto-exclusion patterns for common installers and utilities, but you can add more if needed.
 
 ## Keyboard Shortcuts
 
@@ -120,24 +119,14 @@ The app has 900+ built-in auto-exclusion patterns for common installers and util
 |----------|--------|
 | **Ctrl+F** | Jump to search box |
 | **Ctrl+N** | Add new game |
+| **delete** delete selected game |
+| **Ctrl+E** | Edit selected game |
 | **Ctrl+,** | Open preferences |
 | **F5** | Refresh/rescan all libraries |
-| **Alt+F4** | Exit application |
-
-### Game List Shortcuts
-| Shortcut | Action |
-|----------|--------|
-| **Ctrl+E** | Edit selected game |
-| **Delete** | Delete selected game |
-| **Enter** or **Space** | Launch selected game |
-| **Right-click** | Open context menu |
-| **Tab** | Move between game list and filter tree |
-
-### Filter Tree Shortcuts
-| Shortcut | Action |
-|----------|--------|
+| **enter** | launch selected game |
+| **Ctrl+enter** | opens the selected game's folder in explorer/finder |
+| **ctrl+R** | randomly select a game from the filtered list |
 | **Escape** | Clear all filters (show all games) |
-| **Ctrl+Click** | Select multiple filters (OR logic) |
 
 ### Column Sorting
 Click any column header to sort by that column. Click again to reverse the sort order.
@@ -181,7 +170,6 @@ Game Chooser creates two files:
 ### config.json (User-Specific)
 - **Windows**: `C:\Users\YourName\AppData\Roaming\GameChooser\`
 - **macOS**: `~/Library/Application Support/GameChooser/`
-- **Linux**: `~/.config/GameChooser/`
 - Contains library paths, exceptions, and window preferences
 - Not portable (contains system-specific paths)
 

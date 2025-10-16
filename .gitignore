@@ -5,3 +5,15 @@ __pycache__
 config.json
 errors.log
 venv/
+
+# Build artifacts
+build/
+*.exe
+*.pyd
+*.dll
+
+# Nuitka specific
+*.nuitka-crash-report.xml
+
+# Release packages
+*.zip
