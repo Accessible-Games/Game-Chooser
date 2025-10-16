@@ -3,6 +3,18 @@
 Dialog classes for Game Chooser application
 """
 
+import sys
+from pathlib import Path
+
+# Add smart_list and resource_finder submodules to path
+smart_list_path = Path(__file__).parent / "smart_list"
+if smart_list_path.exists() and str(smart_list_path) not in sys.path:
+    sys.path.insert(0, str(smart_list_path))
+
+resource_finder_path = Path(__file__).parent / "resource_finder"
+if resource_finder_path.exists() and str(resource_finder_path) not in sys.path:
+    sys.path.insert(0, str(resource_finder_path))
+
 import wx
 import json
 import os
@@ -10,6 +22,7 @@ import platform
 import threading
 from models import Game
 from validation_service import ValidationService
+from smart_list import SmartList, Column
 
 
 class ScanProgressDialog(wx.Dialog):
@@ -622,17 +635,17 @@ class PreferencesDialog(wx.Dialog):
         lib_container = wx.Panel(tab_panel)
         lib_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.lib_list = wx.ListCtrl(lib_container, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        self.lib_list = SmartList(parent=lib_container, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         self.lib_list.SetLabel("Game Library Paths")
-        self.lib_list.AppendColumn("Name", width=100)
-        self.lib_list.AppendColumn("Path", width=400)
+        self.lib_list.set_columns([
+            Column(title="Name", model_field="name", width=100),
+            Column(title="Path", model_field="path", width=400)
+        ])
 
         # Populate library list
-        for lib in self.library_manager.config["libraries"]:
-            index = self.lib_list.InsertItem(self.lib_list.GetItemCount(), lib["name"])
-            self.lib_list.SetItem(index, 1, lib["path"])
+        self.lib_list.add_items(self.library_manager.config["libraries"])
 
-        lib_sizer.Add(self.lib_list, 1, wx.EXPAND | wx.RIGHT, 5)
+        lib_sizer.Add(self.lib_list.control.control, 1, wx.EXPAND | wx.RIGHT, 5)
 
         # Library buttons
         lib_btn_panel = wx.Panel(lib_container)
@@ -669,15 +682,16 @@ class PreferencesDialog(wx.Dialog):
         exc_container = wx.Panel(tab_panel)
         exc_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
-        self.exc_list = wx.ListCtrl(exc_container, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
+        self.exc_list = SmartList(parent=exc_container, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         self.exc_list.SetLabel("Exceptions")
-        self.exc_list.AppendColumn("Path", width=500)
+        self.exc_list.set_columns([
+            Column(title="Path", model_field=lambda exc: exc, width=500)
+        ])
 
         # Populate exceptions list
-        for exc in self.library_manager.config["exceptions"]:
-            self.exc_list.InsertItem(self.exc_list.GetItemCount(), exc)
+        self.exc_list.add_items(self.library_manager.config["exceptions"])
 
-        exc_sizer.Add(self.exc_list, 1, wx.EXPAND | wx.RIGHT, 5)
+        exc_sizer.Add(self.exc_list.control.control, 1, wx.EXPAND | wx.RIGHT, 5)
 
         # Exception buttons
         exc_btn_panel = wx.Panel(exc_container)
@@ -711,26 +725,25 @@ class PreferencesDialog(wx.Dialog):
         if dlg.ShowModal() == wx.ID_OK:
             path = dlg.GetPath()
             name = os.path.basename(path)
-            
+
+            # Create library dict
+            new_lib = {"name": name, "path": path}
+
             # Add to list control
-            index = self.lib_list.InsertItem(self.lib_list.GetItemCount(), name)
-            self.lib_list.SetItem(index, 1, path)
-            
+            self.lib_list.add_item(new_lib)
+
             # Add to config
-            self.library_manager.config["libraries"].append({
-                "name": name,
-                "path": path
-            })
+            self.library_manager.config["libraries"].append(new_lib)
         dlg.Destroy()
     
     def on_remove_library(self, event):
         """Remove selected library path"""
-        selected = self.lib_list.GetFirstSelected()
-        if selected >= 0:
+        selected_item = self.lib_list.get_selected_item()
+        if selected_item:
             # Remove from config
-            del self.library_manager.config["libraries"][selected]
+            self.library_manager.config["libraries"].remove(selected_item)
             # Remove from list
-            self.lib_list.DeleteItem(selected)
+            self.lib_list.delete_item(selected_item)
     
     def on_add_exception(self, event):
         """Add a new file exception"""
@@ -750,7 +763,7 @@ class PreferencesDialog(wx.Dialog):
                 # Convert to relative path if within a library
                 relative_path = self._make_relative_to_library(file_path)
                 if relative_path:
-                    self.exc_list.InsertItem(self.exc_list.GetItemCount(), relative_path)
+                    self.exc_list.add_item(relative_path)
                     self.library_manager.config["exceptions"].append(relative_path)
                 else:
                     wx.MessageBox("Selected file is not within any configured library path.",
@@ -768,7 +781,7 @@ class PreferencesDialog(wx.Dialog):
                 if relative_path:
                     # Add trailing slash to indicate this is a folder exception
                     folder_exception = relative_path.rstrip('/') + '/'
-                    self.exc_list.InsertItem(self.exc_list.GetItemCount(), folder_exception)
+                    self.exc_list.add_item(folder_exception)
                     self.library_manager.config["exceptions"].append(folder_exception)
                 else:
                     wx.MessageBox("Selected folder is not within any configured library path.",
@@ -798,11 +811,10 @@ class PreferencesDialog(wx.Dialog):
 
     def on_remove_exception(self, event):
         """Remove selected exception"""
-        selected = self.exc_list.GetFirstSelected()
-        if selected >= 0:
-            exc_path = self.exc_list.GetItemText(selected)
-            self.library_manager.config["exceptions"].remove(exc_path)
-            self.exc_list.DeleteItem(selected)
+        selected_item = self.exc_list.get_selected_item()
+        if selected_item:
+            self.library_manager.config["exceptions"].remove(selected_item)
+            self.exc_list.delete_item(selected_item)
     
     def on_apply(self, event):
         """Apply changes and rescan if needed"""
@@ -858,18 +870,15 @@ class PreferencesDialog(wx.Dialog):
                     message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}"
                     wx.MessageBox(message, "Missing Library Paths Removed", wx.OK | wx.ICON_WARNING)
                     # Refresh the libraries list in the dialog
-                    self.lib_list.DeleteAllItems()
-                    for lib in self.library_manager.config["libraries"]:
-                        index = self.lib_list.InsertItem(self.lib_list.GetItemCount(), lib["name"])
-                        self.lib_list.SetItem(index, 1, lib["path"])
+                    self.lib_list.clear()
+                    self.lib_list.add_items(self.library_manager.config["libraries"])
                 elif exc_count > 0:
                     if wx.MessageBox(f"Added {exc_count} executables to exceptions. Open preferences?",
                                     "Exceptions Added", 
                                     wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
                         # Already in preferences, just refresh the exceptions list
-                        self.exc_list.DeleteAllItems()
-                        for exc in self.library_manager.config["exceptions"]:
-                            self.exc_list.InsertItem(self.exc_list.GetItemCount(), exc)
+                        self.exc_list.clear()
+                        self.exc_list.add_items(self.library_manager.config["exceptions"])
             except PermissionError as e:
                 wx.MessageBox(str(e), "Permission Denied", wx.OK | wx.ICON_ERROR)
         elif exceptions_changed:
@@ -877,9 +886,8 @@ class PreferencesDialog(wx.Dialog):
             self.library_manager.cleanConfigs()
 
             # Refresh the exceptions list to show cleaned exceptions
-            self.exc_list.DeleteAllItems()
-            for exc in self.library_manager.config["exceptions"]:
-                self.exc_list.InsertItem(self.exc_list.GetItemCount(), exc)
+            self.exc_list.clear()
+            self.exc_list.add_items(self.library_manager.config["exceptions"])
 
         # Update original config
         self.original_config = json.loads(json.dumps(self.library_manager.config))

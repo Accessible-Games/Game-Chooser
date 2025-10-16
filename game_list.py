@@ -3,66 +3,85 @@
 Game list control for Game Chooser application
 """
 
+import sys
+from pathlib import Path
+
+# Add smart_list and resource_finder submodules to path
+smart_list_path = Path(__file__).parent / "smart_list"
+if smart_list_path.exists() and str(smart_list_path) not in sys.path:
+    sys.path.insert(0, str(smart_list_path))
+
+resource_finder_path = Path(__file__).parent / "resource_finder"
+if resource_finder_path.exists() and str(resource_finder_path) not in sys.path:
+    sys.path.insert(0, str(resource_finder_path))
+
 import wx
-import wx.lib.mixins.listctrl as listmix
+from smart_list import VirtualSmartList, Column
 
 
-class GameListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
-    """Custom Virtual ListCtrl for game display - only renders visible items for better performance"""
+class GameListCtrl:
+    """Custom VirtualSmartList wrapper for game display with sorting and keyboard navigation"""
 
     def __init__(self, parent, library_manager):
-        super().__init__(parent, style=wx.LC_REPORT | wx.LC_SINGLE_SEL | wx.LC_VIRTUAL)
-        listmix.ListCtrlAutoWidthMixin.__init__(self)
-        
         self.library_manager = library_manager
         self.games_displayed = []
-        
-        # Add columns
-        self.AppendColumn("Title", width=200)
-        self.AppendColumn("Genre", width=150)
-        self.AppendColumn("Developer", width=150)
-        self.AppendColumn("Year", width=80)
-        self.AppendColumn("Platform", width=150)
-        
-        # Load saved column widths
-        if self.library_manager.config["SavedState"]["column_widths"]:
-            widths = self.library_manager.config["SavedState"]["column_widths"]
-            for i, width in enumerate(widths):
-                if i < self.GetColumnCount():
-                    self.SetColumnWidth(i, width)
-        
+
+        # Create VirtualSmartList
+        self.list = VirtualSmartList(
+            parent=parent,
+            get_virtual_item=self.get_virtual_item,
+            style=wx.LC_REPORT | wx.LC_SINGLE_SEL
+        )
+
         # Set up sorting
         self.sort_column = self.library_manager.config["SavedState"]["sort_column"]
         self.sort_ascending = self.library_manager.config["SavedState"]["sort_ascending"]
-        
-        # Bind events
-        self.Bind(wx.EVT_LIST_COL_CLICK, self.on_column_click)
-        self.Bind(wx.EVT_CHAR, self.on_char)
 
-    def OnGetItemText(self, row, col):
-        """Virtual list method - return text for given row/column"""
-        if row >= len(self.games_displayed):
-            return ""
+        # Define and set columns
+        columns = [
+            Column(title="Title", model_field="title", width=200),
+            Column(title="Genre", model_field="genre", width=150),
+            Column(title="Developer", model_field="developer", width=150),
+            Column(title="Year", model_field="year", width=80),
+            Column(title="Platform", model_field=lambda g: ", ".join(g.platforms), width=150)
+        ]
+        self.list.set_columns(columns)
 
-        game = self.games_displayed[row]
-        if col == 0:
-            return game.title
-        elif col == 1:
-            return game.genre
-        elif col == 2:
-            return game.developer
-        elif col == 3:
-            return game.year
-        elif col == 4:
-            return ", ".join(game.platforms)
-        return ""
-    
+        # Load saved column widths (not supported on DataViewCtrl)
+        if not self.is_dataview and self.library_manager.config["SavedState"]["column_widths"]:
+            widths = self.library_manager.config["SavedState"]["column_widths"]
+            for i, width in enumerate(widths):
+                if i < len(columns):
+                    # Access underlying control to set column width
+                    self.list.control.control.SetColumnWidth(i, width)
+
+        # Bind events - use underlying control for column clicks
+        # Context menu, selection, activation need to be bound by MainFrame after init
+        self.list.control.control.Bind(wx.EVT_LIST_COL_CLICK, self.on_column_click)
+        self.list.control.Bind(wx.EVT_CHAR, self.on_char)
+
+    def get_virtual_item(self, index):
+        """Callback for VirtualSmartList to get item by index"""
+        if index < len(self.games_displayed):
+            return self.games_displayed[index]
+        return None
+
+    @property
+    def is_dataview(self):
+        """Check if using DataViewCtrl (macOS) vs ListView (Windows/Linux)"""
+        return hasattr(self.list.control, 'use_dataview') and self.list.control.use_dataview
+
+    @property
+    def control(self):
+        """Expose underlying wx control for splitter"""
+        return self.list.control.control
+
     def populate(self, games):
         """Populate virtual list with games"""
         self.games_displayed = games
         self.sort_list()
-        # Set the virtual list size - this tells wxPython how many items we have
-        self.SetItemCount(len(self.games_displayed))
+        # Update the virtual list count
+        self.list.update_count(len(self.games_displayed))
     
     def sort_list(self):
         """Sort the list by current column and direction"""
@@ -88,16 +107,17 @@ class GameListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
 
         # Refresh the virtual list display
         if self.games_displayed:
-            self.RefreshItems(0, len(self.games_displayed) - 1)
+            self.list.refresh()
 
-        # Update column headers with arrows
-        for col in range(self.GetColumnCount()):
-            info = self.GetColumn(col)
-            text = info.GetText().rstrip(' ▲▼')
-            if col == self.sort_column:
-                text += ' ▲' if self.sort_ascending else ' ▼'
-            info.SetText(text)
-            self.SetColumn(col, info)
+        # Update column headers with arrows (not supported on DataViewCtrl)
+        if not self.is_dataview:
+            for col in range(self.GetColumnCount()):
+                info = self.list.control.control.GetColumn(col)
+                text = info.GetText().rstrip(' ▲▼')
+                if col == self.sort_column:
+                    text += ' ▲' if self.sort_ascending else ' ▼'
+                info.SetText(text)
+                self.list.control.control.SetColumn(col, info)
     
     def on_column_click(self, event):
         """Handle column header click for sorting"""
@@ -107,14 +127,14 @@ class GameListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
         else:
             self.sort_column = col
             self.sort_ascending = True
-        
+
         self.sort_list()
-        
+
         # Save state
         self.library_manager.config["SavedState"]["sort_column"] = self.sort_column
         self.library_manager.config["SavedState"]["sort_ascending"] = self.sort_ascending
         self.library_manager.save_config()
-    
+
     def on_char(self, event):
         """Handle keyboard shortcuts for sorting"""
         key = event.GetKeyCode()
@@ -127,21 +147,21 @@ class GameListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
                     self.sort_column = col
                     self.sort_ascending = True
                 self.sort_list()
-                
+
                 # Save state
                 self.library_manager.config["SavedState"]["sort_column"] = self.sort_column
                 self.library_manager.config["SavedState"]["sort_ascending"] = self.sort_ascending
                 self.library_manager.save_config()
         else:
             event.Skip()
-    
+
     def get_selected_game(self):
         """Get currently selected game"""
         selected = self.GetFirstSelected()
         if selected >= 0 and selected < len(self.games_displayed):
             return self.games_displayed[selected]
         return None
-    
+
     def save_column_widths(self):
         """Save current column widths"""
         widths = []
@@ -149,3 +169,51 @@ class GameListCtrl(wx.ListCtrl, listmix.ListCtrlAutoWidthMixin):
             widths.append(self.GetColumnWidth(i))
         self.library_manager.config["SavedState"]["column_widths"] = widths
         self.library_manager.save_config()
+
+    # Wrapper methods to maintain compatibility with MainFrame
+    def GetColumnCount(self):
+        """Get number of columns"""
+        return self.list.control.control.GetColumnCount()
+
+    def GetColumnWidth(self, col):
+        """Get width of column"""
+        if self.is_dataview:
+            # DataViewCtrl doesn't support GetColumnWidth
+            # Return saved width from config or default
+            saved_widths = self.library_manager.config["SavedState"]["column_widths"]
+            if saved_widths and col < len(saved_widths):
+                return saved_widths[col]
+            return -1  # Default width
+        return self.list.control.control.GetColumnWidth(col)
+
+    def SetColumnWidth(self, col, width):
+        """Set width of column"""
+        if not self.is_dataview:
+            self.list.control.control.SetColumnWidth(col, width)
+
+    def GetFirstSelected(self):
+        """Get index of first selected item"""
+        return self.list.get_selected_index()
+
+    def Select(self, index):
+        """Select item at index"""
+        self.list.set_selected_index(index)
+
+    def Focus(self, index):
+        """Focus item at index"""
+        # smart_list handles focus automatically with selection
+        pass
+
+    def SetFocus(self):
+        """Set focus to list control"""
+        self.list.control.SetFocus()
+
+    def SetLabel(self, label):
+        """Set accessibility label"""
+        self.list.SetLabel(label)
+
+    def Bind(self, event, handler):
+        """Bind event to handler - bind directly to underlying control"""
+        # Bind directly to the underlying wx control that's displayed in the splitter
+        # This ensures events actually reach the handlers
+        self.list.control.control.Bind(event, handler)

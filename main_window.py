@@ -134,7 +134,8 @@ class MainFrame(wx.Frame):
         self.game_list.SetLabel("Games")
         self.game_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_game_selected)
         self.game_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.on_game_activated)
-        self.game_list.Bind(wx.EVT_CONTEXT_MENU, self.on_list_context)
+        # Context menu: right-click handled by list event, keyboard shortcuts in on_list_key
+        self.game_list.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_list_context)
         self.game_list.Bind(wx.EVT_KEY_DOWN, self.on_list_key)
         
         # Tree control
@@ -158,9 +159,9 @@ class MainFrame(wx.Frame):
         tree_sizer.Add(self.tree_ctrl, 1, wx.EXPAND)
         tree_sizer.Add(self.filter_btn, 0, wx.EXPAND | wx.TOP, 5)
         tree_panel.SetSizer(tree_sizer)
-        
-        # Set up splitter
-        splitter.SplitVertically(self.game_list, tree_panel)
+
+        # Set up splitter - use exposed control property
+        splitter.SplitVertically(self.game_list.control, tree_panel)
         splitter.SetSashGravity(0.5)
         
         main_sizer.Add(splitter, 1, wx.EXPAND)
@@ -577,7 +578,7 @@ class MainFrame(wx.Frame):
         self.on_launch(None)
     
     def on_list_context(self, event):
-        """Show context menu for list"""
+        """Show context menu for list (supports both mouse and keyboard)"""
         menu = wx.Menu()
 
         game = self.game_list.get_selected_game()
@@ -599,7 +600,23 @@ class MainFrame(wx.Frame):
         add_game_item = menu.Append(wx.ID_ANY, "Add Game")
         self.Bind(wx.EVT_MENU, self.on_add_game, add_game_item)
 
-        self.PopupMenu(menu)
+        # Determine if this is a mouse event or keyboard event
+        if hasattr(event, 'GetEventType') and event.GetEventType() == wx.wxEVT_LIST_ITEM_RIGHT_CLICK:
+            # Mouse right-click: show at default position (wxPython positions automatically)
+            self.PopupMenu(menu)
+        else:
+            # Keyboard event (Shift+F10, context menu key): show at selected item
+            # Get selected item position
+            selected_index = self.game_list.GetFirstSelected()
+            if selected_index >= 0:
+                # Get item rectangle to position menu near selected item
+                rect = self.game_list.control.GetItemRect(selected_index)
+                pos = wx.Point(rect.x + 10, rect.y + rect.height // 2)
+                self.game_list.control.PopupMenu(menu, pos)
+            else:
+                # No selection, show at default position
+                self.PopupMenu(menu)
+
         menu.Destroy()
     
     def on_list_key(self, event):
@@ -612,6 +629,9 @@ class MainFrame(wx.Frame):
             self.on_delete_game(None)
         elif key in [wx.WXK_RETURN, wx.WXK_SPACE]:
             self.on_launch(None)
+        elif key == wx.WXK_WINDOWS_MENU or (key == wx.WXK_F10 and event.ShiftDown()):
+            # Applications/context menu key or Shift+F10
+            self.on_list_context(event)
         else:
             event.Skip()
 

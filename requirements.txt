@@ -1,1 +1,4 @@
 wxPython==4.2.3
+frozendict
+six
+pywin32; sys_platform == 'win32'

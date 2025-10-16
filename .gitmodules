@@ -1,0 +1,6 @@
+[submodule "smart_list"]
+	path = smart_list
+	url = https://github.com/accessibleapps/smart_list
+[submodule "resource_finder"]
+	path = resource_finder
+	url = https://github.com/accessibleapps/resource_finder
