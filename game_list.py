@@ -123,7 +123,7 @@ class GameListCtrl:
 
         # Refresh the virtual list display
         if self.games_displayed:
-            self.list.refresh()
+            self.list.update_count(len(self.games_displayed))
 
         # Update column headers with arrows (not supported on DataViewCtrl)
         if not self.is_dataview:
@@ -213,7 +213,9 @@ class GameListCtrl:
 
     def Select(self, index):
         """Select item at index"""
-        self.list.set_selected_index(index)
+        # Use UnifiedList's Select method directly (works on DataView)
+        # instead of set_selected_index which uses broken SetSelectedIndex
+        self.list.control.Select(index, True)
 
     def Focus(self, index):
         """Focus item at index"""
