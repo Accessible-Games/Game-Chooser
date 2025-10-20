@@ -167,13 +167,8 @@ class MainFrame(wx.Frame):
                                     style=wx.TR_DEFAULT_STYLE | wx.TR_MULTIPLE)
         self.tree_ctrl.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_selection)
         self.tree_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_tree_key)
-        
-        # Filter tree button
-        self.filter_btn = wx.Button(tree_panel, label="Filter Tree")
-        self.filter_btn.Bind(wx.EVT_BUTTON, self.on_filter_tree)
-        
+
         tree_sizer.Add(self.tree_ctrl, 1, wx.EXPAND)
-        tree_sizer.Add(self.filter_btn, 0, wx.EXPAND | wx.TOP, 5)
         tree_panel.SetSizer(tree_sizer)
 
         # Set up splitter - use exposed control property
@@ -236,6 +231,28 @@ class MainFrame(wx.Frame):
         pref_item = edit_menu.Append(wx.ID_PREFERENCES, "&Preferences\tCtrl+,")
         self.Bind(wx.EVT_MENU, self.on_preferences, pref_item)
         menu_bar.Append(edit_menu, "&Edit")
+
+        # View menu
+        view_menu = wx.Menu()
+
+        # Filter Tree submenu
+        filter_tree_menu = wx.Menu()
+
+        # Store menu items as instance variables for state updates
+        self.filter_platform_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Platform")
+        self.Bind(wx.EVT_MENU, self.on_toggle_filter_platform, self.filter_platform_item)
+
+        self.filter_genre_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Genre")
+        self.Bind(wx.EVT_MENU, self.on_toggle_filter_genre, self.filter_genre_item)
+
+        self.filter_developer_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Developer")
+        self.Bind(wx.EVT_MENU, self.on_toggle_filter_developer, self.filter_developer_item)
+
+        self.filter_year_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Year")
+        self.Bind(wx.EVT_MENU, self.on_toggle_filter_year, self.filter_year_item)
+
+        view_menu.AppendSubMenu(filter_tree_menu, "&Filter Tree")
+        menu_bar.Append(view_menu, "&View")
 
         # Launch menu
         launch_menu = wx.Menu()
@@ -891,57 +908,47 @@ class MainFrame(wx.Frame):
         finally:
             self.dialog_active = False
             dlg.Destroy()
-    
-    def on_filter_tree(self, event):
-        """Show filter tree dialog"""
-        dlg = wx.Dialog(self, title="Filter Tree Levels", size=(300, 200))
 
-        panel = wx.Panel(dlg)
-        sizer = wx.BoxSizer(wx.VERTICAL)
+    def on_toggle_filter_platform(self, event):
+        """Toggle platform filter in tree"""
+        self._toggle_filter("platform")
 
-        # Checkboxes for each level
-        levels = ["Platform", "Genre", "Developer", "Year"]
-        filter_keys = ["platform", "genre", "developer", "year"]
-        checkboxes = []
+    def on_toggle_filter_genre(self, event):
+        """Toggle genre filter in tree"""
+        self._toggle_filter("genre")
 
-        for level, filter_key in zip(levels, filter_keys):
-            cb = wx.CheckBox(panel, label=level)
-            # Set checkbox based on current filter state
-            cb.SetValue(filter_key in self.current_tree_filters)
-            checkboxes.append(cb)
-            sizer.Add(cb, 0, wx.ALL, 5)
-        
-        # Buttons
-        btn_sizer = wx.StdDialogButtonSizer()
-        ok_btn = wx.Button(panel, wx.ID_OK)
-        cancel_btn = wx.Button(panel, wx.ID_CANCEL)
-        btn_sizer.AddButton(ok_btn)
-        btn_sizer.AddButton(cancel_btn)
-        btn_sizer.Realize()
-        
-        sizer.Add(btn_sizer, 0, wx.ALIGN_CENTER | wx.TOP, 10)
-        panel.SetSizer(sizer)
-        
-        if dlg.ShowModal() == wx.ID_OK:
-            # Rebuild tree with selected levels
-            filters = []
-            if checkboxes[0].GetValue():
-                filters.append("platform")
-            if checkboxes[1].GetValue():
-                filters.append("genre")
-            if checkboxes[2].GetValue():
-                filters.append("developer")
-            if checkboxes[3].GetValue():
-                filters.append("year")
+    def on_toggle_filter_developer(self, event):
+        """Toggle developer filter in tree"""
+        self._toggle_filter("developer")
 
-            self.build_tree(filters)
+    def on_toggle_filter_year(self, event):
+        """Toggle year filter in tree"""
+        self._toggle_filter("year")
 
-            # Save filter state immediately
-            self.library_manager.config["SavedState"]["tree_filters"] = self.current_tree_filters
-            self.library_manager.save_config()
+    def _toggle_filter(self, filter_key):
+        """Toggle a filter and rebuild tree"""
+        if filter_key in self.current_tree_filters:
+            self.current_tree_filters.remove(filter_key)
+        else:
+            self.current_tree_filters.append(filter_key)
 
-        dlg.Destroy()
-    
+        # Rebuild tree with updated filters
+        self.build_tree(self.current_tree_filters)
+
+        # Update menu item check states
+        self.update_filter_menu_state()
+
+        # Save filter state immediately
+        self.library_manager.config["SavedState"]["tree_filters"] = self.current_tree_filters
+        self.library_manager.save_config()
+
+    def update_filter_menu_state(self):
+        """Update filter menu item check states based on current filters"""
+        self.filter_platform_item.Check("platform" in self.current_tree_filters)
+        self.filter_genre_item.Check("genre" in self.current_tree_filters)
+        self.filter_developer_item.Check("developer" in self.current_tree_filters)
+        self.filter_year_item.Check("year" in self.current_tree_filters)
+
     def on_preferences(self, event):
         """Show preferences dialog"""
         dlg = PreferencesDialog(self, self.library_manager)
@@ -1036,6 +1043,9 @@ class MainFrame(wx.Frame):
 
         # Build tree with saved filters (without restoring selections yet)
         self.build_tree(filters=self.current_tree_filters, restore_selections=False)
+
+        # Update menu item check states based on current filters
+        self.update_filter_menu_state()
     
     def save_state(self):
         """Save current window state"""
