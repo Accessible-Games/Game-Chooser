@@ -11,7 +11,7 @@ if [ -d "build" ]; then
 fi
 
 # Run Nuitka to build the executable
-python.exe -m nuitka \
+uv run python -m nuitka \
     --standalone \
     --windows-console-mode=disable \
     --enable-plugin=implicit-imports \

@@ -209,6 +209,53 @@ When scanning a folder, Game Chooser looks for executables in this order:
 
 All other executables in that folder are automatically added to the exceptions list, which you can manage in Preferences.
 
+## Smart Folder Organization
+
+Game Chooser is smart about how you organize your games. If you already sort games into folders by developer or genre, the app automatically picks up on that and uses it to categorize your library—no manual tagging needed!
+
+### How It Works
+
+**Simple Organization**
+```
+Games/
+  └── Doom Eternal/
+      └── game.exe
+```
+Result: Game titled "Doom Eternal"
+
+**Organized by Developer**
+```
+Games/
+  └── Valve/
+      └── Half-Life 2/
+          └── hl2.exe
+```
+Result: Game titled "Half-Life 2" with developer "Valve"
+
+**Full Organization**
+```
+Games/
+  └── FPS/
+      └── Valve/
+          └── Half-Life 2/
+              └── hl2.exe
+```
+Result: Complete info - Genre: "FPS", Developer: "Valve", Title: "Half-Life 2"
+
+### Tips for Best Results
+
+- Put games from the same developer in a folder with the developer's name
+- Group similar games in genre folders like 'RPG', 'Strategy', or 'Racing'
+- You can mix and match—some games flat, others organized
+- Reorganize anytime—just hit **F5** to rescan and update
+
+### What This Means for You
+
+- **Spend less time editing game details** - Your folder structure does the work
+- **Your existing organization becomes your game library** - No need to change how you organize
+- **Move games between folders** and categories update automatically
+- **No manual tagging** of hundreds of games
+
 ## Support
 
 Game Chooser is an open-source project. If you encounter issues or have suggestions, please check the project repository for support options.
