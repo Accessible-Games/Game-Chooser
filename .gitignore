@@ -19,3 +19,71 @@ build/
 
 # Release packages
 *.zip
+.DS_Store
+.tscache/
+# OS
+.moai/logs/
+*.tsbuildinfo
+Thumbs.db
+logs/
+*.egg-info/
+# Temporary files
+*.temp
+*_backup_*/
+*-backup/
+.firebase/
+.env/
+/CLAUDE.md
+.ruff_cache
+# MoAI dynamic content (로컬 프로젝트만 무시, but package templates are tracked)
+.moai/reports/*-draft.*
+# Backups
+.pytest_cache/
+# Environment variables and deployment secrets
+docs_backup_*/
+.env*
+*.swo
+.vercel/
+.venv_issue43_py313
+dist/
+.claude/.env.local*
+*.pyc
+# Test coverage
+.uv-cache
+*.pyo
+.moai-backups/
+# Virtual environment
+# Next.js build output
+*.swp
+.moai/temp/
+*.bak
+# Package templates (src/moai_adk/templates/) are tracked
+.aws/
+hooks_backup_*/
+# Logs
+.uv_cache
+.vscode/
+.moai/reports/*.tmp
+*.backup
+# IDE
+*.egg
+# MoAI reports (임시 보고서만 무시)
+.playwright-mcp
+env/
+docs/.next/
+.coverage
+.netlify/
+*.tmp
+.idea/
+docs/out/
+# Claude and MoAI configuration (user-specific, root only)
+node_modules/
+__pycache__/
+*.log
+*~
+coverage.json
+.moai/*.tmp
+# Cache
+.mypy_cache
+*.backup/
+.claude/settings.local.*.json
