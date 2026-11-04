@@ -100,7 +100,7 @@ def test_every_action_rejects_escaping_paths(tmp_path):
     assert tmp_path.exists()
 
 
-@pytest.mark.skipif(sys.platform != "win32", reason="junctions are Windows-only")
+@pytest.mark.windows
 def test_steps_refuse_paths_through_a_junction(tmp_path):
     game = tmp_path / "game"
     game.mkdir()
