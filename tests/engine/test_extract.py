@@ -47,6 +47,16 @@ def test_flatten_inno_with_a_folder_named_app_inside_app(tmp_path):
     assert (tmp_path / "app" / "inner.txt").read_bytes() == b"i"
 
 
+def test_flatten_inno_keeps_a_game_folder_named_tmp(tmp_path):
+    (tmp_path / "app" / "tmp").mkdir(parents=True)
+    (tmp_path / "app" / "tmp" / "keep.txt").write_bytes(b"k")
+    (tmp_path / "tmp").mkdir()
+    (tmp_path / "tmp" / "junk").write_bytes(b"j")
+    flatten_inno(tmp_path)
+    assert (tmp_path / "tmp" / "keep.txt").read_bytes() == b"k"
+    assert not (tmp_path / "tmp" / "junk").exists()
+
+
 def test_flatten_inno_without_app_folder_is_a_no_op(tmp_path):
     (tmp_path / "Game.exe").write_bytes(b"x")
     (tmp_path / "tmp").mkdir()

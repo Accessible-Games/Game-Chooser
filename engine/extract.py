@@ -66,11 +66,11 @@ def flatten_inno(dest: Path) -> None:
     holding = dest / ".gamechooser-inno-app"  # so a folder called "app" inside app/ can't collide with app/
     if holding.exists():
         shutil.rmtree(holding)
+    shutil.rmtree(dest / "tmp", ignore_errors=True)  # innoextract's scratch; before the move so the game's own tmp/ survives
     app.rename(holding)
     for child in list(holding.iterdir()):
         _merge_move(child, dest / child.name)
     holding.rmdir()
-    shutil.rmtree(dest / "tmp", ignore_errors=True)
 
 
 def content_root(dest: Path, extract_dir: str | None) -> Path:
