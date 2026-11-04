@@ -18,6 +18,11 @@ def test_agarchive_blocked_directly():
         "https://agarchive.net:8443/x",
         "https://user@agarchive.net/x",
         "https://a.b.Agarchive.net/x",
+        "https://agarchive。net/x",
+        "https://ａgarchive.net/x",
+        "https://agarchive.net．/x",
+        "https://agarchive%E3%80%82net/x",
+        "https://%61garchive.net/x",
     ]:
         with pytest.raises(BlockedHost):
             check_url_allowed(u)
@@ -77,3 +82,10 @@ def test_http_error_is_download_error(http_server, tmp_path):
 def test_unreachable_is_download_error(tmp_path):
     with pytest.raises(DownloadError):
         Fetcher(timeout=2).download("http://127.0.0.1:1/x", tmp_path / "a")
+
+
+def test_redirect_to_unicode_spelled_agarchive_is_blocked(http_server, tmp_path):
+    http_server.routes["/u"] = (302, {"Location": "https://agarchive。net/f.zip".encode("utf-8").decode("latin-1")}, b"")
+    with pytest.raises(BlockedHost):
+        Fetcher().download(http_server.url("/u"), tmp_path / "f")
+    assert list(tmp_path.iterdir()) == []

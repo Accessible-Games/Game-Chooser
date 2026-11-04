@@ -7,7 +7,7 @@ import urllib.error
 import urllib.request
 from collections.abc import Callable
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import unquote, urlsplit
 
 from engine.errors import BlockedHost, Cancelled, DownloadError
 
@@ -25,7 +25,17 @@ def check_url_allowed(url: str) -> None:
         raise DownloadError(f"Bad address: {url}") from exc
     if parts.scheme.lower() not in ("http", "https") or not host:
         raise DownloadError(f"Not a web address: {url}")
-    host = host.rstrip(".")
+    # urllib percent-encodes redirect Locations, then unquotes the host again
+    # when it builds the request, so compare the unquoted spelling.
+    host = unquote(host)
+    if not host.isascii():
+        # http.client falls back to the idna codec, which maps U+3002, fullwidth
+        # letters and the like onto plain ASCII, so compare what it would connect to.
+        try:
+            host = host.encode("idna").decode("ascii")
+        except UnicodeError as exc:
+            raise DownloadError(f"Bad address: {url}") from exc
+    host = host.lower().rstrip(".")
     if host == BLOCKED_DOMAIN or host.endswith("." + BLOCKED_DOMAIN):
         raise BlockedHost(host)
 
