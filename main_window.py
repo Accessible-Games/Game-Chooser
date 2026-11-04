@@ -42,7 +42,7 @@ class FilterWorker(threading.Thread):
         self.games = games
         self.search_term = search_term.lower().strip() if search_term else ""
         self.tree_criteria = tree_criteria
-        self.library_filter = library_filter  # List of active libraries (empty means all)
+        self.library_filter = library_filter  # Frozen set of hidden library names
         self.callback = callback
         self._stop_event = threading.Event()
 
@@ -62,10 +62,8 @@ class FilterWorker(threading.Thread):
             # Apply library filter
             # Manual games and web games are always included
             if game.library_name and game.library_name != "manual" and game.library_name != "":
-                # If library_filter is None, show all (no filtering)
-                # If library_filter is empty list, show none (all unchecked)
-                # If library_filter has items, show only those
-                if self.library_filter is not None and game.library_name not in self.library_filter:
+                # Skip games from libraries the user has hidden
+                if game.library_name in self.library_filter:
                     continue
 
             # Apply tree filter
@@ -116,8 +114,10 @@ class MainFrame(wx.Frame):
         self.restoring_tree = False  # Flag to block saves during tree restoration
         self.initializing = True  # Flag to prevent focus stealing during startup
         self.current_tree_filters = ["platform", "genre", "developer", "year"]  # Track active tree filters
-        self.active_libraries = None  # Track active libraries for filtering (None means show all, empty list means show none)
-        self.library_menu_items = {}  # Map library names to menu items
+        # Libraries hidden via View > Libraries. Storing hidden (not shown) names means
+        # newly added libraries are visible by default and stale names are harmless.
+        self.hidden_libraries = self._load_hidden_libraries()
+        self.library_menu_items = []  # (library name, menu item) pairs in the Libraries submenu
 
         # Set up UI
         self.init_ui()
@@ -265,9 +265,8 @@ class MainFrame(wx.Frame):
 
         view_menu.AppendSubMenu(filter_tree_menu, "&Filter Tree")
 
-        # Libraries submenu
+        # Libraries submenu (populated in load_saved_state)
         self.libraries_menu = wx.Menu()
-        self.build_libraries_menu()
         view_menu.AppendSubMenu(self.libraries_menu, "&Libraries")
 
         menu_bar.Append(view_menu, "&View")
@@ -348,7 +347,8 @@ class MainFrame(wx.Frame):
 
             # Refresh UI in case they added stuff
             self.refresh_game_list()
-            self.build_tree(force_rebuild=True)
+            self.build_tree(self.current_tree_filters, force_rebuild=True)
+            self.build_libraries_menu()
 
         # Always continue to main window (no forced scanning)
         self.initializing = False
@@ -356,11 +356,13 @@ class MainFrame(wx.Frame):
     
     def build_tree(self, filters=None, force_rebuild=False, restore_selections=True):
         """Build the tree control hierarchy with flat 2-level structure using cache"""
+        # Default to the user's current filter levels so refreshes don't reset them
         if filters is None:
-            filters = ["platform", "genre", "developer", "year"]
+            filters = self.current_tree_filters
 
         # Store the current filters for dialog state
-        self.current_tree_filters = filters
+        self.current_tree_filters = list(filters)
+        filters = self.current_tree_filters
 
         # Generate a simple hash of games to detect changes
         current_hash = len(self.library_manager.games)
@@ -382,26 +384,14 @@ class MainFrame(wx.Frame):
                 "year": set()
             }
 
+            # Collect every category regardless of active filters, so the cache
+            # stays valid when the user turns a filter level back on
             for game in self.library_manager.games:
-                # Collect platforms
-                if "platform" in filters:
-                    for platform in game.platforms:
-                        categories["platform"].add(platform)
-
-                # Collect genres
-                if "genre" in filters:
-                    genre = game.genre or "Unknown Genre"
-                    categories["genre"].add(genre)
-
-                # Collect developers
-                if "developer" in filters:
-                    developer = game.developer or "Unknown Developer"
-                    categories["developer"].add(developer)
-
-                # Collect years
-                if "year" in filters:
-                    year = game.year or "Unknown Year"
-                    categories["year"].add(year)
+                for platform in game.platforms:
+                    categories["platform"].add(platform)
+                categories["genre"].add(game.genre or "Unknown Genre")
+                categories["developer"].add(game.developer or "Unknown Developer")
+                categories["year"].add(game.year or "Unknown Year")
 
             # Cache the results
             self._tree_cache = categories
@@ -568,7 +558,7 @@ class MainFrame(wx.Frame):
             self.library_manager.games,
             search_term,
             tree_criteria,
-            self.active_libraries,
+            frozenset(self.hidden_libraries),
             self.on_filter_complete
         )
         self.filter_worker.start()
@@ -957,9 +947,13 @@ class MainFrame(wx.Frame):
         # Update menu item check states
         self.update_filter_menu_state()
 
-        # Save filter state immediately
-        self.library_manager.config["SavedState"]["tree_filters"] = self.current_tree_filters
+        # Save filter state immediately (prune selections under removed levels)
+        self.save_tree_selections()
+        self.library_manager.config["SavedState"]["tree_filters"] = list(self.current_tree_filters)
         self.library_manager.save_config()
+
+        # Re-filter: a selection under a removed level no longer applies
+        self.apply_filters()
 
     def update_filter_menu_state(self):
         """Update filter menu item check states based on current filters"""
@@ -968,46 +962,61 @@ class MainFrame(wx.Frame):
         self.filter_developer_item.Check("developer" in self.current_tree_filters)
         self.filter_year_item.Check("year" in self.current_tree_filters)
 
+    def _load_hidden_libraries(self):
+        """Load hidden libraries from saved state, migrating the old active_libraries format"""
+        config = self.library_manager.config
+        state = config["SavedState"]
+
+        if "hidden_libraries" in state:
+            return set(state["hidden_libraries"])
+
+        hidden = set()
+        active = state.pop("active_libraries", None)
+        if isinstance(active, list):
+            # Old format stored shown libraries; hide configured ones that weren't shown
+            hidden = {lib["name"] for lib in config["libraries"]
+                      if lib["name"] and lib["name"] not in active}
+        state["hidden_libraries"] = sorted(hidden)
+        return hidden
+
     def build_libraries_menu(self):
         """Build/rebuild the libraries submenu with current libraries"""
-        # Clear existing items
-        for item in self.library_menu_items.values():
+        # Clear existing items and their handlers
+        for _, item in self.library_menu_items:
+            self.Unbind(wx.EVT_MENU, id=item.GetId())
             self.libraries_menu.Delete(item)
-        self.library_menu_items.clear()
+        self.library_menu_items = []
 
-        # Get all libraries (excluding manual)
-        libraries = [lib for lib in self.library_manager.config["libraries"]
-                    if lib["name"] != "manual"]
+        # Unique library names, in config order. Games are tagged by library name,
+        # so libraries sharing a name are toggled together. Empty names (e.g. a
+        # drive root) are skipped: their games are never filtered.
+        names = []
+        for lib in self.library_manager.config["libraries"]:
+            name = lib["name"]
+            if name and name != "manual" and name not in names:
+                names.append(name)
 
-        # Initialize active_libraries if None (first time setup)
-        if self.active_libraries is None:
-            self.active_libraries = [lib["name"] for lib in libraries]
-
-        # Add menu item for each library
-        for library in libraries:
-            lib_name = library["name"]
-            menu_item = self.libraries_menu.AppendCheckItem(wx.ID_ANY, lib_name)
-            self.library_menu_items[lib_name] = menu_item
-
-            # Bind event handler
+        for lib_name in names:
+            # Escape & so it isn't treated as a mnemonic marker
+            menu_item = self.libraries_menu.AppendCheckItem(wx.ID_ANY, lib_name.replace("&", "&&"))
+            self.library_menu_items.append((lib_name, menu_item))
             self.Bind(wx.EVT_MENU, lambda evt, name=lib_name: self.on_toggle_library(evt, name), menu_item)
-
-            # Check the item if library is in active list
-            menu_item.Check(lib_name in self.active_libraries)
+            menu_item.Check(lib_name not in self.hidden_libraries)
 
     def on_toggle_library(self, event, library_name):
         """Toggle library visibility"""
-        if library_name in self.active_libraries:
-            self.active_libraries.remove(library_name)
+        if library_name in self.hidden_libraries:
+            self.hidden_libraries.discard(library_name)
         else:
-            self.active_libraries.append(library_name)
+            self.hidden_libraries.add(library_name)
 
         # Update menu state
-        if self.library_menu_items.get(library_name):
-            self.library_menu_items[library_name].Check(library_name in self.active_libraries)
+        for name, item in self.library_menu_items:
+            if name == library_name:
+                item.Check(library_name not in self.hidden_libraries)
 
         # Save state
-        self.library_manager.config["SavedState"]["active_libraries"] = self.active_libraries
+        self.library_manager.config["SavedState"]["hidden_libraries"] = sorted(self.hidden_libraries)
         self.library_manager.save_config()
 
         # Apply filters
@@ -1020,9 +1029,10 @@ class MainFrame(wx.Frame):
         # Block spurious selection events while modal dialog is active
         self.dialog_active = True
         try:
-            if dlg.ShowModal() == wx.ID_OK:
-                # Defer UI refresh to avoid blocking the dialog close
-                wx.CallAfter(self.refresh_ui_after_preferences)
+            dlg.ShowModal()
+            # Refresh even on Cancel: Apply may already have saved and scanned changes.
+            # Deferred to avoid blocking the dialog close.
+            wx.CallAfter(self.refresh_ui_after_preferences)
         finally:
             self.dialog_active = False
             dlg.Destroy()
@@ -1104,13 +1114,9 @@ class MainFrame(wx.Frame):
         if state["last_search"]:
             self.search_combo.SetValue(state["last_search"])
 
-        # Tree filters
-        if state["tree_filters"]:
-            self.current_tree_filters = state["tree_filters"]
-
-        # Active libraries
-        if "active_libraries" in state:
-            self.active_libraries = state["active_libraries"]
+        # Tree filters (an empty list is a valid saved choice)
+        if isinstance(state.get("tree_filters"), list):
+            self.current_tree_filters = list(state["tree_filters"])
 
         # Build tree with saved filters (without restoring selections yet)
         self.build_tree(filters=self.current_tree_filters, restore_selections=False)
@@ -1118,9 +1124,12 @@ class MainFrame(wx.Frame):
         # Update menu item check states based on current filters
         self.update_filter_menu_state()
 
-        # Rebuild libraries menu with current state
+        # Build libraries menu with current state
         self.build_libraries_menu()
-    
+
+        # Re-filter now that all saved state (search, filters, hidden libraries) is loaded
+        self.refresh_game_list()
+
     def save_state(self):
         """Save current window state"""
         state = self.library_manager.config["SavedState"]
@@ -1131,10 +1140,11 @@ class MainFrame(wx.Frame):
         state["last_search"] = self.search_combo.GetValue()
 
         # Save tree filters
-        state["tree_filters"] = self.current_tree_filters
+        state["tree_filters"] = list(self.current_tree_filters)
 
-        # Save active libraries
-        state["active_libraries"] = self.active_libraries
+        # Save hidden libraries
+        state["hidden_libraries"] = sorted(self.hidden_libraries)
+        state.pop("active_libraries", None)
 
         # Save column widths
         self.game_list.save_column_widths()

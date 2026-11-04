@@ -210,7 +210,8 @@ class FirstTimeSetupDialog(wx.Dialog):
         dlg = wx.DirDialog(self, "Choose Game Library Directory")
         if dlg.ShowModal() == wx.ID_OK:
             path = dlg.GetPath()
-            name = os.path.basename(path)
+            # Drive roots (e.g. G:) have no basename; fall back to the path itself
+            name = os.path.basename(path.rstrip("\\/")) or path
             self.library_manager.config["libraries"].append({
                 "name": name,
                 "path": path
@@ -740,7 +741,8 @@ class PreferencesDialog(wx.Dialog):
         dlg = wx.DirDialog(self, "Choose Game Library Directory")
         if dlg.ShowModal() == wx.ID_OK:
             path = dlg.GetPath()
-            name = os.path.basename(path)
+            # Drive roots (e.g. G:) have no basename; fall back to the path itself
+            name = os.path.basename(path.rstrip("\\/")) or path
 
             # Create library dict
             new_lib = {"name": name, "path": path}
