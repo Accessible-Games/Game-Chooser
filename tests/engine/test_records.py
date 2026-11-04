@@ -1,0 +1,120 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from engine.records import (
+    InstallRecord, InstalledSource, RecordedFile, RecordStore, hash_tree, record_folder,
+)
+from engine.sources import hash_file
+
+
+def make_source(n=1):
+    return InstalledSource(url=f"https://files.accessiblegames.net/files/{n}/a.zip",
+                           sha256="a" * 64, size=10, catalog_sha256="b" * 64,
+                           catalog_size=10, position=0, version="1.0")
+
+
+def make_record(**kw):
+    base = dict(
+        catalog_id="entombed", kind="game", library_name="Main", folder="Entombed",
+        launch_path="Entombed/entombed.exe", source=make_source(),
+        extras={"patch": make_source(2)},
+        files={"entombed.exe": RecordedFile("Entombed.exe", "c" * 64, "entombed")},
+        steps=[{"op": "extract"}], method="extract",
+    )
+    base.update(kw)
+    return InstallRecord(**base)
+
+
+def test_round_trip(tmp_path):
+    store = RecordStore(tmp_path)
+    rec = make_record(previous={"source": {"url": "u"}, "extras": {}, "backups": []},
+                      vendor_uninstaller="unins000.exe")
+    store.save(rec)
+    assert (tmp_path / "entombed.json").exists()
+    assert store.load("entombed") == rec
+    assert isinstance(store.load("entombed").files["entombed.exe"], RecordedFile)
+    assert isinstance(store.load("entombed").extras["patch"], InstalledSource)
+    assert store.all() == {"entombed": rec}
+
+
+def test_atomic_save_leaves_no_temp(tmp_path):
+    RecordStore(tmp_path).save(make_record())
+    RecordStore(tmp_path).save(make_record(tracked=False))
+    assert [p.name for p in tmp_path.iterdir()] == ["entombed.json"]
+
+
+def test_unknown_fields_ignored_and_corrupt_kept(tmp_path):
+    (tmp_path / "x.json").write_text("{not json")
+    assert RecordStore(tmp_path).load("x") is None
+    assert (tmp_path / "x.json").exists()
+
+    store = RecordStore(tmp_path)
+    store.save(make_record())
+    data = json.loads((tmp_path / "entombed.json").read_text())
+    data["future"] = 1
+    data["source"]["future"] = 2
+    data["files"]["entombed.exe"]["future"] = 3
+    data["extras"]["patch"]["future"] = 4
+    del data["vendor_uninstaller"], data["uninstalled"]
+    (tmp_path / "entombed.json").write_text(json.dumps(data))
+    assert store.load("entombed") == make_record()
+
+    (tmp_path / "w.json").write_text('{"catalog_id": 5}')
+    (tmp_path / "l.json").write_text("[]")
+    assert store.load("w") is None and store.load("l") is None
+    assert (tmp_path / "w.json").exists() and (tmp_path / "l.json").exists()
+    assert store.load("missing") is None
+    assert set(store.all()) == {"entombed"}
+
+
+@pytest.mark.parametrize("bad", ["", "..", "a/b", "a" + chr(92) + "b", ".", "x/../y"])
+def test_unsafe_ids_refused(tmp_path, bad):
+    store = RecordStore(tmp_path)
+    with pytest.raises(ValueError):
+        store.load(bad)
+    with pytest.raises(ValueError):
+        store.delete(bad)
+    with pytest.raises(ValueError):
+        store.save(make_record(catalog_id=bad))
+
+
+def test_delete(tmp_path):
+    store = RecordStore(tmp_path)
+    store.save(make_record())
+    store.delete("entombed")
+    store.delete("entombed")
+    assert store.load("entombed") is None
+
+
+def test_hash_tree_skips_engine_dirs_and_folds_case(tmp_path):
+    (tmp_path / "Game.exe").write_bytes(b"g")
+    (tmp_path / "Saves").mkdir()
+    (tmp_path / "Saves" / "1.sav").write_bytes(b"s")
+    (tmp_path / "Game Chooser backup 2026-11-04").mkdir()
+    (tmp_path / "Game Chooser backup 2026-11-04" / "cfg.ini").write_bytes(b"c")
+    (tmp_path / "Saves" / ".gamechooser-staging").mkdir()
+    (tmp_path / "Saves" / ".gamechooser-staging" / "x").write_bytes(b"x")
+    result = hash_tree(tmp_path)
+    assert set(result) == {"game.exe", "saves/1.sav"}
+    assert result["game.exe"][0] == "Game.exe"
+    assert result["saves/1.sav"][0] == "Saves/1.sav"
+    assert result["game.exe"][1] == hash_file(tmp_path / "Game.exe")
+
+
+def test_record_folder_and_owner(tmp_path):
+    libs = [{"name": "Main", "path": str(tmp_path / "lib")}]
+    rel = make_record()
+    assert record_folder(rel, libs) == tmp_path / "lib" / "Entombed"
+    assert record_folder(make_record(library_name="Gone"), libs) is None
+    absolute = make_record(catalog_id="abs", library_name="", folder=str(tmp_path / "elsewhere"))
+    assert record_folder(absolute, libs) == tmp_path / "elsewhere"
+
+    store = RecordStore(tmp_path / "records")
+    store.save(rel)
+    store.save(absolute)
+    found = store.owner_of_folder(tmp_path / "lib" / "ENTOMBED", libs)
+    assert found is not None and found.catalog_id == "entombed"
+    assert store.owner_of_folder(tmp_path / "ELSEWHERE", libs).catalog_id == "abs"
+    assert store.owner_of_folder(tmp_path / "lib" / "Other", libs) is None
