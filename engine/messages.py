@@ -84,3 +84,7 @@ CATALOG_BAD_DOWNLOAD_EMPTY = "The catalog download was damaged, and no saved cop
 SOURCE_UNREACHABLE = "A download address couldn't be reached."
 SOURCE_CHECKSUM_MISMATCH = "A download didn't match the catalog's checksum."
 SOURCE_BLOCKED = "A download address is blocked."
+
+UPDATE_PATH_CONFLICT = ("The update can't be applied because \"{path}\" in your game folder is a {kind}, "
+                        "and the update needs the opposite. Nothing was changed.")
+RECYCLE_FAILED = "Your files couldn't be moved to the Recycle Bin, so they were left where they are."
