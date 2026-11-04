@@ -54,6 +54,16 @@ def _is_code(path: str) -> bool:
     return posixpath.splitext(path.replace("\\", "/"))[1].lower() in EXECUTABLE_CODE_SUFFIXES
 
 
+def _rekey(items: dict, what: str) -> dict:
+    out = {}
+    for key, value in items.items():
+        nk = norm_key(key)
+        if nk in out:
+            raise ValueError(f"Two {what} entries are the same file: {key!r}")
+        out[nk] = value
+    return out
+
+
 def plan_update(
     installed: dict[str, RecordedFile],
     on_disk: dict[str, tuple[str, str]],
@@ -61,6 +71,9 @@ def plan_update(
     persist: Sequence[str] = (),
     restore_changed_code: bool = False,
 ) -> UpdatePlan:
+    installed = _rekey(installed, "installed")
+    on_disk = _rekey(on_disk, "on-disk")
+    incoming = _rekey(incoming, "incoming")
     plan = UpdatePlan()
     for key in sorted(set(installed) | set(on_disk) | set(incoming)):
         inst = installed.get(key)
