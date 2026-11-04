@@ -1,0 +1,101 @@
+import pytest
+
+from engine.entries import (
+    current_platform, extras_of, game_fields, is_mirror_url, mirror_url_for,
+    resolve_dependencies, visible_games,
+)
+from engine.errors import DependencyError
+
+MIRROR = "https://files.accessiblegames.net/files/" + "a" * 64 + "/g.zip"
+
+
+def src(**kw):
+    s = {"label": "Mirror", "url": MIRROR, "platform": "windows",
+         "install": {"method": "zip"}, "sha256": "a" * 64, "size": 10}
+    s.update(kw)
+    return s
+
+
+def entry(id, kind="game", sources=None, **kw):
+    e = {"id": id, "kind": kind, "title": id.upper(), "sources": sources or [src()]}
+    e.update(kw)
+    return e
+
+
+def test_minimal_entry_is_visible():
+    e = {"id": "g", "kind": "game", "title": "G", "sources": [src()]}
+    assert [x["id"] for x in visible_games({"g": e}, "windows")] == ["g"]
+    assert game_fields(e) == {"title": "G", "developer": "", "genre": "", "year": "", "platforms": ["Windows"]}
+
+
+def test_game_fields_full():
+    e = entry("g", developer=["A", "B"], genres=["RPG", "Action"], year=1999)
+    assert game_fields(e) == {"title": "G", "developer": "A, B", "genre": "RPG", "year": "1999", "platforms": ["Windows"]}
+
+
+def test_unknown_values_hide_entry():
+    for bad in [dict(kind="mod-pack"), dict(sources=[src(install={"method": "squashfs"})]),
+                dict(sources=[src(install={"method": "installer", "installer": {"type": "wix", "mode": "extract"}})]),
+                dict(sources=[src(install={"method": "installer", "installer": {"type": "msi", "mode": "x"}})]),
+                dict(sources=[src(steps=[{"action": "shell", "cmd": "x"}])])]:
+        assert visible_games({"g": entry("g", **bad)}, "windows") == []
+
+
+def test_unknown_fields_are_ignored():
+    assert visible_games({"g": entry("g", future_field={"x": 1})}, "windows")
+
+
+def test_platform_filter_and_web():
+    mac = entry("m", sources=[src(platform="macos")])
+    web = entry("w", sources=[src(platform="web", install={"method": "url"})])
+    assert [x["id"] for x in visible_games({"m": mac, "w": web}, "windows")] == ["w"]
+
+
+def test_extras_and_runtimes_are_not_rows():
+    assert visible_games({"x": entry("x", kind="extra", extends="g"), "r": entry("r", kind="runtime"),
+                          "a": entry("a", kind="access-mod")}, "windows") == []
+
+
+def test_dependencies_resolve_depth_first_and_dedupe():
+    es = {"g": entry("g", dependencies=["a", "b"]), "a": entry("a", kind="runtime", dependencies=["b"]),
+          "b": entry("b", kind="runtime")}
+    assert resolve_dependencies("g", es) == ["b", "a"]
+
+
+def test_cycle_and_missing_dependency_hide_game():
+    es = {"g": entry("g", dependencies=["a"]), "a": entry("a", kind="runtime", dependencies=["g2"]),
+          "g2": entry("g2", kind="runtime", dependencies=["a"])}
+    with pytest.raises(DependencyError):
+        resolve_dependencies("g", es)
+    assert visible_games(es, "windows") == []
+    assert visible_games({"h": entry("h", dependencies=["nope"])}, "windows") == []
+
+
+def test_non_runtime_dependency_hides_game():
+    es = {"g": entry("g", dependencies=["x"]), "x": entry("x", kind="game")}
+    assert [e["id"] for e in visible_games(es, "windows")] == ["x"]
+
+
+def test_unreadable_required_extra_hides_game_optional_is_skipped():
+    g = entry("g", extras=[{"id": "r", "required": True}])
+    assert visible_games({"g": g, "r": entry("r", kind="extra", sources=[src(steps=[{"action": "shell"}])])}, "windows") == []
+    g2 = entry("g2", extras=[{"id": "o", "required": False}])
+    es = {"g2": g2, "o": entry("o", kind="extra", sources=[src(steps=[{"action": "shell"}])])}
+    assert visible_games(es, "windows") and extras_of(g2, es, "windows") == []
+
+
+def test_extras_of_returns_usable_extras():
+    g = entry("g", extras=[{"id": "o", "required": False}])
+    o = entry("o", kind="extra")
+    infos = extras_of(g, {"g": g, "o": o}, "windows")
+    assert [(i.entry["id"], i.required) for i in infos] == [("o", False)]
+
+
+def test_mirror_helpers():
+    assert is_mirror_url("https://files.accessiblegames.net/files/abc/x.zip")
+    assert not is_mirror_url("https://example.com/files/abc/x.zip")
+    assert mirror_url_for("ab" * 32, "x y.zip") == f"https://files.accessiblegames.net/files/{'ab'*32}/x%20y.zip"
+
+
+def test_current_platform_is_known():
+    assert current_platform() in {"windows", "macos", "linux"}
