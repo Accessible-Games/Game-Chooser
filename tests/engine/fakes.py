@@ -4,7 +4,10 @@ import gzip
 import hashlib
 import json
 
-from engine.errors import DownloadError
+from pathlib import Path
+
+from engine.errors import Cancelled, DownloadError
+from engine.http import check_url_allowed
 
 
 class FakeFetcher:
@@ -13,12 +16,31 @@ class FakeFetcher:
     def __init__(self, routes: dict[str, bytes] | None = None):
         self.routes: dict[str, bytes] = dict(routes or {})
         self.calls: dict[str, int] = {}
+        self.requests: list[str] = []
 
     def get_bytes(self, url: str, max_bytes: int = 64 * 2**20) -> bytes:
         self.calls[url] = self.calls.get(url, 0) + 1
         if url not in self.routes:
             raise DownloadError(f"404 Not Found: {url}")
         return self.routes[url]
+
+    def download(self, url: str, dest: Path, progress=None, cancel=None) -> None:
+        """Like Fetcher.download: blocked hosts refused, bytes written, progress called, cancel honored."""
+        check_url_allowed(url)
+        self.requests.append(url)
+        if url not in self.routes:
+            raise DownloadError(f"404 Not Found: {url}")
+        data = self.routes[url]
+        half = len(data) // 2
+        dest.write_bytes(data[:half])
+        if progress:
+            progress(half, len(data))
+        if cancel and cancel():
+            dest.unlink(missing_ok=True)
+            raise Cancelled()
+        dest.write_bytes(data)
+        if progress:
+            progress(len(data), len(data))
 
 
 def publish(fetcher: FakeFetcher, base_url: str, entries: list[dict], schema_version: int = 1) -> bytes:

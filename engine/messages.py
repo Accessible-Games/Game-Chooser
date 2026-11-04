@@ -80,3 +80,7 @@ CATALOG_OFFLINE = "The catalog couldn't be reached. Showing the last saved copy.
 CATALOG_OFFLINE_EMPTY = "The catalog couldn't be reached, and no saved copy is available."
 CATALOG_BAD_DOWNLOAD = "The catalog download was damaged. Showing the last saved copy."
 CATALOG_BAD_DOWNLOAD_EMPTY = "The catalog download was damaged, and no saved copy is available."
+
+SOURCE_UNREACHABLE = "A download address couldn't be reached."
+SOURCE_CHECKSUM_MISMATCH = "A download didn't match the catalog's checksum."
+SOURCE_BLOCKED = "A download address is blocked."
