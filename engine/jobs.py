@@ -215,7 +215,11 @@ class InstallEngine:
         staging_root = library_path / STAGING_DIR_NAME
         staging = staging_root / game_id
         work = ctx.work_root / game_id
-        staging_root.mkdir(exist_ok=True)
+        try:
+            # A new library's folder may not exist yet; only the staging folder inside it is hidden.
+            staging_root.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise InstallFailed(messages.LIBRARY_FOLDER_NOT_CREATED.format(path=library_path)) from e
         _hide(staging_root)
         _clear_or_fail(staging)
         _clear_or_fail(work)

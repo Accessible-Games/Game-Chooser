@@ -505,3 +505,28 @@ def test_staging_folder_is_hidden(tmp_path):
     staging = lib / ".gamechooser-staging"
     assert staging.is_dir()
     assert os.stat(staging).st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN
+
+
+def test_install_into_a_library_folder_that_does_not_exist_yet(tmp_path):
+    routes = {}
+    new_lib = tmp_path / "Profile" / "Games"
+    engine, ctx, _ = setup(tmp_path, [game(routes)], routes,
+                           libraries=[{"name": "Games", "path": str(new_lib)}])
+    r = engine.run(InstallRequest("install", "entombed", "Games", new_lib), lambda p: None, never)
+    assert (new_lib / "Entombed" / "entombed.exe").exists() and r.game["library_name"] == "Games"
+    assert ctx.records.load("entombed").folder == "Entombed"
+    if hasattr(os.stat(new_lib), "st_file_attributes"):
+        assert not os.stat(new_lib).st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN
+        assert os.stat(new_lib / ".gamechooser-staging").st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN
+
+
+def test_library_folder_that_cannot_be_created_fails_plainly(tmp_path):
+    routes = {}
+    (tmp_path / "blocker").write_text("a file where the library's parent folder should be")
+    bad_lib = tmp_path / "blocker" / "Games"
+    engine, ctx, _ = setup(tmp_path, [game(routes)], routes,
+                           libraries=[{"name": "Games", "path": str(bad_lib)}])
+    with pytest.raises(InstallFailed) as ei:
+        engine.run(InstallRequest("install", "entombed", "Games", bad_lib), lambda p: None, never)
+    assert ei.value.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=bad_lib)
+    assert ctx.fetcher.requests == []

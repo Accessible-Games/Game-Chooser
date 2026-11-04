@@ -117,3 +117,5 @@ TEMP_FOLDER_NOT_CLEARED = ("Game Chooser couldn't empty its temporary folder {pa
                            "files in it, then try again.")
 FOLDER_NOT_REMOVED = ("The game's folder {path} couldn't be fully removed. Game Chooser isn't keeping track of "
                       "it, so you can delete it yourself.")
+LIBRARY_FOLDER_NOT_CREATED = ("The library folder {path} couldn't be created. Check that the drive is connected, "
+                              "then try again.")
