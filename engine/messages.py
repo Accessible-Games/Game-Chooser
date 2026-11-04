@@ -110,7 +110,14 @@ UNDO_REGISTRY_FAILED = "The Windows registry setting {key} couldn't be put back.
 UNDO_UNREGISTER_FAILED = "{name} couldn't be unregistered from Windows."
 
 NOT_IN_CATALOG = "This game is no longer in the catalog."
-REINSTALL_NOT_SUPPORTED = "{title} was installed before, and Game Chooser can't install it again over that yet."
+NOT_INSTALLED = "{title} isn't installed by Game Chooser."
+INSTALL_NOT_CHANGEABLE = "Game Chooser can't change {title}, because of how it was installed."
+GAME_FOLDER_MISSING = "{title}'s folder {path} wasn't found. If it was moved or deleted, install the game again."
+NOTHING_TO_UNDO = "{title} hasn't been updated, so there's nothing to undo."
+EXTRAS_NOT_AVAILABLE = "The extras you chose for {title} aren't in the catalog anymore."
+FILES_NOT_CHANGED = ("Some of {title}'s files couldn't be changed. Close the game if it's running, then try "
+                     "again. Any file of yours that was replaced is in the game's backup folder.")
+UNINSTALL_FAILED = "Some of {title}'s files couldn't be removed. Close the game if it's running, then try again."
 DEPENDENCIES_NOT_SUPPORTED = ("{title} needs other software installed first, and Game Chooser can't install "
                               "that yet.")
 TEMP_FOLDER_NOT_CLEARED = ("Game Chooser couldn't empty its temporary folder {path}. Close any program using "

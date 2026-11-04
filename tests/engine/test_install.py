@@ -281,17 +281,17 @@ def test_existing_folder_differing_only_in_case_is_refused(tmp_path):
     assert ctx.fetcher.requests == []
 
 
-def test_own_recorded_folder_is_not_blocked_but_not_reinstalled_yet(tmp_path):
+def test_own_recorded_folder_is_not_blocked_and_is_installed_over_as_an_update(tmp_path):
     routes = {}
     e = game(routes)
     engine, ctx, lib = setup(tmp_path, [e], routes)
     engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert blocked_reason(e, lib, ctx.records, ctx.libraries) is None
-    requests = list(ctx.fetcher.requests)
-    with pytest.raises(InstallFailed) as ei:   # Task 13 turns this into an update
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.REINSTALL_NOT_SUPPORTED.format(title="Entombed")
-    assert ctx.fetcher.requests == requests
+    (lib / "Entombed" / "save.dat").write_bytes(b"player")
+    r = engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert r.action == "install" and r.backups == 0
+    assert (lib / "Entombed" / "save.dat").read_bytes() == b"player"
+    assert set(ctx.records.load("entombed").files) == {"entombed.exe", "sounds/a.wav"}
 
 
 def test_duplicate_title_gets_developer_suffix(tmp_path):
