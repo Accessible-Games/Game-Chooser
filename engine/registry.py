@@ -77,6 +77,17 @@ class RegistryAccess:
             return False, None, None
         return True, value, self._type_name(type_)
 
+    def can_restore(self, hive: str, type_: str | None, value: object) -> bool:
+        """True if `set` could later write this value back exactly as it is now."""
+        if hive not in HIVES:
+            return False
+        try:
+            coerced = _coerce(type_, value)
+        except StepError:
+            return False
+        # HKLM goes through reg.exe, which can't be given quotes or newlines.
+        return hive != "HKLM" or not _UNSAFE_TEXT.search(str(coerced))
+
     def set(self, hive: str, key: str, name: str, type_: str, value: object) -> None:
         coerced = _coerce(type_, value)
         if hive == "HKCU":

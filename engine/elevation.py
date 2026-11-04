@@ -79,6 +79,10 @@ class _ShellProcess:
 
 
 class WindowsElevator:
+    def __init__(self, elevated_verb: str = "runas"):
+        # Test seam only: tests pass "open" to drive the real ShellExecuteEx call without a UAC prompt.
+        self._elevated_verb = elevated_verb
+
     def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
         process = self.start(exe, args, elevated, cwd)
         try:
@@ -95,8 +99,7 @@ class WindowsElevator:
             raise StepError(messages.STEP_PROGRAM_NOT_STARTED.format(name=Path(exe).name)) from e
         return _SubprocessProcess(popen)
 
-    @staticmethod
-    def _start_elevated(exe: str, args: str, cwd: Path | None) -> RunningProcess:
+    def _start_elevated(self, exe: str, args: str, cwd: Path | None) -> RunningProcess:
         import pythoncom
         import pywintypes
         import win32con
@@ -108,11 +111,12 @@ class WindowsElevator:
             com_started = True
         except pythoncom.com_error:
             com_started = False  # Already initialised in another mode; that works too.
+        options = {"fMask": shellcon.SEE_MASK_NOCLOSEPROCESS | _SEE_MASK_NOASYNC, "lpVerb": self._elevated_verb,
+                   "lpFile": exe, "lpParameters": args, "nShow": win32con.SW_SHOWNORMAL}
+        if cwd:
+            options["lpDirectory"] = str(cwd)  # pywin32 refuses None for string fields, so omit it instead.
         try:
-            result = shell.ShellExecuteEx(
-                fMask=shellcon.SEE_MASK_NOCLOSEPROCESS | _SEE_MASK_NOASYNC,
-                lpVerb="runas", lpFile=exe, lpParameters=args,
-                lpDirectory=str(cwd) if cwd else None, nShow=win32con.SW_SHOWNORMAL)
+            result = shell.ShellExecuteEx(**options)
         except pywintypes.error as e:
             if e.winerror == _ERROR_CANCELLED:
                 raise ElevationDeclined(str(e)) from e

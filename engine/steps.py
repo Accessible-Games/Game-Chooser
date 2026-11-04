@@ -15,7 +15,7 @@ from pathlib import Path, PurePath, PureWindowsPath
 from . import messages
 from .elevation import Elevator
 from .errors import ElevationDeclined, StepError, UnsafePath
-from .registry import WRITABLE_TYPES, RegistryAccess
+from .registry import RegistryAccess
 from .safety import _resolve_game_path
 
 log = logging.getLogger(__name__)
@@ -103,7 +103,7 @@ def _apply_registry(step: dict, ctx: StepContext) -> dict:
     label = f"{hive}\\{key}"
     try:
         existed, previous, previous_type = ctx.registry.get(hive, key, name)
-        if existed and previous_type not in WRITABLE_TYPES:
+        if existed and not ctx.registry.can_restore(hive, previous_type, previous):
             raise StepError(messages.REGISTRY_CANT_RESTORE.format(key=label))
         ctx.registry.set(hive, key, name, step["type"], step["value"])
     except ElevationDeclined as e:

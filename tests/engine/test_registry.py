@@ -123,3 +123,15 @@ def test_bad_hive_type_or_dword_is_step_error(fake_elev, fake_winreg, hive, type
     reg = RegistryAccess(elevator=fake_elev, hkcu=fake_winreg)
     with pytest.raises(StepError):
         reg.set(hive, r"Software\X", "Path", type_, value)
+
+
+def test_can_restore(fake_elev, fake_winreg):
+    reg = RegistryAccess(elevator=fake_elev, hkcu=fake_winreg)
+    assert reg.can_restore("HKLM", "REG_SZ", r"C:\G")
+    assert reg.can_restore("HKLM", "REG_DWORD", 5)
+    assert not reg.can_restore("HKLM", "REG_SZ", r'"C:\G\g.exe" %1')
+    assert not reg.can_restore("HKLM", "REG_EXPAND_SZ", "a\nb")
+    assert not reg.can_restore("HKLM", "REG_BINARY", b"\x01")
+    assert reg.can_restore("HKCU", "REG_SZ", r'"C:\G\g.exe" %1')
+    assert not reg.can_restore("HKCU", "REG_MULTI_SZ", ["a", "b"])
+    assert not reg.can_restore("HKCR", "REG_SZ", "v")

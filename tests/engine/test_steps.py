@@ -378,3 +378,32 @@ def test_windows_elevator_elevated_path_without_uac(monkeypatch, tmp_path):
     with pytest.raises(StepError) as exc:
         WindowsElevator().run("missing.exe", "", True)
     assert not isinstance(exc.value, ElevationDeclined)
+
+
+@pytest.mark.parametrize("value,type_", [(r'"C:\Program Files\X\x.exe" %1', "REG_SZ"),
+                                          ("line1\nline2", "REG_EXPAND_SZ")])
+def test_hklm_step_refuses_to_replace_a_value_reg_exe_cannot_write_back(ctx, fake_winreg, fake_elev, value, type_):
+    fake_winreg.put(HKLM, r"Software\Classes\X\shell\open\command", "", value, getattr(fake_winreg, type_))
+    step = {"action": "registry", "hive": "HKLM", "key": r"Software\Classes\X\shell\open\command", "name": "",
+            "type": "REG_SZ", "value": "new"}
+    with pytest.raises(StepError) as exc:
+        run_system_steps([step], ctx)
+    assert str(exc.value) == messages.REGISTRY_CANT_RESTORE.format(key=r"HKLM\Software\Classes\X\shell\open\command")
+    assert fake_elev.calls == []
+
+
+def test_hkcu_step_may_replace_a_value_with_quotes(ctx, fake_winreg):
+    fake_winreg.put(HKCU, r"Software\Game", "Cmd", r'"C:\G\g.exe" %1', fake_winreg.REG_SZ)
+    applied = run_system_steps([hkcu_step("Cmd", "new")], ctx)
+    assert undo_steps(applied, ctx) == []
+    assert fake_winreg.value(HKCU, r"Software\Game", "Cmd") == (r'"C:\G\g.exe" %1', fake_winreg.REG_SZ)
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("with_cwd", [False, True])
+def test_windows_elevator_real_shell_execute_path(tmp_path, with_cwd):
+    """The real ShellExecuteEx call, with the "open" verb so no UAC prompt appears."""
+    from engine.elevation import WindowsElevator
+    elev = WindowsElevator(elevated_verb="open")
+    code = elev.run(sys.executable, '-c "import sys; sys.exit(4)"', True, cwd=tmp_path if with_cwd else None)
+    assert code == 4
