@@ -11,3 +11,15 @@ dependencies = [
     "six>=1.17.0",
     "wxpython==4.2.3",
 ]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "tools: needs the bundled tools in bin/ (skipped when bin/7z.exe is absent)",
+    "windows: touches the real Windows registry or other Windows-only behavior",
+]
