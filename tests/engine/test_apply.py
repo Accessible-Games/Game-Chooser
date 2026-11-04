@@ -195,3 +195,111 @@ def test_restore_never_deletes_other_backup_files(dirs):
     backups = [{"original": "a.ini", "backup": f"{BK}/a.ini", "installed_sha256": sha(b"new a")}]
     restore_backups(game, backups)
     assert (game / BK / "other.ini").read_bytes() == b"someone else"
+
+
+# ---- last-moment re-check, partial results, backup-path preflight ----------
+
+
+def make_op_plan(path, op, expected, new=b"new"):
+    plan = UpdatePlan()
+    plan.ops.append(FileOp(path.lower(), path, op, "", expected))
+    if new is not None:
+        plan.new_files[path.lower()] = RecordedFile(path, sha(new), "game")
+    return plan
+
+
+def test_write_over_file_that_appeared_since_planning_is_backed_up(dirs):
+    from engine.safety import ABSENT
+    game, inc = dirs
+    put(inc, "save.dat", b"new")
+    put(game, "save.dat", b"game made this")
+    r = apply_plan(make_op_plan("save.dat", Op.WRITE, ABSENT), game, inc, DAY)
+    assert (game / BK / "save.dat").read_bytes() == b"game made this"
+    assert (game / "save.dat").read_bytes() == b"new" and len(r.backups) == 1
+
+
+def test_write_over_file_changed_since_planning_is_backed_up(dirs):
+    game, inc = dirs
+    put(inc, "a.txt", b"new")
+    put(game, "a.txt", b"changed later")
+    apply_plan(make_op_plan("a.txt", Op.WRITE, sha(b"old")), game, inc, DAY)
+    assert (game / BK / "a.txt").read_bytes() == b"changed later"
+
+
+def test_changed_exe_is_replaced_without_copy(dirs):
+    game, inc = dirs
+    put(inc, "g.exe", b"new")
+    put(game, "g.exe", b"changed later")
+    r = apply_plan(make_op_plan("g.exe", Op.WRITE, sha(b"old")), game, inc, DAY)
+    assert (game / "g.exe").read_bytes() == b"new" and r.backups == [] and not (game / BK).exists()
+
+
+def test_write_when_file_vanished_just_writes(dirs):
+    game, inc = dirs
+    put(inc, "a.txt", b"new")
+    apply_plan(make_op_plan("a.txt", Op.WRITE, sha(b"old")), game, inc, DAY)
+    assert (game / "a.txt").read_bytes() == b"new" and not (game / BK).exists()
+
+
+def test_persist_default_that_appeared_is_kept(dirs):
+    from engine.safety import ABSENT
+    game, inc = dirs
+    put(inc, "p.ini", b"default")
+    put(game, "p.ini", b"player")
+    apply_plan(make_op_plan("p.ini", Op.WRITE, ABSENT, new=None), game, inc, DAY)
+    assert (game / "p.ini").read_bytes() == b"player"
+
+
+def test_delete_of_changed_file_is_kept(dirs):
+    game, inc = dirs
+    put(game, "d/x.txt", b"changed later")
+    apply_plan(make_op_plan("d/x.txt", Op.DELETE, sha(b"old"), new=None), game, inc, DAY)
+    assert (game / "d/x.txt").read_bytes() == b"changed later"
+
+
+def test_delete_of_unchanged_file_still_deletes(dirs):
+    game, inc = dirs
+    put(game, "d/x.txt", b"same")
+    apply_plan(make_op_plan("d/x.txt", Op.DELETE, sha(b"same"), new=None), game, inc, DAY)
+    assert not (game / "d").exists()
+
+
+def test_plan_update_fills_expected():
+    from engine.safety import ABSENT, plan_update
+    plan = plan_update({}, {"a.txt": ("a.txt", "h")}, {"a.txt": RecordedFile("a.txt", "n", "g"),
+                                                       "b.txt": RecordedFile("b.txt", "n", "g")})
+    assert {o.path: o.expected for o in plan.ops} == {"a.txt": "h", "b.txt": ABSENT}
+
+
+def test_failure_partway_reports_partial_backups(dirs, monkeypatch):
+    game, inc = dirs
+    for name in ("a.ini", "b.ini"):
+        put(game, name, b"mine " + name.encode())
+        put(inc, name, b"new")
+    real = os.replace
+
+    def boom(src, dst):
+        if str(dst).endswith("b.ini") and BK not in str(dst):
+            raise OSError("nope")
+        return real(src, dst)
+
+    monkeypatch.setattr(os, "replace", boom)
+    plan = make_plan(("a.ini", Op.BACKUP_AND_WRITE, b"new"), ("b.ini", Op.BACKUP_AND_WRITE, b"new"))
+    with pytest.raises(OSError) as info:
+        apply_plan(plan, game, inc, DAY)
+    monkeypatch.setattr(os, "replace", real)
+    assert [b["original"] for b in info.value.partial.backups] == ["a.ini"]
+    assert (game / BK / "a.ini").exists() and (game / "b.ini").read_bytes() == b"mine b.ini"
+
+
+def test_preflight_catches_backup_path_blocked_by_file(dirs):
+    game, inc = dirs
+    put(game, "Data/cfg.ini", b"mine")
+    put(game, "other.txt", b"old")
+    put(game, BK, b"a file where the backup folder goes")
+    put(inc, "Data/cfg.ini", b"new")
+    put(inc, "other.txt", b"new")
+    plan = make_plan(("other.txt", Op.WRITE, b"new"), ("Data/cfg.ini", Op.BACKUP_AND_WRITE, b"new"))
+    with pytest.raises(EngineError):
+        apply_plan(plan, game, inc, DAY)
+    assert (game / "other.txt").read_bytes() == b"old"

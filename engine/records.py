@@ -66,7 +66,9 @@ def hash_tree(root: Path) -> dict[str, tuple[str, str]]:
     root = Path(root)
     result: dict[str, tuple[str, str]] = {}
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not is_engine_dir(d)]
+        # Never follow a symlink or junction out of the folder.
+        dirnames[:] = [d for d in dirnames if not is_engine_dir(d)
+                       and not (os.path.islink(Path(dirpath) / d) or os.path.isjunction(Path(dirpath) / d))]
         for name in filenames:
             full = Path(dirpath) / name
             rel = full.relative_to(root).as_posix()

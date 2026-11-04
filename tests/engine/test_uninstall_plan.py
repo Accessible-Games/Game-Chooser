@@ -1,3 +1,4 @@
+import pytest
 import hashlib
 from pathlib import Path
 
@@ -93,3 +94,61 @@ def test_empty_player_list_skips_recycle(tmp_path):
     fake = FakeRecycle()
     apply_uninstall(plan_uninstall(FakeRecord({"game.exe": b"exe"}), game), game, True, recycle=fake)
     assert fake.calls == [] and not game.exists()
+
+
+def test_changed_file_is_kept_and_counted_at_apply_time(tmp_path):
+    game, rec = setup(tmp_path)
+    p = plan_uninstall(rec, game)
+    (game / "game.exe").write_bytes(b"changed after planning")
+    fake = FakeRecycle()
+    kept = apply_uninstall(p, game, False, recycle=fake)
+    assert kept == 4 and (game / "game.exe").read_bytes() == b"changed after planning"
+    assert not (game / "sub").exists()
+
+
+def test_changed_file_is_recycled_when_asked(tmp_path):
+    game, rec = setup(tmp_path)
+    p = plan_uninstall(rec, game)
+    (game / "game.exe").write_bytes(b"changed after planning")
+    fake = FakeRecycle()
+    apply_uninstall(p, game, True, recycle=fake)
+    assert len(fake.calls[0]) == 4 and not game.exists()
+
+
+@pytest.mark.windows
+def test_junction_is_never_followed_or_removed(tmp_path):
+    import _winapi
+    outside = tmp_path / "outside"
+    put(outside, "keep.txt", b"not yours")
+    (outside / "emptydir").mkdir()
+    game = tmp_path / "game"
+    put(game, "game.exe", b"exe")
+    _winapi.CreateJunction(str(outside), str(game / "Saves"))
+    try:
+        rec = FakeRecord({"game.exe": b"exe"})
+        p = plan_uninstall(rec, game)
+        assert p.player_files == ["Saves"]
+        fake = FakeRecycle()
+        kept = apply_uninstall(p, game, True, recycle=fake)
+        assert fake.calls == [] and kept == 1
+        assert (outside / "keep.txt").read_bytes() == b"not yours" and (outside / "emptydir").is_dir()
+        assert (game / "Saves").exists() and game.exists()
+    finally:
+        import os
+        os.rmdir(game / "Saves")
+
+
+@pytest.mark.windows
+def test_hash_tree_does_not_follow_junction(tmp_path):
+    import _winapi
+    from engine.records import hash_tree
+    outside = tmp_path / "outside"
+    put(outside, "keep.txt", b"x")
+    game = tmp_path / "game"
+    put(game, "a.txt", b"a")
+    _winapi.CreateJunction(str(outside), str(game / "J"))
+    try:
+        assert list(hash_tree(game)) == ["a.txt"]
+    finally:
+        import os
+        os.rmdir(game / "J")
