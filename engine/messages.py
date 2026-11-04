@@ -88,3 +88,7 @@ SOURCE_BLOCKED = "A download address is blocked."
 UPDATE_PATH_CONFLICT = ("The update can't be applied because \"{path}\" in your game folder is a {kind}, "
                         "and the update needs the opposite. Nothing was changed.")
 RECYCLE_FAILED = "Your files couldn't be moved to the Recycle Bin, so they were left where they are."
+
+EXTRACT_FAILED = "The downloaded files couldn't be unpacked."
+EXTRACT_FOLDER_MISSING = "The game's folder wasn't found in the download."
+EXTRACT_UNSAFE_LINK = "The download contained a shortcut that points outside the game folder, so it was not unpacked."
