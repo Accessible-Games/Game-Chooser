@@ -74,3 +74,9 @@ def update_summary(title: str, backups: int) -> str:
         return f"{title} is updated"
     noun = "file" if backups == 1 else "files"
     return f"Updated {title}. Kept a backup of {backups} {noun} you'd changed."
+
+CATALOG_NEWER_APP = "A newer version of Game Chooser is needed to see the latest catalog."
+CATALOG_OFFLINE = "The catalog couldn't be reached. Showing the last saved copy."
+CATALOG_OFFLINE_EMPTY = "The catalog couldn't be reached, and no saved copy is available."
+CATALOG_BAD_DOWNLOAD = "The catalog download was damaged. Showing the last saved copy."
+CATALOG_BAD_DOWNLOAD_EMPTY = "The catalog download was damaged, and no saved copy is available."
