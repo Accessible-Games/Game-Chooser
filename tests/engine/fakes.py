@@ -57,3 +57,115 @@ def publish(fetcher: FakeFetcher, base_url: str, entries: list[dict], schema_ver
     fetcher.routes[base_url + "index.json.gz"] = gz
     fetcher.routes[base_url + "index-meta.json"] = json.dumps(meta).encode("utf-8")
     return gz
+
+
+class FakeProcess:
+    """A finished process as returned by FakeElevator.start."""
+
+    def __init__(self, code: int, pid: int):
+        self.code = code
+        self.pid = pid
+        self.handle = pid
+
+    def wait(self, timeout: float | None = None) -> int | None:
+        return self.code
+
+    def close(self) -> None:
+        pass
+
+
+class FakeElevator:
+    """Records (exe, args, elevated) calls; never runs anything.
+
+    `exit_codes` maps an exe name to its exit code (default 0). With `decline=True`
+    every elevated call raises ElevationDeclined, as if the UAC prompt was refused.
+    """
+
+    def __init__(self, exit_codes: dict[str, int] | None = None, decline: bool = False):
+        self.exit_codes = dict(exit_codes or {})
+        self.decline = decline
+        self.calls: list[tuple[str, str, bool]] = []
+        self.cwds: list[Path | None] = []
+
+    def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> FakeProcess:
+        from engine.errors import ElevationDeclined
+        self.calls.append((exe, args, elevated))
+        self.cwds.append(cwd)
+        if elevated and self.decline:
+            raise ElevationDeclined("The administrator prompt was declined.")
+        return FakeProcess(self.exit_codes.get(exe, 0), 1000 + len(self.calls))
+
+    def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
+        return self.start(exe, args, elevated, cwd).wait(None)
+
+
+class _FakeKey:
+    def __init__(self, hive: int, path: str, access: int):
+        self.hive, self.path, self.access = hive, path, access
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def Close(self):
+        pass
+
+
+class FakeWinreg:
+    """An in-memory stand-in for the parts of `winreg` the engine uses. Keys and names are case-insensitive."""
+
+    HKEY_CURRENT_USER = 0x80000001
+    HKEY_LOCAL_MACHINE = 0x80000002
+    KEY_READ = 0x20019
+    KEY_SET_VALUE = 0x0002
+    KEY_WOW64_32KEY = 0x0200
+    KEY_WOW64_64KEY = 0x0100
+    REG_NONE, REG_SZ, REG_EXPAND_SZ, REG_BINARY, REG_DWORD = 0, 1, 2, 3, 4
+    REG_MULTI_SZ, REG_QWORD = 7, 11
+
+    def __init__(self):
+        # (hive, lowercased key) -> {lowercased name: (value, type)}
+        self.keys: dict[tuple[int, str], dict[str, tuple[object, int]]] = {}
+        self.opens: list[tuple[int, str, int]] = []
+
+    @staticmethod
+    def _norm(key: str) -> str:
+        return key.strip("\\").lower()
+
+    def OpenKey(self, hive, key, reserved=0, access=0x20019):
+        self.opens.append((hive, key, access))
+        if (hive, self._norm(key)) not in self.keys:
+            raise FileNotFoundError(2, "The system cannot find the file specified")
+        return _FakeKey(hive, self._norm(key), access)
+
+    def CreateKeyEx(self, hive, key, reserved=0, access=0x20006):
+        self.opens.append((hive, key, access))
+        self.keys.setdefault((hive, self._norm(key)), {})
+        return _FakeKey(hive, self._norm(key), access)
+
+    def QueryValueEx(self, handle, name):
+        values = self.keys[(handle.hive, handle.path)]
+        if name.lower() not in values:
+            raise FileNotFoundError(2, "The system cannot find the file specified")
+        return values[name.lower()]
+
+    def SetValueEx(self, handle, name, reserved, type_, value):
+        self.keys[(handle.hive, handle.path)][name.lower()] = (value, type_)
+
+    def DeleteValue(self, handle, name):
+        values = self.keys[(handle.hive, handle.path)]
+        if name.lower() not in values:
+            raise FileNotFoundError(2, "The system cannot find the file specified")
+        del values[name.lower()]
+
+    def CloseKey(self, handle):
+        pass
+
+    # Test helpers
+    def put(self, hive, key, name, value, type_):
+        self.keys.setdefault((hive, self._norm(key)), {})[name.lower()] = (value, type_)
+
+    def value(self, hive, key, name):
+        return self.keys.get((hive, self._norm(key)), {}).get(name.lower())

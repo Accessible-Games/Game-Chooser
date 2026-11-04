@@ -92,3 +92,19 @@ RECYCLE_FAILED = "Your files couldn't be moved to the Recycle Bin, so they were 
 EXTRACT_FAILED = "The downloaded files couldn't be unpacked."
 EXTRACT_FOLDER_MISSING = "The game's folder wasn't found in the download."
 EXTRACT_UNSAFE_LINK = "The download contained a shortcut that points outside the game folder, so it was not unpacked."
+
+STEP_UNKNOWN_ACTION = "This game needs a setup step Game Chooser doesn't know, so it wasn't installed."
+STEP_UNSAFE_PATH = "A setup step points outside the game folder, so it wasn't run."
+STEP_FILE_MISSING = 'A setup step needs "{path}", which isn\'t in the game folder.'
+STEP_RUN_FAILED = "{name} stopped with error code {code} while setting up the game."
+STEP_REGISTER_FAILED = "{name} couldn't be registered with Windows."
+STEP_PROGRAM_NOT_STARTED = "{name} couldn't be started."
+STEP_FILE_FAILED = "A setup step couldn't change the game's files."
+STEP_FAILED = "A setup step for this game didn't work."
+REGISTRY_UNSAFE_TEXT = "A Windows registry setting for this game contains a character Game Chooser won't write."
+REGISTRY_BAD_SETTING = "A Windows registry setting for this game isn't valid."
+REGISTRY_WRITE_FAILED = "The Windows registry setting {key} couldn't be saved."
+REGISTRY_CANT_RESTORE = ("The Windows registry setting {key} already has a value Game Chooser couldn't put back "
+                         "later, so it wasn't changed.")
+UNDO_REGISTRY_FAILED = "The Windows registry setting {key} couldn't be put back."
+UNDO_UNREGISTER_FAILED = "{name} couldn't be unregistered from Windows."
