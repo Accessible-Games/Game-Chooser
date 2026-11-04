@@ -9,6 +9,7 @@ install) are never deleted or overwritten without a backup first. Only
 
 import fnmatch
 import os
+import re
 import posixpath
 import shutil
 import tempfile
@@ -16,7 +17,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Sequence
 
 from . import messages
@@ -149,6 +150,20 @@ def _rel(path: Path, root: Path) -> str:
 def is_link(path) -> bool:
     """True for symlinks and NTFS junctions. The engine never follows or removes these."""
     return os.path.islink(path) or os.path.isjunction(path)
+
+
+def _resolve_game_path(game_dir: Path, rel: str) -> tuple[Path, bool]:
+    """Path of `rel` under `game_dir` and whether it passes through a link.
+
+    The link check is lexical and comes first: safe_join resolves links, so it would refuse
+    (raise) for a file under a junction that points outside the folder.
+    """
+    parts = [p for p in re.split(r"[\/]", rel) if p]
+    if ".." not in parts and not PureWindowsPath(rel).anchor and not rel.startswith(("/", "\\")):
+        lexical = game_dir.joinpath(*parts)
+        if _has_link_component(lexical, game_dir):
+            return lexical, True
+    return safe_join(game_dir, rel), False
 
 
 def _has_link_component(path: Path, root: Path) -> bool:
@@ -324,8 +339,8 @@ def plan_uninstall(record, game_dir: Path) -> UninstallPlan:
     delete = []
     hashes = {}
     for recorded in record.files.values():
-        path = safe_join(game_dir, recorded.path)
-        if _has_link_component(path, game_dir):
+        path, linked = _resolve_game_path(game_dir, recorded.path)
+        if linked:
             continue
         if path.is_file() and hash_file(path) == recorded.sha256:
             rel = recorded.path.replace("\\", "/")
@@ -380,11 +395,11 @@ def apply_uninstall(plan: UninstallPlan, game_dir: Path, delete_player_data: boo
     """Returns how many player files (a link counts as one) were left in the game folder."""
     game_dir = Path(game_dir)
     # Resolve every path first, so a refusal happens before the first deletion.
-    delete_paths = [(rel, safe_join(game_dir, rel)) for rel in plan.delete]
+    delete_paths = [(rel, *_resolve_game_path(game_dir, rel)) for rel in plan.delete]
     player = [_entry_path(game_dir, rel) for rel in plan.player_files]
-    for rel, path in delete_paths:
+    for rel, path, linked in delete_paths:
         expected = plan.hashes.get(rel)
-        if _has_link_component(path, game_dir):
+        if linked:
             player.append(path)
         elif expected is not None and path.exists() and (not path.is_file() or hash_file(path) != expected):
             player.append(path)  # changed since planning: now the player's

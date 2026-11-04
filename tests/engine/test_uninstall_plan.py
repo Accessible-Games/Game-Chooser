@@ -152,3 +152,26 @@ def test_hash_tree_does_not_follow_junction(tmp_path):
     finally:
         import os
         os.rmdir(game / "J")
+
+
+@pytest.mark.windows
+def test_recorded_file_under_outward_junction(tmp_path):
+    import os
+    import _winapi
+    outside = tmp_path / "outside"
+    put(outside, "1.sav", b"save")
+    game = tmp_path / "game"
+    put(game, "game.exe", b"exe")
+    _winapi.CreateJunction(str(outside), str(game / "Saves"))
+    try:
+        rec = FakeRecord({"game.exe": b"exe", "Saves/1.sav": b"save"})
+        p = plan_uninstall(rec, game)
+        assert p.delete == ["game.exe"] and p.player_files == ["Saves"]
+        assert count_player_files(rec, game) == 1
+        fake = FakeRecycle()
+        kept = apply_uninstall(p, game, True, recycle=fake)
+        assert fake.calls == [] and kept == 1
+        assert (outside / "1.sav").read_bytes() == b"save"
+        assert (game / "Saves").exists()
+    finally:
+        os.rmdir(game / "Saves")
