@@ -175,3 +175,28 @@ def test_recorded_file_under_outward_junction(tmp_path):
         assert (game / "Saves").exists()
     finally:
         os.rmdir(game / "Saves")
+
+
+@pytest.mark.windows
+def test_stale_plan_path_that_became_junction_is_never_recycled(tmp_path):
+    import os
+    import _winapi
+    game = tmp_path / "game"
+    put(game, "game.exe", b"exe")
+    put(game, "Saves/1.sav", b"save")
+    rec = FakeRecord({"game.exe": b"exe", "Saves/1.sav": b"save"})
+    p = plan_uninstall(rec, game)
+    assert p.delete == ["Saves/1.sav", "game.exe"]
+    outside = tmp_path / "outside"
+    put(outside, "1.sav", b"save")
+    (game / "Saves" / "1.sav").unlink()
+    (game / "Saves").rmdir()
+    _winapi.CreateJunction(str(outside), str(game / "Saves"))
+    try:
+        fake = FakeRecycle()
+        kept = apply_uninstall(p, game, True, recycle=fake)
+        assert all("Saves" not in str(c) for call in fake.calls for c in call)
+        assert (outside / "1.sav").read_bytes() == b"save"
+        assert kept == 1 and (game / "Saves").exists()
+    finally:
+        os.rmdir(game / "Saves")

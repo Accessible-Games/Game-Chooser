@@ -166,6 +166,17 @@ def _resolve_game_path(game_dir: Path, rel: str) -> tuple[Path, bool]:
     return safe_join(game_dir, rel), False
 
 
+def _first_link(path: Path, root: Path) -> Path | None:
+    """The outermost link between `root` and `path` (or `path` itself), checked lexically."""
+    parts = Path(path).relative_to(root).parts
+    current = Path(root)
+    for part in parts:
+        current = current / part
+        if is_link(current):
+            return current
+    return None
+
+
 def _has_link_component(path: Path, root: Path) -> bool:
     """True if `path`, or any folder between `root` and it, is a link."""
     current = Path(path)
@@ -400,15 +411,22 @@ def apply_uninstall(plan: UninstallPlan, game_dir: Path, delete_player_data: boo
     for rel, path, linked in delete_paths:
         expected = plan.hashes.get(rel)
         if linked:
-            player.append(path)
+            pass  # never touched; its link entry is kept below
         elif expected is not None and path.exists() and (not path.is_file() or hash_file(path) != expected):
             player.append(path)  # changed since planning: now the player's
         else:
             path.unlink(missing_ok=True)
             _prune_empty_dirs(path.parent, game_dir)
+    # A path that goes through a link is represented by the link entry itself, counted once.
+    kept_entries = []
+    for p in player + [path for _rel_, path, linked in delete_paths if linked]:
+        entry = _first_link(p, game_dir) or p
+        if entry not in kept_entries:
+            kept_entries.append(entry)
+    player = kept_entries
     kept = len(player)
     if delete_player_data:
-        to_recycle = [p for p in player if not is_link(p)]
+        to_recycle = [p for p in player if not is_link(p) and not _has_link_component(p, game_dir)]
         if to_recycle:
             recycle(to_recycle)
         _prune_all_empty(game_dir)
