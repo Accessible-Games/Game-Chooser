@@ -2,11 +2,15 @@
 
 import gzip
 import hashlib
+import io
 import json
-
+import shutil
+import zipfile
+from datetime import date
 from pathlib import Path
 
 from engine.errors import Cancelled, DownloadError
+from engine.extract import content_root
 from engine.http import check_url_allowed
 
 
@@ -169,3 +173,118 @@ class FakeWinreg:
 
     def value(self, hive, key, name):
         return self.keys.get((hive, self._norm(key)), {}).get(name.lower())
+
+
+class FakeRegistry:
+    """Stands in for RegistryAccess. `values` maps (hive, lowercased key, lowercased name) -> (value, type)."""
+
+    def __init__(self):
+        self.values: dict[tuple[str, str, str], tuple[object, str]] = {}
+
+    @staticmethod
+    def _id(hive: str, key: str, name: str) -> tuple[str, str, str]:
+        return hive, key.strip("\\").lower(), name.lower()
+
+    def get(self, hive: str, key: str, name: str) -> tuple[bool, object, str | None]:
+        found = self.values.get(self._id(hive, key, name))
+        return (False, None, None) if found is None else (True, found[0], found[1])
+
+    def can_restore(self, hive: str, type_: str | None, value: object) -> bool:
+        return True
+
+    def set(self, hive: str, key: str, name: str, type_: str, value: object) -> None:
+        self.values[self._id(hive, key, name)] = (value, type_)
+
+    def delete(self, hive: str, key: str, name: str) -> None:
+        self.values.pop(self._id(hive, key, name), None)
+
+
+class FakeRecycle:
+    """Records each call's paths, then removes them (as the Recycle Bin would, from the folder's view)."""
+
+    def __init__(self):
+        self.calls: list[list[Path]] = []
+
+    def __call__(self, paths):
+        self.calls.append(list(paths))
+        for p in paths:
+            p = Path(p)
+            assert p.is_absolute()
+            if p.is_dir() and not p.is_symlink():
+                shutil.rmtree(p)
+            else:
+                p.unlink()
+
+
+class ZipExtractor:
+    """Extractor stand-in: unpacks with `zipfile` (every archive method), copies for `none`."""
+
+    def __init__(self):
+        self.calls: list[tuple[Path, Path, dict]] = []
+
+    def extract(self, archive: Path, dest: Path, install: dict, cancel) -> Path:
+        self.calls.append((Path(archive), Path(dest), install))
+        method = install.get("method")
+        if method == "installer" and (install.get("installer") or {}).get("mode") != "extract":
+            raise ValueError("Only installers marked mode 'extract' can be extracted")
+        if method == "url":
+            raise ValueError("Nothing to extract for method 'url'")
+        if cancel():
+            raise Cancelled()
+        dest = Path(dest)
+        dest.mkdir(parents=True, exist_ok=True)
+        if method == "none":
+            shutil.copy2(archive, dest / Path(archive).name)
+        else:
+            with zipfile.ZipFile(archive) as zf:
+                zf.extractall(dest)
+        return content_root(dest, install.get("extract_dir"))
+
+
+def zip_bytes(files: dict[str, bytes]) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        for name, data in files.items():
+            zf.writestr(name, data)
+    return buffer.getvalue()
+
+
+def served_source(routes: dict[str, bytes], url: str, data: bytes, method: str = "zip",
+                  steps: list[dict] | None = None, **install) -> dict:
+    """A windows source whose sha256/size match `data`; also adds `data` to `routes` at `url`."""
+    routes[url] = data
+    source = {"label": "Mirror", "url": url, "platform": "windows",
+              "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+              "install": {"method": method, **install}}
+    if steps:
+        source["steps"] = steps
+    return source
+
+
+def make_engine(tmp_path: Path, entries, **ctx_overrides):
+    """An InstallEngine over fakes, with one library "Games" at tmp_path/Games.
+
+    `entries` is a list of entry dicts or a dict by id. Returns the engine; its `ctx` holds the fakes.
+    """
+    from engine.jobs import EngineContext, InstallEngine
+    from engine.records import RecordStore
+
+    if not isinstance(entries, dict):
+        entries = {e["id"]: e for e in entries}
+    lib = tmp_path / "Games"
+    lib.mkdir(exist_ok=True)
+    values = dict(
+        entries=entries,
+        records=RecordStore(tmp_path / "installs"),
+        fetcher=FakeFetcher(),
+        extractor=ZipExtractor(),
+        elevator=FakeElevator(),
+        registry=FakeRegistry(),
+        work_root=tmp_path / "work",
+        runtimes_root=tmp_path / "runtimes",
+        libraries=[{"name": "Games", "path": str(lib)}],
+        today=lambda: date(2026, 11, 4),
+        recycle=FakeRecycle(),
+    )
+    values.update(ctx_overrides)
+    return InstallEngine(EngineContext(**values))

@@ -4,6 +4,7 @@ from pathlib import Path
 
 from engine.records import RecordedFile
 from engine.safety import UninstallPlan, apply_uninstall, count_player_files, plan_uninstall
+from tests.engine.fakes import FakeRecycle
 
 BK = "Game Chooser backup 2026-11-04"
 
@@ -21,17 +22,6 @@ def put(root, rel, data=b"x"):
 class FakeRecord:
     def __init__(self, files):
         self.files = {p.lower(): RecordedFile(p, sha(d), "game") for p, d in files.items()}
-
-
-class FakeRecycle:
-    def __init__(self):
-        self.calls = []
-
-    def __call__(self, paths):
-        self.calls.append(list(paths))
-        for p in paths:
-            assert Path(p).is_absolute()
-            Path(p).unlink()
 
 
 def setup(tmp_path):

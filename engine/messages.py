@@ -108,3 +108,8 @@ REGISTRY_CANT_RESTORE = ("The Windows registry setting {key} already has a value
                          "later, so it wasn't changed.")
 UNDO_REGISTRY_FAILED = "The Windows registry setting {key} couldn't be put back."
 UNDO_UNREGISTER_FAILED = "{name} couldn't be unregistered from Windows."
+
+NOT_IN_CATALOG = "This game is no longer in the catalog."
+REINSTALL_NOT_SUPPORTED = "{title} was installed before, and Game Chooser can't install it again over that yet."
+DEPENDENCIES_NOT_SUPPORTED = ("{title} needs other software installed first, and Game Chooser can't install "
+                              "that yet.")
