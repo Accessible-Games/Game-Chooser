@@ -113,3 +113,7 @@ NOT_IN_CATALOG = "This game is no longer in the catalog."
 REINSTALL_NOT_SUPPORTED = "{title} was installed before, and Game Chooser can't install it again over that yet."
 DEPENDENCIES_NOT_SUPPORTED = ("{title} needs other software installed first, and Game Chooser can't install "
                               "that yet.")
+TEMP_FOLDER_NOT_CLEARED = ("Game Chooser couldn't empty its temporary folder {path}. Close any program using "
+                           "files in it, then try again.")
+FOLDER_NOT_REMOVED = ("The game's folder {path} couldn't be fully removed. Game Chooser isn't keeping track of "
+                      "it, so you can delete it yourself.")

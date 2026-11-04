@@ -8,6 +8,8 @@ final folder. If they fail they are undone and the folder goes back to staging t
 
 import os
 import shutil
+import stat
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
@@ -107,7 +109,27 @@ def _check(cancel: Callable[[], bool]) -> None:
 
 
 def _clear(path: Path) -> None:
+    """Best-effort removal; use _clear_or_fail where a leftover would be merged into the install."""
     shutil.rmtree(path, ignore_errors=True)
+
+
+def _clear_or_fail(path: Path) -> None:
+    """Remove `path` completely, or stop the install: stale files must never be unpacked over."""
+    _clear(path)
+    if os.path.lexists(path):
+        raise InstallFailed(messages.TEMP_FOLDER_NOT_CLEARED.format(path=path))
+
+
+def _hide(path: Path) -> None:
+    """Give `path` the Windows hidden attribute. Best effort: does nothing elsewhere or on failure."""
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        attributes = os.stat(path).st_file_attributes | stat.FILE_ATTRIBUTE_HIDDEN
+        ctypes.windll.kernel32.SetFileAttributesW(str(path), attributes)
+    except (OSError, AttributeError):
+        pass
 
 
 def _file_states(root: Path) -> dict[str, tuple[int, int, int]]:
@@ -190,10 +212,13 @@ class InstallEngine:
             raise InstallFailed(messages.REINSTALL_NOT_SUPPORTED.format(title=title))
         target = target_folder(entry, library_path, ctx.records, ctx.libraries)
 
-        staging = library_path / STAGING_DIR_NAME / game_id
+        staging_root = library_path / STAGING_DIR_NAME
+        staging = staging_root / game_id
         work = ctx.work_root / game_id
-        _clear(staging)
-        _clear(work)
+        staging_root.mkdir(exist_ok=True)
+        _hide(staging_root)
+        _clear_or_fail(staging)
+        _clear_or_fail(work)
         try:
             staged = self._stage(entry, extras, target.name, staging, work, progress, cancel)
             _check(cancel)
@@ -205,7 +230,7 @@ class InstallEngine:
     def _fetch_and_unpack(self, item: dict, dest: Path, work_dir: Path, progress, cancel) -> tuple[Fetched, Path]:
         """Download `item` into its own empty work folder, unpack it into `dest`, and delete the download."""
         ctx = self.ctx
-        _clear(work_dir)
+        _clear_or_fail(work_dir)
         try:
             fetched = fetch_verified(item, ctx.platform, work_dir, ctx.fetcher, progress, cancel)
         except NoVerifiedSource as e:
@@ -288,7 +313,10 @@ class InstallEngine:
         except BaseException as e:
             # `applied` is only non-empty when the steps all ran and saving the record failed.
             undo_failures = [*getattr(e, "undo_failures", []), *undo_steps(applied, step_ctx)]
-            _take_back(target, staging)
+            if not _take_back(target, staging):
+                undo_failures.append(messages.FOLDER_NOT_REMOVED.format(path=target))
+                if isinstance(e, Exception) and not isinstance(e, (StepError, InstallFailed)):
+                    raise InstallFailed("\n\n".join(undo_failures)) from e
             if isinstance(e, StepError):
                 raise InstallFailed("\n\n".join([str(e), *undo_failures])) from e
             raise
@@ -321,11 +349,15 @@ def _run_file_steps(steps: list[dict], tree: Path) -> None:
         raise InstallFailed(str(e)) from e
 
 
-def _take_back(target: Path, staging: Path) -> None:
-    """Move a just-placed game folder back into staging (which the caller then removes)."""
+def _take_back(target: Path, staging: Path) -> bool:
+    """Move a just-placed game folder back into staging (which the caller then removes).
+
+    Returns False if part of the folder is still in the library.
+    """
     try:
         staging.mkdir(parents=True, exist_ok=True)
         os.replace(target, staging / "placed")
     except OSError:
         # Only files this install created moments ago are in there.
-        shutil.rmtree(target, ignore_errors=True)
+        _clear(target)
+    return not os.path.lexists(target)

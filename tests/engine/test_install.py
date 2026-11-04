@@ -1,8 +1,10 @@
+import os
+import stat
 from pathlib import Path
 
 import pytest
 
-from engine import messages
+from engine import jobs, messages
 from engine.errors import Cancelled, ExtractError, InstallFailed
 from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
@@ -438,3 +440,68 @@ def test_record_save_failure_undoes_steps_and_removes_folder(tmp_path):
     with pytest.raises(OSError):
         engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert ctx.registry.values == {} and not (lib / "Entombed").exists() and leftovers(ctx, lib) == []
+
+
+@pytest.mark.parametrize("stuck", ["staging", "work"])
+def test_temp_folder_that_cannot_be_emptied_stops_the_install(tmp_path, monkeypatch, stuck):
+    routes = {}
+    e = game(routes)
+    engine, ctx, lib = setup(tmp_path, [e], routes)
+    folder = lib / ".gamechooser-staging" / "entombed" if stuck == "staging" else ctx.work_root / "entombed"
+    (folder / "raw").mkdir(parents=True)
+    (folder / "raw" / "locked.exe").write_bytes(b"stale")
+    real_clear = jobs._clear
+
+    def clear(path):   # as if Defender held locked.exe open
+        if Path(path) != folder:
+            real_clear(path)
+
+    monkeypatch.setattr(jobs, "_clear", clear)
+    with pytest.raises(InstallFailed) as ei:
+        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert ei.value.message == messages.TEMP_FOLDER_NOT_CLEARED.format(path=folder)
+    assert ctx.fetcher.requests == [] and ctx.records.load("entombed") is None
+    assert not (lib / "Entombed").exists()
+    assert [p.name for p in (folder / "raw").iterdir()] == ["locked.exe"]
+
+
+def test_rollback_that_cannot_remove_the_folder_says_where_it_is(tmp_path, monkeypatch):
+    routes = {}
+    lib = tmp_path / "Games"
+    target = lib / "Entombed"
+    e = game(routes, files={"entombed.exe": b"exe", "fix.exe": b"fix"}, steps=[{"action": "run", "path": "fix.exe"}])
+    engine, ctx, lib = setup(tmp_path, [e], routes,
+                             elevator=FakeElevator(exit_codes={str(target / "fix.exe"): 1}))
+    real_replace, real_clear = os.replace, jobs._clear
+
+    def replace(src, dst):
+        if Path(src) == target:
+            raise PermissionError("a program started by the game still has fix.exe open")
+        return real_replace(src, dst)
+
+    def clear(path):   # removes everything but the file still in use
+        if Path(path) == target:
+            for p in Path(path).iterdir():
+                if p.name != "fix.exe":
+                    p.unlink() if p.is_file() else real_clear(p)
+        else:
+            real_clear(path)
+
+    monkeypatch.setattr(os, "replace", replace)
+    monkeypatch.setattr(jobs, "_clear", clear)
+    with pytest.raises(InstallFailed) as ei:
+        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert ei.value.message == (messages.STEP_RUN_FAILED.format(name="fix.exe", code=1) + "\n\n"
+                                + messages.FOLDER_NOT_REMOVED.format(path=target))
+    assert str(target) in ei.value.message
+    assert [p.name for p in target.iterdir()] == ["fix.exe"] and ctx.records.load("entombed") is None
+
+
+@pytest.mark.windows
+def test_staging_folder_is_hidden(tmp_path):
+    routes = {}
+    engine, ctx, lib = setup(tmp_path, [game(routes)], routes)
+    engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    staging = lib / ".gamechooser-staging"
+    assert staging.is_dir()
+    assert os.stat(staging).st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN
