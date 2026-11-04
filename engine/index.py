@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import json
 import os
+import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urljoin, urlsplit
@@ -47,7 +48,11 @@ def _schema_of(doc) -> int:
 
 
 def _decode(gz: bytes) -> dict:
-    doc = json.loads(gzip.decompress(gz).decode("utf-8"))
+    """Decode a gzipped index; every failure surfaces as ValueError."""
+    try:
+        doc = json.loads(gzip.decompress(gz).decode("utf-8"))
+    except (OSError, EOFError, zlib.error, RecursionError, UnicodeError) as exc:
+        raise ValueError(f"unreadable index: {exc}") from exc
     if not isinstance(doc, dict):
         raise ValueError("index is not an object")
     return doc

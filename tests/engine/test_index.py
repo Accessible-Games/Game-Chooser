@@ -127,3 +127,30 @@ def test_normalize_catalog_url():
     assert normalize_catalog_url("http://localhost:8765") == "http://localhost:8765/"
     assert normalize_catalog_url("ftp://x/") is None and normalize_catalog_url("http://example.com/") is None
     assert normalize_catalog_url("") is None
+
+
+def _bad_body_gz():
+    import gzip as _gzip
+    good = _gzip.compress(b'{"schema_version": 1, "entries": []}' * 50, mtime=0)
+    return good[:12] + bytes(b ^ 0xFF for b in good[12:-8]) + good[-8:]
+
+
+def test_corrupt_deflate_body_in_cache(tmp_path):
+    fetcher, idx = make(tmp_path)
+    idx.refresh()
+    (tmp_path / "index.json.gz").write_bytes(_bad_body_gz())
+    assert idx.load_cached().entries == {}
+    assert set(idx.refresh().entries) == {"a", "b"}
+
+
+def test_corrupt_deflate_body_from_server_keeps_cache(tmp_path):
+    import hashlib
+    fetcher, idx = make(tmp_path)
+    idx.refresh()
+    bad = _bad_body_gz()
+    fetcher.routes[GZ] = bad
+    meta = json.loads(fetcher.routes[META])
+    meta["sha256"] = hashlib.sha256(bad).hexdigest()
+    fetcher.routes[META] = json.dumps(meta).encode()
+    s = idx.refresh()
+    assert s.error and set(s.entries) == {"a", "b"}
