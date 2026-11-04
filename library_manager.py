@@ -645,25 +645,8 @@ class GameLibraryManager:
         Returns:
             Path to selected executable or None
         """
-        if not executables:
-            return None
-
-        exe_paths = [exe[0] for exe in executables]
-
-        # First preference: game/launch/play named executables
-        for preferred in ['game', 'launch', 'play']:
-            for exe_path in exe_paths:
-                if exe_path.stem.lower() == preferred:
-                    return exe_path
-
-        # Second preference: executable matching directory name
-        dir_lower = directory_name.lower()
-        for exe_path in exe_paths:
-            if exe_path.stem.lower() == dir_lower:
-                return exe_path
-
-        # Default: first executable
-        return exe_paths[0]
+        from engine.launch import select_best_executable
+        return select_best_executable([e[0] for e in executables], directory_name)
 
     def _create_game_from_executable(self, exe_path, rel_path_str, library_name, directory_name, multiple_exes, developer_name="", genre_name=""):
         """
