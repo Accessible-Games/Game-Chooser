@@ -188,7 +188,11 @@ class GameListCtrl:
                 if shown is game:
                     self.Select(index)
                     break
-        if self.list.control.control.GetItemCount() > 0:  # refreshing an empty list trips a wx check
+        if not self.games_displayed:  # refreshing an empty list trips a wx check
+            return
+        if self.is_dataview:  # DataViewCtrl (macOS) has no RefreshItems; resetting the count redraws it
+            self.list.update_count(len(self.games_displayed))
+        else:
             self.list.refresh()
 
     def get_selected_game(self):
