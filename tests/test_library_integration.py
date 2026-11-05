@@ -154,3 +154,48 @@ def test_reconcile_saves_only_when_it_changed_something(isolated_manager_factory
     isolated_manager_factory()
     assert json.loads(path.read_text()) == games
     assert path.read_text() == json.dumps(games, indent=7)
+
+
+def test_failing_games_save_during_construction_leaves_manager_usable(isolated_manager_factory, tmp_path, monkeypatch):
+    from library_manager import GameLibraryManager
+
+    isolated_manager_factory(config={"libraries": [{"id": "main", "path": str(tmp_path)}]})
+    _seed_records(isolated_manager_factory, _record())
+
+    def boom(self):
+        raise PermissionError("read-only")
+
+    monkeypatch.setattr(GameLibraryManager, "save_games", boom)
+    m = isolated_manager_factory()
+    assert m.catalog_game("entombed") is not None
+
+
+def test_corrupt_games_json_is_not_overwritten_by_reconcile(isolated_manager_factory, tmp_path):
+    isolated_manager_factory(config={"libraries": [{"id": "main", "path": str(tmp_path)}]})
+    _seed_records(isolated_manager_factory, _record())
+    path = isolated_manager_factory.app_dir / "games.json"
+    path.write_bytes(b'[{"title": "Hand added", ')
+    m = isolated_manager_factory()
+    assert path.read_bytes() == b'[{"title": "Hand added", '
+    assert m.catalog_game("entombed") is not None  # still usable in memory
+
+
+def test_unreadable_record_keeps_the_games_catalog_link(isolated_manager_factory, tmp_path):
+    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
+    games = [{"title": "Entombed", "launch_path": "Entombed/e.exe", "library_id": "main",
+              "catalog_id": "entombed", "installed_source": {"url": "u", "sha256": "s", "size": 1},
+              "installed_extras": []}]
+    installs = isolated_manager_factory.config_dir / "installs"
+    installs.mkdir(parents=True)
+    (installs / "entombed.json").write_text("{not json", encoding="utf-8")
+    m = isolated_manager_factory(games=games, config=config)
+    assert m.games[0].catalog_id == "entombed" and m.games[0].library_id == "main"
+    assert _games_json(m)[0]["catalog_id"] == "entombed"
+
+
+def test_web_catalog_game_without_record_keeps_its_link(isolated_manager_factory):
+    games = [{"title": "Web", "launch_path": "https://example.com/play", "library_id": "",
+              "catalog_id": "webgame", "platforms": ["Web"]}]
+    m = isolated_manager_factory(games=games)
+    assert m.catalog_game("webgame") is not None
+    assert m.games[0].launch_path == "https://example.com/play"

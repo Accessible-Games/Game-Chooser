@@ -165,6 +165,10 @@ class RecordStore:
             log.warning("The install record %s couldn't be read: %s", path, e)
             return None
 
+    def exists(self, catalog_id: str) -> bool:
+        """True when a record file is there, even if it can't be read."""
+        return self._file(catalog_id).exists()
+
     def save(self, record: InstallRecord) -> None:
         path = self._file(record.catalog_id)
         self.root.mkdir(parents=True, exist_ok=True)

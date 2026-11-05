@@ -152,6 +152,7 @@ class GameLibraryManager:
 
     def load_games(self):
         """Load games from JSON file"""
+        self.games_load_failed = False
         if self.games_file.exists():
             try:
                 with open(self.games_file, 'r') as f:
@@ -159,6 +160,7 @@ class GameLibraryManager:
                     self.games = [Game.from_dict(g) for g in data]
             except:
                 self.games = []
+                self.games_load_failed = True  # a damaged games.json must not be written over at startup
         else:
             self.games = []
     
@@ -199,7 +201,10 @@ class GameLibraryManager:
         changed = False
         for game in self.games:
             rec = records.get(game.catalog_id) if game.catalog_id else None
-            if game.catalog_id and (rec is None or rec.uninstalled):
+            if not game.catalog_id or game.launch_path.startswith("http"):
+                continue  # web games have no install record by design
+            gone = rec.uninstalled if rec else not self.records.exists(game.catalog_id)
+            if gone:  # an unreadable record file is not a gone one: leave that game alone
                 path = self.get_full_path(game)
                 if path:
                     game.launch_path, game.library_id = str(path), ""
@@ -212,8 +217,12 @@ class GameLibraryManager:
                 entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id, "title": rec.catalog_id}
                 self.games.append(Game.from_dict(game_fields_for(entry, rec)))
             changed = True
-        if changed:
-            self.save_games()
+        if changed and not self.games_load_failed:
+            try:
+                self.save_games()
+            except OSError as e:
+                # keep the result in memory; games.json is written with the next change
+                logging.getLogger(__name__).warning("Couldn't save games.json: %s", e)
 
     def _cached_entries(self):
         url = self.config.get("install", {}).get("catalog_url", DEFAULT_CATALOG_URL)
