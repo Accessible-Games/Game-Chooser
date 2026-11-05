@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import shutil
+import time
 import zipfile
 from datetime import date
 from pathlib import Path
@@ -64,15 +65,16 @@ def publish(fetcher: FakeFetcher, base_url: str, entries: list[dict], schema_ver
 
 
 class FakeProcess:
-    """A finished process as returned by FakeElevator.start."""
+    """A process as returned by FakeElevator.start: finished at once unless started `running`."""
 
-    def __init__(self, code: int, pid: int):
+    def __init__(self, code: int, pid: int, running: bool = False):
         self.code = code
         self.pid = pid
         self.handle = pid
+        self.running = running
 
     def wait(self, timeout: float | None = None) -> int | None:
-        return self.code
+        return None if self.running else self.code
 
     def close(self) -> None:
         pass
@@ -85,9 +87,14 @@ class FakeElevator:
     every elevated call raises ElevationDeclined, as if the UAC prompt was refused.
     """
 
-    def __init__(self, exit_codes: dict[str, int] | None = None, decline: bool = False):
+    def __init__(self, exit_codes: dict[str, int] | None = None, decline: bool = False,
+                 on_start=None, hang: set[str] | None = None):
         self.exit_codes = dict(exit_codes or {})
         self.decline = decline
+        # on_start(exe, args, elevated) stands in for what the program does (a fake installer writing
+        # files); exes in `hang` keep running until their watch is terminated.
+        self.on_start = on_start
+        self.hang = set(hang or ())
         self.calls: list[tuple[str, str, bool]] = []
         self.cwds: list[Path | None] = []
 
@@ -97,10 +104,77 @@ class FakeElevator:
         self.cwds.append(cwd)
         if elevated and self.decline:
             raise ElevationDeclined("The administrator prompt was declined.")
-        return FakeProcess(self.exit_codes.get(exe, 0), 1000 + len(self.calls))
+        if self.on_start is not None:
+            self.on_start(exe, args, elevated)
+        return FakeProcess(self.exit_codes.get(exe, 0), 1000 + len(self.calls), running=exe in self.hang)
 
     def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
         return self.start(exe, args, elevated, cwd).wait(None)
+
+
+class FakeWatch:
+    """Stands in for the job-object watcher: done once the fake process has stopped running."""
+
+    def __init__(self, process: FakeProcess, elevated: bool):
+        self.process = process
+        self.elevated = elevated
+        self.terminated = False
+        self.closed = False
+
+    def poll(self, timeout: float) -> bool:
+        if self.process.running:
+            time.sleep(min(timeout, 0.01))
+            return False
+        return True
+
+    def exit_code(self) -> int | None:
+        return self.process.wait(0)
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.process.running = False
+        self.process.code = 1
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeUninstallKeys:
+    """The Windows installed-programs list, in memory: a reader for snapshot_uninstall_keys.
+
+    `entries` maps (hive, view, subkey name) -> values; tests add to it from a fake installer.
+    """
+
+    def __init__(self):
+        self.entries: dict[tuple[str, str, str], dict] = {}
+
+    def add(self, name: str, values: dict, hive: str = "HKLM", view: str = "32") -> None:
+        self.entries[(hive, view, name)] = dict(values)
+
+    def __call__(self, hive: str, key: str, view: str) -> dict[str, dict]:
+        return {name: dict(values) for (h, v, name), values in self.entries.items() if (h, v) == (hive, view)}
+
+
+class FakeInstallerUI:
+    """Records what the engine asked the player, in `events` (shared with a fake installer if given)."""
+
+    def __init__(self, events: list | None = None, done: bool = True, locate: Path | None = None):
+        self.events = events if events is not None else []
+        self.done = done
+        self.locate = locate
+        self.announced: list[tuple[str, Path]] = []
+
+    def announce_target(self, title: str, target: Path) -> None:
+        self.events.append("announce")
+        self.announced.append((title, target))
+
+    def wait_for_installer(self, title: str, finished) -> bool:
+        self.events.append("wait")
+        return self.done
+
+    def locate_folder(self, title: str) -> Path | None:
+        self.events.append("locate")
+        return self.locate
 
 
 class _FakeKey:
@@ -285,6 +359,8 @@ def make_engine(tmp_path: Path, entries, **ctx_overrides):
         libraries=[{"name": "Games", "path": str(lib)}],
         today=lambda: date(2026, 11, 4),
         recycle=FakeRecycle(),
+        process_watch=FakeWatch,
+        uninstall_reader=FakeUninstallKeys(),
     )
     values.update(ctx_overrides)
     return InstallEngine(EngineContext(**values))

@@ -132,3 +132,21 @@ FOLDER_NOT_REMOVED = ("The game's folder {path} couldn't be fully removed. Game 
                       "it, so you can delete it yourself.")
 LIBRARY_FOLDER_NOT_CREATED = ("The library folder {path} couldn't be created. Check that the drive is connected, "
                               "then try again.")
+
+WEB_GAME_NOT_INSTALLED = "{title} is played in your web browser, so there's nothing to install."
+EXTRA_NOT_SUPPORTED = "{extra} has its own installer, so Game Chooser can't add it."
+RUN_INSTALLER_EXTRAS = "{title} has its own installer, so Game Chooser can't add extras to it."
+INSTALLER_NEEDS_PLAYER = ("{title}'s installer asks questions you need to answer, and Game Chooser can't show it "
+                          "right now.")
+INSTALLER_FAILED = "{title}'s installer stopped with error code {code}, so {title} wasn't installed."
+INSTALLER_CODE_NOTE = "{title}'s installer finished with error code {code}. If the game doesn't start, install it again."
+INSTALLER_RESTART_NOTE = "Restart Windows to finish installing {title}."
+INSTALL_FOLDER_NOT_FOUND = ("The installer finished, but Game Chooser couldn't find where {title} was installed. "
+                            "You can add it yourself with Add Game.")
+UNTRACKED_NOTE = ("Game Chooser couldn't tell which files {title}'s installer added, so it can't update or "
+                  "uninstall {title} for you.")
+FILES_NOT_SET_ASIDE = "Your files for {title} couldn't be copied to safety, so its installer wasn't run."
+SETASIDE_LEFT_OVER = ("Copies of your files for {title} from an earlier try are still in {path}. Move them "
+                      "somewhere safe, then try again.")
+SETASIDE_KEPT = "Some of your files for {title} couldn't be put back. Copies of them are in {path}."
+UNINSTALLER_FAILED = "{title}'s uninstaller stopped with error code {code}. Your files were left in place."

@@ -1,10 +1,10 @@
 """Starting helper programs, with the administrator prompt only for the program that needs it.
 
 Game Chooser itself never runs elevated. Elevated programs go through ShellExecuteEx with the
-"runas" verb, so Windows shows its UAC prompt for that one program.
+"runas" verb, so Windows shows its UAC prompt for that one program. Unelevated programs start
+inside a job object, so everything they start can be waited for or stopped (see `job`).
 """
 
-import subprocess
 from pathlib import Path
 from typing import Protocol
 
@@ -36,22 +36,6 @@ class Elevator(Protocol):
         """Start `exe` and return at once."""
 
 
-class _SubprocessProcess:
-    def __init__(self, popen: subprocess.Popen):
-        self._popen = popen
-        self.pid = popen.pid
-        self.handle = int(getattr(popen, "_handle", 0))
-
-    def wait(self, timeout: float | None = None) -> int | None:
-        try:
-            return self._popen.wait(timeout)
-        except subprocess.TimeoutExpired:
-            return None
-
-    def close(self) -> None:
-        pass  # subprocess owns its handle and closes it when the Popen is collected.
-
-
 class _ShellProcess:
     def __init__(self, handle):
         import win32process
@@ -69,13 +53,34 @@ class _ShellProcess:
         if win32event.WaitForSingleObject(self._handle, ms) == win32event.WAIT_TIMEOUT:
             return None
         self._code = win32process.GetExitCodeProcess(self._handle)
-        self.close()
+        self._close_handle()
         return self._code
 
-    def close(self) -> None:
+    def _close_handle(self) -> None:
         if self._handle is not None:
             self._handle.Close()
             self._handle = None
+
+    def close(self) -> None:
+        self._close_handle()
+
+
+class _JobProcess(_ShellProcess):
+    """An unelevated program put in its own job object before it ran a single instruction.
+
+    `job` holds it and every process it starts (None if Windows refused the job); it stays open
+    until `close`. The job doesn't end the programs when it is closed.
+    """
+
+    def __init__(self, handle, job):
+        super().__init__(handle)
+        self.job = job
+
+    def close(self) -> None:
+        super().close()
+        if self.job is not None:
+            self.job.Close()
+            self.job = None
 
 
 class WindowsElevator:
@@ -93,11 +98,35 @@ class WindowsElevator:
     def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> RunningProcess:
         if elevated:
             return self._start_elevated(exe, args, cwd)
+        return self._start_in_job(exe, args, cwd)
+
+    def _start_in_job(self, exe: str, args: str, cwd: Path | None) -> RunningProcess:
+        """Start suspended, put it in a new job, then let it run: a child it starts at once is in the job too.
+
+        A refusal to start keeps Windows' error (winerror 740 means it needs administrator rights)
+        as the StepError's cause.
+        """
+        import pywintypes
+        import win32job
+        import win32process
         try:
-            popen = subprocess.Popen(f'"{exe}" {args}'.rstrip(), cwd=str(cwd) if cwd else None)
-        except OSError as e:
+            process, thread, _, _ = win32process.CreateProcess(
+                None, f'"{exe}" {args}'.rstrip(), None, None, False, win32process.CREATE_SUSPENDED, None,
+                str(cwd) if cwd else None, win32process.STARTUPINFO())
+        except pywintypes.error as e:
             raise StepError(messages.STEP_PROGRAM_NOT_STARTED.format(name=Path(exe).name)) from e
-        return _SubprocessProcess(popen)
+        job = None
+        try:
+            job = win32job.CreateJobObject(None, "")
+            win32job.AssignProcessToJobObject(job, process)
+        except pywintypes.error:
+            if job is not None:
+                job.Close()
+            job = None  # It still runs; only its own exit can be waited for.
+        finally:
+            win32process.ResumeThread(thread)
+            thread.Close()
+        return _JobProcess(process, job)
 
     def _start_elevated(self, exe: str, args: str, cwd: Path | None) -> RunningProcess:
         import pythoncom

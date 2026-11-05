@@ -10,6 +10,10 @@ the incoming files in the same staging folder, then change the game folder only 
 three-checksum planner (engine.safety), which never deletes or overwrites a player's file without
 a backup. If changing the folder fails partway, the record is saved to match what is on disk, with
 the backups made so far, and the version it names stays the old one.
+
+Which way a game is installed is decided by the source that was actually downloaded: an installer
+that must run goes to engine.run_installer (install, update, and a vendor uninstaller at uninstall);
+a web game is never installed here.
 """
 
 import os
@@ -25,7 +29,7 @@ from urllib.parse import unquote, urlparse
 
 from exception_manager import ExceptionManager
 
-from . import messages
+from . import messages, run_installer
 from .entries import extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources
 from .errors import Cancelled, EngineError, ExtractError, InstallFailed, NoVerifiedSource, StepError, UnsafePath
 from .folders import target_folder
@@ -34,6 +38,7 @@ from .messages import Progress
 from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
 from .recycle import send_to_recycle_bin
+from .run_installer import InstallerUI, ProcessWatch, RunItem, UninstallReader
 from .safety import (ApplyResult, UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall, is_link,
                      plan_uninstall, plan_update, preflight, restore_backups)
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
@@ -41,9 +46,10 @@ from .steps import StepContext, run_file_steps, run_system_steps, undo_steps
 
 ACTIONS = ("install", "update", "repair", "undo", "extras", "uninstall")
 
-# Install methods whose files Game Chooser unpacked and recorded itself. Run-mode installs (Task 14)
-# are recorded with method "run" and are not changed by these flows.
+# Install methods whose files Game Chooser unpacked and recorded itself.
 EXTRACT_METHODS = frozenset({"zip", "7z", "installer", "cab", "none"})
+# Run-mode installs are recorded with method "run". When tracked, these actions work on them.
+RUN_ACTIONS = frozenset({"install", "update", "uninstall"})
 
 
 @dataclass
@@ -85,9 +91,13 @@ class EngineContext:
     register_shared_components: bool = True
     platform: str = "windows"
     today: Callable[[], date] = date.today
-    installer_ui: object | None = None  # Task 14 narrows this to its InstallerUI protocol.
+    installer_ui: InstallerUI | None = None
     recycle: Callable[[list[Path]], None] = send_to_recycle_bin
     exclude: Callable[[Path], bool] = field(default_factory=_scanner_exclude)
+    # How a started installer is watched (a job object, or the handle when elevated).
+    process_watch: Callable[[object, bool], ProcessWatch] = run_installer.watch_process
+    # Reads one Uninstall key location (hive, key, view) -> {subkey: values}; read-only.
+    uninstall_reader: UninstallReader = run_installer._winreg_reader
 
 
 # Downloads one catalog item (the game or an extra) into an empty work folder.
@@ -222,12 +232,12 @@ class InstallEngine:
             raise ValueError(f"Unknown action: {req.action!r}")
         entry = self.ctx.entries.get(req.catalog_id)
         if req.action == "uninstall":  # A game that left the catalog can still be uninstalled.
-            return self._uninstall(req, entry)
+            return self._uninstall(req, entry, progress, cancel)
         if entry is None:
             raise InstallFailed(messages.NOT_IN_CATALOG)
         if req.action == "install":
             return self._install(entry, req, progress, cancel)
-        rec, game_dir = self._installed(entry)
+        rec, game_dir = self._installed(entry, req.action)
         if req.action == "update":
             return self._update(entry, rec, game_dir, set(rec.extras), "update", progress, cancel)
         if req.action == "repair":
@@ -245,24 +255,23 @@ class InstallEngine:
                 return lib["name"], Path(lib["path"])
         raise ValueError(f"Not a configured library: {req.library_name!r} {req.library_path!r}")
 
-    def _installed(self, entry: dict) -> tuple[InstallRecord, Path]:
+    def _installed(self, entry: dict, action: str) -> tuple[InstallRecord, Path]:
         """The game's record and folder, for the actions that change an installed game."""
         title = _title(entry)
         rec = self.ctx.records.load(entry["id"])
         if rec is None or rec.uninstalled:
             raise InstallFailed(messages.NOT_INSTALLED.format(title=title))
-        _require_changeable(rec, title)
+        _require_changeable(rec, title, action)
         game_dir = record_folder(rec, self.ctx.libraries)
         if game_dir is None or not game_dir.is_dir():
             raise InstallFailed(messages.GAME_FOLDER_MISSING.format(title=title, path=game_dir or rec.folder))
         return rec, game_dir
 
     @contextmanager
-    def _workspace(self, library_path: Path, game_id: str) -> Iterator[tuple[Path, Path]]:
-        """Empty staging and work folders for one job, removed again when it ends."""
+    def _staging_folder(self, library_path: Path, game_id: str) -> Iterator[Path]:
+        """An empty staging folder for one job, on the library's drive, removed again when it ends."""
         staging_root = library_path / STAGING_DIR_NAME
         staging = staging_root / game_id
-        work = self.ctx.work_root / game_id
         try:
             # A new library's folder may not exist yet; only the staging folder inside it is hidden.
             staging_root.mkdir(parents=True, exist_ok=True)
@@ -270,12 +279,26 @@ class InstallEngine:
             raise InstallFailed(messages.LIBRARY_FOLDER_NOT_CREATED.format(path=library_path)) from e
         _hide(staging_root)
         _clear_or_fail(staging)
-        _clear_or_fail(work)
         try:
-            yield staging, work
+            yield staging
         finally:
             _clear(staging)
+
+    @contextmanager
+    def _work_folder(self, game_id: str) -> Iterator[Path]:
+        """An empty work folder (for downloads) for one job, removed again when it ends."""
+        work = self.ctx.work_root / game_id
+        _clear_or_fail(work)
+        try:
+            yield work
+        finally:
             _clear(work)
+
+    @contextmanager
+    def _workspace(self, library_path: Path, game_id: str) -> Iterator[tuple[Path, Path]]:
+        """Empty staging and work folders for one job, removed again when it ends."""
+        with self._staging_folder(library_path, game_id) as staging, self._work_folder(game_id) as work:
+            yield staging, work
 
     # ---- fetching and staging ------------------------------------------------
 
@@ -320,12 +343,44 @@ class InstallEngine:
             return fetched
         return fetch
 
+    def _fetch_game(self, entry: dict, work: Path, progress, cancel) -> Fetched:
+        """Download the catalog's current file for the game, which decides how it is installed.
+
+        A web game is refused before anything is downloaded.
+        """
+        sources = platform_sources(entry, self.ctx.platform)
+        if sources and all(_method(s) == "url" for s in sources):
+            raise InstallFailed(messages.WEB_GAME_NOT_INSTALLED.format(title=_title(entry)))
+        folder = work / "fetched"
+        _clear_or_fail(folder)
+        fetched = self._catalog_fetch(progress, cancel)(entry, folder)
+        if _method(fetched.source) == "url":
+            raise InstallFailed(messages.WEB_GAME_NOT_INSTALLED.format(title=_title(entry)))
+        return fetched
+
+    def _install_run(self, entry: dict, fetched: Fetched, extras: list[dict], action: str,
+                     place: Callable[[RunItem], tuple[InstallRecord, list[str]]]) -> JobResult:
+        """Hand a downloaded installer that must run to engine.run_installer, through `place`."""
+        title = _title(entry)
+        if extras:
+            raise InstallFailed(messages.RUN_INSTALLER_EXTRAS.format(title=title))
+        install = fetched.source.get("install") or {}
+        item = RunItem(entry["id"], entry.get("kind", "game"), title, fetched.path,
+                       dict(install.get("installer") or {}), _steps(fetched),
+                       _installed_source(entry, fetched, self.ctx.platform), _launch_hint(entry, self.ctx.platform))
+        record, notes = place(item)
+        return JobResult(action, entry["id"], title, _game_dict(entry, record),
+                         [*([fetched.note] if fetched.note else []), *notes])
+
     def _fetch_and_unpack(self, item: dict, dest: Path, work_dir: Path, fetch: Fetch,
                           progress, cancel) -> tuple[Fetched, Path]:
         """Download `item` into its own empty work folder, unpack it into `dest`, and delete the download."""
         _clear_or_fail(work_dir)
         fetched = fetch(item, work_dir)
         try:
+            if _method(fetched.source) == "url" or _runs_installer(fetched.source):
+                # The game itself is routed before it gets here, so this is an extra.
+                raise InstallFailed(messages.EXTRA_NOT_SUPPORTED.format(extra=item.get("title") or item["id"]))
             _check(cancel)
             progress(Progress("extracting"))
             root = self.ctx.extractor.extract(fetched.path, dest, fetched.source.get("install") or {}, cancel)
@@ -387,8 +442,6 @@ class InstallEngine:
         library_name, library_path = self._library(req)
         extras = [x.entry for x in extras_of(entry, ctx.entries, ctx.platform)
                   if x.required or x.entry["id"] in req.extras]
-        for item in [entry, *extras]:
-            _require_extract_mode(item, ctx.platform)
 
         # Refusals come before anything is downloaded or written.
         if entry.get("dependencies"):
@@ -398,7 +451,7 @@ class InstallEngine:
         if folder is not None and folder.is_dir():
             # Its own folder, even after an uninstall that kept the player's files: installed
             # over under the update rules, so nothing of the player's is lost.
-            _require_changeable(record, title)
+            _require_changeable(record, title, "install")
             keep = set() if record.uninstalled else set(record.extras)
             return self._update(entry, record, folder, keep | set(req.extras), "install", progress, cancel)
         reason = blocked_reason(entry, library_path, ctx.records, ctx.libraries)
@@ -413,7 +466,14 @@ class InstallEngine:
             # the new ones record the player's values, not Game Chooser's leftovers.
             notes = self._forget_steps(record, folder or library_path / record.folder)
         with self._workspace(library_path, game_id) as (staging, work):
-            staged = self._stage(entry, extras, target.name, staging, work, self._catalog_fetch(progress, cancel),
+            fetched = self._fetch_game(entry, work, progress, cancel)
+            if _runs_installer(fetched.source):
+                result = self._install_run(entry, fetched, extras, "install", lambda item: run_installer.install(
+                    ctx, item, target, library_name, library_path, progress, cancel))
+                result.notes[:0] = notes
+                return result
+            staged = self._stage(entry, extras, target.name, staging, work,
+                                 _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
                                  _launch_hint(entry, ctx.platform), progress, cancel)
             _check(cancel)
             return self._place(entry, staged, target, library_name, library_path, staging, notes)
@@ -536,18 +596,25 @@ class InstallEngine:
         title = _title(entry)
         extras = [x.entry for x in extras_of(entry, ctx.entries, ctx.platform)
                   if x.required or x.entry["id"] in extra_ids]
-        for item in [entry, *extras]:
-            _require_extract_mode(item, ctx.platform)
         if entry.get("dependencies"):
             raise InstallFailed(messages.DEPENDENCIES_NOT_SUPPORTED.format(title=title))
         prior = _snapshot(rec)
-        with self._workspace(game_dir.parent, game_id) as (staging, work):
-            staged = self._stage(entry, extras, game_dir.name, staging, work, self._catalog_fetch(progress, cancel),
-                                 _launch_hint(entry, ctx.platform), progress, cancel)
-            _check(cancel)
-            plan, result, steps, notes = self._change_folder(
-                rec, game_dir, staged.tree, _incoming(staged.tree, staged.owners, game_id), rec.files,
-                staged.system_steps(), prior, title, persist=entry.get("persist") or [])
+        with self._work_folder(game_id) as work:
+            fetched = self._fetch_game(entry, work, progress, cancel)
+            if _runs_installer(fetched.source):
+                return self._install_run(entry, fetched, extras, action, lambda item: run_installer.update(
+                    ctx, item, rec, game_dir, progress, cancel))
+            if not rec.library_name:
+                # An installer put it outside the libraries: Game Chooser's staging folder doesn't go there.
+                raise InstallFailed(messages.INSTALL_NOT_CHANGEABLE.format(title=title))
+            with self._staging_folder(game_dir.parent, game_id) as staging:
+                staged = self._stage(entry, extras, game_dir.name, staging, work,
+                                     _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
+                                     _launch_hint(entry, ctx.platform), progress, cancel)
+                _check(cancel)
+                plan, result, steps, notes = self._change_folder(
+                    rec, game_dir, staged.tree, _incoming(staged.tree, staged.owners, game_id), rec.files,
+                    staged.system_steps(), prior, title, persist=entry.get("persist") or [])
 
         # A failed earlier attempt at this change may already have moved the player's copy aside and
         # written this version's file; that backup belongs to this undo point too.
@@ -682,8 +749,6 @@ class InstallEngine:
         chosen = [x.entry for x in extras_of(entry, ctx.entries, ctx.platform) if x.entry["id"] in extra_ids]
         if not chosen:
             raise InstallFailed(messages.EXTRAS_NOT_AVAILABLE.format(title=title))
-        for item in chosen:
-            _require_extract_mode(item, ctx.platform)
         chosen_ids = {x["id"] for x in chosen}
         base_extras = {k: v for k, v in rec.extras.items() if k not in chosen_ids}
         prior = _snapshot(rec)
@@ -723,23 +788,33 @@ class InstallEngine:
 
     # ---- uninstall -----------------------------------------------------------
 
-    def _uninstall(self, req: InstallRequest, entry: dict | None) -> JobResult:
+    def _uninstall(self, req: InstallRequest, entry: dict | None, progress, cancel) -> JobResult:
         """Undo the system steps, delete the recorded unchanged files, and keep (or recycle) the rest.
 
-        Runtimes are separate records in their own folders, and are never touched here.
+        A game whose installer registered its own uninstaller has that run first, with the player's
+        files set aside and put back. Runtimes are separate records in their own folders, and are
+        never touched here.
         """
         ctx = self.ctx
         rec = ctx.records.load(req.catalog_id)
         title = _title(entry) if entry else Path(rec.folder).name if rec else req.catalog_id
         if rec is None:
             raise InstallFailed(messages.NOT_INSTALLED.format(title=title))
-        _require_changeable(rec, title)
+        _require_changeable(rec, title, "uninstall")
         game_dir = record_folder(rec, ctx.libraries)
         if game_dir is None:
             raise InstallFailed(messages.GAME_FOLDER_MISSING.format(title=title, path=rec.folder))
+        if rec.vendor_uninstaller:
+            run_installer.require_no_setaside(ctx, rec.catalog_id, title)
         # Steps first: unregistering a component needs its file still in place.
         notes = undo_steps(rec.steps, StepContext(game_dir.absolute(), ctx.elevator, ctx.registry))
         rec.steps = []
+        if rec.vendor_uninstaller:
+            try:
+                notes += run_installer.run_vendor_uninstaller(ctx, rec, game_dir, title, progress, cancel)
+            except BaseException:
+                ctx.records.save(rec)  # Its steps are undone; its files are as they were.
+                raise
         try:
             kept = apply_uninstall(plan_uninstall(rec, game_dir), game_dir, req.delete_player_data, ctx.recycle)
         except Exception as e:
@@ -759,17 +834,31 @@ class InstallEngine:
         return JobResult("uninstall", rec.catalog_id, title, None, notes, kept_player_files=kept)
 
 
-def _require_extract_mode(item: dict, platform: str) -> None:
-    """Run-mode installers (Task 14) and web games are not installed by this path yet."""
-    for source in platform_sources(item, platform):
-        install = source.get("install") or {}
-        if install.get("method") == "url" or (install.get("installer") or {}).get("mode") == "run":
-            raise NotImplementedError(f"{item.get('id')}: install method not supported yet")
+def _method(source: dict) -> str | None:
+    return (source.get("install") or {}).get("method")
 
 
-def _require_changeable(rec: InstallRecord, title: str) -> None:
-    """Only games whose files Game Chooser unpacked and recorded itself are changed by these flows."""
-    if rec.kind == "runtime" or not rec.tracked or rec.method not in EXTRACT_METHODS:
+def _runs_installer(source: dict) -> bool:
+    install = source.get("install") or {}
+    return install.get("method") == "installer" and (install.get("installer") or {}).get("mode") == "run"
+
+
+def _prefetched(fetch: Fetch, item_id: str, fetched: Fetched) -> Fetch:
+    """`fetch`, except that the first request for `item_id` gets the file already downloaded."""
+    pending = [fetched]
+
+    def get(item: dict, work_dir: Path) -> Fetched:
+        if item["id"] == item_id and pending:
+            return pending.pop()
+        return fetch(item, work_dir)
+    return get
+
+
+def _require_changeable(rec: InstallRecord, title: str, action: str) -> None:
+    """Only tracked games are changed: those Game Chooser unpacked itself and, for install, update
+    and uninstall, those an installer put in place whose files were found."""
+    changeable = rec.method in EXTRACT_METHODS or (rec.method == "run" and action in RUN_ACTIONS)
+    if rec.kind == "runtime" or not rec.tracked or not changeable:
         raise InstallFailed(messages.INSTALL_NOT_CHANGEABLE.format(title=title))
 
 
@@ -801,11 +890,18 @@ def _incoming(tree: Path, owners: dict[str, str], game_id: str) -> dict[str, Rec
 
 
 def _game_dict(entry: dict, rec: InstallRecord) -> dict:
-    """The games.json fields for an installed catalog game."""
+    """The games.json fields for an installed catalog game.
+
+    A game an installer put outside every library is a "manual" game with an absolute launch path.
+    """
+    if rec.library_name:
+        launch_path, library_name = f"{rec.folder}/{rec.launch_path}", rec.library_name
+    else:
+        launch_path, library_name = str(Path(rec.folder) / rec.launch_path), "manual"
     return {
         **game_fields(entry),
-        "launch_path": f"{rec.folder}/{rec.launch_path}",
-        "library_name": rec.library_name,
+        "launch_path": launch_path,
+        "library_name": library_name,
         "catalog_id": rec.catalog_id,
         "installed_source": {"url": rec.source.url, "sha256": rec.source.sha256, "size": rec.source.size},
         "installed_extras": list(rec.extras),

@@ -283,6 +283,7 @@ def test_update_refuses_records_it_does_not_manage(tmp_path):
     eng, game = install_v1(tmp_path)
     rec = record(eng)
     rec.method = "run"
+    rec.tracked = False  # an installer put it in place, and its files weren't found
     eng.ctx.records.save(rec)
     publish(eng, V2)
     before = snapshot(game)
