@@ -363,3 +363,10 @@ LIBRARY_NOT_FOUND_TITLE = "Library Not Found"
 GAME_BUSY = "Game Chooser is still working on {title}. Wait for it to finish, then try again."
 ACTION_NOT_STARTED = "Game Chooser couldn't start that for {title}. Try again."
 INSTALL_PROBLEM_NAME = "Install problem"
+
+# Preferences, Installing tab
+PREFS_INSTALLING_TAB = "Installing"
+PREFS_REGISTER_SHARED = "Register shared components system-wide (needs administrator permission)"
+PREFS_CATALOG_ADDRESS = "Catalog address:"
+PREFS_BAD_CATALOG_ADDRESS = "That catalog address isn't valid. Use an https:// address."
+PREFS_BAD_ADDRESS_TITLE = "Catalog address"

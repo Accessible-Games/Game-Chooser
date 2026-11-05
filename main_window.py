@@ -146,6 +146,7 @@ class MainFrame(wx.Frame):
         # to the library (Preferences can refresh its library list from here)
         self.job_done_hooks = []
         self._index_fetching = False  # a catalog index fetch is running or waiting for a dialog to close
+        self._index_refetch = False  # the catalog address changed during a fetch: fetch again after it
         self.statuses = {}  # (library_id, launch_path) -> Status text, filled by refresh_statuses()
         self._status_generation = 0  # only the newest status computation is shown
         # Before the list is first filled: using the saved index may adopt catalog launch paths
@@ -481,11 +482,25 @@ class MainFrame(wx.Frame):
 
         threading.Thread(target=work, name="catalog-index", daemon=True).start()
 
+    def refetch_index(self):
+        """The catalog address changed: fetch again from the new one. A fetch already under way used the old
+        address, so another follows it."""
+        if self._index_fetching:
+            self._index_refetch = True
+        else:
+            self.start_index_fetch()
+
+    def _run_pending_refetch(self):
+        if self._index_refetch and not self._index_fetching:
+            self._index_refetch = False
+            self.start_index_fetch()
+
     def _index_fetch_failed(self):
         if not self:
             return
         self._index_fetching = False
         self.catalog_panel.set_checking(False)
+        self._run_pending_refetch()
 
     def _index_fetched(self, state):
         """A fetched index arrived (UI thread). Using it may adopt catalog launch paths, which replaces
@@ -516,6 +531,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't show the fetched catalog index")
         finally:
             self.catalog_panel.set_checking(False)  # "Checking for catalog updates" never outlives the fetch
+        self._run_pending_refetch()
 
     def show_description(self, game):
         """The Library description: the catalog text for a catalog game, empty otherwise"""
@@ -1676,19 +1692,23 @@ class MainFrame(wx.Frame):
         marked holds_no_games, and isn't opened in modal_dialog()): a library whose last uninstall finishes
         leaves its list at once. The prompts it opens still defer them, through modal_dialog()."""
         dlg = PreferencesDialog(self, self.library_manager, self.service)
+        catalog_changed = False
         hook = dlg.on_job_done
         self.job_done_hooks.append(hook)
         try:
             dlg.ShowModal()
+            catalog_changed = dlg.catalog_url_changed()  # Apply may have saved a new address, even before Cancel
             # Refresh even on Cancel: Apply may already have saved changes.
             # Deferred to avoid blocking the dialog close.
-            wx.CallAfter(self.refresh_ui_after_preferences)
+            wx.CallAfter(self.refresh_ui_after_preferences, catalog_changed)
         finally:
             self.job_done_hooks.remove(hook)
             dlg.Destroy()
 
-    def refresh_ui_after_preferences(self):
-        """Refresh UI after preferences dialog closes"""
+    def refresh_ui_after_preferences(self, catalog_changed=False):
+        """Refresh UI after preferences dialog closes; a new catalog address fetches the catalog again"""
+        if catalog_changed:
+            self.refetch_index()
         self.refresh_game_list()
         self.build_tree(force_rebuild=True)
         self.build_libraries_menu()

@@ -541,3 +541,13 @@ def test_forget_an_untracked_game_keeps_its_files_and_it_stays_gone(rig, isolate
     assert rig.manager.records.exists("pawprints") and rig.manager.library_by_id(lib["id"]) is not None
     restarted = isolated_manager_factory()  # reconcile at the next start doesn't bring it back
     assert restarted.catalog_game("entombed") is None and restarted.catalog_game("pawprints") is not None
+
+
+def test_changed_catalog_url_is_used_by_the_next_fetch(rig):
+    other = "http://127.0.0.1:9/"
+    publish(rig.fetcher, DEFAULT_CATALOG_URL, [game_entry(rig.routes)])
+    publish(rig.fetcher, other, [game_entry(rig.routes, id="elsewhere", title="Elsewhere")])
+    assert set(rig.service.fetch_index().entries) == {"entombed"}
+    rig.manager.config["install"]["catalog_url"] = other
+    assert set(rig.service.fetch_index().entries) == {"elsewhere"}
+    assert rig.fetcher.calls[other + "index-meta.json"] >= 1

@@ -40,6 +40,7 @@ from library_manager import LibraryError
 from engine import messages
 from engine.folders import library_label
 from install_dialogs import RemoveLibraryDialog
+from install_prefs import check_install_prefs, current_catalog_url
 from library_actions import library_row_name
 from wx_bridge import run_in_background
 from models import Game
@@ -485,12 +486,16 @@ class PreferencesDialog(wx.Dialog):
         # Runs work once no prompt is open over Preferences (the main window's; it doesn't count Preferences itself)
         self._when_no_prompt = getattr(parent, "run_when_no_dialog", None) or (lambda fn, *args: fn(*args))
         self._counting = False  # a Remove is counting the player's files in the background
+        # The catalog address when Preferences opened, so the main window can tell if it changed (even over
+        # several Applies, and even when the player then chooses Cancel)
+        self.catalog_url_at_open = current_catalog_url(library_manager.config["install"])
 
         # Create notebook
         self.notebook = wx.Notebook(self)
 
         # Create tabs
         self.create_library_paths_tab()
+        self.create_installing_tab()
 
         # Main sizer with buttons
         main_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -568,6 +573,43 @@ class PreferencesDialog(wx.Dialog):
         add_lib_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
         change_lib_btn.Bind(wx.EVT_BUTTON, self.on_change_library_folder)
         remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
+
+    def create_installing_tab(self):
+        """Install preferences: the shared-components checkbox and the catalog address. The address field
+        follows its label, so a screen reader announces it."""
+        install = self.library_manager.config["install"]
+        tab_panel = wx.Panel(self.notebook)
+        tab_sizer = wx.BoxSizer(wx.VERTICAL)
+
+        self.shared_check = wx.CheckBox(tab_panel, label=messages.PREFS_REGISTER_SHARED)
+        self.shared_check.SetValue(bool(install.get("register_shared_components", True)))
+        tab_sizer.Add(self.shared_check, 0, wx.ALL, 10)
+
+        address_label = wx.StaticText(tab_panel, label=messages.PREFS_CATALOG_ADDRESS)
+        tab_sizer.Add(address_label, 0, wx.LEFT | wx.RIGHT | wx.TOP, 10)
+        self.address_ctrl = wx.TextCtrl(tab_panel, value=current_catalog_url(install), name=messages.PREFS_CATALOG_ADDRESS)
+        tab_sizer.Add(self.address_ctrl, 0, wx.EXPAND | wx.ALL, 10)
+
+        tab_panel.SetSizer(tab_sizer)
+        self.notebook.AddPage(tab_panel, messages.PREFS_INSTALLING_TAB)
+        self.installing_page = tab_panel
+
+    def _save_install_prefs(self):
+        """Check the Installing tab and store it. An invalid address says so, keeps the old values, and puts
+        focus in the address field. Returns False then."""
+        install = self.library_manager.config["install"]
+        result = check_install_prefs(install, self.address_ctrl.GetValue(), self.shared_check.GetValue())
+        if not result.ok:
+            self.notebook.SetSelection(self.notebook.FindPage(self.installing_page))
+            wx.MessageBox(messages.PREFS_BAD_CATALOG_ADDRESS, messages.PREFS_BAD_ADDRESS_TITLE,
+                          wx.OK | wx.ICON_ERROR, self)
+            self.address_ctrl.SelectAll()
+            self.address_ctrl.SetFocus()
+            return False
+        install["catalog_url"] = result.catalog_url
+        install["register_shared_components"] = result.register_shared
+        self.address_ctrl.ChangeValue(result.catalog_url)
+        return True
 
     def _fill_library_list(self):
         """Show the libraries; rows carry the id so actions don't depend on the folder name. A library waiting
@@ -720,14 +762,22 @@ class PreferencesDialog(wx.Dialog):
             if self:
                 self.lib_list.control.SetFocus()
 
+    def catalog_url_changed(self) -> bool:
+        """The saved catalog address differs from the one Preferences opened with."""
+        return current_catalog_url(self.library_manager.config["install"]) != self.catalog_url_at_open
+
     def on_apply(self, event):
-        """Save the config"""
+        """Save the config. Library actions already applied; the Installing tab is saved here, and an invalid
+        address keeps the old values and the dialog open. Returns whether it saved."""
+        if not self._save_install_prefs():
+            return False
         self.library_manager.save_config()
+        return True
 
     def on_ok(self, event):
-        """Save and close"""
-        self.on_apply(event)
-        self.EndModal(wx.ID_OK)
+        """Save and close (stays open when the catalog address isn't valid)"""
+        if self.on_apply(event):
+            self.EndModal(wx.ID_OK)
 
 
 class DeleteGameDialog(wx.Dialog):
