@@ -25,6 +25,16 @@ NEEDS_SHARED_COMPONENT = ("{title} needs {component}, which needs administrator 
                           "components system-wide\" in Preferences, Installing, to install it.")
 
 
+# The install confirmation dialog (engine.plan).
+PLAN_DEPENDENCY_SHARED = "Also installs: {title} (needs administrator permission)"
+PLAN_DEPENDENCY_PRIVATE = "Also installs: {title} (a private copy for this game)"
+PLAN_DEPENDENCY_SKIPPED = ("Needs {title}, which isn't installed because shared components are turned off in "
+                           "Preferences")
+PLAN_DEMO = "This installs a demo. Registering unlocks the full game."
+PLAN_DEMO_BUY = "This installs a demo. Registering unlocks the full game. Buy or register: {url}"
+PLAN_INTERACTIVE = "You'll be guided through this game's own installer."
+
+
 @dataclass
 class Progress:
     phase: str
