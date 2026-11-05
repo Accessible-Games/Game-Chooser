@@ -17,11 +17,13 @@
 
 """The install service: ties the catalog index, the install engine and queue, and the game library together.
 
-wx-free. The UI calls `apply_result` and `job_failed` on its own thread when the queue's listener reports a
-job's end; `refresh_index` may run on a background thread.
+wx-free. Every member is for the UI thread except `fetch_index`, which is safe on any thread and changes
+nothing: the UI fetches in the background and hands the state to `take_index` on its own thread. The UI calls
+`apply_result` and `job_failed` on its thread when the queue's listener reports a job's end.
 """
 
 import logging
+import os
 import tempfile
 from pathlib import Path
 
@@ -59,8 +61,7 @@ class InstallService:
         self.elevator = elevator if elevator is not None else WindowsElevator()
         self.registry = registry if registry is not None else RegistryAccess(self.elevator)
         self.security = WindowsSecurity()
-        self.index_state = IndexState()
-        self.entries: dict[str, dict] = {}
+        self.index_state = IndexState()  # entries come from it, so the two never disagree
         self.pending_removal: set[str] = set()  # library ids waiting for their games' uninstalls
         self.queue = InstallQueue(self._new_engine, listener, manager.config_dir / "install.log")
 
@@ -70,45 +71,57 @@ class InstallService:
         url = self.manager.config["install"].get("catalog_url") or DEFAULT_CATALOG_URL
         return CatalogIndex(self.manager.config_dir / "catalog", normalize_catalog_url(url) or url, self.fetcher)
 
-    def _take(self, state: IndexState) -> IndexState:
-        # One assignment each, never an in-place change, so a reader on another thread sees old or new.
-        self.index_state = state
-        self.entries = state.entries
+    @property
+    def entries(self) -> dict[str, dict]:
+        return self.index_state.entries
+
+    def fetch_index(self) -> IndexState:
+        """Fetch the catalog index (offline, the saved copy) without changing anything. Safe on any thread."""
+        return self._index().refresh()
+
+    def take_index(self, state: IndexState) -> IndexState:
+        """Use a fetched index, and adopt the launch paths it now names. UI thread only."""
+        self.index_state = state  # one assignment: a reader on the worker thread sees the old or the new
         self.adopt_launch_paths()
         return state
 
     def load_cached_index(self) -> IndexState:
-        return self._take(self._index().load_cached())
+        """Use the saved copy of the index. UI thread only."""
+        return self.take_index(self._index().load_cached())
 
     def refresh_index(self) -> IndexState:
-        """Fetch the catalog index (called from a background thread); offline, the saved copy is used."""
-        return self._take(self._index().refresh())
+        """Fetch and use the index in one step. UI thread only (it changes games.json); never call it from
+        another thread, use fetch_index there and take_index back on the UI thread."""
+        return self.take_index(self.fetch_index())
 
     def adopt_launch_paths(self) -> int:
-        """Switch guessed launch paths to the catalog's, where the catalog now names one; returns how many."""
+        """Switch guessed launch paths to the catalog's, where the catalog now names one; returns how many.
+
+        UI thread only. A game with a queued or running job is left alone: the job owns its record."""
         changed = 0
-        platform = current_platform()
-        libraries = self.manager.config["libraries"]
         for game in list(self.manager.games):
-            if not game.catalog_id or _is_web(game):
-                continue
-            entry = self.entries.get(game.catalog_id)
-            rec = self.manager.records.load(game.catalog_id)
-            if entry is None or rec is None or rec.uninstalled:
-                continue
-            if rec.library_id and not self.manager.library_reachable(rec.library_id):
-                continue
-            game_dir = record_folder(rec, libraries)
-            if game_dir is None or not adopt_catalog_launch(rec, entry, platform, game_dir):
+            if not game.catalog_id or _is_web(game) or self.queue.job_for(game.catalog_id) is not None:
                 continue
             try:
-                self.manager.records.save(rec)
-                self.manager.add_catalog_game(game_fields_for(entry, rec, platform))
-            except OSError as e:
-                log.warning("Couldn't save the catalog launch path of %s: %s", game.catalog_id, e)
-                continue
-            changed += 1
+                changed += self._adopt(game.catalog_id)
+            except Exception:  # a malformed entry or a file error never stops the others
+                log.warning("Couldn't adopt the catalog launch path of %s", game.catalog_id, exc_info=True)
         return changed
+
+    def _adopt(self, catalog_id: str) -> bool:
+        platform = current_platform()
+        entry = self.entries.get(catalog_id)
+        rec = self.manager.records.load(catalog_id)
+        if entry is None or rec is None or rec.uninstalled:
+            return False
+        if rec.library_id and not self.manager.library_reachable(rec.library_id):
+            return False
+        game_dir = record_folder(rec, self.manager.config["libraries"])
+        if game_dir is None or not adopt_catalog_launch(rec, entry, platform, game_dir):
+            return False
+        self.manager.records.save(rec)
+        self.manager.add_catalog_game(game_fields_for(entry, rec, platform))
+        return True
 
     def visible_games(self) -> list[dict]:
         return _visible_games(self.entries, current_platform())
@@ -148,6 +161,11 @@ class InstallService:
                                   runtimes_root=default_runtimes_root(), security=self.security)
 
     def blocked(self, entry_id: str, library_path: Path) -> str | None:
+        """Why the game can't be installed into this library folder right now, or None."""
+        target = os.path.normcase(os.path.abspath(library_path))
+        for lib in self.manager.config["libraries"]:
+            if lib["id"] in self.pending_removal and os.path.normcase(os.path.abspath(lib["path"])) == target:
+                return messages.LIBRARY_BEING_REMOVED
         return blocked_reason(self.entries[entry_id], Path(library_path), self.manager.records,
                               self.manager.config["libraries"])
 
@@ -226,6 +244,9 @@ class InstallService:
             return []
         if not self.manager.library_reachable(library_id):
             raise LibraryError(messages.LIBRARY_REMOVE_UNREACHABLE)
+        for game in games:  # its job (an update, say) would stand in for the uninstall
+            if self.queue.job_for(game.catalog_id) is not None:
+                raise LibraryError(messages.LIBRARY_REMOVE_BUSY.format(title=game.title or game.catalog_id))
         self.pending_removal.add(library_id)
         return [self.submit("uninstall", g.catalog_id, delete_player_data=delete_player_data) for g in games]
 

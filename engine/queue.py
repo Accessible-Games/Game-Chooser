@@ -98,6 +98,15 @@ class InstallQueue:
         with self._cond:
             return self._current
 
+    def job_for(self, catalog_id: str) -> Job | None:
+        """The game's queued or running job, or None. Unlike `submit`, a running job that is being
+        cancelled still counts: it may still be changing the game's files and record."""
+        with self._cond:
+            for job in (self._current, *self._waiting):
+                if job is not None and job.request.catalog_id == catalog_id and job.state in ("queued", "running"):
+                    return job
+            return None
+
     def waiting_count(self) -> int:
         with self._cond:
             return len(self._waiting)

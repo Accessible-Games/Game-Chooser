@@ -140,6 +140,21 @@ def test_duplicate_submit_returns_existing_job(tmp_path):
     r.queue.shutdown(WAIT)
 
 
+def test_job_for_finds_a_games_queued_or_running_job(tmp_path):
+    r = Rig(tmp_path, gates=["a", "b"])
+    assert r.queue.job_for("a") is None
+    ja, jb = r.queue.submit(req("a"), "A"), r.queue.submit(req("b", "update"), "B")
+    r.listener.wait_for(("started", "a"))
+    assert r.queue.job_for("a") is ja and r.queue.job_for("b") is jb
+    r.queue.cancel(jb.id)
+    assert r.queue.job_for("b") is None  # a cancelled waiting job is gone at once
+    r.queue.cancel(ja.id)
+    assert r.queue.job_for("a") is ja  # a running job counts until it has stopped
+    r.listener.wait_for(("cancelled", "a"))
+    assert r.queue.job_for("a") is None
+    r.queue.shutdown(WAIT)
+
+
 def test_resubmit_from_finished_callback_runs_a_new_job(tmp_path):
     r = Rig(tmp_path)
     resubmitted = []

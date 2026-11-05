@@ -57,17 +57,25 @@ class FakeListener:
 class SyncQueue:
     """InstallQueue's interface, running each job at once on the caller's thread.
 
-    Jobs for ids in `fail` fail without running the engine."""
+    Jobs for ids in `fail` fail without running the engine; jobs for ids in `hold` stay queued."""
 
     def __init__(self, engine_factory, listener, log_path):
         self.engine_factory, self.listener, self.log_path = engine_factory, listener, log_path
         self.engines = []
         self.fail = set()
+        self.hold = set()
+        self.waiting = []
         self.next_id = 1
+
+    def job_for(self, catalog_id):
+        return next((j for j in self.waiting if j.request.catalog_id == catalog_id), None)
 
     def submit(self, request, title):
         job = Job(self.next_id, request, title)
         self.next_id += 1
+        if request.catalog_id in self.hold:
+            self.waiting.append(job)
+            return job
         self.listener.job_started(job)
         if request.catalog_id in self.fail:
             job.state = "failed"
@@ -344,3 +352,72 @@ def test_remove_unreachable_library_refused(rig):
     shutil.rmtree(rig.tmp_path / "Empty")
     assert rig.service.remove_library(empty["id"], delete_player_data=False) == []  # nothing to uninstall
     assert rig.manager.library_by_id(empty["id"]) is None
+
+
+def _guessed_install(rig, *ids):
+    """Install games whose zips hold two exes, so the engine guesses the root one; returns (lib, entries)."""
+    lib = rig.library()
+    entries = [game_entry(rig.routes, id=cid, title=cid.title(), files={f"{cid}.exe": b"exe", "sub/other.exe": b"o"})
+               for cid in ids]
+    rig.publish(*entries)
+    for cid in ids:
+        rig.run("install", cid, library_id=lib["id"])
+    return lib, entries
+
+
+def test_fetch_index_changes_nothing_until_taken(rig):
+    _, (entry,) = _guessed_install(rig, "entombed")
+    before_entries, before_json = rig.service.entries, _games_json(rig.manager)
+    publish(rig.fetcher, DEFAULT_CATALOG_URL, [{**entry, "launch": {"windows": {"path": "sub/other.exe"}}}])
+    state = rig.service.fetch_index()
+    assert state.entries["entombed"]["launch"] and state.error is None
+    assert rig.service.entries is before_entries and "launch" not in rig.service.entries["entombed"]
+    assert rig.service.index_state is not state
+    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
+    assert _games_json(rig.manager) == before_json
+    assert not rig.manager.records.load("entombed").launch_from_catalog
+    assert rig.service.take_index(state) is state
+    assert rig.service.index_state is state and rig.service.entries is state.entries
+    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/sub/other.exe"
+
+
+def test_adopt_skips_a_game_with_a_job(rig):
+    _, (entry,) = _guessed_install(rig, "entombed")
+    rig.service.queue.hold.add("entombed")
+    rig.service.submit("repair", "entombed")
+    rig.publish({**entry, "launch": {"windows": {"path": "sub/other.exe"}}})
+    assert rig.service.adopt_launch_paths() == 0
+    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
+    assert not rig.manager.records.load("entombed").launch_from_catalog
+
+
+def test_malformed_entry_does_not_stop_adoption(rig):
+    _, (first, second) = _guessed_install(rig, "entombed", "pawprints")
+    rig.publish({**first, "launch": {"windows": "sub/other.exe"}},  # not an object: adopting it raises
+                {**second, "launch": {"windows": {"path": "sub/other.exe"}}})
+    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
+    assert rig.manager.catalog_game("pawprints").launch_path == "Pawprints/sub/other.exe"
+
+
+def test_remove_library_refused_while_a_game_is_busy(rig):
+    lib = _two_installed(rig)
+    rig.service.queue.hold.add("pawprints")
+    rig.service.submit("update", "pawprints")
+    submitted = rig.service.queue.next_id
+    with pytest.raises(LibraryError) as raised:
+        rig.service.remove_library(lib["id"], delete_player_data=True)
+    assert str(raised.value) == messages.LIBRARY_REMOVE_BUSY.format(title="Pawprints")
+    assert rig.service.queue.next_id == submitted and rig.service.pending_removal == set()
+    assert rig.manager.library_by_id(lib["id"]) is not None
+    assert {g.catalog_id for g in rig.manager.games} == {"entombed", "pawprints"}
+
+
+def test_nothing_installs_into_a_library_being_removed(rig):
+    lib = _two_installed(rig)
+    other = rig.library("Other")
+    rig.publish(game_entry(rig.routes), game_entry(rig.routes, id="pawprints", title="Pawprints"),
+                game_entry(rig.routes, id="third", title="Third"))
+    rig.service.remove_library(lib["id"], delete_player_data=False)
+    assert lib["id"] in rig.service.pending_removal
+    assert rig.service.blocked("third", rig.tmp_path / "Games") == messages.LIBRARY_BEING_REMOVED
+    assert rig.service.blocked("third", rig.tmp_path / "Other") is None

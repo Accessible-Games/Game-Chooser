@@ -233,3 +233,5 @@ LIBRARY_UNREACHABLE = ("The library folder {path} can't be reached. If it's on a
 CATALOG_NOT_EDITABLE = "{title} comes from the catalog, so its details can't be edited."
 LIBRARY_REMOVE_UNREACHABLE = ("That library's folder can't be reached, so its games can't be uninstalled. Connect the "
                               "drive, or use Change folder if it moved.")
+LIBRARY_REMOVE_BUSY = "{title} is still installing or updating. Wait for it to finish, then try again."
+LIBRARY_BEING_REMOVED = "That library is being removed."
