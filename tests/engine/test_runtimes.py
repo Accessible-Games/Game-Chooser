@@ -20,7 +20,7 @@ from engine.records import RecordedFile, RecordStore
 from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present, is_com_runtime, lock_down_commands,
                              missing_runtimes, recorded_private, runtime_present)
 from tests.engine.fakes import (ADMINISTRATORS, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
-                                FakeSecurity, make_engine, served_source, zip_bytes)
+                                FakeSecurity, make_engine, served_source, split_chain, zip_bytes)
 
 MIRROR = "https://files.accessiblegames.net/files/"
 DX8VB = b"MZ fake dx8vb.dll"
@@ -280,14 +280,18 @@ def test_declined_elevation_fails_install_plainly(tmp_path):
     assert g["sources"][0]["url"] not in eng.ctx.fetcher.requests
 
 
-def test_failed_register_fails_install_and_leaves_no_runtime(tmp_path):
+def test_failed_register_fails_install_and_leaves_no_record_and_the_locked_folder(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
+    folder = eng.ctx.runtimes_root / "dx8vb"
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
     assert ei.value.message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
-    assert eng.ctx.records.load("dx8vb") is None and not (eng.ctx.runtimes_root / "dx8vb").exists()
+    assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
+    # The folder was made and sealed by the elevated command, so the player can't remove it (R39). Without a
+    # marker it counts as absent, and a retry adopts it.
+    assert snapshot(folder) == {"dx8vb.dll": DX8VB} and not (folder / MARKER_NAME).exists()
 
 
 def snapshot(root: Path) -> dict[str, bytes]:
@@ -371,29 +375,57 @@ def test_marker_reached_through_a_junction_doesnt_count(tmp_path):
     assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root, eng.ctx.security)
 
 
-def test_matching_folder_without_marker_is_adopted(tmp_path):
+def test_player_owned_folder_is_refused_for_a_registering_runtime_and_left_alone(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes)
     folder = eng.ctx.runtimes_root / "dx8vb"
-    folder.mkdir(parents=True)
+    folder.mkdir(parents=True)  # owned by the player (FakeSecurity's default): matching files aren't enough
     (folder / "dx8vb.dll").write_bytes(DX8VB)
-    run(eng, "install")
-    assert eng.ctx.elevator.calls == [*lock_down(eng, folder), regsvr32(folder / "dx8vb.dll")]
-    assert snapshot(folder) == {"dx8vb.dll": DX8VB, MARKER_NAME: (folder / MARKER_NAME).read_bytes()}
-    assert json.loads((folder / MARKER_NAME).read_text())["files"] == {"dx8vb.dll": sha(DX8VB)}
-    assert set(eng.ctx.records.load("dx8vb").files) == {"dx8vb.dll"}
-    assert (lib / "Entombed" / "entombed.exe").exists()
+    before = snapshot(folder)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert snapshot(folder) == before and eng.ctx.elevator.calls == []
+    assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
 
 
-def test_empty_folder_without_marker_is_adopted_and_filled(tmp_path):
+def test_administrators_owned_folder_is_adopted_and_only_missing_files_are_copied(tmp_path):
     routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
-    folder = eng.ctx.runtimes_root / "dx8vb"
+    data = zip_bytes({"vbx.ocx": b"MZ vbx", "lib/helper.dll": b"MZ helper", "lib/deep/more.dll": b"MZ more"})
+    vbx = {"id": "vbx", "kind": "runtime", "title": "VBX", "version": "1",
+           "sources": [served_source(routes, f"{MIRROR}{sha(data)}/vbx.zip", data,
+                                     steps=[{"action": "register", "path": "vbx.ocx"}])]}
+    eng, lib = setup(tmp_path, [vbx, game(routes, dependencies=["vbx"])], routes)
+    folder = eng.ctx.runtimes_root / "vbx"
+    (folder / "lib").mkdir(parents=True)  # locked by an earlier install that lost its marker and record
+    (folder / "vbx.ocx").write_bytes(b"MZ vbx")
+    eng.ctx.security.set_owner(folder, ADMINISTRATORS)
+    run(eng, "install")
+    files = ["vbx.ocx", "lib/helper.dll", "lib/deep/more.dll"]
+    assert eng.ctx.elevator.calls == [*lock_down(eng, folder, files, existing={"vbx.ocx", "lib"}),
+                                      regsvr32(folder / "vbx.ocx")]
+    commands = icacls_commands(eng.ctx.elevator.calls[0][1])
+    assert f'mkdir "{folder}"' not in commands and f'mkdir "{folder / "lib"}"' not in commands
+    assert f'mkdir "{folder / "lib" / "deep"}"' in commands
+    assert [c for c in commands if c.startswith("copy ")] == [
+        f'copy /b "{staging_of(eng, folder) / "lib" / "helper.dll"}" "{folder / "lib" / "helper.dll"}" >nul',
+        f'copy /b "{staging_of(eng, folder) / "lib" / "deep" / "more.dll"}" "{folder / "lib" / "deep" / "more.dll"}" >nul']
+    assert snapshot(folder) == {"vbx.ocx": b"MZ vbx", "lib/helper.dll": b"MZ helper", "lib/deep/more.dll": b"MZ more",
+                                MARKER_NAME: (folder / MARKER_NAME).read_bytes()}
+    assert set(json.loads((folder / MARKER_NAME).read_text())["files"]) == set(files)
+    assert set(eng.ctx.records.load("vbx").files) == set(files) and (lib / "Entombed" / "entombed.exe").exists()
+
+
+def test_empty_folder_without_marker_is_adopted_and_filled_for_a_runtime_with_no_elevated_step(tmp_path):
+    routes = {}
+    rt = plain_runtime(routes, "bass")
+    eng, lib = setup(tmp_path, [rt, game(routes, dependencies=["bass"])], routes)
+    folder = eng.ctx.runtimes_root / "bass"
     folder.mkdir(parents=True)
     run(eng, "install")
-    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / MARKER_NAME).exists()
+    assert (folder / "bass.dll").read_bytes() == b"bass" and (folder / MARKER_NAME).exists()
+    assert eng.ctx.elevator.calls == []
 
 
 def test_folder_that_doesnt_match_is_refused_and_left_alone(tmp_path):
@@ -404,6 +436,7 @@ def test_folder_that_doesnt_match_is_refused_and_left_alone(tmp_path):
     folder.mkdir(parents=True)
     (folder / "dx8vb.dll").write_bytes(b"a different dx8vb")
     (folder / "other.dll").write_bytes(b"other")
+    eng.ctx.security.set_owner(folder, ADMINISTRATORS)
     before = snapshot(folder)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
@@ -428,17 +461,24 @@ def test_failed_install_removes_only_what_it_added_to_a_folder_it_found(tmp_path
     assert eng.ctx.records.load("bass") is None
 
 
-def test_failed_register_in_a_found_folder_removes_only_what_it_added(tmp_path):
+def test_after_a_failed_register_the_locked_folder_stays_and_a_retry_adopts_it(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
     folder = eng.ctx.runtimes_root / "dx8vb"
-    folder.mkdir(parents=True)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
     assert ei.value.message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
-    assert snapshot(folder) == {} and folder.is_dir()  # the DLL and the marker it added are gone again
+    assert snapshot(folder) == {"dx8vb.dll": DX8VB}  # sealed: nothing the player could remove; no marker
     assert eng.ctx.records.load("dx8vb") is None
+
+    eng.ctx.elevator.exit_codes.clear()  # regsvr32 works this time
+    run(eng, "install")
+    retry = eng.ctx.elevator.calls[2:]
+    assert retry == [*lock_down(eng, folder, existing={"dx8vb.dll"}), regsvr32(folder / "dx8vb.dll")]
+    assert not any(c.startswith(("mkdir ", "copy ")) for c in icacls_commands(retry[0][1]))  # nothing was missing
+    assert json.loads((folder / MARKER_NAME).read_text())["files"] == {"dx8vb.dll": sha(DX8VB)}
+    assert set(eng.ctx.records.load("dx8vb").files) == {"dx8vb.dll"} and (lib / "Entombed" / "entombed.exe").exists()
 
 
 def test_found_folder_with_an_extra_file_isnt_adopted_for_a_lock_down(tmp_path):
@@ -449,6 +489,7 @@ def test_found_folder_with_an_extra_file_isnt_adopted_for_a_lock_down(tmp_path):
     folder.mkdir(parents=True)
     (folder / "dx8vb.dll").write_bytes(DX8VB)
     (folder / "readme.txt").write_bytes(b"someone else's note")
+    eng.ctx.security.set_owner(folder, ADMINISTRATORS)
     before = snapshot(folder)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
@@ -456,90 +497,155 @@ def test_found_folder_with_an_extra_file_isnt_adopted_for_a_lock_down(tmp_path):
     assert snapshot(folder) == before and eng.ctx.elevator.calls == []
 
 
-def lock_down(eng, folder: Path, files=("dx8vb.dll",)) -> list[tuple[str, str, bool]]:
-    return [(exe, args, True) for exe, args in lock_down_commands(folder, eng.ctx.security.current_user(), list(files))]
+def test_found_folder_with_a_stale_marker_isnt_adopted_for_a_lock_down(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    put_marker(folder, {"dx8vb.dll": DX8VB})
+    (folder / "dx8vb.dll").unlink()  # the marker lists a file that is gone: it would say "installed" again
+    eng.ctx.security.set_owner(folder, ADMINISTRATORS)  # as soon as the file is copied back, before regsvr32
+    before = snapshot(folder)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert snapshot(folder) == before and eng.ctx.elevator.calls == []
+
+
+def staging_of(eng, folder: Path, game: str = "entombed") -> Path:
+    """Where the runtime was unpacked, as the player: the source of the elevated command's copies."""
+    return eng.ctx.work_root / game / "runtimes" / folder.name / "unpacked"
+
+
+def lock_down(eng, folder: Path, files=("dx8vb.dll",), existing=None, game: str = "entombed"):
+    return [(exe, args, True) for exe, args in lock_down_commands(
+        folder, eng.ctx.security.current_user(), staging_of(eng, folder, game), list(files), existing)]
 
 
 def icacls_commands(args: str) -> list[str]:
-    assert args.startswith('/d /v:off /s /c "') and args.endswith('"')
-    return args[len('/d /v:off /s /c "'):-1].split(" && ")
+    """The elevated chain's commands, in order (icacls and the rest)."""
+    return split_chain(args)
+
+
+BASE_GRANTS = "*S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX"
+
+
+def not_a_reparse_point(path) -> str:
+    return f'(fsutil reparsepoint query "{path}" >nul 2>&1 && exit 1 || type nul)'
 
 
 def test_lock_down_command_is_exact():
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\dx8vb")
-    [(exe, args)] = lock_down_commands(folder, "S-1-5-21-1-2-3-1001", ["dx8vb.dll"])
+    staging = Path(r"C:\Users\p\AppData\Local\Temp\GameChooser\entombed\runtimes\dx8vb\unpacked")
+    [(exe, args)] = lock_down_commands(folder, "S-1-5-21-1-2-3-1001", staging, ["dx8vb.dll"])
     assert exe == "cmd.exe"
-    gc, rt, m = r"C:\ProgramData\GameChooser", r"C:\ProgramData\GameChooser\runtimes", folder / MARKER_NAME
-    base = "*S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX"
+    gc, rt = r"C:\ProgramData\GameChooser", r"C:\ProgramData\GameChooser\runtimes"
     assert icacls_commands(args) == [
         f'icacls "{gc}" /setowner *S-1-5-32-544 /L /Q',
-        f'icacls "{gc}" /inheritance:r /grant:r {base} /L /Q',
+        f'icacls "{gc}" /inheritance:r /grant:r {BASE_GRANTS} /L /Q',
+        not_a_reparse_point(gc),
         f'icacls "{rt}" /setowner *S-1-5-32-544 /L /Q',
-        f'icacls "{rt}" /inheritance:r /grant:r {base} *S-1-3-0:(OI)(CI)(IO)F /L /Q',
+        f'icacls "{rt}" /inheritance:r /grant:r {BASE_GRANTS} *S-1-3-0:(OI)(CI)(IO)F /L /Q',
         f'icacls "{rt}" /grant *S-1-5-32-545:(AD) /L /Q',
+        not_a_reparse_point(rt),
+        f'mkdir "{folder}"',
         f'icacls "{folder}" /setowner *S-1-5-32-544 /L /Q',
-        f'icacls "{folder}" /inheritance:r /grant:r {base} /L /Q',
-        f'icacls "{m}" /setowner *S-1-5-32-544 /L /Q',
-        f'icacls "{m}" /reset /L /Q',
-        f'icacls "{folder / "dx8vb.dll"}" /setowner *S-1-5-32-544 /L /Q',
-        f'icacls "{folder / "dx8vb.dll"}" /reset /L /Q',
-        f'icacls "{m}" /grant *S-1-5-21-1-2-3-1001:M /L /Q',
+        f'icacls "{folder}" /inheritance:r /grant:r {BASE_GRANTS} *S-1-5-21-1-2-3-1001:(WD) /L /Q',
+        f'copy /b "{staging / "dx8vb.dll"}" "{folder / "dx8vb.dll"}" >nul',
     ]
 
 
-def test_lock_down_never_recurses_and_seals_each_folder_before_its_children():
+def test_adoption_command_makes_nothing_that_exists_and_copies_only_missing_files():
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\vbx")
-    files = ["vbx.ocx", "lib/a.dll", "lib/deep/b.dll", "z.txt"]
-    [(exe, args)] = lock_down_commands(folder, "S-1-5-21-1-2-3-1001", files)
+    staging = Path(r"C:\Users\p\AppData\Local\Temp\GameChooser\entombed\runtimes\vbx\unpacked")
+    files = ["vbx.ocx", "lib/a.dll", "lib/deep/b.dll"]
+    [(exe, args)] = lock_down_commands(folder, "S-1-5-21-1-2-3-1001", staging, files, existing={"vbx.ocx", "lib"})
     commands = icacls_commands(args)
-    assert all(" /T" not in c and "*\"" not in c and "\\*" not in c for c in commands)  # no recursion, no wildcard
-    assert all(c.startswith('icacls "') and c.endswith(" /L /Q") for c in commands)  # /L on every call
-    named = [Path(c.split('"')[1]) for c in commands]
-    expected = {folder.parent.parent, folder.parent, folder, folder / MARKER_NAME,
-                *(folder.joinpath(*f.split("/")) for f in files), folder / "lib", folder / "lib" / "deep"}
-    assert set(named) == expected  # only the expected list's paths
-    for directory in (folder, folder / "lib", folder / "lib" / "deep"):
-        sealed = max(i for i, c in enumerate(commands) if named[i] == directory and "/inheritance:r" in c)
-        owned = min(i for i, c in enumerate(commands) if named[i] == directory and "/setowner" in c)
-        assert owned < sealed
-        children = [i for i, p in enumerate(named) if directory in p.parents]
-        assert children and min(children) > sealed  # sealed before anything inside it is touched
+    lib, deep = folder / "lib", folder / "lib" / "deep"
+    assert commands[7:] == [
+        f'icacls "{folder}" /setowner *S-1-5-32-544 /L /Q',
+        f'icacls "{folder}" /inheritance:r /grant:r {BASE_GRANTS} *S-1-5-21-1-2-3-1001:(WD) /L /Q',
+        not_a_reparse_point(folder),
+        f'(if exist "{folder / MARKER_NAME}" exit 1)',  # a stale marker must not say "installed" before regsvr32
+        f'icacls "{lib}" /setowner *S-1-5-32-544 /L /Q',
+        f'icacls "{lib}" /inheritance:r /grant:r {BASE_GRANTS} /L /Q',
+        not_a_reparse_point(lib),
+        # Into a folder that was already there: never through a link, never over something planted.
+        not_a_reparse_point(lib / "a.dll"),
+        f'(if exist "{lib / "a.dll"}" exit 1)',
+        f'copy /b "{staging / "lib" / "a.dll"}" "{lib / "a.dll"}" >nul',
+        f'mkdir "{deep}"',
+        f'icacls "{deep}" /setowner *S-1-5-32-544 /L /Q',
+        f'icacls "{deep}" /inheritance:r /grant:r {BASE_GRANTS} /L /Q',
+        f'copy /b "{staging / "lib" / "deep" / "b.dll"}" "{deep / "b.dll"}" >nul',  # a folder it just made and sealed
+    ]
+    assert not any("vbx.ocx" in c for c in commands)  # already there: not copied, not touched
+
+
+def test_lock_down_never_recurses_and_touches_no_file_with_icacls():
+    folder = Path(r"C:\ProgramData\GameChooser\runtimes\vbx")
+    staging = Path(r"C:\staging")
+    files = ["vbx.ocx", "lib/a.dll", "lib/deep/b.dll", "z.txt"]
+    for existing in (None, {"lib", "lib/a.dll"}):
+        [(exe, args)] = lock_down_commands(folder, "S-1-5-21-1-2-3-1001", staging, files, existing)
+        commands = icacls_commands(args)
+        assert all(" /T" not in c and "*\"" not in c and "\\*" not in c for c in commands)  # no recursion, no wildcard
+        icacls = [c for c in commands if c.startswith("icacls ")]
+        assert all(c.endswith(" /L /Q") for c in icacls)  # /L on every call
+        folders = {folder.parent.parent, folder.parent, folder, folder / "lib", folder / "lib" / "deep"}
+        assert {Path(c.split('"')[1]) for c in icacls} <= folders  # icacls names folders only, never a file
+        copies = [Path(c.split('"')[3]) for c in commands if c.startswith("copy ")]
+        assert {p.relative_to(folder).as_posix() for p in copies} == set(files) - (existing or set())
+        for directory in folders - {folder.parent.parent, folder.parent}:
+            sealed = commands.index(f'icacls "{directory}" /inheritance:r /grant:r {BASE_GRANTS}'
+                                    + (" *S-1-5-21-1-2-3-1001:(WD)" if directory == folder else "") + " /L /Q")
+            assert commands.index(f'icacls "{directory}" /setowner *S-1-5-32-544 /L /Q') < sealed
+            made = [i for i, c in enumerate(commands) if c == f'mkdir "{directory}"']
+            assert (made == [] if existing and directory != folder / "lib" / "deep" else made[0] < sealed)
+            children = [i for i, c in enumerate(commands) if f'"{directory}\\' in c]
+            assert children and min(children) > sealed  # sealed before anything inside it is touched
+        # The parents are sealed before the runtime's folder is made or sealed.
+        assert commands.index(not_a_reparse_point(folder.parent)) < commands.index(
+            f'icacls "{folder}" /setowner *S-1-5-32-544 /L /Q')
 
 
 def test_long_lock_down_is_split_into_few_invocations_each_parent_first():
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\big")
     files = [f"data/file-{i:04}.dat" for i in range(120)]
-    invocations = lock_down_commands(folder, "S-1-5-21-1-2-3-1001", files)
+    invocations = lock_down_commands(folder, "S-1-5-21-1-2-3-1001", Path(r"C:\staging\big"), files)
     assert 1 < len(invocations) <= 4 and all(len(args) <= 8000 for _, args in invocations)
+    first = icacls_commands(invocations[0][1])
+    assert f'icacls "{folder}" /inheritance:r /grant:r {BASE_GRANTS} *S-1-5-21-1-2-3-1001:(WD) /L /Q' in first
     commands = [c for _, args in invocations for c in icacls_commands(args)]
     data = folder / "data"
     sealed = next(i for i, c in enumerate(commands) if f'icacls "{data}" /inheritance:r' in c)
     assert all(i > sealed for i, c in enumerate(commands) if f'"{data}\\' in c)
 
 
-def test_folder_is_locked_down_then_hashed_again_before_regsvr32(tmp_path):
+def test_folder_is_made_and_filled_by_the_elevated_command_then_hashed_again_before_regsvr32(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     seen = []
 
     def watch(exe, args, elevated):
-        dll = tmp_path / "runtimes" / "dx8vb" / "dx8vb.dll"
-        seen.append((exe, dll.read_bytes() if dll.exists() else None))
+        folder = tmp_path / "runtimes" / "dx8vb"
+        seen.append((exe, folder.exists(), (folder / "dx8vb.dll").read_bytes() if (folder / "dx8vb.dll").exists() else None))
 
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=watch))
     run(eng, "install")
     folder = eng.ctx.runtimes_root / "dx8vb"
     assert eng.ctx.elevator.calls == [*lock_down(eng, folder), regsvr32(folder / "dx8vb.dll")]
-    assert seen == [("cmd.exe", DX8VB), ("regsvr32.exe", DX8VB)]  # copied before the lock-down
+    assert seen == [("cmd.exe", False, None), ("regsvr32.exe", True, DX8VB)]  # nothing there until the command ran
+    assert json.loads((folder / MARKER_NAME).read_text())["files"] == {"dx8vb.dll": sha(DX8VB)}
 
 
-def test_file_swapped_before_the_lock_down_is_caught_and_nothing_is_registered(tmp_path):
+def test_staging_file_swapped_during_the_prompt_is_caught_and_nothing_is_registered(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
 
     def swap(exe, args, elevated):
-        if exe == "cmd.exe":  # another account replaces the DLL just before the folder is locked
-            (tmp_path / "runtimes" / "dx8vb" / "dx8vb.dll").write_bytes(b"MZ planted")
+        if exe == "cmd.exe":  # code running as the player replaces the file the elevated command will copy
+            next(p for p in tmp_path.rglob("dx8vb.dll") if "unpacked" in p.parts).write_bytes(b"MZ planted")
 
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=swap))
     folder = eng.ctx.runtimes_root / "dx8vb"
@@ -547,33 +653,54 @@ def test_file_swapped_before_the_lock_down_is_caught_and_nothing_is_registered(t
         run(eng, "install")
     assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
+    assert (folder / "dx8vb.dll").read_bytes() == b"MZ planted"  # left locked, with no marker (R39)
+    assert not (folder / MARKER_NAME).exists()
     assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
+
+
+def test_folder_planted_during_the_prompt_stops_the_elevated_command_and_registers_nothing(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+
+    def plant(exe, args, elevated):
+        if exe == "cmd.exe":  # the folder appears between the engine's check and the elevated mkdir
+            (tmp_path / "runtimes" / "dx8vb").mkdir()
+
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=plant))
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
+    assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
+    assert snapshot(folder) == {} and eng.ctx.records.load("dx8vb") is None
 
 
 @pytest.mark.windows
 @pytest.mark.parametrize("swapped", ["id", "runtimes"])
-def test_junction_swapped_in_during_the_lock_down_is_caught_and_nothing_is_registered(tmp_path, swapped):
+def test_junction_planted_at_the_folder_or_a_parent_during_the_prompt_stops_the_elevated_command(tmp_path, swapped):
     import _winapi
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     root = tmp_path / "GameChooser" / "runtimes"
-    decoy = tmp_path / "decoy"
+    victim = tmp_path / "victim"
+    victim.mkdir()
 
     def swap(exe, args, elevated):
         if exe != "cmd.exe":
             return
-        # Another account moves the folder away and puts a junction to a look-alike in its place.
+        # Code running as the player: a junction where the runtime's folder will be made, or the `runtimes`
+        # folder moved away and a junction to somewhere else put in its place.
         path = root / "dx8vb" if swapped == "id" else root
-        shutil.copytree(path, decoy / path.name)
-        path.rename(path.with_name(path.name + "-moved"))
-        _winapi.CreateJunction(str(decoy / path.name), str(path))
+        if path.exists():
+            path.rename(path.with_name(path.name + "-moved"))
+        _winapi.CreateJunction(str(victim), str(path))
 
     eng, lib = setup(tmp_path, [rt, g], routes, runtimes_root=root, elevator=FakeElevator(on_start=swap))
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=root / "dx8vb")
+    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=root / "dx8vb")
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
-    assert eng.ctx.records.load("dx8vb") is None
+    assert list(victim.iterdir()) == [] and eng.ctx.records.load("dx8vb") is None  # nothing made inside it
 
 
 def test_a_new_runtime_folder_still_installs_after_the_parents_are_locked(tmp_path):
@@ -591,71 +718,94 @@ def test_a_new_runtime_folder_still_installs_after_the_parents_are_locked(tmp_pa
     root = eng.ctx.runtimes_root
     assert (root / "vbx" / "vbx.ocx").read_bytes() == vbx_data
     assert eng.ctx.elevator.calls == [*lock_down(eng, root / "dx8vb"), regsvr32(root / "dx8vb" / "dx8vb.dll"),
-                                      *lock_down(eng, root / "vbx", ["vbx.ocx"]), regsvr32(root / "vbx" / "vbx.ocx")]
+                                      *lock_down(eng, root / "vbx", ["vbx.ocx"], game="pawprints"),
+                                      regsvr32(root / "vbx" / "vbx.ocx")]
     assert all('icacls "%s" /grant *S-1-5-32-545:(AD) /L /Q' % root in c[1] for c in eng.ctx.elevator.calls[::2])
 
 
+def adoptable_folder(eng, files: dict[str, bytes] | None = None) -> Path:
+    """A dx8vb folder locked by an earlier install (owned by Administrators) that lost its marker."""
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    folder.mkdir(parents=True)
+    for rel, data in ({"dx8vb.dll": DX8VB} if files is None else files).items():
+        (folder / rel).write_bytes(data)
+    eng.ctx.security.set_owner(folder, ADMINISTRATORS)
+    return folder
+
+
 @pytest.mark.windows
-@pytest.mark.parametrize("name", ["dx8vb.dll", "planted"])
-def test_junction_planted_inside_the_folder_during_the_prompt_is_refused(tmp_path, name):
+@pytest.mark.parametrize("name, outcome", [("dx8vb.dll", "RUNTIME_FOLDER_NOT_SECURED"),
+                                           ("planted", "RUNTIME_FOLDER_CHANGED")])
+def test_junction_planted_inside_a_found_folder_during_the_prompt_is_refused(tmp_path, name, outcome):
     import _winapi
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     victim = tmp_path / "victim"
     victim.mkdir()
-    (victim / "dx8vb.dll").write_bytes(DX8VB)
-
-    def plant(exe, args, elevated):
-        if exe == "cmd.exe":  # code running as the player, while the administrator prompt waits
-            folder = tmp_path / "runtimes" / "dx8vb"
-            if name == "dx8vb.dll":
-                (folder / "dx8vb.dll").unlink()
-            _winapi.CreateJunction(str(victim), str(folder / name))
-
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=plant))
+    (victim / "dx8vb.dll").write_bytes(b"the victim's own file")
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    # Under the expected name, the file is missing and would be copied: the elevated command refuses to copy
+    # onto something that appeared. Under another name, the post-lock walk refuses the folder.
+    folder = adoptable_folder(eng, files={} if name == "dx8vb.dll" else None)
+    eng.ctx.elevator.on_start = lambda exe, args, elevated: (
+        _winapi.CreateJunction(str(victim), str(folder / name)) if exe == "cmd.exe" else None)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE,
-                                                                      path=eng.ctx.runtimes_root / "dx8vb")
+    assert ei.value.message == getattr(messages, outcome).format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
+    assert snapshot(victim) == {"dx8vb.dll": b"the victim's own file"}  # nothing written through the junction
     assert eng.ctx.records.load("dx8vb") is None
 
 
-def test_unexpected_file_planted_during_the_prompt_is_refused(tmp_path):
+def test_unexpected_file_planted_in_a_found_folder_during_the_prompt_is_refused(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
-
-    def plant(exe, args, elevated):
-        if exe == "cmd.exe":
-            (tmp_path / "runtimes" / "dx8vb" / "dx8vbhelper.dll").write_bytes(b"MZ extra")
-
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=plant))
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = adoptable_folder(eng)
+    eng.ctx.elevator.on_start = lambda exe, args, elevated: (
+        (folder / "dx8vbhelper.dll").write_bytes(b"MZ extra") if exe == "cmd.exe" else None)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE,
-                                                                      path=eng.ctx.runtimes_root / "dx8vb")
+    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
-def test_hard_linked_file_is_refused(tmp_path):
+def test_hard_linked_file_in_a_found_folder_is_refused(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
-    elsewhere = tmp_path / "elsewhere.dll"
-
-    def plant(exe, args, elevated):
-        if exe == "cmd.exe":
-            dll = tmp_path / "runtimes" / "dx8vb" / "dx8vb.dll"
-            os.link(dll, elsewhere)
-
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=plant))
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = adoptable_folder(eng)
+    eng.ctx.elevator.on_start = lambda exe, args, elevated: (
+        os.link(folder / "dx8vb.dll", tmp_path / "elsewhere.dll") if exe == "cmd.exe" else None)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE,
-                                                                      path=eng.ctx.runtimes_root / "dx8vb")
+    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
-def test_runtime_with_a_subfolder_is_sealed_parent_first(tmp_path):
+def test_hard_link_in_staging_is_copied_and_its_other_name_is_left_alone(tmp_path):
+    """R41's case: the player's staging file is a hard link to another file. The elevated command copies
+    its bytes into a new file, so the other file is never touched, and the install goes through."""
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    victim = tmp_path / "victim.dll"
+    victim.write_bytes(DX8VB)
+
+    def link(exe, args, elevated):
+        if exe == "cmd.exe":
+            staged = next(p for p in tmp_path.rglob("dx8vb.dll") if "unpacked" in p.parts)
+            staged.unlink()
+            os.link(victim, staged)
+
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=link))
+    run(eng, "install")
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and os.stat(folder / "dx8vb.dll").st_nlink == 1
+    assert os.stat(victim).st_nlink == 1  # the staging was cleared; the copy is its own file
+    assert eng.ctx.elevator.calls[1] == regsvr32(folder / "dx8vb.dll") and eng.ctx.records.load("dx8vb")
+
+
+def test_runtime_with_a_subfolder_is_made_and_sealed_parent_first(tmp_path):
     routes = {}
     data = zip_bytes({"vbx.ocx": b"MZ vbx", "lib/helper.dll": b"MZ helper"})
     vbx = {"id": "vbx", "kind": "runtime", "title": "VBX", "version": "1",
@@ -667,11 +817,11 @@ def test_runtime_with_a_subfolder_is_sealed_parent_first(tmp_path):
     [(exe, args, elevated), register] = eng.ctx.elevator.calls
     commands = icacls_commands(args)
     sub = folder / "lib"
-    seal_sub = commands.index(f'icacls "{sub}" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F '
-                              f'*S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /L /Q')
-    assert commands.index(f'icacls "{sub}" /setowner *S-1-5-32-544 /L /Q') < seal_sub
-    assert commands.index(f'icacls "{sub / "helper.dll"}" /setowner *S-1-5-32-544 /L /Q') > seal_sub
-    assert register == regsvr32(folder / "vbx.ocx") and (folder / "lib" / "helper.dll").exists()
+    seal_sub = commands.index(f'icacls "{sub}" /inheritance:r /grant:r {BASE_GRANTS} /L /Q')
+    assert commands.index(f'mkdir "{sub}"') < commands.index(f'icacls "{sub}" /setowner *S-1-5-32-544 /L /Q') < seal_sub
+    assert commands.index(f'copy /b "{staging_of(eng, folder) / "lib" / "helper.dll"}" "{sub / "helper.dll"}" >nul') > seal_sub
+    assert register == regsvr32(folder / "vbx.ocx") and (folder / "lib" / "helper.dll").read_bytes() == b"MZ helper"
+    assert set(eng.ctx.records.load("vbx").files) == {"vbx.ocx", "lib/helper.dll"}
 
 
 def test_declined_lock_down_fails_plainly(tmp_path):
@@ -763,13 +913,12 @@ def test_failure_after_registering_in_a_found_folder_leaves_the_registration(tmp
     routes = {}
     rt, g = failing_after_register(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes)
-    folder = eng.ctx.runtimes_root / "dx8vb"
-    folder.mkdir(parents=True)
-    (folder / "dx8vb.dll").write_bytes(DX8VB)  # it may already have been registered by another account
+    folder = adoptable_folder(eng)  # it may already have been registered by another account
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
     assert ei.value.message.startswith(messages.STEP_FILE_MISSING.format(path="setup.exe"))
-    assert eng.ctx.elevator.calls == [*lock_down(eng, folder), regsvr32(folder / "dx8vb.dll")]  # no /u
+    assert eng.ctx.elevator.calls == [*lock_down(eng, folder, existing={"dx8vb.dll"}),
+                                      regsvr32(folder / "dx8vb.dll")]  # no /u
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB
 
 
@@ -781,7 +930,7 @@ def test_failure_after_registering_in_a_folder_it_made_unregisters(tmp_path):
     with pytest.raises(InstallFailed):
         run(eng, "install")
     assert eng.ctx.elevator.calls[-1] == ("regsvr32.exe", f'/u /s "{folder / "dx8vb.dll"}"', True)
-    assert not folder.exists()
+    assert snapshot(folder) == {"dx8vb.dll": DX8VB}  # the sealed folder stays (R39), with no marker
 
 
 def test_installer_runtime_runs_untracked_then_is_checked(tmp_path, monkeypatch):

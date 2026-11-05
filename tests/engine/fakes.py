@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import time
 import zipfile
@@ -81,10 +82,86 @@ class FakeProcess:
         pass
 
 
-class FakeElevator:
-    """Records (exe, args, elevated) calls; never runs anything.
+_CHAIN_PREFIX = '/d /v:off /s /c "'
+_CHAIN_FORMS = [
+    ("icacls", re.compile(r'^icacls "([^"]+)" .+ /L /Q$')),
+    ("not_reparse", re.compile(r'^\(fsutil reparsepoint query "([^"]+)" >nul 2>&1 && exit 1 \|\| type nul\)$')),
+    ("mkdir", re.compile(r'^mkdir "([^"]+)"$')),
+    ("absent", re.compile(r'^\(if exist "([^"]+)" exit 1\)$')),
+    ("copy", re.compile(r'^copy /b "([^"]+)" "([^"]+)" >nul$')),
+]
 
-    `exit_codes` maps an exe name to its exit code (default 0). With `decline=True`
+
+def split_chain(args: str) -> list[str]:
+    """The commands of an elevated chain's arguments, `/d /v:off /s /c "a && (b && c || d) && e"`, split as
+    cmd.exe reads them: on `&&` outside parentheses and quotes."""
+    assert args.startswith(_CHAIN_PREFIX) and args.endswith('"'), args
+    commands, current, depth, quoted = [], "", 0, False
+    text = args[len(_CHAIN_PREFIX):-1]
+    i = 0
+    while i < len(text):
+        if text[i] == '"':
+            quoted = not quoted
+        elif not quoted and text[i] in "()":
+            depth += 1 if text[i] == "(" else -1
+        if not quoted and depth == 0 and text.startswith(" && ", i):
+            commands.append(current)
+            current, i = "", i + 4
+            continue
+        current += text[i]
+        i += 1
+    return [*commands, current]
+
+
+def run_elevated_chain(args: str) -> int:
+    """Play the engine's elevated lock-down chain (`cmd.exe /d /v:off /s /c "a && b && …"`) on disk, as
+    cmd.exe would, stopping at the first command that fails: mkdir of something that exists, a reparse
+    point where a real folder must be, a destination that is already there, a copy that can't be made.
+    icacls calls are recorded by the caller and change nothing here. Any other command is a test error."""
+    for command in split_chain(args):
+        for kind, form in _CHAIN_FORMS:
+            match = form.match(command)
+            if match:
+                break
+        else:
+            raise AssertionError(f"unexpected command in the elevated chain: {command}")
+        path = Path(match.group(1))
+        if kind == "not_reparse":
+            if _is_reparse_point(path):
+                return 1
+        elif kind == "mkdir":
+            try:
+                os.mkdir(path)
+            except OSError:
+                return 1
+        elif kind == "absent":
+            if os.path.lexists(path):
+                return 1
+        elif kind == "copy":
+            dest = Path(match.group(2))
+            if dest.is_dir():
+                dest = dest / path.name  # as cmd's copy does: into the folder (or wherever a junction leads)
+            try:
+                shutil.copyfile(path, dest)
+            except OSError:
+                return 1
+    return 0
+
+
+def _is_reparse_point(path: Path) -> bool:
+    try:
+        info = os.lstat(path)
+    except OSError:
+        return False
+    return os.path.islink(path) or bool(getattr(info, "st_file_attributes", 0) & 0x400)
+
+
+class FakeElevator:
+    """Records (exe, args, elevated) calls; runs nothing, except that an elevated `cmd.exe` lock-down
+    chain is played on disk by `run_elevated_chain` (after `on_start`, which stands for what happens
+    while the administrator prompt waits).
+
+    `exit_codes` maps an exe name to its exit code (default 0, or the chain's). With `decline=True`
     every elevated call raises ElevationDeclined, as if the UAC prompt was refused.
     """
 
@@ -107,7 +184,10 @@ class FakeElevator:
             raise ElevationDeclined("The administrator prompt was declined.")
         if self.on_start is not None:
             self.on_start(exe, args, elevated)
-        return FakeProcess(self.exit_codes.get(exe, 0), 1000 + len(self.calls), running=exe in self.hang)
+        code = self.exit_codes.get(exe)
+        if code is None:
+            code = run_elevated_chain(args) if exe == "cmd.exe" and elevated else 0
+        return FakeProcess(code, 1000 + len(self.calls), running=exe in self.hang)
 
     def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
         return self.start(exe, args, elevated, cwd).wait(None)

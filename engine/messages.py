@@ -136,9 +136,9 @@ RUNTIME_FOLDER_NOT_SECURED = ("Game Chooser couldn't protect the folder {path} f
                               "installed.")
 RUNTIME_FOLDER_CHANGED = ("The files in {path} changed while {title} was being installed, so Game Chooser stopped and "
                           "registered nothing.")
-RUNTIME_FOLDER_NOT_OURS = ("{title} wasn't installed, because the folder {path} is already there and its files "
-                           "don't match. Game Chooser didn't make that folder, so it won't remove it. If no other "
-                           "program uses it, delete it yourself, then try again.")
+RUNTIME_FOLDER_NOT_OURS = ("{title} wasn't installed, because the folder {path} is already there, and Game Chooser "
+                           "can't tell that it holds the right files. Game Chooser didn't make that folder, so it "
+                           "won't remove it. If no other program uses it, delete it yourself, then try again.")
 RUNTIME_FOLDER_NOT_CREATED = ("Game Chooser couldn't create the folder {path} for {title}. Check that the drive has "
                               "free space, then try again.")
 TEMP_FOLDER_NOT_CLEARED = ("Game Chooser couldn't empty its temporary folder {path}. Close any program using "

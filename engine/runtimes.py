@@ -19,10 +19,13 @@ refused otherwise. Only a folder this run created is removed when an install fai
 
 Every account can create folders in %ProgramData%, so a runtime folder is trusted only when it is a
 real folder (no link or junction anywhere on the way to it) and is owned by Administrators or SYSTEM,
-or by the current user. Before a runtime's elevated steps (regsvr32, an HKLM setting) run, an
-elevated command locks its folder down (owner Administrators, inheritance off, Administrators and
-SYSTEM full control, Users read and execute; the current user may only rewrite the marker), and its
-files are hashed again, so a file swapped before the lock is caught and nothing is registered. A
+or by the current user. A runtime with an elevated step (regsvr32, an HKLM setting) never gets its
+folder from the player: one elevated command seals the folders above it, makes its folder (or finds
+it already sealed by an earlier install), seals it (owner Administrators, inheritance off,
+Administrators and SYSTEM full control, Users read and execute; the current user may only create
+files in it, which is how the marker gets written), and copies the files in from where the player
+unpacked them, so every file there was made by an administrator. The folder is then walked and its
+files hashed again, so a file swapped in the player's staging is caught and nothing is registered. A
 marker counts only in a folder owned by Administrators or SYSTEM, or, for a runtime with no elevated
 step, by the current user.
 
@@ -104,9 +107,19 @@ COMMAND_LINE_LIMIT = 8000
 
 
 def _icacls(path: Path, what: str) -> str:
-    # /L: act on a link itself, never on what it points to. No /T and no wildcard, ever: only the paths
-    # listed here are touched, so nothing planted inside the folder can steer an elevated change elsewhere.
+    # Folders only, one path each, /L (a link itself, never what it points to), no /T, no wildcard: nothing
+    # planted inside a folder, and no hard link, can steer an elevated change onto anything else.
     return f'icacls "{path}" {what} /L /Q'
+
+
+def _real(path: Path) -> str:
+    # Stops the chain if `path`, just sealed, is a link or junction after all: sealed, it can't be swapped
+    # any more, so the check holds for everything the chain does with it afterwards.
+    return f'(fsutil reparsepoint query "{path}" >nul 2>&1 && exit 1 || type nul)'
+
+
+def _absent(path: Path) -> str:
+    return f'(if exist "{path}" exit 1)'
 
 
 def _depth_first_order(files: list[str]) -> list[tuple[str, bool]]:
@@ -120,40 +133,62 @@ def _depth_first_order(files: list[str]) -> list[tuple[str, bool]]:
     return sorted(entries.items(), key=lambda item: (item[0].count("/"), item[0].lower()))
 
 
-def lock_down_commands(folder: Path, user_sid: str, files: list[str]) -> list[tuple[str, str]]:
-    """The elevated commands that lock a runtime's folder, and the two folders above it, down:
-    [(exe, arguments)], one per administrator prompt (usually one; more only if the command line would
-    be too long). `files` are the download's files, relative to `folder` with forward slashes.
+def lock_down_commands(folder: Path, user_sid: str, staging: Path, files: list[str],
+                       existing: set[str] | None = None) -> list[tuple[str, str]]:
+    """The elevated commands that make and fill a runtime's folder and lock it, and the two folders above
+    it, down: [(exe, arguments)], one per administrator prompt (usually one; more only if the command
+    line would be too long). `files` are the download's files, relative to `folder` and to `staging`
+    (where the player unpacked them) with forward slashes. `existing` is None when `folder` isn't there
+    yet; else the expected entries it already holds (an Administrators-owned folder being adopted).
 
-    Nothing is ever recursive: every icacls call names one path and carries /L. Each folder is sealed
-    (owner Administrators, then inheritance off with Administrators and SYSTEM full control and Users
-    read and execute) before anything inside it is touched:
-    - `<GameChooser>` and `<GameChooser>/runtimes` themselves. `runtimes` also lets Users create a
-      folder in it (AD, on that folder only; no delete-child), and gives the creator full control of
-      the folder they made (CREATOR OWNER, inherited only), so the next runtime can still be unpacked
-      by the player before its own lock-down.
-    - `folder`, then each expected sub-folder, parent first.
-    - Each expected file, and the marker: owner Administrators, then reset to inherit only from its
-      sealed folder (dropping any explicit grant). The current user may then rewrite the marker only,
-      so it can say "installed" once the elevated steps succeed.
+    The chain stops at the first command that fails, and never changes the owner or permissions of a
+    FILE (a hard link shares them with its other names): icacls runs on folders only, one explicit path
+    at a time with /L, never /T or a wildcard. In order:
+    - `<GameChooser>`, then `<GameChooser>/runtimes`: sealed (owner Administrators, inheritance off,
+      Administrators and SYSTEM full control, Users read and execute), then checked to be a real folder.
+      `runtimes` also lets Users create a folder in it (AD, on that folder only; no delete-child) and
+      gives the creator full control of the folder they made (CREATOR OWNER, inherited only), for
+      runtimes that need no elevated step and are unpacked by the player.
+    - `folder`: made with mkdir, which fails if anything appeared there meanwhile, then sealed. The
+      current user may also create files in it (WD, on that folder only), so the marker can be written
+      once the elevated steps succeed. A folder being adopted is sealed, checked to be real, and must
+      hold no marker, which would say "installed" before anything is registered.
+    - Each expected sub-folder the same way, parent first; one already there is sealed and checked.
+    - Each expected file not already there is copied in from `staging` by explicit path, so the
+      elevated process creates it and it inherits only from its sealed folder. Into a folder that was
+      already there, the copy first checks that nothing (no link, nothing at all) sits at that name.
     """
     runtimes, game_chooser = folder.parent, folder.parent.parent
     base = f"*{ADMINISTRATORS}:(OI)(CI)F *{SYSTEM}:(OI)(CI)F *{USERS}:(OI)(CI)RX"
     owner = f"/setowner *{ADMINISTRATORS}"
+    present = None if existing is None else {norm_key(rel) for rel in existing}
 
     def seal(path: Path, extra: str = "") -> list[str]:
         return [_icacls(path, owner), _icacls(path, f"/inheritance:r /grant:r {base}{extra}")]
 
-    commands = [*seal(game_chooser), *seal(runtimes, f" *{CREATOR_OWNER}:(OI)(CI)(IO)F"),
-                _icacls(runtimes, f"/grant *{USERS}:(AD)"), *seal(folder)]
-    for rel, is_folder in _depth_first_order([*files, MARKER_NAME]):
-        path = folder.joinpath(*PurePosixPath(rel).parts)
-        commands += seal(path) if is_folder else [_icacls(path, owner), _icacls(path, "/reset")]
-    commands.append(_icacls(folder / MARKER_NAME, f"/grant *{user_sid}:M"))
+    def there(rel: str) -> bool:
+        return present is not None and norm_key(rel) in present
+
+    commands = [*seal(game_chooser), _real(game_chooser), *seal(runtimes, f" *{CREATOR_OWNER}:(OI)(CI)(IO)F"),
+                _icacls(runtimes, f"/grant *{USERS}:(AD)"), _real(runtimes)]
+    if present is None:
+        commands += [f'mkdir "{folder}"', *seal(folder, f" *{user_sid}:(WD)")]
+    else:
+        commands += [*seal(folder, f" *{user_sid}:(WD)"), _real(folder), _absent(folder / MARKER_NAME)]
+    lead = len(commands)  # always in the first invocation: nothing inside is touched before this is done
+    for rel, is_folder in _depth_first_order(files):
+        parts = PurePosixPath(rel).parts
+        path = folder.joinpath(*parts)
+        if is_folder:
+            commands += [*seal(path), _real(path)] if there(rel) else [f'mkdir "{path}"', *seal(path)]
+        elif not there(rel):
+            if present is not None and (len(parts) == 1 or there("/".join(parts[:-1]))):
+                commands += [_real(path), _absent(path)]  # the folder was there: so could something at this name
+            commands.append(f'copy /b "{staging.joinpath(*parts)}" "{path}" >nul')
 
     invocations, batch = [], []
-    for command in commands:
-        if batch and len(_cmd_args(batch + [command])) > COMMAND_LINE_LIMIT:
+    for i, command in enumerate(commands):
+        if i >= lead and len(_cmd_args(batch + [command])) > COMMAND_LINE_LIMIT:
             invocations.append(batch)
             batch = []
         batch.append(command)
@@ -289,7 +324,7 @@ def marker_present(folder: Path, runtime_id: str, security, allow_user: bool = F
 def _write_marker(folder: Path, runtime_id: str, source_sha256: str, files: dict[str, str]) -> None:
     """Best effort: without it, another account adopts the folder instead of skipping it.
 
-    Written in place: in a locked folder the current user may change the marker but create nothing."""
+    Written directly: in a sealed folder the current user may create a file, and nothing else."""
     try:
         (folder / MARKER_NAME).write_text(
             json.dumps({"id": runtime_id, "source_sha256": source_sha256, "files": files}, indent=2),
@@ -497,17 +532,23 @@ def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) 
 
 
 def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel) -> None:
-    """Unpack into `unpack_dir` and run the file steps there; copy the result into `target`, lock it down
-    and check its files again if any step needs administrator permission, run the system steps there,
-    and leave the record and the marker.
+    """Unpack into `unpack_dir` and run the file steps there; get the result into `target`, run the system
+    steps there, and leave the record and the marker.
+
+    A runtime with no elevated step is copied into `target` by the player. One with an elevated step
+    never is: one elevated command makes `target` (or seals it again), seals it and copies the files in
+    (lock_down_commands), and the folder is then walked and hashed again before any step runs, so a
+    swap in the player's staging is caught and nothing is registered.
 
     `target`, or a folder on the way to it, that is a link is refused. A `target` that is already there
     (another account's install, or one whose record was lost) is never removed or changed: it is adopted
-    only if it is owned by Administrators, SYSTEM or the current user and no file in it differs from the
-    download, and only its missing files are added; otherwise the install is refused. On any failure,
-    the system steps already applied are undone (but in a folder it found, never a registration, which
-    may predate this run), and only what this run created is removed: `target` itself if it made it,
-    else just the files it added (where the lock-down still allows it).
+    only if no file in it differs from the download and it is owned by Administrators or SYSTEM (or, for
+    a runtime with no elevated step, the current user); for a runtime with an elevated step it may hold
+    nothing else and no marker. Only its missing files are added. Otherwise the install is refused. On
+    any failure, the system steps already applied are undone (but in a folder it found, never a
+    registration, which may predate this run). A folder the player filled is removed if this run made
+    it, else just the files it added; a sealed folder stays as it is (without a marker it counts as
+    absent, and a retry adopts it).
     """
     title = _title(runtime)
     install = fetched.source.get("install") or {}
@@ -519,33 +560,29 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
     if linked is not None:
         raise InstallFailed(messages.RUNTIME_FOLDER_LINKED.format(title=title, path=linked))
     found = os.path.lexists(target)
-    made = False  # True once this run has created `target`
-    added = PrivateCopy(runtime, [], [], [])  # what this run added to a folder it found
+    made = False  # True once this run (or its elevated command) has created `target`
+    added = PrivateCopy(runtime, [], [], [])  # what the player added to a folder it found
     try:
         root = ctx.extractor.extract(fetched.path, unpack_dir, install, cancel)
         run_file_steps(steps, root)
         _check(cancel)
         incoming = hash_tree(root)
-        if not found:
-            target.mkdir()  # FileExistsError if something made it meanwhile: then it isn't ours
-            made = True
-        elif (not _owner_is(ctx.security, target, allow_user=True) or not _matches_download(target, incoming)
-              # A folder to be locked down may hold only the download's files: anything else would be
-              # touched by the elevated command, or refused after it.
-              or (elevated and not _only_expected(target, incoming))):
+        if found and not _adoptable(ctx, target, incoming, elevated):
             raise InstallFailed(messages.RUNTIME_FOLDER_NOT_OURS.format(title=title, path=target))
-        _copy_into(root, target, added)
         if elevated:
-            if not os.path.lexists(target / MARKER_NAME):
-                added.files.append(target / MARKER_NAME)  # removed again if this run fails in a found folder
-            _empty_marker(target, title)
-            _lock_down(ctx, target, title, [display for display, _ in incoming.values()])
-            # Checked again now that no one else can change it: a junction put anywhere on the way to it
-            # or inside it, an entry the download doesn't have, or a file swapped before the lock.
+            _lock_down(ctx, target, title, root, incoming, found)
+            made = not found
+            # Checked again now that no one else can change it: a junction anywhere on the way to it or
+            # inside it, an entry the download doesn't have, a hard link, or a file swapped in staging.
             if (linked_component(ctx.runtimes_root, target) is not None
                     or not _owner_is(ctx.security, target, allow_user=False)
                     or not _only_expected(target, incoming) or not _holds_download(target, incoming)):
                 raise InstallFailed(messages.RUNTIME_FOLDER_CHANGED.format(title=title, path=target))
+        else:
+            if not found:
+                target.mkdir()  # FileExistsError if something made it meanwhile: then it isn't ours
+                made = True
+            _copy_into(root, target, added)
         for step in steps:  # one at a time, so a failure leaves `applied` true to what was done
             applied += run_system_steps([step], step_ctx)
         files = {key: RecordedFile(display, sha, runtime["id"]) for key, (display, sha) in incoming.items()}
@@ -556,10 +593,11 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
     except BaseException as e:
         undo = [s for s in applied if made or s.get("action") != "register"]
         undo_failures = [*getattr(e, "undo_failures", []), *undo_steps(undo, step_ctx)]
-        if made:
-            _clear(target)
-        else:
-            _remove_copy(added, target)
+        if not elevated:  # a sealed folder isn't the player's to change (R39)
+            if made:
+                _clear(target)
+            else:
+                _remove_copy(added, target)
         if isinstance(e, StepError):
             if isinstance(e.__cause__, ElevationDeclined):
                 raise InstallFailed(messages.ELEVATION_DECLINED.format(what=title)) from e
@@ -572,23 +610,30 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
     _write_marker(target, runtime["id"], fetched.sha256, {display: sha for display, sha in incoming.values()})
 
 
-def _empty_marker(target: Path, title: str) -> None:
-    """Empty (or create) the marker before the lock-down, as the player: a failed run then leaves no stale
-    "installed". It is never written elevated, where a link or hard link planted in its place would
-    steer the write elsewhere."""
-    try:
-        (target / MARKER_NAME).write_text("", encoding="utf-8")
-    except OSError as e:
-        raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target)) from e
+def _adoptable(ctx, target: Path, incoming: dict[str, tuple[str, str]], elevated: bool) -> bool:
+    """True if a `target` that is already there may be used for this install (see _unpack)."""
+    if not _owner_is(ctx.security, target, allow_user=not elevated) or not _matches_download(target, incoming):
+        return False
+    if elevated:
+        # The elevated command adds the missing files and leaves everything else alone, so the folder may
+        # hold only the download's files; and no marker, which would say "installed" as soon as the files
+        # are complete, before anything is registered.
+        return _only_expected(target, incoming) and not os.path.lexists(target / MARKER_NAME)
+    return True
 
 
-def _lock_down(ctx, target: Path, title: str, files: list[str]) -> None:
-    """Run lock_down_commands elevated (the runtime's folder and the two above it), passed inline: never
-    through a script file a player could swap. A declined prompt is a declined install (R6)."""
+def _lock_down(ctx, target: Path, title: str, staging: Path, incoming: dict[str, tuple[str, str]],
+               found: bool) -> None:
+    """Run lock_down_commands elevated (the runtime's folder, made or adopted, and the two above it),
+    passed inline: never through a script file a player could swap. A declined prompt is a declined
+    install (R6)."""
     user = ctx.security.current_user()
-    if not user or not _SID.fullmatch(user) or "%" in str(target) or any("%" in f for f in files):
+    files = [display for display, _ in incoming.values()]
+    if (not user or not _SID.fullmatch(user) or "%" in str(target) or "%" in str(staging)
+            or any("%" in f for f in files)):
         raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))  # cmd expands %
-    for exe, args in lock_down_commands(target, user, files):
+    existing = {rel for rel, _ in _depth_first_order(files) if os.path.lexists(target / rel)} if found else None
+    for exe, args in lock_down_commands(target, user, staging, files, existing):
         try:
             code = ctx.elevator.run(exe, args, True)
         except ElevationDeclined as e:
