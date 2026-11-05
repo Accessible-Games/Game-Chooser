@@ -29,9 +29,15 @@ def is_editable(game) -> bool:
     return not game.catalog_id and not game.library_id
 
 
+def is_game_record(record) -> bool:
+    """A record of an installed game. A shared runtime's record (kind "runtime") is never a game's: the Library
+    never offers to change or forget it."""
+    return record is not None and getattr(record, "kind", "game") == "game"
+
+
 def is_tracked(record) -> bool:
     """A catalog install Game Chooser can change: Update, Undo, Repair and Uninstall work on it."""
-    return record is not None and not record.uninstalled and record.tracked
+    return is_game_record(record) and not record.uninstalled and record.tracked
 
 
 def undo_item(record) -> MenuItem:
@@ -54,7 +60,7 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
     if not game.catalog_id:
         return []
     links = [MenuItem(LINK, label, url=url) for label, url in link_items(entry)]
-    if is_web(game) or record is None or record.uninstalled:
+    if is_web(game) or not is_game_record(record) or record.uninstalled:
         return links
     if not record.tracked:
         items = [MenuItem(UPDATE, messages.MENU_UPDATE_BY_HAND, enabled=False)] if update_available else []
@@ -77,7 +83,7 @@ def delete_kind(game, record) -> str:
         return "delete"
     if is_tracked(record):
         return "uninstall"
-    if record is not None and not record.uninstalled:
+    if is_game_record(record) and not record.uninstalled:
         return "forget"
     return "delete"
 

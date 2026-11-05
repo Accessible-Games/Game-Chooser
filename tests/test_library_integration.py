@@ -199,3 +199,44 @@ def test_web_catalog_game_without_record_keeps_its_link(isolated_manager_factory
     m = isolated_manager_factory(games=games)
     assert m.catalog_game("webgame") is not None
     assert m.games[0].launch_path == "https://example.com/play"
+
+
+def _runtime(catalog_id="dx8vb", folder="C:/ProgramData/GameChooser/runtimes/dx8vb", **kw):
+    return _record(catalog_id=catalog_id, kind="runtime", library_id="", folder=folder, launch_path="", extras={},
+                   method="zip", **kw)
+
+
+def test_reconcile_skips_runtime_records(isolated_manager_factory, tmp_path):
+    isolated_manager_factory(config={"libraries": [{"id": "main", "path": str(tmp_path)}]})
+    dx8vb = _runtime(folder=str(tmp_path / "runtimes" / "dx8vb"))
+    vb6 = _runtime("vb6-runtime", folder=str(tmp_path / "runtimes" / "vb6-runtime"), tracked=False)
+    vb6.method = "run"
+    _seed_records(isolated_manager_factory, dx8vb, vb6)
+    for _ in range(2):  # at every start
+        m = isolated_manager_factory()
+        assert m.games == [] and m.catalog_game("dx8vb") is None and m.catalog_game("vb6-runtime") is None
+    assert not (isolated_manager_factory.app_dir / "games.json").exists()  # nothing changed, nothing written
+    assert m.records.load("dx8vb") == dx8vb and m.records.load("vb6-runtime") == vb6
+    assert set(m.records.game_records()) == set()
+
+
+def test_reconcile_unlinks_a_game_that_names_a_runtime_record(isolated_manager_factory, tmp_path):
+    """A hand-edited games.json row with a runtime's id has no game record: it is kept, as a game added by hand,
+    and the runtime's record is never touched."""
+    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
+    games = [{"title": "DX", "launch_path": "DX/dx.exe", "library_id": "main", "catalog_id": "dx8vb"}]
+    isolated_manager_factory(config=config)
+    runtime = _runtime(folder=str(tmp_path / "runtimes" / "dx8vb"))
+    _seed_records(isolated_manager_factory, runtime)
+    m = isolated_manager_factory(games=games)
+    assert [(g.title, g.catalog_id, g.library_id) for g in m.games] == [("DX", "", "")]
+    assert m.records.load("dx8vb") == runtime
+
+
+def test_reconcile_treats_an_unsafe_catalog_id_as_no_record(isolated_manager_factory, tmp_path):
+    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
+    games = [{"title": "Odd", "launch_path": "Odd/odd.exe", "library_id": "main", "catalog_id": "../odd"},
+             {"title": "Web", "launch_path": "https://example.com/", "library_id": "", "catalog_id": "a/b"}]
+    m = isolated_manager_factory(games=games, config=config)  # no crash at startup
+    assert [(g.title, g.catalog_id, g.library_id) for g in m.games] == [("Odd", "", ""), ("Web", "a/b", "")]
+    assert m.records.load_game("a/b") is None

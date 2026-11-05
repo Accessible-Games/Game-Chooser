@@ -116,7 +116,7 @@ class InstallService:
     def _adopt(self, catalog_id: str) -> bool:
         platform = current_platform()
         entry = self.entries.get(catalog_id)
-        rec = self.manager.records.load(catalog_id)
+        rec = self.manager.records.load_game(catalog_id)
         if entry is None or rec is None or rec.uninstalled:
             return False
         if rec.library_id and not self.manager.library_reachable(rec.library_id):
@@ -132,9 +132,10 @@ class InstallService:
         return _visible_games(self.entries, current_platform())
 
     def installed_ids(self) -> set[str]:
-        """Catalog ids shown as installed: an install record that isn't uninstalled, or a catalog web game."""
+        """Catalog ids shown as installed: a game's install record that isn't uninstalled, or a catalog web game.
+        A shared runtime's record is never a game's."""
         ids = {g.catalog_id for g in self.manager.games if g.catalog_id and _is_web(g)}
-        ids |= {cid for cid, rec in self.manager.records.all().items() if not rec.uninstalled}
+        ids |= {cid for cid, rec in self.manager.records.game_records().items() if not rec.uninstalled}
         return ids
 
     # ---- installing -----------------------------------------------------------------------------------------
@@ -211,7 +212,7 @@ class InstallService:
     def player_files(self, catalog_id: str) -> int:
         """How many files in an installed game's folder are the player's (saves, settings), for the Uninstall and
         Remove-library checkboxes; 0 when that can't be told. Reads and hashes the folder's files."""
-        rec = self.manager.records.load(catalog_id)
+        rec = self.manager.records.load_game(catalog_id)
         if rec is None or rec.uninstalled:
             return 0
         folder = record_folder(rec, self.manager.config["libraries"])
@@ -226,8 +227,9 @@ class InstallService:
     def forget(self, catalog_id: str) -> None:
         """Delete a catalog game Game Chooser can't uninstall (an untracked install): its install record goes, so
         reconcile_catalog_records doesn't add it back at the next start, then it leaves the list. Its files stay
-        where they are. The record goes first: if that fails (OSError), nothing has changed."""
-        self.manager.records.delete(catalog_id)
+        where they are. The record goes first: if that fails (OSError), nothing has changed. A record that isn't a
+        game's (a shared runtime's) is never deleted."""
+        self.manager.records.delete_game(catalog_id)
         self.manager.remove_catalog_game(catalog_id)
 
     def job_failed(self, job: Job) -> None:
@@ -242,7 +244,8 @@ class InstallService:
     # ---- library status -------------------------------------------------------------------------------------
 
     def record_for(self, game) -> InstallRecord | None:
-        return self.manager.records.load(game.catalog_id) if game.catalog_id else None
+        """The game's install record: None for a game added by hand, and for a record that isn't a game's."""
+        return self.manager.records.load_game(game.catalog_id) if game.catalog_id else None
 
     def entry_for(self, game) -> dict | None:
         return self.entries.get(game.catalog_id) if game.catalog_id else None
@@ -250,7 +253,7 @@ class InstallService:
     def statuses(self) -> dict[tuple[str, str], str]:
         """Each game's status, keyed by (library_id, launch_path)."""
         platform = current_platform()
-        records = self.manager.records.all()
+        records = self.manager.records.game_records()
         result = {}
         for game in self.manager.games:
             full_path = self.manager.get_full_path(game)
@@ -277,7 +280,7 @@ class InstallService:
         list as games added by hand when the library goes."""
         tracked, kept = [], []
         for game in self.manager.catalog_games_in(library_id):
-            if is_tracked(self.manager.records.load(game.catalog_id)):
+            if is_tracked(self.manager.records.load_game(game.catalog_id)):
                 tracked.append(game)
             elif not _is_web(game):
                 kept.append(game)
@@ -317,7 +320,7 @@ class InstallService:
             return
         try:
             for game in kept:
-                self.manager.records.delete(game.catalog_id)
+                self.manager.records.delete_game(game.catalog_id)
         except OSError as e:
             log.warning("Couldn't delete an install record while removing library %s: %s", library_id, e)
             raise LibraryError(messages.LIBRARY_NOT_REMOVED) from e
@@ -325,7 +328,7 @@ class InstallService:
             self.manager.unlink_catalog_game(game)
         if kept:
             self.manager.save_games()
-        for cid, rec in self.manager.records.all().items():
+        for cid, rec in self.manager.records.game_records().items():
             if rec.uninstalled and rec.library_id == library_id:
                 self.manager.records.delete(cid)
         self.manager.remove_library(library_id)

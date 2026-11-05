@@ -203,15 +203,16 @@ class GameLibraryManager:
         """Make games.json agree with the install records (they are the truth about what is installed).
 
         A record with no game gets one, using the cached catalog index only (never the network); a game
-        whose record is gone becomes a game added by hand and is kept.
+        whose record is gone becomes a game added by hand and is kept. Only games' records count: a shared
+        runtime's record (kind "runtime") is never a game.
         """
-        records = self.records.all()
+        records = self.records.game_records()
         changed = False
         for game in self.games:
-            rec = records.get(game.catalog_id) if game.catalog_id else None
             if not game.catalog_id or game.launch_path.startswith("http"):
                 continue  # web games have no install record by design
-            gone = rec.uninstalled if rec else not self.records.exists(game.catalog_id)
+            rec = records.get(game.catalog_id)
+            gone = rec.uninstalled if rec else not self._record_unreadable(game.catalog_id)
             if gone:  # an unreadable record file is not a gone one: leave that game alone
                 self.unlink_catalog_game(game)
                 changed = True
@@ -228,6 +229,17 @@ class GameLibraryManager:
             except OSError as e:
                 # keep the result in memory; games.json is written with the next change
                 logging.getLogger(__name__).warning("Couldn't save games.json: %s", e)
+
+    def _record_unreadable(self, catalog_id):
+        """True when a record file is there for this id but can't be read, so it may still be the game's. A
+        readable record that isn't a game's (a runtime's) is no game record; nor is an unsafe id's."""
+        try:
+            if not self.records.exists(catalog_id):
+                return False
+        except ValueError:  # a hand-edited games.json: no file can have that name
+            logging.getLogger(__name__).warning("Not a safe catalog id, so it has no install record: %r", catalog_id)
+            return False
+        return self.records.load(catalog_id) is None
 
     def _cached_entries(self):
         url = self.config.get("install", {}).get("catalog_url", DEFAULT_CATALOG_URL)

@@ -166,7 +166,7 @@ class RecordStore:
             return None
 
     def exists(self, catalog_id: str) -> bool:
-        """True when a record file is there, even if it can't be read."""
+        """True when a record file is there, even if it can't be read. ValueError for an unsafe id."""
         return self._file(catalog_id).exists()
 
     def save(self, record: InstallRecord) -> None:
@@ -188,6 +188,36 @@ class RecordStore:
             if record is not None:
                 result[path.stem] = record
         return result
+
+    # The library's view of the store. Shared runtimes keep `kind="runtime"` records here too; they are never
+    # games, so the library never lists, changes or deletes them. A catalog id from a hand-edited games.json may
+    # be unsafe as a file name: for the library that is simply "no record".
+
+    def game_records(self) -> dict[str, InstallRecord]:
+        """The readable records of installed games (runtimes left out)."""
+        return {cid: rec for cid, rec in self.all().items() if rec.kind == "game"}
+
+    def load_game(self, catalog_id: str) -> InstallRecord | None:
+        """The game's record, or None: none, unreadable, an unsafe id, or a record that isn't a game's."""
+        try:
+            record = self.load(catalog_id)
+        except ValueError:
+            log.warning("Not a safe catalog id, so it has no install record: %r", catalog_id)
+            return None
+        return record if record is not None and record.kind == "game" else None
+
+    def delete_game(self, catalog_id: str) -> None:
+        """Delete a game's record (an unreadable one too). Never one that isn't a game's (a runtime's), and an
+        unsafe id has nothing to delete. OSError if the file can't be deleted."""
+        try:
+            record = self.load(catalog_id)
+        except ValueError:
+            log.warning("Not a safe catalog id, so it has no install record: %r", catalog_id)
+            return
+        if record is not None and record.kind != "game":
+            log.warning("The install record %s is a %s's, not a game's, so it was kept", catalog_id, record.kind)
+            return
+        self.delete(catalog_id)
 
     def owner_of_folder(self, folder: Path, libraries: list[dict]) -> InstallRecord | None:
         for record in self.all().values():

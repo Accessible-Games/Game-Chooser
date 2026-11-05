@@ -128,3 +128,20 @@ def test_record_folder_by_id(tmp_path):
     libs = [{"id": "a1", "path": str(tmp_path / "A")}, {"id": "b2", "path": str(tmp_path / "B")}]
     assert record_folder(make_record(library_id="b2"), libs) == tmp_path / "B" / "Entombed"
     assert record_folder(make_record(library_id="zz"), libs) is None
+
+
+def test_library_view_leaves_runtime_records_alone(tmp_path):
+    store = RecordStore(tmp_path)
+    game, runtime = make_record(), make_record(catalog_id="dx8vb", kind="runtime", library_id="", folder="C:/rt")
+    store.save(game)
+    store.save(runtime)
+    (tmp_path / "broken.json").write_text("{not json", encoding="utf-8")
+    assert set(store.game_records()) == {"entombed"}
+    assert store.load_game("entombed") == game and store.load_game("dx8vb") is None
+    assert store.load_game("broken") is None and store.load_game("../x") is None and store.load_game("a/b") is None
+    store.delete_game("dx8vb")  # a runtime's record is never deleted as a game's
+    store.delete_game("../x")  # an unsafe id has nothing to delete
+    assert store.load("dx8vb") == runtime
+    store.delete_game("broken")  # an unreadable record may be the game's: it goes
+    store.delete_game("entombed")
+    assert not (tmp_path / "broken.json").exists() and store.load("entombed") is None

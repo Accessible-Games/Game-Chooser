@@ -551,3 +551,42 @@ def test_changed_catalog_url_is_used_by_the_next_fetch(rig):
     rig.manager.config["install"]["catalog_url"] = other
     assert set(rig.service.fetch_index().entries) == {"elsewhere"}
     assert rig.fetcher.calls[other + "index-meta.json"] >= 1
+
+
+def _runtime_record(rig, catalog_id="dx8vb"):
+    from engine.records import InstalledSource, InstallRecord
+    rec = InstallRecord(catalog_id=catalog_id, kind="runtime", library_id="",
+                        folder=str(rig.tmp_path / "runtimes" / catalog_id), launch_path="",
+                        source=InstalledSource("https://x/r.zip", "a" * 64, 1, None, None, 0, "1"), extras={},
+                        files={}, steps=[], method="zip")
+    rig.manager.records.save(rec)
+    return rec
+
+
+def test_installed_ids_skip_runtime_records(rig):
+    lib = rig.library()
+    rig.publish(game_entry(rig.routes))
+    rig.run("install", "entombed", library_id=lib["id"])
+    _runtime_record(rig)
+    assert rig.service.installed_ids() == {"entombed"}
+    assert set(rig.service.statuses()) == {(lib["id"], "Entombed/entombed.exe")}
+
+
+def test_runtime_records_are_never_offered_forgotten_or_deleted(rig):
+    from library_actions import catalog_menu_items, delete_kind, is_tracked
+    lib = rig.library()
+    runtime = _runtime_record(rig)
+    # a hand-edited games.json row naming the runtime, in a library (reconcile would unlink it at the next start)
+    game = Game(title="DX", launch_path="DX/dx.exe", library_id=lib["id"], catalog_id="dx8vb")
+    rig.manager.games.append(game)
+    assert rig.service.record_for(game) is None and rig.service.player_files("dx8vb") == 0
+    assert delete_kind(game, rig.service.record_for(game)) == "delete"
+    assert delete_kind(game, runtime) == "delete" and not is_tracked(runtime)
+    assert catalog_menu_items(game, runtime, None, update_available=False, extras_to_add=False) == []
+    assert rig.service.library_games(lib["id"]) == ([], [game])
+    rig.service.forget("dx8vb")
+    assert rig.manager.records.load("dx8vb") == runtime and rig.manager.catalog_game("dx8vb") is None
+    rig.manager.games.append(game)
+    assert rig.service.remove_library(lib["id"], delete_player_data=False) == []
+    assert rig.manager.records.load("dx8vb") == runtime and rig.manager.library_by_id(lib["id"]) is None
+    assert rig.service.record_for(Game(title="Odd", launch_path="https://example.com/", catalog_id="a/b")) is None
