@@ -18,6 +18,10 @@ installer that must run goes to engine.run_actions, an archive is rebuilt in sta
 A game whose installer runs gets its extras after the installer: they are downloaded and unpacked
 before it starts, so a bad download changes nothing, and applied over its folder once it is tracked.
 
+A game's missing runtimes are installed first, before it is downloaded (engine.runtimes): shared,
+machine-wide, or with "Register shared components system-wide" off, a COM runtime is copied into the
+staged game folder with a manifest beside its exe. Repair and Undo make those private copies again.
+
 A game an installer put outside the libraries is staged under the work folder instead, since its
 own folder's parent may be Program Files or shared with other games. Game Chooser never runs
 elevated, so a folder there that needs administrator permission is refused before anything changes.
@@ -37,7 +41,7 @@ from urllib.parse import unquote, urlparse
 
 from exception_manager import ExceptionManager
 
-from . import messages, run_actions, run_installer
+from . import messages, run_actions, run_installer, runtimes
 from .entries import extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources
 from .errors import Cancelled, EngineError, ExtractError, InstallFailed, NoVerifiedSource, StepError, UnsafePath
 from .folders import target_folder
@@ -222,13 +226,15 @@ class _StagedGame:
     extras: list[tuple[dict, Fetched]]
     owners: dict[str, str]  # norm_key -> extra id, for files an extra wrote last
     launch_path: str
+    dependency_notes: list[str] = field(default_factory=list)  # runtimes it had to go without
 
     def system_steps(self) -> list[dict]:
         """The game's steps, then each extra's, as one list (the shape `record.steps` is built from)."""
         return _steps(self.game) + [s for _, f in self.extras for s in _steps(f)]
 
     def notes(self) -> list[str]:
-        return list(dict.fromkeys(f.note for f in [self.game, *(f for _, f in self.extras)] if f.note))
+        fetched = [f.note for f in [self.game, *(f for _, f in self.extras)] if f.note]
+        return list(dict.fromkeys([*fetched, *self.dependency_notes]))
 
 
 class InstallEngine:
@@ -475,8 +481,11 @@ class InstallEngine:
         return fetched, root
 
     def _stage(self, entry: dict, extras: list[dict], folder_name: str, staging: Path, work: Path,
-               fetch: Fetch, launch: str | None, progress, cancel) -> _StagedGame:
-        """Build the finished game tree in staging: game, its file steps, then each extra and its file steps."""
+               fetch: Fetch, launch: str | None, progress, cancel, private: list[dict] = ()) -> _StagedGame:
+        """Build the finished game tree in staging: game, its file steps, then each extra and its file steps.
+
+        `private` COM runtimes (the preference off) are copied in before the exe is detected, and given
+        their manifest once it is (engine.runtimes)."""
         fetched, root = self._fetch_and_unpack(entry, staging / "raw", work / "game", fetch, progress, cancel)
         # Named like the final folder, so exe detection can prefer an exe named after it.
         tree = staging / "game" / folder_name
@@ -484,12 +493,16 @@ class InstallEngine:
         os.replace(root, tree)
         _run_file_steps(_steps(fetched), tree)
         owners, fetched_extras = self._merge_extras(tree, extras, staging, work, fetch, progress, cancel)
+        copies = runtimes.stage_private(self.ctx, list(private), tree, staging, work,
+                                        self._catalog_fetch(progress, cancel), progress, cancel)
 
         progress(Progress("finishing"))
-        exe = find_launch_exe(tree, launch, self.ctx.exclude)
+        copied = runtimes.is_private_file(copies)
+        exe = find_launch_exe(tree, launch, lambda path: self.ctx.exclude(path) or copied(path))
         if exe is None:
             raise InstallFailed(messages.NO_EXE.format(title=_title(entry)) + "\n\n" + messages.DEFENDER_NOTE)
-        return _StagedGame(tree, fetched, fetched_extras, owners, exe.relative_to(tree).as_posix())
+        notes = runtimes.finish_private(tree, exe, copies, _title(entry))
+        return _StagedGame(tree, fetched, fetched_extras, owners, exe.relative_to(tree).as_posix(), notes)
 
     def _merge_extras(self, tree: Path, extras: list[dict], staging: Path, work: Path, fetch: Fetch,
                       progress, cancel) -> tuple[dict[str, str], list[tuple[dict, Fetched]]]:
@@ -538,8 +551,6 @@ class InstallEngine:
                   if x.required or x.entry["id"] in req.extras]
 
         # Refusals come before anything is downloaded or written.
-        if entry.get("dependencies"):
-            raise InstallFailed(messages.DEPENDENCIES_NOT_SUPPORTED.format(title=title))
         record = ctx.records.load(game_id)
         folder = record_folder(record, ctx.libraries) if record is not None else None
         if folder is not None and folder.is_dir():
@@ -552,6 +563,7 @@ class InstallEngine:
         if reason:
             raise InstallFailed(reason)
         target = target_folder(entry, library_path, ctx.records, ctx.libraries)
+        deps = runtimes.plan_runtimes(entry, ctx)  # refuses a dependency cycle
 
         notes: list[str] = []
         if record is not None:
@@ -560,6 +572,7 @@ class InstallEngine:
             # the new ones record the player's values, not Game Chooser's leftovers.
             notes = self._forget_steps(record, folder or library_path / record.folder)
         with self._workspace(library_path, game_id) as (staging, work):
+            self._install_runtimes(deps, work, progress, cancel)
             fetched = self._fetch_game(entry, work, progress, cancel)
             if _runs_installer(fetched.source):
                 unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
@@ -567,12 +580,19 @@ class InstallEngine:
                 result = self._install_run(entry, fetched, unpacked, staging, "install", lambda item, spare: (
                     run_installer.install(ctx, item, target, library_name, library_path, progress, cancel)), cancel)
                 result.notes[:0] = notes
+                result.notes += _went_without(title, deps, run_mode=True)
                 return result
             staged = self._stage(entry, extras, target.name, staging, work,
                                  _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
-                                 _launch_hint(entry, ctx.platform), progress, cancel)
+                                 _launch_hint(entry, ctx.platform), progress, cancel, private=deps.private)
             _check(cancel)
-            return self._place(entry, staged, target, library_name, library_path, staging, notes)
+            return self._place(entry, staged, target, library_name, library_path, staging,
+                               [*notes, *_went_without(title, deps)])
+
+    def _install_runtimes(self, deps: runtimes.RuntimePlan, work: Path, progress, cancel) -> None:
+        """Install the game's missing runtimes machine-wide, before the game is downloaded."""
+        runtimes.install_shared(self.ctx, deps.shared, work / "runtimes", self._catalog_fetch(progress, cancel),
+                                progress, cancel)
 
     def _forget_steps(self, record: InstallRecord, folder: Path) -> list[str]:
         """Undo a record's system steps (registry undo needs no folder) and save it without them."""
@@ -692,10 +712,10 @@ class InstallEngine:
         title = _title(entry)
         extras = [x.entry for x in extras_of(entry, ctx.entries, ctx.platform)
                   if x.required or x.entry["id"] in extra_ids]
-        if entry.get("dependencies"):
-            raise InstallFailed(messages.DEPENDENCIES_NOT_SUPPORTED.format(title=title))
+        deps = runtimes.plan_runtimes(entry, ctx)  # refuses a dependency cycle
         prior = _snapshot(rec)
         with self._work_folder(game_id) as work:
+            self._install_runtimes(deps, work, progress, cancel)
             fetched = self._fetch_game(entry, work, progress, cancel)
             if _runs_installer(fetched.source):
                 if extras or rec.extras:  # applied by Game Chooser after the installer, so checked first
@@ -703,14 +723,16 @@ class InstallEngine:
                 with self._staging_folder(self._staging_root(rec, game_dir), game_id) as staging:
                     unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
                                                    progress, cancel)
-                    return self._install_run(entry, fetched, unpacked, staging, action, lambda item, spare: (
+                    result = self._install_run(entry, fetched, unpacked, staging, action, lambda item, spare: (
                         run_installer.update(ctx, item, rec, game_dir, progress, cancel, previous=prior,
                                              spare_steps=spare)), cancel, prior)
+                    result.notes += _went_without(title, deps, run_mode=True)
+                    return result
             self._require_writable(rec, game_dir, title)
             with self._staging_folder(self._staging_root(rec, game_dir), game_id) as staging:
                 staged = self._stage(entry, extras, game_dir.name, staging, work,
                                      _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
-                                     _launch_hint(entry, ctx.platform), progress, cancel)
+                                     _launch_hint(entry, ctx.platform), progress, cancel, private=deps.private)
                 _check(cancel)
                 plan, result, steps, notes = self._change_folder(
                     rec, game_dir, staged.tree, _incoming(staged.tree, staged.owners, game_id), rec.files,
@@ -730,17 +752,22 @@ class InstallEngine:
         rec.previous_unavailable = None
         rec.uninstalled = False
         ctx.records.save(rec)
-        return JobResult(action, game_id, title, _game_dict(entry, rec), [*staged.notes(), *notes],
-                         backups=len(result.backups))
+        return JobResult(action, game_id, title, _game_dict(entry, rec),
+                         [*staged.notes(), *notes, *_went_without(title, deps)], backups=len(result.backups))
 
     def _stage_recorded(self, entry: dict, source: InstalledSource, extra_sources: dict[str, InstalledSource],
-                        folder_name: str, staging: Path, work: Path, progress, cancel) -> _StagedGame:
-        """Rebuild exactly a recorded version in staging: its files, unpacked and set up as recorded."""
+                        folder_name: str, staging: Path, work: Path, progress, cancel,
+                        private: bool = False) -> _StagedGame:
+        """Rebuild exactly a recorded version in staging: its files, unpacked and set up as recorded.
+
+        With `private`, the game's private COM copies are made again too (from today's catalog), so
+        a Repair or Undo doesn't remove the ones its install made."""
         ctx = self.ctx
         extras = [ctx.entries.get(x) or {"id": x} for x in extra_sources]
         fetch = self._exact_fetch({entry["id"]: source, **extra_sources}, progress, cancel)
+        copies = runtimes.private_runtimes(entry, ctx) if private else []
         return self._stage(entry, extras, folder_name, staging, work, fetch,
-                           _recorded_launch(source, entry, ctx.platform), progress, cancel)
+                           _recorded_launch(source, entry, ctx.platform), progress, cancel, private=copies)
 
     def _repair(self, entry: dict, rec: InstallRecord, game_dir: Path, progress, cancel) -> JobResult:
         """Put back the exact files that were installed; changed code is restored, the player's edits kept.
@@ -757,7 +784,7 @@ class InstallEngine:
         with self._workspace(self._staging_root(rec, game_dir), game_id) as (staging, work):
             try:
                 staged = self._stage_recorded(entry, rec.source, rec.extras, game_dir.name, staging, work,
-                                              progress, cancel)
+                                              progress, cancel, private=True)
             except NoVerifiedSource as e:
                 raise InstallFailed(_repair_failure_text(e, game_id, title)) from e
             except _NoUnpackSpec as e:
@@ -799,7 +826,7 @@ class InstallEngine:
         with self._workspace(self._staging_root(rec, game_dir), game_id) as (staging, work):
             try:
                 staged = self._stage_recorded(entry, source, extra_sources, game_dir.name, staging, work,
-                                              progress, cancel)
+                                              progress, cancel, private=True)
             except NoVerifiedSource as e:
                 if not e.downloaded:  # Nothing could be reached: maybe only for now, so Undo stays offered.
                     raise InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title)) from e
@@ -989,6 +1016,12 @@ class InstallEngine:
         plain = isinstance(e, EngineError) and not isinstance(e, UnsafePath)
         raise InstallFailed("\n\n".join([str(e) if plain else messages.UNINSTALL_FAILED.format(title=title),
                                          *notes])) from e
+
+
+def _went_without(title: str, deps: runtimes.RuntimePlan, run_mode: bool = False) -> list[str]:
+    """Notes for the runtimes the game was installed without: installers that can't be made private, and
+    (for a game whose installer runs, which has no staged folder to copy them into) COM runtimes."""
+    return runtimes.needs_shared_notes(title, [*deps.skipped, *(deps.private if run_mode else [])])
 
 
 def _method(source: dict) -> str | None:

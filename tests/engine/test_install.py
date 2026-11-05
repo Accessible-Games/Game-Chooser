@@ -326,16 +326,6 @@ def test_leftover_staging_is_cleared(tmp_path):
     assert leftovers(ctx, lib) == []
 
 
-def test_dependencies_not_yet_supported_message(tmp_path):
-    routes = {}
-    e = game(routes, dependencies=["vb6-runtime"])
-    engine, ctx, lib = setup(tmp_path, [e], routes)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.DEPENDENCIES_NOT_SUPPORTED.format(title="Entombed")
-    assert ctx.fetcher.requests == []
-
-
 def test_no_verified_source_fails_plainly(tmp_path):
     routes = {}
     e = game(routes)
