@@ -1386,13 +1386,13 @@ def test_cancelled_vendor_uninstall_seen_to_stop_puts_files_back_quietly(tmp_pat
     assert (target / "saves" / "slot1.sav").read_bytes() == b"save" and not setaside(eng).exists()
 
 
-def test_game_dict_outside_libraries():
-    from engine.jobs import _game_dict
+def test_game_fields_for_outside_libraries():
+    from engine.jobs import game_fields_for
     entry = {"id": "lightcars", "title": "Light Cars", "platforms": ["Windows"]}
     elsewhere = Path(os.path.abspath("Old Games")) / "Light Cars"
     rec = InstallRecord(catalog_id="lightcars", kind="game", library_id="", folder=str(elsewhere),
                         launch_path="lc.exe", method="run", source=InstalledSource("u", "s" * 64, 1, "c" * 64, 1, 0, "1.0"),
                         files={}, extras={}, steps=[])
-    game = _game_dict(entry, rec, "windows")
+    game = game_fields_for(entry, rec, "windows")
     assert game["library_id"] == "" and Path(game["launch_path"]) == elsewhere / "lc.exe"
     assert Path(game["launch_path"]).is_absolute() and "library_name" not in game and "manual" not in game.values()

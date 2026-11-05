@@ -128,3 +128,8 @@ def test_status_never_hashes_files(monkeypatch, tmp_path):
     exe.write_bytes(b"x")
     rec = record()
     assert game_status(str(exe), False, rec, entry([src(sha="e" * 64)]), "windows") == UPDATE_AVAILABLE
+
+
+def test_library_not_found_wins():
+    from engine.status import LIBRARY_NOT_FOUND, game_status
+    assert game_status("X:/nope.exe", False, None, None, "windows", library_reachable=False) == LIBRARY_NOT_FOUND

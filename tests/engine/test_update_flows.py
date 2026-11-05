@@ -817,3 +817,22 @@ def test_fresh_install_whose_library_cant_be_created_leaves_the_old_steps_alone(
     assert ei.value.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=blocker / "Games")
     assert eng.ctx.registry.values != {} and record(eng).steps == [{**reg_step("Path", "here"), "undo": {
         "existed": False, "previous": None, "previous_type": None}}]
+
+
+def test_repair_prefers_current_catalog_hint(tmp_path):
+    eng, game = install_v1(tmp_path)
+    assert record(eng).launch_from_catalog is False
+    eng.ctx.entries["pawprints"]["launch"] = {"windows": {"path": "pawprints.exe"}}
+    run(eng, "repair")
+    after = record(eng)
+    assert after.launch_path == "pawprints.exe" and after.launch_from_catalog is True
+
+
+def test_old_records_without_the_field_load_as_guessed(tmp_path):
+    eng, game = install_v1(tmp_path)
+    path = eng.ctx.records._file("pawprints")
+    import json
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("launch_from_catalog")
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert record(eng).launch_from_catalog is False

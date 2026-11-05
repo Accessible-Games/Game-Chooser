@@ -590,3 +590,30 @@ def test_game_dict_labels_the_platform_installed_not_the_first_source(tmp_path):
     engine, ctx, lib = setup(tmp_path, [e], routes)
     r = engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert r.game["platforms"] == ["Windows"]
+
+
+# ---- where the launch path came from -------------------------------------------
+
+
+def _install_entombed(tmp_path, files, launch=None):
+    routes = {}
+    e = game(routes, files=files, **({"launch": launch} if launch else {}))
+    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    return ctx.records.load("entombed")
+
+
+def test_install_with_hint_is_from_catalog(tmp_path):
+    rec = _install_entombed(tmp_path, {"entombed.exe": b"a", "bin/other.exe": b"b"},
+                            {"windows": {"path": "bin/other.exe"}})
+    assert rec.launch_path == "bin/other.exe" and rec.launch_from_catalog is True
+
+
+def test_install_without_hint_is_guessed(tmp_path):
+    rec = _install_entombed(tmp_path, {"entombed.exe": b"a"})
+    assert rec.launch_path == "entombed.exe" and rec.launch_from_catalog is False
+
+
+def test_garbled_hint_falls_back_and_is_guessed(tmp_path):
+    rec = _install_entombed(tmp_path, {"entombed.exe": b"a"}, {"windows": {"path": "nope/missing.exe"}})
+    assert rec.launch_path == "entombed.exe" and rec.launch_from_catalog is False

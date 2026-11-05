@@ -7,6 +7,7 @@ from .entries import platform_sources
 READY = "Ready"
 UPDATE_AVAILABLE = "Update available"
 EXE_NOT_FOUND = "Executable not found"
+LIBRARY_NOT_FOUND = "Library not found"
 
 
 def update_available(record, entry: dict | None, platform: str) -> bool:
@@ -35,7 +36,10 @@ def update_available(record, entry: dict | None, platform: str) -> bool:
     return entry.get("version") != installed.version
 
 
-def game_status(full_path: str | None, is_web: bool, record, entry: dict | None, platform: str) -> str:
+def game_status(full_path: str | None, is_web: bool, record, entry: dict | None, platform: str,
+                library_reachable: bool = True) -> str:
+    if not library_reachable:
+        return LIBRARY_NOT_FOUND
     if not is_web and (not full_path or not os.path.exists(full_path)):
         return EXE_NOT_FOUND
     if update_available(record, entry, platform):

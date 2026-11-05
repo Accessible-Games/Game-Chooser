@@ -45,10 +45,10 @@ from urllib.parse import unquote, urlparse
 from exception_manager import ExceptionManager
 
 from . import messages, run_actions, run_installer, runtimes
-from .entries import extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources
+from .entries import current_platform, extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources
 from .errors import Cancelled, EngineError, ExtractError, InstallFailed, NoVerifiedSource, StepError, UnsafePath
 from .folders import library_label, target_folder
-from .launch import find_launch_exe
+from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
 from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key, safe_join
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
@@ -217,7 +217,9 @@ def _installed_source(entry: dict, fetched: Fetched, platform: str) -> Installed
 
 def _recorded_launch(recorded: InstalledSource, entry: dict, platform: str) -> str | None:
     """The launch hint the recorded source was installed with (today's, for records that predate it)."""
-    return recorded.launch if recorded.install is not None else _launch_hint(entry, platform)
+    if recorded.install is None:
+        return _launch_hint(entry, platform)
+    return _launch_hint(entry, platform) or recorded.launch
 
 
 class _NoUnpackSpec(Exception):
@@ -238,6 +240,7 @@ class _StagedGame:
     extras: list[tuple[dict, Fetched]]
     owners: dict[str, str]  # norm_key -> extra id, for files an extra wrote last
     launch_path: str
+    launch_from_catalog: bool
     dependency_notes: list[str] = field(default_factory=list)  # runtimes it had to go without
     private_ids: list[str] = field(default_factory=list)  # runtimes it has private COM copies of
 
@@ -444,7 +447,7 @@ class InstallEngine:
         record, notes = place(item, _extra_steps(unpacked))
         extra_notes, backups = self._extras_after_installer(entry, record, unpacked, staging, prior, cancel)
         private_notes = self._private_after_installer(entry, record, list(private))
-        return JobResult(action, entry["id"], title, _game_dict(entry, record, self.ctx.platform),
+        return JobResult(action, entry["id"], title, game_fields_for(entry, record, self.ctx.platform),
                          [*([fetched.note] if fetched.note else []), *notes, *extra_notes, *private_notes],
                          backups=backups)
 
@@ -557,8 +560,8 @@ class InstallEngine:
         if exe is None:
             raise InstallFailed(messages.NO_EXE.format(title=_title(entry)) + "\n\n" + messages.DEFENDER_NOTE)
         notes, private_ids = runtimes.finish_private(tree, exe, copies, _title(entry))
-        return _StagedGame(tree, fetched, fetched_extras, owners, exe.relative_to(tree).as_posix(), notes,
-                           private_ids)
+        return _StagedGame(tree, fetched, fetched_extras, owners, exe.relative_to(tree).as_posix(),
+                           is_catalog_launch(tree, exe, launch), notes, private_ids)
 
     def _merge_extras(self, tree: Path, extras: list[dict], staging: Path, work: Path, fetch: Fetch,
                       progress, cancel) -> tuple[dict[str, str], list[tuple[dict, Fetched]]]:
@@ -683,6 +686,7 @@ class InstallEngine:
             record = InstallRecord(
                 catalog_id=game_id, kind=entry.get("kind", "game"), library_id=library_id,
                 folder=target.name, launch_path=staged.launch_path,
+                launch_from_catalog=staged.launch_from_catalog,
                 source=_installed_source(entry, staged.game, ctx.platform),
                 extras={x["id"]: _installed_source(x, f, ctx.platform) for x, f in staged.extras},
                 files=files, steps=applied, method=(staged.game.source.get("install") or {}).get("method", ""),
@@ -700,7 +704,7 @@ class InstallEngine:
                 raise InstallFailed("\n\n".join([str(e), *undo_failures])) from e
             raise
 
-        return JobResult("install", game_id, _title(entry), _game_dict(entry, record, ctx.platform), [*staged.notes(), *notes])
+        return JobResult("install", game_id, _title(entry), game_fields_for(entry, record, ctx.platform), [*staged.notes(), *notes])
 
     # ---- changing an installed game -------------------------------------------
 
@@ -810,6 +814,7 @@ class InstallEngine:
         rec.source = _installed_source(entry, staged.game, ctx.platform)
         rec.extras = {x["id"]: _installed_source(x, f, ctx.platform) for x, f in staged.extras}
         rec.launch_path = staged.launch_path
+        rec.launch_from_catalog = staged.launch_from_catalog
         rec.private_runtimes = staged.private_ids
         rec.method = (staged.game.source.get("install") or {}).get("method", "")
         rec.vendor_uninstaller = None  # An installer's own uninstaller no longer matches these files.
@@ -817,7 +822,7 @@ class InstallEngine:
         rec.previous_unavailable = None
         rec.uninstalled = False
         ctx.records.save(rec)
-        return JobResult(action, game_id, title, _game_dict(entry, rec, ctx.platform),
+        return JobResult(action, game_id, title, game_fields_for(entry, rec, ctx.platform),
                          [*staged.notes(), *notes, *_went_without(title, deps)], backups=len(result.backups))
 
     def _stage_recorded(self, entry: dict, source: InstalledSource, extra_sources: dict[str, InstalledSource],
@@ -864,11 +869,12 @@ class InstallEngine:
         rec.files = plan.new_files
         rec.steps = steps
         rec.launch_path = staged.launch_path
+        rec.launch_from_catalog = staged.launch_from_catalog
         rec.private_runtimes = staged.private_ids
         rec.method = (staged.game.source.get("install") or {}).get("method", rec.method)
         _keep_backups(rec, result.backups, prior)
         ctx.records.save(rec)
-        return JobResult("repair", game_id, title, _game_dict(entry, rec, ctx.platform), notes, backups=len(result.backups))
+        return JobResult("repair", game_id, title, game_fields_for(entry, rec, ctx.platform), notes, backups=len(result.backups))
 
     def _undo(self, entry: dict, rec: InstallRecord, game_dir: Path, progress, cancel) -> JobResult:
         """Reinstall the previous version under the same rules, then put back the player's copies the
@@ -926,13 +932,14 @@ class InstallEngine:
         rec.source = source
         rec.extras = extra_sources
         rec.launch_path = staged.launch_path
+        rec.launch_from_catalog = staged.launch_from_catalog
         rec.private_runtimes = staged.private_ids
         rec.method = (staged.game.source.get("install") or {}).get("method", rec.method)
         rec.vendor_uninstaller = previous.get("vendor_uninstaller")  # the previous version's, if it had one
         rec.previous = None
         rec.previous_unavailable = None
         ctx.records.save(rec)
-        return JobResult("undo", game_id, title, _game_dict(entry, rec, ctx.platform), notes, backups=len(result.backups))
+        return JobResult("undo", game_id, title, game_fields_for(entry, rec, ctx.platform), notes, backups=len(result.backups))
 
     def _retarget_backups(self, rec: InstallRecord, game_dir: Path, untouched: list[dict],
                           incoming: dict[str, RecordedFile]) -> None:
@@ -987,7 +994,7 @@ class InstallEngine:
         rec.extras.update({x["id"]: _installed_source(x, f, ctx.platform) for x, f in fetched})
         ctx.records.save(rec)
         notes = [*dict.fromkeys(f.note for _, f in fetched if f.note), *notes]
-        return JobResult("extras", game_id, title, _game_dict(entry, rec, ctx.platform), notes, backups=len(result.backups))
+        return JobResult("extras", game_id, title, game_fields_for(entry, rec, ctx.platform), notes, backups=len(result.backups))
 
     def _apply_extras(self, entry: dict, rec: InstallRecord, game_dir: Path, tree: Path,
                       unpacked: list[tuple[dict, Fetched, Path]], prior: dict | None, cancel, every: bool = False
@@ -1181,11 +1188,12 @@ def _incoming(tree: Path, owners: dict[str, str], game_id: str) -> dict[str, Rec
             for key, (display, sha) in hash_tree(tree).items()}
 
 
-def _game_dict(entry: dict, rec: InstallRecord, platform: str) -> dict:
+def game_fields_for(entry: dict, rec: InstallRecord, platform: str | None = None) -> dict:
     """The games.json fields for an installed catalog game, labelled with the platform it was installed for.
 
     A game an installer put outside every library has library_id "" and an absolute launch path.
     """
+    platform = platform or current_platform()
     if rec.library_id:
         launch_path, library_id = f"{rec.folder}/{rec.launch_path}", rec.library_id
     else:

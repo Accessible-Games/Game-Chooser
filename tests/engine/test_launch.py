@@ -114,3 +114,30 @@ def test_select_best_executable_rules():
     assert select_best_executable([Path("q.exe"), Path("Dir.exe")], "dir") == Path("Dir.exe")
     assert select_best_executable([Path("q.exe"), Path("r.exe")], "dir") == Path("q.exe")
     assert select_best_executable([], "dir") is None
+
+
+def test_is_catalog_launch(tmp_path):
+    from engine.launch import is_catalog_launch
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "Game.exe").write_bytes(b"x")
+    (tmp_path / "other.exe").write_bytes(b"x")
+    assert is_catalog_launch(tmp_path, tmp_path / "bin" / "Game.exe", "bin/Game.exe")
+    assert not is_catalog_launch(tmp_path, tmp_path / "other.exe", "bin/Game.exe")
+    assert not is_catalog_launch(tmp_path, tmp_path / "other.exe", None)
+    assert not is_catalog_launch(tmp_path, tmp_path / "other.exe", "missing.exe")
+
+
+def test_adopt_catalog_launch(tmp_path):
+    from types import SimpleNamespace
+    from engine.launch import adopt_catalog_launch
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "Game.exe").write_bytes(b"x")
+    rec = SimpleNamespace(launch_path="old.exe", launch_from_catalog=False)
+    entry = {"launch": {"windows": {"path": "bin/Game.exe"}}}
+    assert adopt_catalog_launch(rec, entry, "windows", tmp_path) is True
+    assert rec.launch_path == "bin/Game.exe" and rec.launch_from_catalog is True
+    assert adopt_catalog_launch(rec, entry, "windows", tmp_path) is False
+    gone = SimpleNamespace(launch_path="old.exe", launch_from_catalog=False)
+    assert adopt_catalog_launch(gone, {"launch": {"windows": {"path": "nope.exe"}}}, "windows", tmp_path) is False
+    assert gone.launch_path == "old.exe" and gone.launch_from_catalog is False
+    assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False

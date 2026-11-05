@@ -30,7 +30,7 @@ from . import messages
 from .elevation import RunningProcess
 from .errors import Cancelled, ElevationDeclined, InstallFailed, StepError, UnsafePath
 from .installer_watch import ProcessWatch, watch_process  # noqa: F401  (re-exported)
-from .launch import find_launch_exe
+from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
 from .paths import EXECUTABLE_CODE_SUFFIXES, STAGING_DIR_NAME, is_engine_dir, norm_key, unique_path
 from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is_runtime_owner, record_folder
@@ -600,6 +600,7 @@ def _track_and_record(ctx, item: RunItem, folder: Path, in_target: bool, before:
     record = InstallRecord(
         catalog_id=item.catalog_id, kind=item.kind, library_id=stored_library, folder=stored_folder,
         launch_path=exe.relative_to(folder).as_posix(), source=item.source, extras={},
+        launch_from_catalog=is_catalog_launch(folder, exe, item.launch_hint),
         files=_recorded(folder, claimed, item.catalog_id), steps=[], method="run", tracked=tracked,
         vendor_uninstaller=vendor,
     )
@@ -885,6 +886,7 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     record.tracked = True
     if exe is not None:
         record.launch_path = exe.relative_to(game_dir).as_posix()
+        record.launch_from_catalog = is_catalog_launch(game_dir, exe, item.launch_hint)
     new_entries = new_uninstall_entries(keys_before, snapshot_uninstall_keys(ctx.uninstall_reader))
     if undo_of is not None and "vendor_uninstaller" in undo_of:
         fallback = undo_of["vendor_uninstaller"]

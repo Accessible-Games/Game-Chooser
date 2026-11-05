@@ -42,7 +42,7 @@ def repair(engine, entry: dict, rec: InstallRecord, game_dir: Path, progress, ca
                                              spare_steps=jobs._extra_steps(unpacked))
         extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, prior, cancel,
                                                               recorded=extra_sources)
-    return jobs.JobResult("repair", game_id, title, jobs._game_dict(entry, record, engine.ctx.platform),
+    return jobs.JobResult("repair", game_id, title, jobs.game_fields_for(entry, record, engine.ctx.platform),
                           [*notes, *extra_notes],
                           backups=backups)
 
@@ -90,7 +90,7 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
     record.previous = None
     record.previous_unavailable = None
     ctx.records.save(record)
-    return jobs.JobResult("undo", game_id, title, jobs._game_dict(entry, record, ctx.platform), [*notes, *extra_notes],
+    return jobs.JobResult("undo", game_id, title, jobs.game_fields_for(entry, record, ctx.platform), [*notes, *extra_notes],
                           backups=backups)
 
 

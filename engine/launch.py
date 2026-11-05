@@ -47,6 +47,26 @@ def _recorded_launch_exe(game_dir: Path, launch_path: str | None) -> Path | None
     return path
 
 
+def is_catalog_launch(game_dir: Path, exe: Path, hint: str | None) -> bool:
+    """Did `exe` come from the catalog's launch hint (the hint names a real file, and it is this one)?"""
+    return _recorded_launch_exe(Path(game_dir), hint) == Path(exe)
+
+
+def adopt_catalog_launch(record, entry: dict, platform: str, game_dir: Path) -> bool:
+    """Switch a guessed launch path to the catalog's, when the entry now has one that exists in the game.
+
+    Returns True when the record changed; the caller saves it."""
+    if record.launch_from_catalog:
+        return False
+    hint = ((entry.get("launch") or {}).get(platform) or {}).get("path")
+    exe = _recorded_launch_exe(Path(game_dir), hint)
+    if exe is None:
+        return False
+    record.launch_path = exe.relative_to(Path(game_dir)).as_posix()
+    record.launch_from_catalog = True
+    return True
+
+
 def find_launch_exe(game_dir: Path, launch_path: str | None,
                     exclude: Callable[[Path], bool]) -> Path | None:
     """The recorded launch path if it is a real file inside the game, else the best found exe.
