@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from engine.errors import BlockedHost, Cancelled, DownloadError
+from engine.errors import BlockedHost, Cancelled, DownloadError, DownloadWriteError
 
 USER_AGENT = "GameChooser/0.1 (+https://catalog.accessiblegames.net/)"
 BLOCKED_DOMAIN = "agarchive.net"
@@ -87,7 +87,7 @@ class Fetcher:
                 length = response.headers.get("Content-Length")
                 total = int(length) if length and length.isdigit() else None
                 done = 0
-                with open(part, "wb") as out:
+                with _writing(part) as out:
                     while True:
                         if cancel and cancel():
                             raise Cancelled()
@@ -97,12 +97,36 @@ class Fetcher:
                             raise DownloadError(str(exc)) from exc
                         if not chunk:
                             break
-                        out.write(chunk)
+                        try:
+                            out.write(chunk)
+                        except OSError as exc:
+                            raise DownloadWriteError(str(exc)) from exc
                         done += len(chunk)
                         if progress:
                             progress(done, total)
-            os.replace(part, dest)
+            if total is not None and done < total:
+                raise DownloadError(f"Download ended early: {done} of {total} bytes")
+            try:
+                os.replace(part, dest)
+            except OSError as exc:
+                raise DownloadWriteError(str(exc)) from exc
         except BaseException:
             with contextlib.suppress(OSError):
                 part.unlink()
             raise
+
+
+@contextlib.contextmanager
+def _writing(path: Path):
+    """The file a download is written into; one that can't be opened or closed is a DownloadWriteError."""
+    try:
+        out = open(path, "wb")
+    except OSError as exc:
+        raise DownloadWriteError(str(exc)) from exc
+    try:
+        yield out
+    finally:
+        try:
+            out.close()
+        except OSError as exc:
+            raise DownloadWriteError(str(exc)) from exc

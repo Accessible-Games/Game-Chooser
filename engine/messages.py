@@ -21,6 +21,11 @@ FAILED = "{title} couldn't be installed"
 UNINSTALLED = "{title} is uninstalled"
 UNEXPECTED_ERROR = ("Something went wrong installing {title}. Try again, and if it keeps happening, "
                     "the details are in the install log.")
+# File errors that escape a job (jobs.InstallEngine.run gives every OSError one of these).
+DISK_FULL = "There isn't enough space on the drive for {title}. Free some space, then try again."
+FILE_LOCKED = "A file for {title} couldn't be changed. Close the game if it's running, then try again."
+FILE_VANISHED = "A file for {title} disappeared while Game Chooser was working on it. Try again."
+FILE_ERROR = "Game Chooser couldn't read or write {path} for {title}. ({detail})"
 NEEDS_SHARED_COMPONENT = ("{title} needs {component}, which needs administrator permission. Turn on \"Register shared "
                           "components system-wide\" in Preferences, Installing, to install it.")
 

@@ -28,6 +28,8 @@ own folder's parent may be Program Files or shared with other games. Game Choose
 elevated, so a folder there that needs administrator permission is refused before anything changes.
 """
 
+import errno
+import logging
 import os
 import shutil
 import stat
@@ -59,7 +61,14 @@ from .safety import (ApplyResult, UpdatePlan, _resolve_game_path, apply_plan, ap
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
 from .steps import StepContext, run_file_steps, run_system_steps, undo_steps
 
+log = logging.getLogger(__name__)
+
 ACTIONS = ("install", "update", "repair", "undo", "extras", "uninstall")
+
+# Windows error codes an OSError may carry instead of (or as well as) an errno.
+_WINERROR_DISK_FULL = {39, 112}      # ERROR_HANDLE_DISK_FULL, ERROR_DISK_FULL
+_WINERROR_LOCKED = {5, 32, 33}       # ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLATION, ERROR_LOCK_VIOLATION
+_WINERROR_VANISHED = {2, 3}          # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
 
 # Install methods whose files Game Chooser unpacked and recorded itself.
 EXTRACT_METHODS = frozenset({"zip", "7z", "installer", "cab", "none"})
@@ -247,7 +256,26 @@ class InstallEngine:
 
     def run(self, req: InstallRequest, progress: Callable[[Progress], None],
             cancel: Callable[[], bool]) -> JobResult:
-        """Carry out `req`. Raises InstallFailed (with plain words for the player) or Cancelled."""
+        """Carry out `req`. Raises InstallFailed (with plain words for the player) or Cancelled.
+
+        A file error anywhere in the job (the drive is full, a file is locked or gone) has had its cleanup
+        and rollback done where it happened; here it gets its plain words (see plain_file_error).
+        """
+        try:
+            return self._run(req, progress, cancel)
+        except OSError as e:
+            log.warning("File error during %s of %s", req.action, req.catalog_id, exc_info=True)
+            raise InstallFailed(plain_file_error(e, self._title_of(req))) from e
+
+    def _title_of(self, req: InstallRequest) -> str:
+        entry = self.ctx.entries.get(req.catalog_id)
+        if entry is not None:
+            return _title(entry)
+        rec = self.ctx.records.load(req.catalog_id)
+        return Path(rec.folder).name if rec is not None else req.catalog_id
+
+    def _run(self, req: InstallRequest, progress: Callable[[Progress], None],
+             cancel: Callable[[], bool]) -> JobResult:
         if req.action not in ACTIONS:
             raise ValueError(f"Unknown action: {req.action!r}")
         entry = self.ctx.entries.get(req.catalog_id)
@@ -1057,6 +1085,19 @@ class InstallEngine:
         plain = isinstance(e, EngineError) and not isinstance(e, UnsafePath)
         raise InstallFailed("\n\n".join([str(e) if plain else messages.UNINSTALL_FAILED.format(title=title),
                                          *notes])) from e
+
+
+def plain_file_error(e: OSError, title: str) -> str:
+    """The player's words for an OSError that stopped a job: what happened, and what to do."""
+    code, winerror = e.errno, getattr(e, "winerror", None)
+    if code == errno.ENOSPC or winerror in _WINERROR_DISK_FULL:
+        return messages.DISK_FULL.format(title=title)
+    if code in (errno.EACCES, errno.EPERM, errno.EBUSY) or winerror in _WINERROR_LOCKED:
+        return messages.FILE_LOCKED.format(title=title)
+    if code == errno.ENOENT or winerror in _WINERROR_VANISHED:
+        return messages.FILE_VANISHED.format(title=title)
+    path = e.filename or e.filename2 or "a file"
+    return messages.FILE_ERROR.format(title=title, path=path, detail=e.strerror or str(e))
 
 
 def _went_without(title: str, deps: runtimes.RuntimePlan) -> list[str]:

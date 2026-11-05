@@ -3,7 +3,7 @@ import hashlib
 import pytest
 
 from engine.entries import is_mirror_url
-from engine.errors import Cancelled, NoVerifiedSource
+from engine.errors import Cancelled, DownloadWriteError, NoVerifiedSource
 from engine.messages import DEVELOPER_CHANGED_UNVERIFIED, DEVELOPER_CHANGED_VERIFIED
 from engine.sources import fetch_exact, fetch_verified, hash_file
 from tests.engine.fakes import FakeFetcher
@@ -194,3 +194,20 @@ def test_hash_file_streams_in_chunks(tmp_path):
     data = b"x" * (3 * 2**20 + 5)
     p.write_bytes(data)
     assert hash_file(p) == sha(data)
+
+
+def test_download_write_failure_stops_the_walk_with_the_file_error(tmp_path):
+    """A full or locked drive isn't a bad address: no other source is tried, and the OSError reaches the
+    engine's boundary, which gives it plain words."""
+    class FullDisk(FakeFetcher):
+        def download(self, url, dest, progress=None, cancel=None):
+            self.requests.append(url)
+            try:
+                raise OSError(28, "No space left on device", str(dest))
+            except OSError as e:
+                raise DownloadWriteError(str(e)) from e
+
+    ff = FullDisk({DEV: GOOD, mirror(): GOOD})
+    with pytest.raises(OSError) as ei:
+        run(entry(src(DEV), src(mirror())), ff, tmp_path)
+    assert ei.value.errno == 28 and ff.requests == [DEV] and files(tmp_path) == []

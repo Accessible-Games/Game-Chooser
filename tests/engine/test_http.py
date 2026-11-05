@@ -1,6 +1,6 @@
 import pytest
 
-from engine.errors import BlockedHost, Cancelled, DownloadError
+from engine.errors import BlockedHost, Cancelled, DownloadError, DownloadWriteError
 from engine.http import Fetcher, check_url_allowed
 
 
@@ -88,4 +88,20 @@ def test_redirect_to_unicode_spelled_agarchive_is_blocked(http_server, tmp_path)
     http_server.routes["/u"] = (302, {"Location": "https://agarchive。net/f.zip".encode("utf-8").decode("latin-1")}, b"")
     with pytest.raises(BlockedHost):
         Fetcher().download(http_server.url("/u"), tmp_path / "f")
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_write_failure_is_a_download_write_error_carrying_the_cause(http_server, tmp_path):
+    with pytest.raises(DownloadWriteError) as ei:
+        Fetcher().download(http_server.url("/sized"), tmp_path / "missing folder" / "a")
+    assert isinstance(ei.value, DownloadError) and isinstance(ei.value.__cause__, OSError)
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_truncated_download_is_refused(http_server, tmp_path):
+    body = b"x" * 1000
+    http_server.routes["/short"] = (200, {"Content-Length": str(len(body) + 500)}, body)
+    with pytest.raises(DownloadError) as ei:
+        Fetcher().download(http_server.url("/short"), tmp_path / "a")
+    assert not isinstance(ei.value, DownloadWriteError)
     assert list(tmp_path.iterdir()) == []

@@ -1,3 +1,4 @@
+import errno
 import os
 import stat
 from pathlib import Path
@@ -5,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from engine import jobs, messages
-from engine.errors import Cancelled, ExtractError, InstallFailed
+from engine.errors import Cancelled, DownloadWriteError, ExtractError, InstallFailed
 from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
 from engine.messages import DEFENDER_NOTE
@@ -424,12 +425,72 @@ def test_record_save_failure_undoes_steps_and_removes_folder(tmp_path):
     engine, ctx, lib = setup(tmp_path, [e], routes)
 
     def broken_save(record):
-        raise OSError("disk full")
+        raise OSError(errno.ENOSPC, "No space left on device", str(ctx.records.root / "entombed.json.tmp"))
 
     ctx.records.save = broken_save
-    with pytest.raises(OSError):
+    with pytest.raises(InstallFailed) as ei:  # never a raw OSError: run() says what happened, in plain words (I1)
         engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
     assert ctx.registry.values == {} and not (lib / "Entombed").exists() and leftovers(ctx, lib) == []
+
+
+class FullDiskFetcher(FakeFetcher):
+    """Like the real Fetcher when the drive fills up while a download is written: a DownloadWriteError
+    carrying the OSError."""
+
+    def download(self, url, dest, progress=None, cancel=None):
+        self.requests.append(url)
+        try:
+            raise OSError(errno.ENOSPC, "No space left on device", str(dest))
+        except OSError as e:
+            raise DownloadWriteError(str(e)) from e
+
+
+def test_disk_full_during_download_says_so_and_tries_no_other_source(tmp_path):
+    routes = {}
+    e = game(routes)
+    e["sources"].append({**e["sources"][0], "url": "https://dev.example.com/entombed.zip"})
+    engine = make_engine(tmp_path, [e], fetcher=FullDiskFetcher(routes))
+    ctx, lib = engine.ctx, tmp_path / "Games"
+    with pytest.raises(InstallFailed) as ei:
+        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
+    assert ctx.fetcher.requests == [e["sources"][0]["url"]]  # a second address won't help a full drive
+    assert not (lib / "Entombed").exists() and leftovers(ctx, lib) == []
+
+
+@pytest.mark.parametrize("error, text", [
+    (OSError(errno.EACCES, "Permission denied", "C:/Games/Entombed/entombed.exe"), messages.FILE_LOCKED),
+    (PermissionError(13, "The process cannot access the file because it is being used by another process",
+                     "C:/Games/Entombed/a.wav", 32), messages.FILE_LOCKED),
+    (FileNotFoundError(2, "The system cannot find the file specified", "C:/Games/Entombed/a.wav"), messages.FILE_VANISHED),
+    (OSError(errno.ENOSPC, "No space left on device"), messages.DISK_FULL),
+    (OSError(0, "The disk is full", "C:/x", 112), messages.DISK_FULL),
+])
+def test_file_errors_escaping_a_job_get_plain_words(tmp_path, monkeypatch, error, text):
+    routes = {}
+    engine, ctx, lib = setup(tmp_path, [game(routes)], routes)
+
+    def failing(*args, **kwargs):
+        raise error
+    monkeypatch.setattr(jobs, "find_launch_exe", failing)  # deep inside the install, after the download
+    with pytest.raises(InstallFailed) as ei:
+        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert ei.value.message == text.format(title="Entombed")
+    assert not (lib / "Entombed").exists() and leftovers(ctx, lib) == []
+
+
+def test_other_file_error_names_the_file_and_the_systems_words(tmp_path, monkeypatch):
+    routes = {}
+    engine, ctx, lib = setup(tmp_path, [game(routes)], routes)
+
+    def failing(*args, **kwargs):
+        raise OSError(errno.EIO, "Input/output error", str(lib / "Entombed" / "sounds" / "a.wav"))
+    monkeypatch.setattr(jobs, "find_launch_exe", failing)
+    with pytest.raises(InstallFailed) as ei:
+        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert ei.value.message == messages.FILE_ERROR.format(
+        title="Entombed", path=lib / "Entombed" / "sounds" / "a.wav", detail="Input/output error")
 
 
 @pytest.mark.parametrize("stuck", ["staging", "work"])
