@@ -130,6 +130,12 @@ DEPENDENCY_CYCLE = ("The catalog's list of other software {title} needs goes rou
                     "Chooser can't install or change {title} right now.")
 DEPENDENCY_UNAVAILABLE = ("{title} needs other software that the catalog doesn't offer right now, so Game Chooser "
                           "can't install or change {title}.")
+RUNTIME_FOLDER_LINKED = ("{title} wasn't installed, because the folder {path} is a link to another place. Game "
+                         "Chooser only installs shared components into a real folder. Remove the link, then try again.")
+RUNTIME_FOLDER_NOT_SECURED = ("Game Chooser couldn't protect the folder {path} for {title}, so {title} wasn't "
+                              "installed.")
+RUNTIME_FOLDER_CHANGED = ("The files in {path} changed while {title} was being installed, so Game Chooser stopped and "
+                          "registered nothing.")
 RUNTIME_FOLDER_NOT_OURS = ("{title} wasn't installed, because the folder {path} is already there and its files "
                            "don't match. Game Chooser didn't make that folder, so it won't remove it. If no other "
                            "program uses it, delete it yourself, then try again.")

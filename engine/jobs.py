@@ -113,6 +113,8 @@ class EngineContext:
     process_watch: Callable[[object, bool], ProcessWatch] = watch_process
     # Reads one Uninstall key location (hive, key, view) -> {subkey: values}; read-only.
     uninstall_reader: UninstallReader = _winreg_reader
+    # Who owns a runtime folder and who is running Game Chooser (engine.runtimes.WindowsSecurity).
+    security: object = field(default_factory=runtimes.WindowsSecurity)
 
 
 # Downloads one catalog item (the game or an extra) into an empty work folder.

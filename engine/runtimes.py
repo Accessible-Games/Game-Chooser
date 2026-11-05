@@ -17,6 +17,15 @@ reads as "present". A folder that is already there without a valid marker isn't 
 remove: it is adopted if its files match the download (missing files are added, none replaced), and
 refused otherwise. Only a folder this run created is removed when an install fails.
 
+Every account can create folders in %ProgramData%, so a runtime folder is trusted only when it is a
+real folder (no link or junction anywhere on the way to it) and is owned by Administrators or SYSTEM,
+or by the current user. Before a runtime's elevated steps (regsvr32, an HKLM setting) run, an
+elevated command locks its folder down (owner Administrators, inheritance off, Administrators and
+SYSTEM full control, Users read and execute; the current user may only rewrite the marker), and its
+files are hashed again, so a file swapped before the lock is caught and nothing is registered. A
+marker counts only in a folder owned by Administrators or SYSTEM, or, for a runtime with no elevated
+step, by the current user.
+
 With the preference off, nothing gets an administrator prompt for a game's runtimes. A COM runtime
 (one with a `register` step) is copied into the game's own folder instead, beside its exe, with a
 registration-free COM manifest (engine.comfree). A runtime that only exists as an installer can't be
@@ -29,6 +38,7 @@ copies of those again, and of no other.
 import json
 import logging
 import os
+import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -50,6 +60,91 @@ log = logging.getLogger(__name__)
 _CLASSES = "SOFTWARE\\Classes\\"
 # Left in a runtime's folder once it is installed: {"id", "source_sha256", "files": {path: sha256}}.
 MARKER_NAME = ".gamechooser-runtime.json"
+
+ADMINISTRATORS, SYSTEM, USERS = "S-1-5-32-544", "S-1-5-18", "S-1-5-32-545"
+_TRUSTED_OWNERS = frozenset({ADMINISTRATORS, SYSTEM})
+_FILE_ATTRIBUTE_REPARSE_POINT = 0x400
+_SID = re.compile(r"S-1-[0-9]+(-[0-9]+)*")
+
+
+class WindowsSecurity:
+    """Who owns a file or folder, and who is running Game Chooser, as string SIDs (None if unknown)."""
+
+    def owner(self, path: Path) -> str | None:
+        try:
+            import pywintypes
+            import win32security
+        except ImportError:
+            return None
+        try:
+            sd = win32security.GetNamedSecurityInfo(str(path), win32security.SE_FILE_OBJECT,
+                                                    win32security.OWNER_SECURITY_INFORMATION)
+            return win32security.ConvertSidToStringSid(sd.GetSecurityDescriptorOwner())
+        except pywintypes.error:
+            return None
+
+    def current_user(self) -> str | None:
+        try:
+            import pywintypes
+            import win32api
+            import win32security
+        except ImportError:
+            return None
+        try:
+            token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32security.TOKEN_QUERY)
+            sid, _ = win32security.GetTokenInformation(token, win32security.TokenUser)
+            return win32security.ConvertSidToStringSid(sid)
+        except pywintypes.error:
+            return None
+
+
+def lock_down_command(folder: Path, user_sid: str) -> tuple[str, str]:
+    """The one elevated command that locks a runtime's folder down: (exe, arguments).
+
+    It empties (or creates) the marker, makes Administrators the owner of everything, turns
+    inheritance off on the folder with Administrators and SYSTEM full control and Users read and
+    execute, resets everything inside to inherit only that (dropping any explicit grants), and lets
+    the current user rewrite the marker, so it can say "installed" once the elevated steps succeed.
+    """
+    marker = folder / MARKER_NAME
+    commands = [
+        f'type nul > "{marker}"',
+        f'icacls "{folder}" /setowner *{ADMINISTRATORS} /T /Q',
+        f'icacls "{folder}" /inheritance:r /grant:r *{ADMINISTRATORS}:(OI)(CI)F *{SYSTEM}:(OI)(CI)F '
+        f'*{USERS}:(OI)(CI)RX /Q',
+        f'icacls "{folder}\\*" /reset /T /Q',
+        f'icacls "{marker}" /grant *{user_sid}:M /Q',
+    ]
+    return "cmd.exe", f'/d /v:off /s /c "{" && ".join(commands)}"'
+
+
+def linked_component(root: Path, folder: Path) -> Path | None:
+    """The first of `root`'s parent, `root` and `folder` that is a link, junction or other reparse point."""
+    for path in (Path(root).parent, Path(root), Path(folder)):
+        try:
+            attributes = getattr(os.lstat(path), "st_file_attributes", 0)
+        except OSError:
+            continue
+        if is_link(path) or attributes & _FILE_ATTRIBUTE_REPARSE_POINT:
+            return path
+    return None
+
+
+def _owner_is(security, path: Path, allow_user: bool) -> bool:
+    """True if `path` is owned by Administrators or SYSTEM (or, with `allow_user`, by the current user)."""
+    owner = security.owner(path)
+    if owner in _TRUSTED_OWNERS:
+        return True
+    return allow_user and owner is not None and owner == security.current_user()
+
+
+def _elevated_steps(steps: list[dict]) -> bool:
+    return any(s.get("action") == "register" or (s.get("action") == "registry" and
+                                                  str(s.get("hive", "")).upper() == "HKLM") for s in steps)
+
+
+def _has_elevated_steps(entry: dict) -> bool:
+    return any(_elevated_steps(source.get("steps") or []) for source in entry.get("sources") or [])
 _HIVE_NAMES = {"HKEY_CLASSES_ROOT": "HKCR", "HKEY_LOCAL_MACHINE": "HKLM", "HKEY_CURRENT_USER": "HKCU"}
 
 
@@ -102,13 +197,14 @@ def is_com_runtime(entry: dict) -> bool:
                for source in entry.get("sources") or [] for step in source.get("steps") or [])
 
 
-def runtime_present(entry: dict, records, registry, root: Path | None = None) -> bool:
-    """True if Game Chooser installed it: a runtime record (this account), or a valid marker in its folder
-    under `root` (any account); or if its `detect` hint finds it."""
+def runtime_present(entry: dict, records, registry, root: Path | None = None, security=None) -> bool:
+    """True if Game Chooser installed it: a runtime record (this account), or a trusted marker in its
+    folder under `root` (any account; `security` reads who owns it); or if its `detect` hint finds it."""
     record = records.load(entry["id"])
     if record is not None and record.kind == "runtime":
         return True
-    if root is not None and marker_present(Path(root) / entry["id"], entry["id"]):
+    if root is not None and security is not None and marker_present(
+            Path(root) / entry["id"], entry["id"], security, allow_user=not _has_elevated_steps(entry)):
         return True
     return detect_present(entry.get("detect"), registry)
 
@@ -123,8 +219,13 @@ def _read_marker(folder: Path) -> dict | None:
     return data
 
 
-def marker_present(folder: Path, runtime_id: str) -> bool:
-    """True if `folder` has Game Chooser's marker for `runtime_id` and every file it lists is still there."""
+def marker_present(folder: Path, runtime_id: str, security, allow_user: bool = False) -> bool:
+    """True if `folder` has Game Chooser's marker for `runtime_id`, every file it lists is still there,
+    nothing on the way to it is a link, and it is owned by Administrators or SYSTEM (or, with
+    `allow_user`, for a runtime with no elevated step, by the current user)."""
+    folder = Path(folder)
+    if linked_component(folder.parent, folder) is not None or not _owner_is(security, folder, allow_user):
+        return False
     data = _read_marker(folder)
     if data is None or data.get("id") != runtime_id:
         return False
@@ -139,19 +240,15 @@ def marker_present(folder: Path, runtime_id: str) -> bool:
 
 
 def _write_marker(folder: Path, runtime_id: str, source_sha256: str, files: dict[str, str]) -> None:
-    """Best effort: without it, another account adopts the folder instead of skipping it."""
-    marker = folder / MARKER_NAME
-    tmp = marker.with_name(MARKER_NAME + ".tmp")
+    """Best effort: without it, another account adopts the folder instead of skipping it.
+
+    Written in place: in a locked folder the current user may change the marker but create nothing."""
     try:
-        tmp.write_text(json.dumps({"id": runtime_id, "source_sha256": source_sha256, "files": files}, indent=2),
-                       encoding="utf-8")
-        os.replace(tmp, marker)
+        (folder / MARKER_NAME).write_text(
+            json.dumps({"id": runtime_id, "source_sha256": source_sha256, "files": files}, indent=2),
+            encoding="utf-8")
     except OSError:
         log.warning("Couldn't write the runtime marker in %s", folder, exc_info=True)
-        try:
-            tmp.unlink(missing_ok=True)
-        except OSError:
-            pass
 
 
 def _title(entry: dict) -> str:
@@ -187,9 +284,11 @@ def dependency_order(entry: dict, entries: dict) -> list[dict]:
     return order
 
 
-def missing_runtimes(entry: dict, entries: dict, records, registry, root: Path | None = None) -> list[dict]:
+def missing_runtimes(entry: dict, entries: dict, records, registry, root: Path | None = None,
+                     security=None) -> list[dict]:
     """The runtimes `entry` needs that aren't present, deepest first (see dependency_order)."""
-    return [r for r in dependency_order(entry, entries) if not runtime_present(r, records, registry, root)]
+    return [r for r in dependency_order(entry, entries)
+            if not runtime_present(r, records, registry, root, security)]
 
 
 # ---- what to do about them --------------------------------------------------------------------------------
@@ -220,7 +319,7 @@ class RuntimePlan:
 
 def plan_runtimes(entry: dict, ctx) -> RuntimePlan:
     """Decide, before anything is downloaded, what happens to each of the game's missing runtimes."""
-    missing = missing_runtimes(entry, ctx.entries, ctx.records, ctx.registry, ctx.runtimes_root)
+    missing = missing_runtimes(entry, ctx.entries, ctx.records, ctx.registry, ctx.runtimes_root, ctx.security)
     if ctx.register_shared_components:
         return RuntimePlan(shared=missing)
     plan = RuntimePlan()
@@ -341,7 +440,7 @@ def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) 
     run_installer_untracked(fetched.path, installer, target, ctx, progress, cancel, title=title)
     if runtime.get("detect") and not runtime_present(runtime, ctx.records, ctx.registry):
         raise InstallFailed(messages.FAILED.format(title=title))
-    _write_marker(target, runtime["id"], fetched.sha256, {})
+    # No marker: the installer put the runtime wherever it likes, so the record or the detect hint says.
     try:
         ctx.records.save(InstallRecord(
             catalog_id=runtime["id"], kind="runtime", library_name="", folder=str(target), launch_path="",
@@ -351,20 +450,27 @@ def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) 
 
 
 def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel) -> None:
-    """Unpack into `unpack_dir` and run the file steps there; copy the result into `target`, run the
-    system steps there, and leave the marker and the record.
+    """Unpack into `unpack_dir` and run the file steps there; copy the result into `target`, lock it down
+    and check its files again if any step needs administrator permission, run the system steps there,
+    and leave the record and the marker.
 
-    A `target` that is already there (another account's install, or one whose record was lost) is
-    never removed or changed: if a file in it differs from the download, the install is refused;
-    otherwise it is adopted and only its missing files are added. On any failure the system steps
-    already applied are undone, and only what this run created is removed: `target` itself if it
-    made it, else just the files it added.
+    `target`, or a folder on the way to it, that is a link is refused. A `target` that is already there
+    (another account's install, or one whose record was lost) is never removed or changed: it is adopted
+    only if it is owned by Administrators, SYSTEM or the current user and no file in it differs from the
+    download, and only its missing files are added; otherwise the install is refused. On any failure,
+    the system steps already applied are undone (but in a folder it found, never a registration, which
+    may predate this run), and only what this run created is removed: `target` itself if it made it,
+    else just the files it added (where the lock-down still allows it).
     """
     title = _title(runtime)
     install = fetched.source.get("install") or {}
     steps = list(fetched.source.get("steps") or [])
+    elevated = _elevated_steps(steps)
     step_ctx = StepContext(target.absolute(), ctx.elevator, ctx.registry)
     applied: list[dict] = []
+    linked = linked_component(ctx.runtimes_root, target)
+    if linked is not None:
+        raise InstallFailed(messages.RUNTIME_FOLDER_LINKED.format(title=title, path=linked))
     found = os.path.lexists(target)
     made = False  # True once this run has created `target`
     added = PrivateCopy(runtime, [], [], [])  # what this run added to a folder it found
@@ -376,17 +482,25 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
         if not found:
             target.mkdir()  # FileExistsError if something made it meanwhile: then it isn't ours
             made = True
-        elif not _matches_download(target, incoming):
+        elif not _owner_is(ctx.security, target, allow_user=True) or not _matches_download(target, incoming):
             raise InstallFailed(messages.RUNTIME_FOLDER_NOT_OURS.format(title=title, path=target))
         _copy_into(root, target, added)
-        applied = run_system_steps(steps, step_ctx)  # undoes what it applied if a step fails
+        if elevated:
+            _lock_down(ctx, target, title)
+            # Hashed again now that no one else can change it: a swap before the lock is caught here.
+            if (linked_component(ctx.runtimes_root, target) is not None
+                    or not _owner_is(ctx.security, target, allow_user=False) or not _holds_download(target, incoming)):
+                raise InstallFailed(messages.RUNTIME_FOLDER_CHANGED.format(title=title, path=target))
+        for step in steps:  # one at a time, so a failure leaves `applied` true to what was done
+            applied += run_system_steps([step], step_ctx)
         files = {key: RecordedFile(display, sha, runtime["id"]) for key, (display, sha) in incoming.items()}
         ctx.records.save(InstallRecord(
             catalog_id=runtime["id"], kind="runtime", library_name="", folder=str(target), launch_path="",
             source=_source(runtime, fetched), extras={}, files=files, steps=applied,
             method=install.get("method", "")))
     except BaseException as e:
-        undo_failures = [*getattr(e, "undo_failures", []), *undo_steps(applied, step_ctx)]
+        undo = [s for s in applied if made or s.get("action") != "register"]
+        undo_failures = [*getattr(e, "undo_failures", []), *undo_steps(undo, step_ctx)]
         if made:
             _clear(target)
         else:
@@ -401,6 +515,34 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
             raise InstallFailed(messages.FAILED.format(title=title)) from e
         raise
     _write_marker(target, runtime["id"], fetched.sha256, {display: sha for display, sha in incoming.values()})
+
+
+def _lock_down(ctx, target: Path, title: str) -> None:
+    """Run lock_down_command elevated. A declined prompt is a declined install (R6)."""
+    user = ctx.security.current_user()
+    if not user or not _SID.fullmatch(user) or "%" in str(target):  # cmd would expand a % in the path
+        raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))
+    exe, args = lock_down_command(target, user)
+    try:
+        code = ctx.elevator.run(exe, args, True)
+    except ElevationDeclined as e:
+        raise InstallFailed(messages.ELEVATION_DECLINED.format(what=title)) from e
+    except StepError as e:
+        raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target)) from e
+    if code != 0:
+        raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))
+
+
+def _holds_download(folder: Path, incoming: dict[str, tuple[str, str]]) -> bool:
+    """True if `folder` has every file of the download, each a plain file with the download's contents."""
+    for display, sha in incoming.values():
+        try:
+            path, linked = _resolve_game_path(folder, display)
+            if linked or not path.is_file() or hash_file(path) != sha:
+                return False
+        except (UnsafePath, OSError):
+            return False
+    return True
 
 
 def _matches_download(folder: Path, incoming: dict[str, tuple[str, str]]) -> bool:

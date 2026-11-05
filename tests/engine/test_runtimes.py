@@ -16,10 +16,10 @@ from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from engine.messages import Progress
 from engine.records import RecordedFile, RecordStore
-from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present, is_com_runtime, missing_runtimes,
-                             recorded_private, runtime_present)
-from tests.engine.fakes import (FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry, make_engine,
-                                served_source, zip_bytes)
+from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present, is_com_runtime, lock_down_command,
+                             missing_runtimes, recorded_private, runtime_present)
+from tests.engine.fakes import (ADMINISTRATORS, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
+                                FakeSecurity, make_engine, served_source, zip_bytes)
 
 MIRROR = "https://files.accessiblegames.net/files/"
 DX8VB = b"MZ fake dx8vb.dll"
@@ -240,7 +240,7 @@ def test_runtime_steps_run_before_the_game_is_downloaded(tmp_path):
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=elevator)
     eng.ctx.fetcher = Recording(routes)
     run(eng, "install")
-    assert order == [rt["sources"][0]["url"], "regsvr32.exe", g["sources"][0]["url"]]
+    assert order == [rt["sources"][0]["url"], "cmd.exe", "regsvr32.exe", g["sources"][0]["url"]]
 
 
 def test_present_runtime_is_skipped(tmp_path):
@@ -313,8 +313,9 @@ def test_installed_runtime_leaves_a_marker_other_accounts_read(tmp_path):
     assert set(eng.ctx.records.load("dx8vb").files) == {"dx8vb.dll"}  # the marker isn't one of its files
 
     # Another Windows account: its own records, the same machine-wide runtimes folder.
+    other_user = FakeSecurity(eng.ctx.elevator, user="S-1-5-21-2000-2000-2000-1002")  # sees the same lock-down
     other = make_engine(tmp_path, [rt, one, two], fetcher=FakeFetcher(routes), records=RecordStore(tmp_path / "b"),
-                        runtimes_root=eng.ctx.runtimes_root)
+                        runtimes_root=eng.ctx.runtimes_root, security=other_user)
     run(other, "install", id="pawprints")
     assert other.ctx.fetcher.requests == [two["sources"][0]["url"]] and other.ctx.elevator.calls == []
     assert other.ctx.records.load("dx8vb") is None and (folder / "dx8vb.dll").read_bytes() == DX8VB
@@ -326,14 +327,47 @@ def test_existing_marker_counts_as_present_only_while_its_files_are_there(tmp_pa
     eng, lib = setup(tmp_path, [rt, g], routes)
     folder = eng.ctx.runtimes_root / "dx8vb"
     put_marker(folder, {"dx8vb.dll": DX8VB})
-    assert runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root)
+    sec = eng.ctx.security
+    sec.set_owner(folder, ADMINISTRATORS)  # locked down by an earlier install
+    assert runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root, sec)
     assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry)  # no root given: the marker isn't read
     run(eng, "install")
     assert eng.ctx.fetcher.requests == [g["sources"][0]["url"]] and eng.ctx.elevator.calls == []
     (folder / "dx8vb.dll").unlink()
-    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root)
+    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root, sec)
     put_marker(folder, {"dx8vb.dll": DX8VB}, runtime_id="other")
-    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root)
+    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root, sec)
+
+
+def test_marker_counts_only_in_a_folder_owned_by_administrators_or_for_a_plain_runtime_the_user(tmp_path):
+    routes = {}
+    rt, bass = dx8vb(routes), plain_runtime(routes, "bass")
+    eng, lib = setup(tmp_path, [rt, bass, game(routes)], routes)
+    sec, root = eng.ctx.security, eng.ctx.runtimes_root
+    put_marker(root / "dx8vb", {"dx8vb.dll": DX8VB})
+    put_marker(root / "bass", {"bass.dll": b"bass"}, runtime_id="bass")
+    # Owned by the current user: enough for a runtime with no elevated step, not for one that registers.
+    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, root, sec)
+    assert runtime_present(bass, eng.ctx.records, eng.ctx.registry, root, sec)
+    # Owned by another account: never.
+    for folder in (root / "dx8vb", root / "bass"):
+        sec.set_owner(folder, "S-1-5-21-2000-2000-2000-1002")
+    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, root, sec)
+    assert not runtime_present(bass, eng.ctx.records, eng.ctx.registry, root, sec)
+
+
+@pytest.mark.windows
+def test_marker_reached_through_a_junction_doesnt_count(tmp_path):
+    import _winapi
+    routes = {}
+    rt = dx8vb(routes)
+    eng, lib = setup(tmp_path, [rt, game(routes)], routes)
+    real = tmp_path / "elsewhere"
+    put_marker(real, {"dx8vb.dll": DX8VB})
+    eng.ctx.runtimes_root.mkdir(parents=True)
+    _winapi.CreateJunction(str(real), str(eng.ctx.runtimes_root / "dx8vb"))
+    eng.ctx.security.set_owner(eng.ctx.runtimes_root / "dx8vb", ADMINISTRATORS)
+    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root, eng.ctx.security)
 
 
 def test_matching_folder_without_marker_is_adopted(tmp_path):
@@ -345,7 +379,7 @@ def test_matching_folder_without_marker_is_adopted(tmp_path):
     (folder / "dx8vb.dll").write_bytes(DX8VB)
     (folder / "readme.txt").write_bytes(b"someone else's note")
     run(eng, "install")
-    assert eng.ctx.elevator.calls == [regsvr32(folder / "dx8vb.dll")]
+    assert eng.ctx.elevator.calls == [lock_down(eng, folder), regsvr32(folder / "dx8vb.dll")]
     assert snapshot(folder) == {"dx8vb.dll": DX8VB, "readme.txt": b"someone else's note",
                                 MARKER_NAME: (folder / MARKER_NAME).read_bytes()}
     assert json.loads((folder / MARKER_NAME).read_text())["files"] == {"dx8vb.dll": sha(DX8VB)}
@@ -394,6 +428,167 @@ def test_failed_install_removes_only_what_it_added_to_a_folder_it_found(tmp_path
     assert eng.ctx.records.load("dx8vb") is None
 
 
+def lock_down(eng, folder: Path) -> tuple[str, str, bool]:
+    return ("cmd.exe", *lock_down_command(folder, eng.ctx.security.current_user())[1:], True)
+
+
+def test_lock_down_command_is_exact():
+    folder = Path(r"C:\ProgramData\GameChooser\runtimes\dx8vb")
+    exe, args = lock_down_command(folder, "S-1-5-21-1-2-3-1001")
+    marker = folder / MARKER_NAME
+    assert exe == "cmd.exe"
+    assert args == (
+        f'/d /v:off /s /c "type nul > "{marker}" && '
+        f'icacls "{folder}" /setowner *S-1-5-32-544 /T /Q && '
+        f'icacls "{folder}" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F '
+        f'*S-1-5-32-545:(OI)(CI)RX /Q && '
+        f'icacls "{folder}\\*" /reset /T /Q && '
+        f'icacls "{marker}" /grant *S-1-5-21-1-2-3-1001:M /Q"')
+
+
+def test_folder_is_locked_down_then_hashed_again_before_regsvr32(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    seen = []
+
+    def watch(exe, args, elevated):
+        dll = tmp_path / "runtimes" / "dx8vb" / "dx8vb.dll"
+        seen.append((exe, dll.read_bytes() if dll.exists() else None))
+
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=watch))
+    run(eng, "install")
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    assert eng.ctx.elevator.calls == [lock_down(eng, folder), regsvr32(folder / "dx8vb.dll")]
+    assert seen == [("cmd.exe", DX8VB), ("regsvr32.exe", DX8VB)]  # copied before the lock-down
+
+
+def test_file_swapped_before_the_lock_down_is_caught_and_nothing_is_registered(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+
+    def swap(exe, args, elevated):
+        if exe == "cmd.exe":  # another account replaces the DLL just before the folder is locked
+            (tmp_path / "runtimes" / "dx8vb" / "dx8vb.dll").write_bytes(b"MZ planted")
+
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=swap))
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
+    assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
+    assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
+
+
+def test_declined_lock_down_fails_plainly(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(decline=True))
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.ELEVATION_DECLINED.format(what=DX8VB_TITLE)
+    assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
+
+
+def test_failed_lock_down_registers_nothing(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"cmd.exe": 5}))
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
+    assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
+
+
+def test_runtime_with_no_elevated_step_isnt_locked_down(tmp_path):
+    routes = {}
+    rt = plain_runtime(routes, "bass")
+    eng, lib = setup(tmp_path, [rt, game(routes, dependencies=["bass"])], routes)
+    run(eng, "install")
+    assert eng.ctx.elevator.calls == [] and (eng.ctx.runtimes_root / "bass" / MARKER_NAME).exists()
+
+
+@pytest.mark.windows
+def test_junction_at_the_runtime_folder_is_refused(tmp_path):
+    import _winapi
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    real = tmp_path / "attacker"
+    real.mkdir()
+    eng.ctx.runtimes_root.mkdir(parents=True)
+    link = eng.ctx.runtimes_root / "dx8vb"
+    _winapi.CreateJunction(str(real), str(link))
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_LINKED.format(title=DX8VB_TITLE, path=link)
+    assert list(real.iterdir()) == [] and eng.ctx.elevator.calls == []
+
+
+@pytest.mark.windows
+def test_junction_at_a_parent_folder_is_refused(tmp_path):
+    import _winapi
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    real = tmp_path / "attacker"
+    real.mkdir()
+    root = tmp_path / "GameChooser" / "runtimes"
+    root.parent.mkdir()
+    _winapi.CreateJunction(str(real), str(root))
+    eng, lib = setup(tmp_path, [rt, g], routes, runtimes_root=root)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_LINKED.format(title=DX8VB_TITLE, path=root)
+    assert list(real.iterdir()) == [] and eng.ctx.elevator.calls == []
+
+
+def test_folder_owned_by_another_account_is_refused_and_left_alone(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    folder.mkdir(parents=True)  # empty, as another account could leave it
+    (folder / "readme.txt").write_bytes(b"theirs")
+    eng.ctx.security.set_owner(folder, "S-1-5-21-2000-2000-2000-1002")
+    before = snapshot(folder)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert snapshot(folder) == before and eng.ctx.elevator.calls == []
+
+
+def failing_after_register(routes):
+    """dx8vb with a second step that fails once regsvr32 has run (its program isn't in the folder)."""
+    rt = dx8vb(routes)
+    rt["sources"][0]["steps"] = [{"action": "register", "path": "dx8vb.dll"}, {"action": "run", "path": "setup.exe"}]
+    return rt
+
+
+def test_failure_after_registering_in_a_found_folder_leaves_the_registration(tmp_path):
+    routes = {}
+    rt, g = failing_after_register(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    folder.mkdir(parents=True)
+    (folder / "dx8vb.dll").write_bytes(DX8VB)  # it may already have been registered by another account
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message.startswith(messages.STEP_FILE_MISSING.format(path="setup.exe"))
+    assert eng.ctx.elevator.calls == [lock_down(eng, folder), regsvr32(folder / "dx8vb.dll")]  # no /u
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB
+
+
+def test_failure_after_registering_in_a_folder_it_made_unregisters(tmp_path):
+    routes = {}
+    rt, g = failing_after_register(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    with pytest.raises(InstallFailed):
+        run(eng, "install")
+    assert eng.ctx.elevator.calls[-1] == ("regsvr32.exe", f'/u /s "{folder / "dx8vb.dll"}"', True)
+    assert not folder.exists()
+
+
 def test_installer_runtime_runs_untracked_then_is_checked(tmp_path, monkeypatch):
     routes = {}
     rt, g = vb6(routes), game(routes, dependencies=["vb6-runtime"])
@@ -411,6 +606,7 @@ def test_installer_runtime_runs_untracked_then_is_checked(tmp_path, monkeypatch)
     assert len(calls) == 1 and calls[0][1:] == ("/Q", False)
     rec = eng.ctx.records.load("vb6-runtime")
     assert rec.kind == "runtime" and rec.method == "run" and not rec.tracked and rec.files == {}
+    assert not (eng.ctx.runtimes_root / "vb6-runtime" / MARKER_NAME).exists()  # presence: record or detect
     assert (lib / "Entombed" / "entombed.exe").exists()
 
 
@@ -445,7 +641,7 @@ def test_run_mode_game_installs_runtime_first(tmp_path):
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=installs))
     run(eng, "install", id="lightcars")
     exes = [c[0] for c in eng.ctx.elevator.calls]
-    assert exes[0] == "regsvr32.exe" and exes[1].endswith("setup.exe")
+    assert exes[:2] == ["cmd.exe", "regsvr32.exe"] and exes[2].endswith("setup.exe")
     assert eng.ctx.records.load("dx8vb").kind == "runtime" and eng.ctx.records.load("lightcars").tracked
 
 
@@ -457,7 +653,8 @@ def test_update_installs_missing_runtime_first(tmp_path):
     assert eng.ctx.elevator.calls == []
     eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0")
     r = run(eng, "update")
-    assert eng.ctx.elevator.calls == [regsvr32(eng.ctx.runtimes_root / "dx8vb" / "dx8vb.dll")]
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    assert eng.ctx.elevator.calls == [lock_down(eng, folder), regsvr32(folder / "dx8vb.dll")]
     assert (lib / "Entombed" / "entombed.exe").read_bytes() == b"exe 2" and r.notes == []
 
 

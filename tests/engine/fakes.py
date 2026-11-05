@@ -4,6 +4,7 @@ import gzip
 import hashlib
 import io
 import json
+import os
 import shutil
 import time
 import zipfile
@@ -364,6 +365,37 @@ def served_source(routes: dict[str, bytes], url: str, data: bytes, method: str =
     return source
 
 
+ADMINISTRATORS = "S-1-5-32-544"
+
+
+class FakeSecurity:
+    """Stands in for engine.runtimes.WindowsSecurity.
+
+    A path's owner is the one set with `set_owner`; else Administrators once the elevator has run the
+    lock-down for it; else, if it exists, the current user (`user`).
+    """
+
+    def __init__(self, elevator=None, user: str = "S-1-5-21-1000-1000-1000-1001"):
+        self.elevator = elevator
+        self.user = user
+        self.owners: dict[str, str] = {}
+
+    def set_owner(self, path, sid: str) -> None:
+        self.owners[os.path.normcase(str(path))] = sid
+
+    def current_user(self) -> str:
+        return self.user
+
+    def owner(self, path) -> str | None:
+        found = self.owners.get(os.path.normcase(str(path)))
+        if found:
+            return found
+        for exe, args, _ in (self.elevator.calls if self.elevator is not None else []):
+            if exe == "cmd.exe" and "/setowner" in args and f'icacls "{path}" /setowner' in args:
+                return ADMINISTRATORS
+        return self.user if os.path.lexists(path) else None
+
+
 def make_engine(tmp_path: Path, entries, **ctx_overrides):
     """An InstallEngine over fakes, with one library "Games" at tmp_path/Games.
 
@@ -392,4 +424,5 @@ def make_engine(tmp_path: Path, entries, **ctx_overrides):
         uninstall_reader=FakeUninstallKeys(),
     )
     values.update(ctx_overrides)
+    values.setdefault("security", FakeSecurity(values["elevator"]))
     return InstallEngine(EngineContext(**values))
