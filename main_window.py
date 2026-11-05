@@ -20,6 +20,7 @@ Main window for Game Chooser application
 """
 
 import wx
+import wx.adv
 import os
 import logging
 import subprocess
@@ -830,6 +831,13 @@ class MainFrame(wx.Frame):
         else:
             self.show_description(None)
     
+    def notify(self, text: str):
+        """Tell the player something without a dialog (a Windows notification)"""
+        try:
+            wx.adv.NotificationMessage("Game Chooser", text).Show()
+        except Exception:
+            log.warning("Couldn't show a notification", exc_info=True)
+
     def refresh_game_list(self):
         """Refresh the game list display"""
         self.apply_filters()

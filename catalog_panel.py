@@ -34,6 +34,8 @@ from catalog_view import (FLAG_LABELS, action_kind, action_label, action_verb, b
                           filter_rows, link_items, tree_categories)
 from description_field import DescriptionField
 from engine import messages
+from engine.entries import current_platform, game_fields, platform_sources
+from install_dialogs import InstallConfirmDialog
 from install_service import InstallService
 
 log = logging.getLogger(__name__)
@@ -386,10 +388,43 @@ class CatalogPanel(wx.Panel):
         self.frame.launch_game(game)
 
     def _confirm_install(self, row):
-        """Placeholder, replaced in Task 9 by the install (or add) confirmation. Never installs or adds anything:
-        Enter must not start a download without the player's confirmation."""
-        log.debug("Install or add requested for %s (%s); the confirmation arrives in Task 9",
-                  row.id, action_kind(row))
+        """Install: confirm where and what first. A web game just gets added to the Library."""
+        if action_kind(row) == "add":
+            self._add_web_game(row)
+            return
+        plan = self.service.plan(row.id)
+        choice = None
+        with self.frame.modal_dialog():
+            dlg = InstallConfirmDialog(self.frame, plan, self.service)
+            try:
+                if dlg.ShowModal() == wx.ID_OK:
+                    choice = dlg.get_choice()
+            finally:
+                dlg.Destroy()
+        if choice is not None:
+            self.service.submit(plan.action, row.id, choice.library_id, choice.library_path, choice.extras)
+            self.frame.refresh_game_list()
+            self.refresh_rows()
+            self.frame.refresh_statuses()
+        self._focus_row(row)
+
+    def _add_web_game(self, row):
+        sources = platform_sources(row.entry, current_platform())
+        fields = game_fields(row.entry, current_platform())
+        fields.update(platforms=["Web"], launch_path=sources[0].get("url", ""), library_id="", catalog_id=row.id)
+        self.service.manager.add_catalog_game(fields)
+        self.frame.refresh_game_list()
+        self.refresh_rows()
+        self.frame.refresh_statuses()
+        self.frame.notify(messages.ADDED.format(title=fields["title"] or row.title))
+        self._focus_row(row)
+
+    def _focus_row(self, row):
+        """Back to the row in the list, by the screen reader pattern (Select, Focus, SetFocus)"""
+        if not self:
+            return
+        self._select_row(row)
+        self.focus_list()
 
     def on_random_game(self):
         """Ctrl+R: pick a random game from the list as shown (filters applied) and offer to act on it"""
