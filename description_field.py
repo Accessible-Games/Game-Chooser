@@ -39,7 +39,9 @@ class DescriptionField(wx.TextCtrl):
         self.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
 
     def set_text(self, text: str):
-        """Show new text, with the caret at the start"""
+        """Show new text, with the caret at the start. The same text again leaves the caret where it is."""
+        if text == self.GetValue():
+            return
         self.ChangeValue(text)
         self.SetInsertionPoint(0)
 

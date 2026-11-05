@@ -27,6 +27,7 @@ import platform
 import webbrowser
 import threading
 import random
+from contextlib import contextmanager
 from pathlib import Path
 
 from models import Game
@@ -41,6 +42,14 @@ from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSe
 log = logging.getLogger(__name__)
 
 TABS = ("library", "catalog")  # notebook page order
+
+
+def _call_after(fn, *args):
+    """wx.CallAfter from a worker thread; does nothing once the app is gone (closing while a worker runs)"""
+    try:
+        wx.CallAfter(fn, *args)
+    except Exception:
+        log.debug("The app closed before %s could run", getattr(fn, "__name__", fn))
 
 
 class _NoQueueListener:
@@ -146,6 +155,8 @@ class MainFrame(wx.Frame):
         self._tree_cache = None  # Cache for tree categories
         self._games_hash = None  # Hash to detect when games list changes
         self.dialog_active = False  # Flag to block spurious events when modal dialogs are open
+        self._deferred = []  # callables waiting for every modal dialog to close (run_when_no_dialog)
+        self._deferred_retry = False  # a wx.CallLater retry of _run_deferred is pending
         self.restoring_tree = False  # Flag to block saves during tree restoration
         self.initializing = True  # Flag to prevent focus stealing during startup
         self.current_tree_filters = ["platform", "genre", "developer", "year"]  # Track active tree filters
@@ -373,6 +384,8 @@ class MainFrame(wx.Frame):
     def on_tab_changed(self, event):
         """Remember the tab, enable its menu items, and put focus in its games list"""
         event.Skip()
+        if event.GetEventObject() is not self.notebook:  # a book control inside a page
+            return
         self.library_manager.config["SavedState"]["last_tab"] = self.active_tab()
         self.library_manager.save_config()
         self.update_tab_menus()
@@ -421,7 +434,7 @@ class MainFrame(wx.Frame):
             except Exception:
                 log.warning("Couldn't work out the games' status", exc_info=True)
                 return
-            wx.CallAfter(self._statuses_ready, generation, statuses)
+            _call_after(self._statuses_ready, generation, statuses)
 
         threading.Thread(target=work, name="library-status", daemon=True).start()
 
@@ -441,14 +454,18 @@ class MainFrame(wx.Frame):
             except Exception:
                 log.warning("Couldn't fetch the catalog index", exc_info=True)
                 return
-            wx.CallAfter(self._index_fetched, state)
+            _call_after(self._index_fetched, state)
 
         threading.Thread(target=work, name="catalog-index", daemon=True).start()
 
     def _index_fetched(self, state):
-        """Use a fetched index (UI thread: it may adopt catalog launch paths, which saves games.json)"""
+        """A fetched index arrived (UI thread). Using it may adopt catalog launch paths, which replaces
+        manager.games and saves games.json, so it waits until no dialog holds a game (run_when_no_dialog)."""
         if not self:
             return
+        self.run_when_no_dialog(self._take_index, state)
+
+    def _take_index(self, state):
         games_before = self.library_manager.games
         self.service.take_index(state)
         if self.library_manager.games is not games_before:  # a game was adopted (the list is replaced)
@@ -461,11 +478,82 @@ class MainFrame(wx.Frame):
         """The Library description: the catalog text for a catalog game, empty otherwise"""
         self.description.set_text(description_text(self.service.entry_for(game)) if game else "")
 
+    # ---- work that must wait for modal dialogs ----------------------------------------------------------------
+
+    @contextmanager
+    def modal_dialog(self):
+        """Wrap every modal dialog that can read or change games (sets dialog_active; nests).
+
+        wx runs CallAfter events inside a modal loop; while this is active, run_when_no_dialog queues them.
+        When the outermost one closes, the queue runs (after the current handler returns)."""
+        was_active = self.dialog_active
+        self.dialog_active = True
+        try:
+            yield
+        finally:
+            self.dialog_active = was_active
+            if not was_active:
+                wx.CallAfter(self._run_deferred)
+
+    def _modal_open(self):
+        if self.dialog_active:
+            return True
+        return any(isinstance(w, wx.Dialog) and w.IsModal() for w in wx.GetTopLevelWindows())
+
+    def run_when_no_dialog(self, fn, *args):
+        """Run fn(*args) now on the UI thread if no modal dialog is open, else once the last one closes.
+
+        UI thread only. For work that changes manager.games, games.json or records at a moment the player
+        didn't choose (index refreshes; Task 10: the queue's apply_result and job_failed), so an open Edit or
+        Delete dialog never holds a game object that was replaced under it. Queued calls run in order."""
+        self._deferred.append((fn, args))
+        self._run_deferred()
+
+    def _run_deferred(self):
+        if not self:
+            return
+        while self._deferred:
+            if self._modal_open():
+                # modal_dialog() runs the queue when it closes; a dialog it doesn't wrap is polled for
+                if not self.dialog_active and not self._deferred_retry:
+                    self._deferred_retry = True
+                    wx.CallLater(250, self._retry_deferred)
+                return
+            fn, args = self._deferred.pop(0)
+            try:
+                fn(*args)
+            except Exception:  # one failure must not keep the rest from running
+                log.exception("Deferred %s failed", getattr(fn, "__name__", fn))
+
+    def _retry_deferred(self):
+        if not self:
+            return
+        self._deferred_retry = False
+        self._run_deferred()
+
+    def _live_game(self, game):
+        """The library's current object for a game shown in the list, or None if it is gone.
+
+        An index refresh can replace a catalog game's object before the list is refilled."""
+        if game is None:
+            return None
+        games = self.library_manager.games
+        if any(g is game for g in games):
+            return game
+        for g in games:
+            if game.catalog_id and g.catalog_id == game.catalog_id:
+                return g
+        for g in games:
+            if (g.library_id, g.launch_path) == (game.library_id, game.launch_path):
+                return g
+        return None
+
     def check_libraries(self):
         """Check if first run and show setup dialog"""
         if self.library_manager.is_first_run:
             dlg = FirstTimeSetupDialog(self, self.library_manager)
-            dlg.ShowModal()
+            with self.modal_dialog():
+                dlg.ShowModal()
             dlg.Destroy()
 
             # Refresh UI in case they added stuff
@@ -873,20 +961,23 @@ class MainFrame(wx.Frame):
             # Regular game
             full_path = self.library_manager.get_full_path(game)
             if not full_path or not Path(full_path).exists():
-                wx.MessageBox("Game executable not found. Please locate the game.",
-                            "File Not Found", wx.OK | wx.ICON_ERROR)
+                with self.modal_dialog():
+                    wx.MessageBox("Game executable not found. Please locate the game.",
+                                "File Not Found", wx.OK | wx.ICON_ERROR)
 
-                # File dialog to relocate
-                dlg = wx.FileDialog(self, "Locate Game Executable")
-                if dlg.ShowModal() == wx.ID_OK:
-                    new_path = dlg.GetPath()
+                    # File dialog to relocate
+                    dlg = wx.FileDialog(self, "Locate Game Executable")
+                    if dlg.ShowModal() == wx.ID_OK:
+                        new_path = dlg.GetPath()
 
-                    # Any path on disk will do; it is no longer tied to a library
-                    game.launch_path = new_path
-                    game.library_id = ""
-                    self.library_manager.save_games()
-                    self.refresh_statuses()
-                dlg.Destroy()
+                        # Any path on disk will do; it is no longer tied to a library
+                        live = self._live_game(game)
+                        if live is not None:
+                            live.launch_path = new_path
+                            live.library_id = ""
+                            self.library_manager.save_games()
+                            self.refresh_statuses()
+                    dlg.Destroy()
                 return
 
             # Launch the game
@@ -950,36 +1041,36 @@ class MainFrame(wx.Frame):
         # Pick random game
         random_game = random.choice(compatible_games)
 
-        # Show dialog
-        response = wx.MessageBox(
-            f"Your game for today is...\n\n{random_game.title}\n\nLaunch now?",
-            "Random Game",
-            wx.YES_NO | wx.ICON_QUESTION
-        )
+        # Show dialog (the game object is held until it launches, so no refresh may replace it meanwhile)
+        with self.modal_dialog():
+            response = wx.MessageBox(
+                f"Your game for today is...\n\n{random_game.title}\n\nLaunch now?",
+                "Random Game",
+                wx.YES_NO | wx.ICON_QUESTION
+            )
 
-        if response == wx.YES:
-            self.launch_game(random_game)
+            if response == wx.YES:
+                self.launch_game(random_game)
 
     def on_edit_game(self, event):
         """Edit selected game"""
         if self.active_tab() != "library":
             return
-        game = self.game_list.get_selected_game()
+        game = self._live_game(self.game_list.get_selected_game())
         if not game:
             return
 
         dlg = GameDialog(self, self.library_manager, game)
 
-        # Block spurious selection events while modal dialog is active
-        self.dialog_active = True
-        try:
-            if dlg.ShowModal() == wx.ID_OK:
-                self.library_manager.save_games()
-                self.refresh_game_list()
-                self.refresh_statuses()
-        finally:
-            self.dialog_active = False
-            dlg.Destroy()
+        # Block spurious selection events (and game-changing refreshes) while modal dialog is active
+        with self.modal_dialog():
+            try:
+                if dlg.ShowModal() == wx.ID_OK:
+                    self.library_manager.save_games()
+                    self.refresh_game_list()
+                    self.refresh_statuses()
+            finally:
+                dlg.Destroy()
     
     def on_delete_game(self, event):
         """Delete selected game"""
@@ -995,16 +1086,21 @@ class MainFrame(wx.Frame):
         # Show custom delete dialog
         dlg = DeleteGameDialog(self, game.title)
 
-        # Block spurious selection events while modal dialog is active
-        self.dialog_active = True
-        try:
-            result = dlg.ShowModal()
-        finally:
-            self.dialog_active = False
-            dlg.Destroy()
+        # Block spurious selection events (and game-changing refreshes) while modal dialog is active.
+        # The queued refreshes run after this handler returns, so after the removal below.
+        with self.modal_dialog():
+            try:
+                result = dlg.ShowModal()
+            finally:
+                dlg.Destroy()
 
         if result == wx.ID_YES:
-            self.library_manager.games.remove(game)
+            live = self._live_game(game)
+            games = self.library_manager.games
+            for i, g in enumerate(games):
+                if g is live:
+                    del games[i]
+                    break
             self.library_manager.save_games()
             self.refresh_game_list()
 
@@ -1018,17 +1114,16 @@ class MainFrame(wx.Frame):
         """Add a new game"""
         dlg = GameDialog(self, self.library_manager)
 
-        # Block spurious selection events while modal dialog is active
-        self.dialog_active = True
-        try:
-            if dlg.ShowModal() == wx.ID_OK:
-                self.library_manager.games.append(dlg.game)
-                self.library_manager.save_games()
-                self.refresh_game_list()
-                self.refresh_statuses()
-        finally:
-            self.dialog_active = False
-            dlg.Destroy()
+        # Block spurious selection events (and game-changing refreshes) while modal dialog is active
+        with self.modal_dialog():
+            try:
+                if dlg.ShowModal() == wx.ID_OK:
+                    self.library_manager.games.append(dlg.game)
+                    self.library_manager.save_games()
+                    self.refresh_game_list()
+                    self.refresh_statuses()
+            finally:
+                dlg.Destroy()
 
     def on_toggle_filter_platform(self, event):
         """Toggle platform filter in tree"""
@@ -1123,16 +1218,15 @@ class MainFrame(wx.Frame):
         """Show preferences dialog"""
         dlg = PreferencesDialog(self, self.library_manager)
 
-        # Block spurious selection events while modal dialog is active
-        self.dialog_active = True
-        try:
-            dlg.ShowModal()
-            # Refresh even on Cancel: Apply may already have saved changes.
-            # Deferred to avoid blocking the dialog close.
-            wx.CallAfter(self.refresh_ui_after_preferences)
-        finally:
-            self.dialog_active = False
-            dlg.Destroy()
+        # Block spurious selection events (and game-changing refreshes) while modal dialog is active
+        with self.modal_dialog():
+            try:
+                dlg.ShowModal()
+                # Refresh even on Cancel: Apply may already have saved changes.
+                # Deferred to avoid blocking the dialog close.
+                wx.CallAfter(self.refresh_ui_after_preferences)
+            finally:
+                dlg.Destroy()
 
     def refresh_ui_after_preferences(self):
         """Refresh UI after preferences dialog closes"""
