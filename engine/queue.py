@@ -63,7 +63,9 @@ class InstallQueue:
             if self._stopping:
                 raise RuntimeError("The install queue has been shut down.")
             for job in (self._current, *self._waiting):
-                if job is not None and job.request.catalog_id == request.catalog_id:
+                # A job that is finishing or being cancelled no longer counts: the caller wants a new one.
+                if (job is not None and job.request.catalog_id == request.catalog_id
+                        and job.state in ("queued", "running") and not job.cancel_event.is_set()):
                     return job
             job = Job(self._next_id, request, title)
             self._next_id += 1
@@ -159,31 +161,33 @@ class InstallQueue:
                     self._events.append(("job_started", (job,)))
                     self._cond.notify_all()
                 self._run_job(job)
-                with self._cond:
-                    self._current = None
         finally:
             with self._cond:
                 self._worker_done = True
                 self._cond.notify_all()
 
     def _run_job(self, job: Job) -> None:
+        """Run `job`, then in one step set its final state, report it and free the worker slot."""
+        state, event = "failed", None  # what a BaseException leaves behind
         try:
             engine = self._factory()
             result = engine.run(job.request, lambda p: self._emit("job_progress", job, p), job.cancel_event.is_set)
+            state, event = "done", ("job_finished", (job, result))
         except Cancelled:
-            job.state = "cancelled"
-            self._emit("job_cancelled", job)
+            state, event = "cancelled", ("job_cancelled", (job,))
         except InstallFailed as e:
-            job.state = "failed"
-            self._emit("job_failed", job, e.message)
+            state, event = "failed", ("job_failed", (job, e.message))
         except Exception:
             self._log(f"Unexpected error in {job.request.action} of {job.request.catalog_id!r}:\n"
                       + traceback.format_exc())
-            job.state = "failed"
-            self._emit("job_failed", job, messages.UNEXPECTED_ERROR.format(title=job.title))
-        else:
-            job.state = "done"
-            self._emit("job_finished", job, result)
+            state, event = "failed", ("job_failed", (job, messages.UNEXPECTED_ERROR.format(title=job.title)))
+        finally:
+            with self._cond:
+                job.state = state
+                self._current = None
+                if event is not None:
+                    self._events.append(event)
+                self._cond.notify_all()
 
     def _log(self, text: str) -> None:
         try:

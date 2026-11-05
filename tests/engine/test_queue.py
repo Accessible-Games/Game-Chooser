@@ -1,5 +1,7 @@
 import threading
 
+import pytest
+
 from engine.errors import Cancelled, InstallFailed
 from engine.jobs import InstallRequest, JobResult
 from engine.queue import InstallQueue
@@ -138,16 +140,65 @@ def test_duplicate_submit_returns_existing_job(tmp_path):
     r.queue.shutdown(WAIT)
 
 
-def test_resubmit_after_finish_runs_again(tmp_path):
+def test_resubmit_from_finished_callback_runs_a_new_job(tmp_path):
     r = Rig(tmp_path)
+    resubmitted = []
+    original = r.listener.job_finished
+
+    def finished(job, result):
+        original(job, result)
+        if not resubmitted:
+            resubmitted.append(r.queue.submit(req("a"), "A"))
+
+    r.listener.job_finished = finished
+    j1 = r.queue.submit(req("a"), "A")
+    with r.listener.cond:
+        assert r.listener.cond.wait_for(lambda: len(r.listener.kinds("finished")) == 2, WAIT)
+    assert resubmitted[0] is not j1 and resubmitted[0].id != j1.id
+    assert r.queue.shutdown(WAIT)
+    assert r.entered == ["a", "a"]
+
+
+def test_resubmit_from_failed_callback_runs_a_new_job(tmp_path):
+    r = Rig(tmp_path, behavior={"a": InstallFailed("No.")})
+    resubmitted = []
+    original = r.listener.job_failed
+
+    def failed(job, message):
+        original(job, message)
+        if not resubmitted:
+            r.behavior.clear()
+            resubmitted.append(r.queue.submit(req("a"), "A"))
+
+    r.listener.job_failed = failed
     j1 = r.queue.submit(req("a"), "A")
     r.listener.wait_for(("finished", "a"))
-    # The worker clears `current` just after reporting; wait until it is idle.
-    while r.queue.busy():
-        threading.Event().wait(0.002)
+    assert resubmitted[0] is not j1
+    assert r.queue.shutdown(WAIT)
+    assert r.entered == ["a", "a"]
+
+
+def test_resubmit_while_running_job_is_cancelling_queues_a_new_job(tmp_path):
+    r = Rig(tmp_path, gates=["a"])
+    j1 = r.queue.submit(req("a"), "A")
+    r.listener.wait_for(("started", "a"))
+    r.queue.cancel(j1.id)
     j2 = r.queue.submit(req("a"), "A")
-    assert j2 is not j1 and j2.id != j1.id
+    assert j2 is not j1
+    r.listener.wait_for(("cancelled", "a"))
+    r.gates["a"].set()  # the second run waits on the same gate
+    r.listener.wait_for(("finished", "a"))
+    assert j1.state == "cancelled" and j2.state == "done"
     r.queue.shutdown(WAIT)
+
+
+@pytest.mark.filterwarnings("ignore::pytest.PytestUnhandledThreadExceptionWarning")
+def test_base_exception_still_frees_the_worker_slot(tmp_path):
+    r = Rig(tmp_path, behavior={"a": SystemExit()})
+    j = r.queue.submit(req("a"), "A")
+    r.listener.wait_for(("started", "a"))
+    r.queue.shutdown(WAIT)
+    assert j.state == "failed" and not r.queue.busy()
 
 
 def test_cancel_queued_and_running(tmp_path):
