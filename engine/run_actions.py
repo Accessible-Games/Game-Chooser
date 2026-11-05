@@ -45,7 +45,7 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
     ctx = engine.ctx
     game_id, title = entry["id"], jobs._title(entry)
     previous = rec.previous
-    if previous.get("extras"):
+    if previous.get("extras") or rec.extras:  # neither version's extras can be put back over an installer
         raise InstallFailed(messages.RUN_INSTALLER_EXTRAS.format(title=title))
     with engine._work_folder(game_id) as work:
         try:

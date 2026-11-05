@@ -373,6 +373,21 @@ def test_repair_and_undo_of_a_run_record_with_extras_are_refused_plainly(tmp_pat
     assert tree(target) == files and len(eng.ctx.elevator.calls) == 1
 
 
+def test_undo_of_a_run_update_after_extras_were_added_is_refused_plainly(tmp_path):
+    eng, target = run_game_with_music(tmp_path)
+    routes = dict(eng.ctx.fetcher.routes)
+    publish_v2(eng, routes, setup=SETUP_V2)["extras"] = [{"id": "lc-music", "required": False}]
+    eng.ctx.elevator.on_start = versioned(target)
+    run(eng, "update")
+    run(eng, "extras", extras=("lc-music",))
+    assert record(eng).previous["extras"] == {}
+    files, calls = tree(target), len(eng.ctx.elevator.calls)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "undo")
+    assert ei.value.message == messages.RUN_INSTALLER_EXTRAS.format(title="Light Cars")
+    assert tree(target) == files and len(eng.ctx.elevator.calls) == calls
+
+
 # ---- what stays refused --------------------------------------------------------------------------------------
 
 
