@@ -1,4 +1,4 @@
-from catalog_view import (build_rows, description_text, filter_rows, initial_tab, link_at_line,
+from catalog_view import (action_kind, action_label, build_rows, link_items, description_text, filter_rows, initial_tab, link_at_line,
                           markdown_to_text, tree_categories)
 
 SRC = [{"platform": "windows", "install": {"method": "zip"}, "url": "https://x/e.zip"}]
@@ -79,3 +79,31 @@ def test_description_text_links_on_own_lines():
 def test_initial_tab():
     assert initial_tab(None, True) == "catalog" and initial_tab(None, False) == "library"
     assert initial_tab("catalog", False) == "catalog" and initial_tab("bogus", True) == "catalog"
+
+
+WEB = {"id": "webgame", "kind": "game", "title": "Webgame", "sources": [
+    {"platform": "web", "install": {"method": "url"}, "url": "https://play.example"}]}
+
+
+def test_action_label_install_launch_add():
+    rows = {r.id: r for r in build_rows([entombed, WEB], set())}
+    assert action_label(rows["entombed"], "windows") == "Install Entombed"
+    assert action_label(rows["webgame"], "windows") == "Add Webgame"
+    assert action_kind(rows["webgame"], "linux") == "add"  # a web source suits every platform
+    installed = {r.id: r for r in build_rows([entombed, WEB], {"entombed", "webgame"})}
+    assert action_label(installed["entombed"], "windows") == "Launch Entombed"
+    assert action_label(installed["webgame"], "windows") == "Launch Webgame"
+    assert action_label(None) == "Install"
+
+
+def test_action_kind_mixed_and_no_sources_is_install():
+    mixed = dict(WEB, sources=WEB["sources"] + SRC)
+    assert action_kind(build_rows([mixed], set())[0], "windows") == "install"
+    assert action_kind(build_rows([minimal_entry], set())[0], "windows") == "install"
+
+
+def test_link_items_in_menu_order_http_only():
+    assert link_items(entry_with_links) == [
+        ("Open homepage", "https://h.example"), ("Open purchase page", "https://b.example"),
+        ("Open agarchive page", "https://www.agarchive.net/pages/devs/bsc.html")]
+    assert link_items(None) == [] and link_items({"links": {"homepage": "javascript:x"}}) == []

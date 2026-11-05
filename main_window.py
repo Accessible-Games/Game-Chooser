@@ -36,6 +36,7 @@ from install_service import InstallService
 from catalog_view import description_text, initial_tab
 from engine.folders import library_label
 from game_list import GameListCtrl
+from catalog_panel import CatalogPanel
 from description_field import DescriptionField
 from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
 
@@ -146,6 +147,7 @@ class MainFrame(wx.Frame):
         self.library_manager = GameLibraryManager()
         # The no-op listener and installer_ui=None stand in until the install progress UI exists (Task 10)
         self.service = InstallService(self.library_manager, _NoQueueListener(), installer_ui=None)
+        self._index_fetching = False  # a catalog index fetch is running or waiting for a dialog to close
         self.statuses = {}  # (library_id, launch_path) -> Status text, filled by refresh_statuses()
         self._status_generation = 0  # only the newest status computation is shown
         # Before the list is first filled: using the saved index may adopt catalog launch paths
@@ -179,17 +181,18 @@ class MainFrame(wx.Frame):
 
         # Status column, then the catalog index from the network (the saved copy is already in use)
         self.refresh_statuses()
-        self._start_index_fetch()
+        self.start_index_fetch()
         
         # Bind close event
         self.Bind(wx.EVT_CLOSE, self.on_close)
     
     def init_ui(self):
         """Initialize the user interface"""
-        # Notebook: page 0 Library (the player's games), page 1 Catalog (a placeholder until Task 8)
+        # Notebook: page 0 Library (the player's games), page 1 Catalog
         self.notebook = wx.Notebook(self)
         self.library_page = wx.Panel(self.notebook)
-        self.catalog_page = wx.Panel(self.notebook)
+        self.catalog_panel = CatalogPanel(self.notebook, self, self.service)
+        self.catalog_page = self.catalog_panel
         self.notebook.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self.on_tab_changed)
         panel = self.library_page
         main_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -389,6 +392,8 @@ class MainFrame(wx.Frame):
         self.library_manager.config["SavedState"]["last_tab"] = self.active_tab()
         self.library_manager.save_config()
         self.update_tab_menus()
+        if self.active_tab() == "catalog":
+            self.catalog_panel.refresh_rows()  # Library changes may have changed what is installed
         wx.CallAfter(self.focus_active_list)
 
     def update_tab_menus(self):
@@ -410,8 +415,7 @@ class MainFrame(wx.Frame):
                 self.game_list.Focus(index)
             self.game_list.SetFocus()
         else:
-            # The Catalog tab has no list yet (Task 8); never leave focus on a control of the hidden page
-            self.notebook.SetFocus()
+            self.catalog_panel.focus_list()
 
     def on_find(self, event):
         """Ctrl+F: the Library search box"""
@@ -444,8 +448,13 @@ class MainFrame(wx.Frame):
         self.statuses = statuses
         self.game_list.refresh_rows()
 
-    def _start_index_fetch(self):
-        """Fetch the catalog index on a daemon thread; only fetch_index() may run off the UI thread"""
+    def start_index_fetch(self):
+        """Fetch the catalog index on a daemon thread (startup, F5 and Retry on the Catalog tab).
+        Only fetch_index() may run off the UI thread. Does nothing while a fetch is already under way."""
+        if self._index_fetching:
+            return
+        self._index_fetching = True
+        self.catalog_panel.set_checking(True)
         service = self.service
 
         def work():
@@ -453,10 +462,17 @@ class MainFrame(wx.Frame):
                 state = service.fetch_index()
             except Exception:
                 log.warning("Couldn't fetch the catalog index", exc_info=True)
+                _call_after(self._index_fetch_failed)
                 return
             _call_after(self._index_fetched, state)
 
         threading.Thread(target=work, name="catalog-index", daemon=True).start()
+
+    def _index_fetch_failed(self):
+        if not self:
+            return
+        self._index_fetching = False
+        self.catalog_panel.set_checking(False)
 
     def _index_fetched(self, state):
         """A fetched index arrived (UI thread). Using it may adopt catalog launch paths, which replaces
@@ -466,13 +482,17 @@ class MainFrame(wx.Frame):
         self.run_when_no_dialog(self._take_index, state)
 
     def _take_index(self, state):
-        games_before = self.library_manager.games
-        self.service.take_index(state)
-        if self.library_manager.games is not games_before:  # a game was adopted (the list is replaced)
-            self.refresh_game_list()
-            self.build_tree(force_rebuild=True)
-        self.refresh_statuses()
-        self.show_description(self.game_list.get_selected_game())
+        try:
+            games_before = self.library_manager.games
+            self.service.take_index(state)
+            if self.library_manager.games is not games_before:  # a game was adopted (the list is replaced)
+                self.refresh_game_list()
+                self.build_tree(force_rebuild=True)
+            self.refresh_statuses()
+            self.show_description(self.game_list.get_selected_game())
+        finally:
+            self._index_fetching = False
+        self.catalog_panel.set_index_state(state)
 
     def show_description(self, game):
         """The Library description: the catalog text for a catalog game, empty otherwise"""
@@ -1008,7 +1028,8 @@ class MainFrame(wx.Frame):
 
     def on_random_game(self, event):
         """Pick a random game from filtered list and offer to launch it"""
-        if self.active_tab() != "library":
+        if self.active_tab() == "catalog":
+            self.catalog_panel.on_random_game()
             return
         if not self.filtered_games:
             wx.MessageBox("No games available to choose from.",
@@ -1236,8 +1257,10 @@ class MainFrame(wx.Frame):
         self.refresh_statuses()  # a library may have been added, moved or removed
     
     def on_refresh(self, event):
-        """F5 on the Library tab: rebuild the game list and tree and recheck each game's Status"""
-        if self.active_tab() != "library":
+        """F5: on the Catalog tab check for catalog updates; on Library rebuild the game list and tree and
+        recheck each game's Status"""
+        if self.active_tab() == "catalog":
+            self.catalog_panel.check_for_updates()
             return
         self.refresh_game_list()
         self.build_tree(force_rebuild=True)
@@ -1314,6 +1337,7 @@ class MainFrame(wx.Frame):
         state["splitter_position"] = self.splitter.GetSashPosition()
         state["last_search"] = self.search_combo.GetValue()
         state["last_tab"] = self.active_tab()
+        self.catalog_panel.save_state()
 
         # Save tree filters
         state["tree_filters"] = list(self.current_tree_filters)

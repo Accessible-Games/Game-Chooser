@@ -235,3 +235,10 @@ LIBRARY_REMOVE_UNREACHABLE = ("That library's folder can't be reached, so its ga
                               "drive, or use Change folder if it moved.")
 LIBRARY_REMOVE_BUSY = "{title} is still installing or updating. Wait for it to finish, then try again."
 LIBRARY_BEING_REMOVED = "That library is being removed."
+
+CATALOG_CHECKING = "Checking for catalog updates"
+CATALOG_NEWER_APP_NEEDED = "A newer version of Game Chooser is needed to see the latest catalog."
+CATALOG_LOAD_FAILED = "Couldn't load the catalog. Check your internet connection, then choose Retry."
+CATALOG_RANDOM_PROMPT = "Your game for today is...\n\n{title}\n\n{verb} now?"
+CATALOG_NO_GAMES = "No games available to choose from."
+CATALOG_NOT_IN_LIBRARY = "{title} is installed, but Game Chooser can't find it in your Library."

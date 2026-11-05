@@ -5,7 +5,7 @@ Never imports wx and never fetches anything (the agarchive link is shown as text
 import re
 from dataclasses import dataclass
 
-from engine.entries import _PLATFORM_LABELS, _sources, game_fields
+from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, platform_sources
 
 FLAG_LABELS = {"requires-registration": "needs registration"}
 LINK_LABELS = [
@@ -173,3 +173,48 @@ def initial_tab(saved: str | None, is_first_run: bool) -> str:
     if saved in ("catalog", "library"):
         return saved
     return "catalog" if is_first_run else "library"
+
+
+def action_kind(row: CatalogRow, platform: str | None = None) -> str:
+    """What Enter does on a row: "launch" (installed), "add" (a web game: every source for this platform is a
+    link, nothing downloads) or "install"."""
+    if row.installed:
+        return "launch"
+    sources = platform_sources(row.entry, platform or current_platform())
+    if sources and all(isinstance(s.get("install"), dict) and s["install"].get("method") == "url" for s in sources):
+        return "add"
+    return "install"
+
+
+_ACTION_VERBS = {"launch": "Launch", "add": "Add", "install": "Install"}
+
+
+def action_verb(row: CatalogRow, platform: str | None = None) -> str:
+    return _ACTION_VERBS[action_kind(row, platform)]
+
+
+def action_label(row: CatalogRow | None, platform: str | None = None) -> str:
+    """The action button's label; "Install" alone while nothing is selected."""
+    if row is None:
+        return "Install"
+    return f"{action_verb(row, platform)} {row.title}"
+
+
+def link_items(entry: dict | None) -> list[tuple[str, str]]:
+    """(menu label, url) for each http(s) link the entry has, in the context menu's order."""
+    links = entry.get("links") if entry else None
+    links = links if isinstance(links, dict) else {}
+    result = []
+    for key, label in _LINK_MENU:
+        url = links.get(key)
+        if isinstance(url, str) and url.startswith(("http://", "https://")):
+            result.append((label, url))
+    return result
+
+
+_LINK_MENU = [
+    ("homepage", "Open homepage"),
+    ("purchase", "Open purchase page"),
+    ("audiogames_net", "Open audiogames.net page"),
+    ("agarchive", "Open agarchive page"),
+]
