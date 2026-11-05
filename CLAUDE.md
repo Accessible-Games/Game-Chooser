@@ -83,7 +83,7 @@ or overwrites a player-owned file without a copy (only `.exe`, `.dll` and `.ocx`
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
 - **extract.py** - unpacks with the bundled tools; **run_installer.py** / **run_actions.py** - installers that run.
-- **runtimes.py** - shared runtimes under `%ProgramData%\GameChooseruntimes\<id>` (sealed by an elevated
+- **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated
   chain, marker `.gamechooser-runtime.json`), or private COM copies (`comfree.py`); **steps.py**, **registry.py**,
   **elevation.py** - catalog steps and the one program that runs elevated; **queue.py**, **status.py**,
   **plan.py** - the job queue, library status and the install confirmation plan for the UI.
