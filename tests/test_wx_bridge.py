@@ -36,6 +36,11 @@ class FakeFrame:
         raise AttributeError(name)
 
 
+class FakeJob:
+    def __init__(self, id):
+        self.id = id
+
+
 def in_thread(fn, *args):
     out = {}
     thread = threading.Thread(target=lambda: out.setdefault("value", fn(*args)), daemon=True)
@@ -46,17 +51,18 @@ def in_thread(fn, *args):
 def test_listener_posts_every_queue_event_to_the_frames_handler():
     post, frame = Recorder(), FakeFrame()
     listener = WxQueueListener(frame, post=post)
-    listener.job_started("J")
-    listener.job_progress("J", "P")
-    listener.job_finished("J", "R")
-    listener.job_failed("J", "M")
-    listener.job_cancelled("J")
+    j = FakeJob(1)
+    listener.job_started(j)
+    listener.job_progress(j, "P")
+    listener.job_finished(j, "R")
+    listener.job_failed(j, "M")
+    listener.job_cancelled(j)
     listener.queue_changed(2)
     for fn, args in post.posts:  # what the UI thread would run
         fn(*args)
-    assert frame.calls == [("on_job_started", ("J",)), ("on_job_progress", ("J", "P")),
-                           ("on_job_finished", ("J", "R")), ("on_job_failed", ("J", "M")),
-                           ("on_job_cancelled", ("J",)), ("on_queue_changed", (2,))]
+    assert frame.calls == [("on_job_started", (j,)), ("on_job_progress", (j, "P")),
+                           ("on_job_finished", (j, "R")), ("on_job_failed", (j, "M")),
+                           ("on_job_cancelled", (j,)), ("on_queue_changed", (2,))]
 
 
 def test_listener_drops_events_for_a_closed_window():
@@ -125,3 +131,29 @@ def test_the_first_answer_wins():
     assert gate.answer(True)
     assert not gate.cancel()
     assert gate.value is True
+
+
+def test_listener_records_each_job_end_before_posting_it():
+    post = Recorder()
+    listener = WxQueueListener(FakeFrame(), post=post)
+    a, b, c = FakeJob(1), FakeJob(2), FakeJob(3)
+    listener.job_started(a)
+    listener.job_progress(a, "P")
+    listener.queue_changed(1)
+    listener.job_finished(a, "R")
+    listener.job_failed(b, "M")
+    listener.job_cancelled(c)
+    assert listener.outcomes.drain() == [("finished", a, "R"), ("failed", b, "M"), ("cancelled", c, None)]
+
+
+def test_each_job_end_is_applied_once():
+    outcomes = wx_bridge.JobOutcomes()
+    a, b, c = FakeJob(1), FakeJob(2), FakeJob(3)
+    outcomes.add("finished", a, "R")
+    outcomes.add("failed", b, "M")
+    outcomes.add("cancelled", c)
+    assert outcomes.take(a)  # the normal UI path applies Alpha
+    assert not outcomes.take(a)  # ...and only once
+    assert outcomes.drain() == [("failed", b, "M"), ("cancelled", c, None)]  # quitting applies the rest
+    assert not outcomes.take(b) and not outcomes.take(c)  # a late UI event for them applies nothing
+    assert outcomes.drain() == []

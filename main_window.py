@@ -42,7 +42,7 @@ from description_field import DescriptionField
 from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
 from engine import messages
 from progress_area import ProgressArea
-from wx_bridge import WxInstallerUI, WxQueueListener
+from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener
 from wx_bridge import call_after as _call_after  # wx.CallAfter that does nothing once the app is gone
 
 log = logging.getLogger(__name__)
@@ -128,7 +128,10 @@ class MainFrame(wx.Frame):
             log.debug("Toast notifications aren't available", exc_info=True)
         # The queue's events and the engine's installer prompts reach this window on the UI thread only
         self.installer_ui = WxInstallerUI(self)
-        self.service = InstallService(self.library_manager, WxQueueListener(self), installer_ui=self.installer_ui)
+        self.job_outcomes = JobOutcomes()  # job ends not yet applied to the library (each is applied once)
+        self.service = InstallService(self.library_manager, WxQueueListener(self, outcomes=self.job_outcomes),
+                                      installer_ui=self.installer_ui)
+        self._quitting = False  # on_close is applying the last job ends: no dialogs, notifications or refreshes
         self._shown_job_id = None  # the job the progress areas show
         self._cancelling_job_id = None  # the job the player pressed Cancel on
         self._installer_wait_done = None  # Done's handler while "Waiting for the installer" shows
@@ -942,34 +945,68 @@ class MainFrame(wx.Frame):
     def _apply_finished(self, job, result):
         """A finished job (any action) reaches the library, then the player hears about it. Runs only while
         no dialog is open (run_when_no_dialog), so no dialog holds a game this replaces."""
+        if self.job_outcomes.take(job):  # not already applied while quitting
+            self._finished(job, result)
+
+    def _apply_failed(self, job, message):
+        if self.job_outcomes.take(job):
+            self._failed(job, message)
+
+    def _apply_cancelled(self, job):
+        if self.job_outcomes.take(job):
+            self._cancelled(job)
+
+    def _finished(self, job, result):
         try:
             self.service.apply_result(result)
         except Exception:
             log.exception("Couldn't apply the result of %s", job.title)
+        if self._quitting:
+            return
         self._refresh_after_job()
         self.notify(messages.finished_text(result.action, result.title or job.title, result.notes,
                                            result.backups))
         self._run_job_done_hooks(job)
 
-    def _apply_failed(self, job, message):
+    def _failed(self, job, message):
         try:
             self.service.job_failed(job)
         except Exception:
             log.exception("Couldn't clean up after %s failed", job.title)
+        if self._quitting:
+            return
         self._refresh_after_job()
-        self.notify(messages.FAILED.format(title=job.title))
+        self.notify(messages.failed_text(job.request.action, job.title))
         with self.modal_dialog():  # a second failure waits for this box instead of stacking on it
             wx.MessageBox(message, messages.INSTALL_PROBLEM_TITLE, wx.OK | wx.ICON_ERROR, self)
         self._run_job_done_hooks(job)
 
-    def _apply_cancelled(self, job):
+    def _cancelled(self, job):
         """A cancelled job is a failed one to the service (an uninstall's library stays), without the message"""
         try:
             self.service.job_failed(job)
         except Exception:
             log.exception("Couldn't clean up after %s was cancelled", job.title)
+        if self._quitting:
+            return
         self._refresh_after_job()
         self._run_job_done_hooks(job)
+
+    def _apply_outcomes_on_quit(self):
+        """Quitting: bring the library up to date with every job end whose UI event hasn't been applied, quietly.
+        First what waits for a dialog (a job that ended during the quit question), then the ends still in wx's
+        queue or never posted (a job that ended during the shutdown wait; Destroy drops those events)."""
+        self._run_deferred()
+        for kind, job, detail in self.job_outcomes.drain():
+            try:
+                if kind == "finished":
+                    self._finished(job, detail)
+                elif kind == "failed":
+                    self._failed(job, detail)
+                else:
+                    self._cancelled(job)
+            except Exception:
+                log.exception("Couldn't apply how %s ended while quitting", job.title)
 
     def _refresh_after_job(self):
         """Both lists, the Library tree, the Libraries menu and the statuses (a game or a library may have
@@ -1529,6 +1566,7 @@ class MainFrame(wx.Frame):
         if job is not None and event.CanVeto() and not self.confirm_quit_while_busy(job.title):
             event.Veto()
             return
+        self._quitting = True
         # A prompt the worker is blocked on answers "cancelled" first, so nothing can wait on this window
         self.installer_ui.release_all()
         queue.cancel_all()
@@ -1537,6 +1575,7 @@ class MainFrame(wx.Frame):
             self.Hide()  # the window goes at once; the cancelled job gets a moment to stop and tidy up
         if not queue.shutdown(QUIT_WAIT_SECONDS):
             log.warning("The install queue didn't stop within %s seconds", QUIT_WAIT_SECONDS)
+        self._apply_outcomes_on_quit()  # a job that ended meanwhile (an uninstall often ignores the cancel)
         self.library_manager.save_games()
         self.library_manager.save_config()
         self.Destroy()

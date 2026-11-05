@@ -281,12 +281,19 @@ MORE_WAITING = "{count} more waiting"
 INSTALLER_WAITING = "Waiting for the installer"
 INSTALLER_TARGET_TITLE = "Installing {title}"
 INSTALLER_TARGET = "When the installer asks where to install, use: {path}\n\nThe path is on your clipboard."
+INSTALLER_TARGET_NO_CLIPBOARD = "When the installer asks where to install, use: {path}"
 LOCATE_FOLDER = "Locate where {title} was installed"
 QUIT_WHILE_BUSY = "{title} is still installing. Cancel it and quit?"
 QUIT_WHILE_BUSY_TITLE = "Quit Game Chooser"
 JOB_ALREADY_RUNNING = "{title} is already installing. Its progress is shown below the games list."
 JOB_ALREADY_WAITING = "{title} is already waiting to install. It starts when the install before it finishes."
 INSTALL_NOT_STARTED = "Game Chooser couldn't start installing {title}. Try again."
+# The failure notification, by action (FAILED is the install one)
+FAILED_UPDATE = "{title} couldn't be updated"
+FAILED_UNINSTALL = "{title} couldn't be uninstalled"
+FAILED_REPAIR = "{title} couldn't be repaired"
+FAILED_UNDO = "{title} couldn't be restored to the previous version"
+FAILED_EXTRAS = "{title}'s extras couldn't be installed"
 
 
 def with_waiting(label: str, waiting: int) -> str:
@@ -294,12 +301,6 @@ def with_waiting(label: str, waiting: int) -> str:
     if waiting <= 0:
         return label
     return f"{label}, " + (ONE_MORE_WAITING if waiting == 1 else MORE_WAITING.format(count=waiting))
-
-
-def job_status(progress: Progress | None, title: str, waiting: int) -> str:
-    """The progress status for a job; before its first progress report it is being prepared."""
-    label = phase_label(progress, title) if progress is not None else JOB_PREPARING.format(title=title)
-    return with_waiting(label, waiting)
 
 
 def _sentence(text: str) -> str:
@@ -318,3 +319,9 @@ def finished_text(action: str, title: str, notes=(), backups: int = 0) -> str:
     if not notes:
         return text
     return " ".join([_sentence(text), *(_sentence(n) for n in notes)])
+
+
+def failed_text(action: str, title: str) -> str:
+    """The notification for a failed job, by its action."""
+    return {"update": FAILED_UPDATE, "uninstall": FAILED_UNINSTALL, "repair": FAILED_REPAIR, "undo": FAILED_UNDO,
+            "extras": FAILED_EXTRAS}.get(action, FAILED).format(title=title)

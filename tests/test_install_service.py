@@ -274,6 +274,21 @@ def test_last_library_remembered(rig):
     assert rig.service.plan("entombed").default_library == lib["id"]
 
 
+def test_last_library_not_remembered_when_submit_fails(rig):
+    lib = rig.library()
+    other = rig.library("Other")
+    rig.publish(game_entry(rig.routes))
+    rig.service.submit("install", "entombed", library_id=lib["id"])
+
+    def refuse(request, title):
+        raise RuntimeError("The install queue has been shut down.")
+    rig.service.queue.submit = refuse
+    with pytest.raises(RuntimeError):
+        rig.service.submit("install", "entombed", library_id=other["id"])
+    assert rig.manager.config["install"]["last_library"] == lib["id"]
+    assert json.loads(rig.manager.config_file.read_text())["install"]["last_library"] == lib["id"]
+
+
 def test_plan_and_blocked(rig):
     lib = rig.library()
     rig.publish(game_entry(rig.routes))

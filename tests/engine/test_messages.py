@@ -29,14 +29,6 @@ def test_with_waiting():
     assert with_waiting("Verifying", 3) == "Verifying, 3 more waiting"
 
 
-def test_job_status():
-    from engine.messages import job_status
-    assert job_status(None, "Entombed", 0) == "Preparing Entombed"
-    assert job_status(Progress("extracting"), "Entombed", 2) == "Extracting, 2 more waiting"
-    assert job_status(Progress("downloading", 1024, 2048), "Entombed", 1) == \
-        "Downloading Entombed, 1 of 2 kilobytes, 1 more waiting"
-
-
 def test_finished_text_per_action():
     from engine.messages import finished_text
     assert finished_text("install", "Entombed") == "Entombed is installed"
@@ -58,3 +50,13 @@ def test_finished_text_appends_each_note_as_a_sentence():
     assert finished_text("update", "Entombed", ["A note."], backups=1) == \
         "Updated Entombed. Kept a backup of 1 file you'd changed. A note."
     assert finished_text("install", "Entombed", ["", "  "]) == "Entombed is installed"
+
+
+def test_failed_text_per_action():
+    from engine.messages import failed_text
+    assert failed_text("install", "Entombed") == "Entombed couldn't be installed"
+    assert failed_text("update", "Entombed") == "Entombed couldn't be updated"
+    assert failed_text("uninstall", "Entombed") == "Entombed couldn't be uninstalled"
+    assert failed_text("repair", "Entombed") == "Entombed couldn't be repaired"
+    assert failed_text("undo", "Entombed") == "Entombed couldn't be restored to the previous version"
+    assert failed_text("extras", "Entombed") == "Entombed's extras couldn't be installed"

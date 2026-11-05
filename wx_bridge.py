@@ -53,12 +53,43 @@ def _call_if_alive(frame, name, *args):
         getattr(frame, name)(*args)
 
 
-class WxQueueListener:
-    """The install queue's listener: every call is passed to `frame.on_<name>` on the UI thread."""
+class JobOutcomes:
+    """How jobs ended that the library hasn't been brought up to date with yet. Thread-safe.
 
-    def __init__(self, frame, post=call_after):
+    The listener adds each end here (notifier thread) before posting it to the UI thread. Whoever applies it
+    first claims it with `take`: MainFrame's normal handler, or `drain` when quitting, for ends whose UI event
+    would otherwise never run (a job ending during the quit question or the shutdown wait). So each is applied
+    exactly once."""
+
+    def __init__(self):
+        self._lock = threading.Lock()
+        self._items: dict[int, tuple] = {}  # job id -> (kind, job, result or message), in arrival order
+
+    def add(self, kind: str, job, detail=None):
+        with self._lock:
+            self._items[job.id] = (kind, job, detail)
+
+    def take(self, job) -> bool:
+        """Claim a job's end for applying. False if it was already claimed (or never added)."""
+        with self._lock:
+            return self._items.pop(job.id, None) is not None
+
+    def drain(self) -> list[tuple]:
+        """Claim every end not yet applied: (kind, job, detail), oldest first."""
+        with self._lock:
+            items = list(self._items.values())
+            self._items.clear()
+            return items
+
+
+class WxQueueListener:
+    """The install queue's listener: every call is passed to `frame.on_<name>` on the UI thread. Job ends are
+    also recorded in `outcomes` first, so quitting can apply ones whose UI event never ran."""
+
+    def __init__(self, frame, post=call_after, outcomes: JobOutcomes | None = None):
         self.frame = frame
         self._post = post
+        self.outcomes = outcomes if outcomes is not None else JobOutcomes()
 
     def _send(self, name, *args):
         self._post(_call_if_alive, self.frame, name, *args)
@@ -70,12 +101,15 @@ class WxQueueListener:
         self._send("on_job_progress", job, progress)
 
     def job_finished(self, job, result):
+        self.outcomes.add("finished", job, result)
         self._send("on_job_finished", job, result)
 
     def job_failed(self, job, message):
+        self.outcomes.add("failed", job, message)
         self._send("on_job_failed", job, message)
 
     def job_cancelled(self, job):
+        self.outcomes.add("cancelled", job)
         self._send("on_job_cancelled", job)
 
     def queue_changed(self, waiting):
@@ -155,10 +189,6 @@ class WxInstallerUI:
 
     # ---- UI thread -------------------------------------------------------------------------------------------
 
-    @property
-    def closing(self) -> bool:
-        return self._closing
-
     def release_all(self):
         """Quitting: answer every open prompt as cancelled; later prompts return cancelled at once."""
         with self._lock:
@@ -190,18 +220,22 @@ class WxInstallerUI:
     def _show_target(self, gate, title, target):
         if self._stale(gate):
             return
+        copied = False
         try:
             if wx.TheClipboard.Open():
                 try:
-                    wx.TheClipboard.SetData(wx.TextDataObject(str(target)))
+                    copied = wx.TheClipboard.SetData(wx.TextDataObject(str(target)))
                     wx.TheClipboard.Flush()  # the path stays on the clipboard after Game Chooser closes
                 finally:
                     wx.TheClipboard.Close()
         except Exception:
             log.warning("Couldn't put the install folder on the clipboard", exc_info=True)
+        if not copied:
+            log.warning("The clipboard couldn't be opened; the install folder isn't on it")
+        text = messages.INSTALLER_TARGET if copied else messages.INSTALLER_TARGET_NO_CLIPBOARD
         try:
             with self.frame.modal_dialog():
-                wx.MessageBox(messages.INSTALLER_TARGET.format(path=target),
+                wx.MessageBox(text.format(path=target),
                               messages.INSTALLER_TARGET_TITLE.format(title=title),
                               wx.OK | wx.ICON_INFORMATION, self.frame)
         finally:

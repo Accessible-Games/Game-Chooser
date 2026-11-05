@@ -179,13 +179,14 @@ class InstallService:
     def submit(self, action: str, entry_id: str, library_id: str = "", library_path: Path | None = None,
                extras=(), delete_player_data: bool = False) -> Job:
         request = InstallRequest(action, entry_id, library_id, library_path, tuple(extras), delete_player_data)
-        if library_id:
+        job = self.queue.submit(request, self._title(entry_id))
+        if library_id:  # remembered only once the job is queued (submit raises after shutdown)
             self.manager.config["install"]["last_library"] = library_id
             try:
                 self.manager.save_config()
             except OSError as e:
                 log.warning("Couldn't save the last library: %s", e)
-        return self.queue.submit(request, self._title(entry_id))
+        return job
 
     def apply_result(self, result: JobResult) -> None:
         """Bring games.json up to date with a finished job (on the UI thread)."""
