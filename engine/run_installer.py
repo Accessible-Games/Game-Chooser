@@ -218,6 +218,26 @@ def _spans_older_folders(folder: Path, claimed: dict[str, str], since: float) ->
     return False
 
 
+def _set_aside_new_files(folder: Path, before: set[str], dest: Path, title: str) -> list[str]:
+    """Move the files that weren't in `folder` before an installer ran over an installed game into `dest`,
+    keeping their layout, and say so. They may be the installer's, or the player's (a save the running game
+    wrote during the window): nothing is deleted, and nothing already in `dest` from an earlier try is
+    replaced. A file that can't be moved stays where it is."""
+    moved = False
+    if folder.is_dir():
+        for rel, full in list(_walk(folder)):
+            if norm_key(rel) in before:
+                continue
+            try:
+                (dest / rel).parent.mkdir(parents=True, exist_ok=True)
+                os.replace(full, unique_path(dest / rel))
+            except OSError:
+                continue
+            moved = True
+            _prune_empty_dirs(full.parent, folder)
+    return [messages.NEW_FILES_SET_ASIDE.format(title=title, path=dest)] if moved else []
+
+
 def _remove_new_files(folder: Path, before: set[str], existed: bool) -> None:
     """Remove the files that weren't in `folder` before the installer ran; never one that was."""
     if not folder.is_dir():
@@ -678,6 +698,13 @@ def _setaside_root(ctx, catalog_id: str) -> Path:
     return Path(ctx.work_root) / ".setaside" / catalog_id
 
 
+def _new_files_root(ctx, catalog_id: str) -> Path:
+    """Where a failed or cancelled run over an installed game moves the files that appeared during its window
+    (beside the set-aside copies; an id never has a dot, so it is no other game's). Never removed by the engine:
+    a later run neither clears it nor refuses because of it."""
+    return Path(ctx.work_root) / ".setaside" / f"{catalog_id}.new"
+
+
 def require_no_setaside(ctx, catalog_id: str, title: str) -> None:
     """Refuse while copies of the player's files from an earlier try are still set aside."""
     root = _setaside_root(ctx, catalog_id)
@@ -802,8 +829,11 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
                                          *aside.kept_note(title)])) from e
     except BaseException as e:
         tree_done = getattr(e, "tree_done", tree_done)
-        _remove_new_files(game_dir, before, True)
-        kept = aside.restore(title, tree_done)
+        # A file that appeared during the window may be the player's (the running game writing a save), so it
+        # is moved beside the set-aside copies, never deleted; the copies go back as usual (R21 still decides
+        # when they are discarded).
+        kept = _set_aside_new_files(game_dir, before, _new_files_root(ctx, item.catalog_id), title)
+        kept += aside.restore(title, tree_done)
         if kept and isinstance(e, InstallFailed):
             raise InstallFailed("\n\n".join([e.message, *kept])) from e
         if kept and isinstance(e, Cancelled):

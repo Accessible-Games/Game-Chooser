@@ -32,6 +32,7 @@ NEEDS_SHARED_COMPONENT = ("{title} needs {component}, which needs administrator 
 
 # The install confirmation dialog (engine.plan).
 PLAN_DEPENDENCY_SHARED = "Also installs: {title} (needs administrator permission)"
+PLAN_DEPENDENCY_SHARED_PLAIN = "Also installs: {title}"
 PLAN_DEPENDENCY_PRIVATE = "Also installs: {title} (a private copy for this game)"
 PLAN_DEPENDENCY_SKIPPED = ("Needs {title}, which isn't installed because shared components are turned off in "
                            "Preferences")
@@ -213,6 +214,10 @@ EXTRAS_FILES_NOT_COPIED = ("{title}'s files couldn't be copied to add its extras
                            "check that the drive has free space, then try again.")
 UNDO_FILES_NOT_REMOVED = ("Some files from the newer version of {title} couldn't be removed, so they were left in its "
                           "folder. Uninstalling {title} removes them.")
+UNDO_BACKUPS_KEPT = ("Your copies of {names} weren't put back, because the files they would replace have changed "
+                     "since the update or couldn't be replaced. They are still in {title}'s backup folder.")
+NEW_FILES_SET_ASIDE = ("Files that appeared in {title}'s folder while its installer ran were moved to {path}. Look "
+                       "through them, and delete that folder once you don't need them.")
 
 
 def names(items: list[str]) -> str:

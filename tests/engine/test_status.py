@@ -40,6 +40,14 @@ def test_any_matching_hashed_source_means_no_update():
     assert not update_available(rec, entry([src(sha="e" * 64), src(sha="c" * 64)]), "windows")
 
 
+def test_installed_developer_file_later_accepted_by_the_catalog_is_not_an_update():
+    """M3: installed with catalog X and the developer's Z (noted); when the catalog accepts Z, nothing is new."""
+    rec = record(sha256="z" * 64, catalog_sha256="x" * 64)
+    assert not update_available(rec, entry([src(sha="z" * 64)]), "windows")
+    assert not update_available(rec, entry([src(sha="x" * 64)]), "windows")
+    assert update_available(rec, entry([src(sha="y" * 64)]), "windows")
+
+
 def test_hashes_added_later_compare_actual():
     assert not update_available(record(sha256="a" * 64, catalog_sha256=None), entry([src(sha="a" * 64)]), "windows")
 

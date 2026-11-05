@@ -130,6 +130,17 @@ def test_unknown_action_is_hard_error_and_undoes_earlier(tmp_path, ctx, fake_win
     assert fake_winreg.value(HKCU, r"Software\Game", "Path") is None
 
 
+@pytest.mark.parametrize("step", [5, "copy", None, ["copy"]])
+def test_step_that_isnt_an_object_is_a_hard_error(tmp_path, step):
+    with pytest.raises(StepError) as exc:
+        run_file_steps([step], tmp_path)
+    assert str(exc.value) == messages.STEP_UNKNOWN_ACTION
+    elev = FakeElevator()
+    with pytest.raises(StepError):
+        run_system_steps([step], StepContext(tmp_path, elev, RegistryAccess(elev, hkcu=FakeWinreg())))
+    assert elev.calls == []
+
+
 def test_unknown_action_in_file_steps_is_hard_error(tmp_path):
     (tmp_path / "a").write_text("a")
     with pytest.raises(StepError):

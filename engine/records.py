@@ -5,6 +5,7 @@ so it round-trips untouched; every other nested value is rebuilt into its datacl
 """
 
 import json
+import logging
 import os
 import typing
 from dataclasses import MISSING, asdict, dataclass, fields
@@ -12,6 +13,8 @@ from pathlib import Path
 
 from .paths import is_engine_dir, norm_key
 from .sources import hash_file
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -153,7 +156,11 @@ class RecordStore:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             return _record_from_dict(data)
-        except (OSError, ValueError, TypeError, KeyError):
+        except FileNotFoundError:
+            return None  # not installed: the normal case
+        except (OSError, ValueError, TypeError, KeyError) as e:
+            # Never silent: an unreadable record makes an installed game look uninstalled.
+            log.warning("The install record %s couldn't be read: %s", path, e)
             return None
 
     def save(self, record: InstallRecord) -> None:

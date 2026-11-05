@@ -338,7 +338,7 @@ def test_undo_restores_v1_and_puts_player_copies_back(tmp_path):
     assert (game / "sounds" / "a.wav").read_bytes() == b"a" and not (game / "sounds" / "b.wav").exists()
     for rel, data in PLAYER_FILES.items():
         assert (game / rel).read_bytes() == data
-    assert not (game / BK).exists()
+    assert not (game / BK).exists() and r.notes == []
     rec = record(eng)
     assert rec.previous is None and rec.source.sha256 == v1_sha and rec.source.version == "1.0"
     assert rec.files["pawprints.ini"].sha256 == sha(V1["pawprints.ini"])   # the player's copy is player-owned again
@@ -354,6 +354,7 @@ def test_undo_leaves_a_backup_whose_file_changed_after_the_update(tmp_path):
     assert (game / BK / "pawprints.ini").read_bytes() == EDITED_INI
     assert (game / BK / "pawprints (2).ini").read_bytes() == b"edited again after the update"
     assert r.backups == 1
+    assert r.notes == [messages.UNDO_BACKUPS_KEPT.format(title="Pawprints", names="pawprints.ini")]
 
 
 def test_undo_tries_recorded_url_then_mirror_path(tmp_path):
@@ -802,3 +803,17 @@ def test_adding_extras_offline_says_try_again_later(tmp_path):
     with pytest.raises(InstallFailed) as ei:
         run(eng, "extras", extras=("pawprints-voices",))
     assert ei.value.message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
+
+
+def test_fresh_install_whose_library_cant_be_created_leaves_the_old_steps_alone(tmp_path):
+    """M1: the record's folder is gone (an unplugged drive). Its registry settings are undone only once the
+    new install's workspace exists; if the library folder can't be made, nothing of the old install changes."""
+    eng, game = install_v1(tmp_path, play=False, steps=[reg_step("Path", "here")])
+    blocker = tmp_path / "unplugged"
+    blocker.write_bytes(b"not a folder")  # a library path under a file can't be created
+    eng.ctx.libraries = [{"name": "Other", "path": str(blocker / "Games")}]
+    with pytest.raises(InstallFailed) as ei:
+        eng.run(InstallRequest("install", "pawprints", "Other"), quiet, never)
+    assert ei.value.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=blocker / "Games")
+    assert eng.ctx.registry.values != {} and record(eng).steps == [{**reg_step("Path", "here"), "undo": {
+        "existed": False, "previous": None, "previous_type": None}}]

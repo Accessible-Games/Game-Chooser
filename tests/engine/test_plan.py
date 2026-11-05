@@ -76,9 +76,25 @@ def test_required_extras_listed_required(tmp_path):
     assert p.extras[1] == ExtraChoice("manual", "The manual", False, None)
 
 
+def bass():
+    return {"id": "bass", "kind": "runtime", "title": "BASS", "sources": [source(4)]}
+
+
 def test_dependency_lines():
     assert dependency_line(dx8vb(), True).text == (
         "Also installs: DirectX 8 for Visual Basic (needs administrator permission)")
+    # M2: a loose runtime with no register or HKLM step and no installer gets no prompt, so none is promised.
+    assert dependency_line(bass(), True).text == "Also installs: BASS"
+    assert dependency_line(bass(), False).text == "Also installs: BASS"
+    assert dependency_line(bass(), True).installs and dependency_line(bass(), True).size == 4
+    hklm = {**bass(), "sources": [{**source(4), "steps": [{"action": "registry", "hive": "HKLM", "key": "S", "name": "n",
+                                                            "type": "REG_SZ", "value": "v"}]}]}
+    assert dependency_line(hklm, False).text == "Also installs: BASS (needs administrator permission)"
+    installer = {**bass(), "sources": [source(4, method="installer", installer={"type": "inno", "mode": "run"})]}
+    assert dependency_line(installer, True).text == "Also installs: BASS (needs administrator permission)"
+    flagged = {**bass(), "sources": [source(4), source(5, method="installer", platform="macos",
+                                                      installer={"type": "inno", "mode": "run", "elevation": True})]}
+    assert dependency_line(flagged, True).text == "Also installs: BASS (needs administrator permission)"
     private = dependency_line(dx8vb(), False)
     assert private.text == "Also installs: DirectX 8 for Visual Basic (a private copy for this game)"
     assert private.installs and private.size == 2

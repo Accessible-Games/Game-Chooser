@@ -42,7 +42,8 @@ def repair(engine, entry: dict, rec: InstallRecord, game_dir: Path, progress, ca
                                              spare_steps=jobs._extra_steps(unpacked))
         extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, prior, cancel,
                                                               recorded=extra_sources)
-    return jobs.JobResult("repair", game_id, title, jobs._game_dict(entry, record), [*notes, *extra_notes],
+    return jobs.JobResult("repair", game_id, title, jobs._game_dict(entry, record, engine.ctx.platform),
+                          [*notes, *extra_notes],
                           backups=backups)
 
 
@@ -84,11 +85,12 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
             _retarget_rewritten(ctx, rec, game_dir, untouched)
             raise
     # The installer and extras have just rewritten those files, so each is compared with what they wrote.
-    restore_backups(game_dir, [jobs._rewritten_by(record.files, b) for b in untouched])
+    restored = restore_backups(game_dir, [jobs._rewritten_by(record.files, b) for b in untouched])
+    notes += jobs._backups_kept_note(game_dir, previous.get("backups") or [], restored, title)
     record.previous = None
     record.previous_unavailable = None
     ctx.records.save(record)
-    return jobs.JobResult("undo", game_id, title, jobs._game_dict(entry, record), [*notes, *extra_notes],
+    return jobs.JobResult("undo", game_id, title, jobs._game_dict(entry, record, ctx.platform), [*notes, *extra_notes],
                           backups=backups)
 
 

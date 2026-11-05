@@ -581,3 +581,12 @@ def test_library_folder_that_cannot_be_created_fails_plainly(tmp_path):
         engine.run(InstallRequest("install", "entombed", "Games", bad_lib), lambda p: None, never)
     assert ei.value.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=bad_lib)
     assert ctx.fetcher.requests == []
+
+
+def test_game_dict_labels_the_platform_installed_not_the_first_source(tmp_path):
+    routes = {}
+    e = game(routes)
+    e["sources"].insert(0, {**e["sources"][0], "platform": "macos", "url": "https://dev.example.com/mac.zip"})
+    engine, ctx, lib = setup(tmp_path, [e], routes)
+    r = engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert r.game["platforms"] == ["Windows"]

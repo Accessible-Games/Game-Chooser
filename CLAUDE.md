@@ -17,6 +17,15 @@ uv.exe run game-chooser.py
 uv sync
 ```
 
+### Running the Tests
+```bash
+uv run pytest -q            # the engine suite (tests/engine), no wxPython, pywin32 or network needed
+uv run pytest -q -m tools   # only the tests that need the bundled extraction tools in bin/
+```
+Markers (`pyproject.toml`): `tools` tests need `bin/7z.exe` and skip when it is absent; `windows` tests touch
+the real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-only behavior and skip
+elsewhere. Fetch the tools once with `uv run python scripts/fetch_tools.py` (bin/ is not committed).
+
 ### Testing Strategy
 
 #### Logic Testing Without Dependencies
@@ -60,6 +69,29 @@ print('games/game.exe excluded:', manager._is_path_exception('games/game.exe'))
 - Test edge cases: empty/None values, mixed states, boundaries
 - Isolate logic from UI/dependency layers
 - Avoid GUI testing without dependencies
+
+## Install Engine (`engine/`)
+
+A wx-free package that installs, updates, repairs, undoes and uninstalls games from the curated catalog
+(`https://catalog.accessiblegames.net/`), with its tests in `tests/engine/` (fakes in `tests/engine/fakes.py`).
+It never imports wx (a test enforces it), never runs elevated itself (only regsvr32, a machine-wide registry
+step, an installer flagged for elevation and the runtime lock-down chain go through UAC), and never deletes
+or overwrites a player-owned file without a copy (only `.exe`, `.dll` and `.ocx` are replaced in place).
+
+- **jobs.py** - `InstallEngine.run(InstallRequest)` routes install/update/repair/undo/extras/uninstall; raises
+  only `InstallFailed` (plain words from `messages.py`) or `Cancelled`.
+- **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
+  in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
+- **extract.py** - unpacks with the bundled tools; **run_installer.py** / **run_actions.py** - installers that run.
+- **runtimes.py** - shared runtimes under `%ProgramData%\GameChooseruntimes\<id>` (sealed by an elevated
+  chain, marker `.gamechooser-runtime.json`), or private COM copies (`comfree.py`); **steps.py**, **registry.py**,
+  **elevation.py** - catalog steps and the one program that runs elevated; **queue.py**, **status.py**,
+  **plan.py** - the job queue, library status and the install confirmation plan for the UI.
+
+**Bundled tools requirement:** `engine/extract.py` looks for `7z.exe`, `7z.dll` and `innoextract.exe` in the
+`bin/` folder beside the executable. `scripts/fetch_tools.py` downloads them (SHA256-pinned) into `bin/` with
+their licenses in `bin/licenses/`; `build_windows.sh` fetches them when missing and ships `bin/` and
+`THIRD_PARTY.md` next to the built exe. Without `bin/`, every zip, 7z, cab, Inno and NSIS install fails.
 
 ## Project Structure
 

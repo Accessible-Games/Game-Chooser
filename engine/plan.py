@@ -11,7 +11,7 @@ from . import messages
 from .entries import extras_of, platform_sources
 from .errors import InstallFailed
 from .run_installer import silent_args_for
-from .runtimes import _is_installer_runtime, _runs_installer, is_com_runtime, missing_runtimes
+from .runtimes import _has_elevated_steps, _is_installer_runtime, _runs_installer, is_com_runtime, missing_runtimes
 
 MANUAL_LIBRARY = "manual"
 _DEMO_FLAGS = ("demo", "requires-registration")
@@ -77,10 +77,19 @@ def _installer_only(runtime: dict, platform: str | None) -> bool:
     return bool(sources) and all(_runs_installer(s) for s in sources)
 
 
+def _needs_administrator(runtime: dict, platform: str | None) -> bool:
+    """True if installing the runtime machine-wide brings an administrator prompt: a register or HKLM step,
+    an installer that must run (its own prompt), or an installer flagged for elevation."""
+    flagged = any(bool(((s.get("install") or {}).get("installer") or {}).get("elevation"))
+                  for s in runtime.get("sources") or [] if isinstance(s, dict))
+    return _has_elevated_steps(runtime) or _installer_only(runtime, platform) or flagged
+
+
 def dependency_line(runtime: dict, register_shared_components: bool, platform: str | None = None) -> DependencyLine:
     """How one missing runtime is described, following what the install will do about it (plan_runtimes).
 
-    Without a `platform`, every source of the runtime is considered.
+    Without a `platform`, every source of the runtime is considered. A shared install is said to need
+    administrator permission only when it will ask for it.
     """
     title = _title(runtime)
     size = _size(runtime, platform)
@@ -89,7 +98,8 @@ def dependency_line(runtime: dict, register_shared_components: bool, platform: s
             return DependencyLine(runtime["id"], messages.PLAN_DEPENDENCY_SKIPPED.format(title=title), False, size)
         if is_com_runtime(runtime):
             return DependencyLine(runtime["id"], messages.PLAN_DEPENDENCY_PRIVATE.format(title=title), True, size)
-    return DependencyLine(runtime["id"], messages.PLAN_DEPENDENCY_SHARED.format(title=title), True, size)
+    text = messages.PLAN_DEPENDENCY_SHARED if _needs_administrator(runtime, platform) else messages.PLAN_DEPENDENCY_SHARED_PLAIN
+    return DependencyLine(runtime["id"], text.format(title=title), True, size)
 
 
 def _is_interactive(entry: dict, platform: str) -> bool:

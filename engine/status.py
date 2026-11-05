@@ -22,7 +22,9 @@ def update_available(record, entry: dict | None, platform: str) -> bool:
     installed = record.source
     hashes = [s["sha256"] for s in sources if s.get("sha256")]
     if hashes:
-        return (installed.catalog_sha256 or installed.sha256) not in hashes
+        # Either recorded hash: the catalog's at install time, or the file actually installed (a developer's
+        # changed file, installed with a note) that the catalog may since have accepted.
+        return installed.catalog_sha256 not in hashes and installed.sha256 not in hashes
     position = installed.position if 0 <= installed.position < len(sources) else 0
     current = sources[position]
     if current.get("url") != installed.url:

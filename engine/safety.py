@@ -63,8 +63,8 @@ def matches_persist(path: str, persist: Sequence[str]) -> bool:
         if pat.endswith("/"):
             if key.startswith(pat) or key + "/" == pat:
                 return True
-        elif fnmatch.fnmatchcase(key, pat):
-            return True
+        elif fnmatch.fnmatchcase(key, pat) or key.startswith(pat + "/"):
+            return True  # a pattern naming a folder, with or without the slash, protects everything under it
     return False
 
 

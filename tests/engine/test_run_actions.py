@@ -213,7 +213,9 @@ def test_undo_whose_installer_failed_keeps_the_undo_point_and_can_be_retried(tmp
     elevator.on_start = failing
     with pytest.raises(InstallFailed) as ei:
         run(eng, "undo")
-    assert ei.value.message == messages.INSTALLER_FAILED.format(title="Light Cars", code=5)
+    assert ei.value.message == "\n\n".join([  # the files the failed installer added were moved aside (M5)
+        messages.INSTALLER_FAILED.format(title="Light Cars", code=5),
+        messages.NEW_FILES_SET_ASIDE.format(title="Light Cars", path=eng.ctx.work_root / ".setaside" / "lightcars.new")])
     assert record(eng).previous is not None and record(eng).method == "zip"
     assert (folder / "Game Chooser backup 2026-11-04" / "cfg.ini").read_bytes() == b"volume=9 mine"
     elevator.exit_codes.clear()

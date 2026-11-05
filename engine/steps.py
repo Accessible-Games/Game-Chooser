@@ -31,8 +31,8 @@ class StepContext:
     registry: RegistryAccess
 
 
-def _action(step: dict) -> str:
-    action = step.get("action")
+def _action(step: object) -> str:
+    action = step.get("action") if isinstance(step, dict) else None
     if action not in FILE_ACTIONS and action not in SYSTEM_ACTIONS:
         raise StepError(messages.STEP_UNKNOWN_ACTION)
     return action

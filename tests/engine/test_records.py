@@ -45,10 +45,14 @@ def test_atomic_save_leaves_no_temp(tmp_path):
     assert [p.name for p in tmp_path.iterdir()] == ["entombed.json"]
 
 
-def test_unknown_fields_ignored_and_corrupt_kept(tmp_path):
+def test_unknown_fields_ignored_and_corrupt_kept(tmp_path, caplog):
     (tmp_path / "x.json").write_text("{not json")
     assert RecordStore(tmp_path).load("x") is None
     assert (tmp_path / "x.json").exists()
+    [warning] = [r for r in caplog.records if r.levelname == "WARNING"]  # M7: never silent
+    assert str(tmp_path / "x.json") in warning.getMessage() and "Expecting" in warning.getMessage()
+    caplog.clear()
+    assert RecordStore(tmp_path).load("absent") is None and caplog.records == []  # a missing record is normal
 
     store = RecordStore(tmp_path)
     store.save(make_record())

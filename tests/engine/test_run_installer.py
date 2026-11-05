@@ -630,13 +630,46 @@ def test_cancelled_update_restores_player_files_and_removes_only_new_ones(tmp_pa
         put(target, "new.dll", b"new")
         (target / "saves" / "slot1.sav").unlink()
     eng.ctx.elevator.on_start = installer
-    with pytest.raises(Cancelled):
+    with pytest.raises(InstallFailed) as ei:
         eng.run(InstallRequest("update", "lightcars"), quiet, lambda: bool(started))
     after = tree(target)
     assert after.pop("cfg.ini.new") == b"installer's half-written ini"
     assert after == before
-    assert not (eng.ctx.work_root / ".setaside" / "lightcars").exists()
+    # M5: a file that appeared during the window isn't deleted (it may be the player's, written by the running
+    # game); it is moved beside the set-aside copies, and the player is told where.
+    aside = eng.ctx.work_root / ".setaside" / "lightcars.new"
+    assert tree(aside) == {"new.dll": b"new"}
+    assert not (eng.ctx.work_root / ".setaside" / "lightcars").exists()  # the player's copies: back, discarded
+    assert ei.value.message == "\n\n".join([messages.INSTALLER_CANCELLED.format(title="Light Cars"),
+                                             messages.NEW_FILES_SET_ASIDE.format(title="Light Cars", path=aside)])
     assert eng.ctx.records.load("lightcars").source.version == "1.0"
+
+
+def test_failed_update_sets_new_files_aside_and_a_retry_neither_clears_nor_refuses_them(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path)
+    publish_v2(eng, routes)
+
+    def failing(exe, args, elevated):
+        eng.ctx.elevator.exit_codes[exe] = 7
+        put(target, "saves" / Path("slot2.sav"), b"written by the game during the window")
+    eng.ctx.elevator.on_start = failing
+    with pytest.raises(InstallFailed) as ei:
+        eng.run(InstallRequest("update", "lightcars"), quiet, never)
+    aside = eng.ctx.work_root / ".setaside" / "lightcars.new"
+    assert ei.value.message == "\n\n".join([messages.INSTALLER_FAILED.format(title="Light Cars", code=7),
+                                             messages.NEW_FILES_SET_ASIDE.format(title="Light Cars", path=aside)])
+    assert (aside / "saves" / "slot2.sav").read_bytes() == b"written by the game during the window"
+    assert not (target / "saves" / "slot2.sav").exists() and (target / "saves" / "slot1.sav").read_bytes() == b"save"
+    # A second failure keeps the earlier file too; a retry that works leaves the folder for the player.
+    eng.ctx.elevator.exit_codes.clear()
+    with pytest.raises(InstallFailed):
+        eng.run(InstallRequest("update", "lightcars"), quiet, never)
+    assert tree(aside) == {"saves/slot2.sav": b"written by the game during the window",
+                           "saves/slot2 (2).sav": b"written by the game during the window"}
+    eng.ctx.elevator.exit_codes.clear()
+    eng.ctx.elevator.on_start = writes(target, {"lc.exe": b"exe v2"})
+    r = eng.run(InstallRequest("update", "lightcars"), quiet, never)
+    assert r.game["launch_path"] == "Light Cars/lc.exe" and len(tree(aside)) == 2
 
 
 def test_failed_restore_keeps_set_aside_copies(tmp_path, monkeypatch):

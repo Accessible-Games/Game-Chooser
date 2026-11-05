@@ -3,6 +3,7 @@
 An entry with a value this app does not know is hidden, never an error.
 Unknown fields are ignored.
 """
+import re
 import sys
 from dataclasses import dataclass
 from urllib.parse import quote
@@ -16,6 +17,8 @@ KNOWN_INSTALLER_MODES = frozenset({"extract", "run"})
 KNOWN_STEP_ACTIONS = frozenset({"copy", "move", "delete", "registry", "register", "run"})
 
 _MIRROR_PREFIX = "https://files.accessiblegames.net/files/"
+# The catalog schema's id pattern. Ids become folder names and appear in elevated command lines.
+_ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 _PLATFORM_LABELS = {"windows": "Windows", "macos": "macOS", "linux": "Linux", "web": "Web"}
 
 
@@ -27,28 +30,43 @@ def current_platform() -> str:
     return "linux"
 
 
+def _sources(entry: dict) -> list[dict]:
+    """The entry's sources that are objects; anything else is skipped."""
+    sources = entry.get("sources")
+    return [s for s in sources if isinstance(s, dict)] if isinstance(sources, list) else []
+
+
 def platform_sources(entry: dict, platform: str) -> list[dict]:
-    return [s for s in entry.get("sources") or [] if s.get("platform") in (platform, "web")]
+    return [s for s in _sources(entry) if s.get("platform") in (platform, "web")]
 
 
-def _source_is_readable(source: dict) -> bool:
-    install = source.get("install") or {}
+def _source_is_readable(source: object) -> bool:
+    if not isinstance(source, dict) or not isinstance(source.get("install"), dict):
+        return False
+    install = source["install"]
     method = install.get("method")
     if method not in KNOWN_METHODS:
         return False
     if method == "installer":
-        installer = install.get("installer") or {}
+        installer = install.get("installer")
+        if not isinstance(installer, dict):
+            return False
         if installer.get("type") not in KNOWN_INSTALLER_TYPES:
             return False
         if installer.get("mode") not in KNOWN_INSTALLER_MODES:
             return False
-    return all(step.get("action") in KNOWN_STEP_ACTIONS for step in source.get("steps") or [])
+    steps = source.get("steps") or []
+    return isinstance(steps, list) and all(isinstance(step, dict) and step.get("action") in KNOWN_STEP_ACTIONS
+                                           for step in steps)
 
 
 def is_readable(entry: dict) -> bool:
     if entry.get("kind") not in KNOWN_KINDS:
         return False
-    return all(_source_is_readable(s) for s in entry.get("sources") or [])
+    if not isinstance(entry.get("id"), str) or not _ID.fullmatch(entry["id"]):
+        return False
+    sources = entry.get("sources") or []
+    return isinstance(sources, list) and all(_source_is_readable(s) for s in sources)
 
 
 def resolve_dependencies(entry_id: str, entries: dict) -> list[str]:
@@ -90,9 +108,14 @@ def _game_is_visible(entry: dict, entries: dict, platform: str) -> bool:
             return False
     return all(
         _usable(entries.get(x.get("id")), platform)
-        for x in entry.get("extras") or []
+        for x in _extras(entry)
         if x.get("required")
     )
+
+
+def _extras(entry: dict) -> list[dict]:
+    extras = entry.get("extras")
+    return [x for x in extras if isinstance(x, dict)] if isinstance(extras, list) else []
 
 
 def visible_games(entries: dict, platform: str) -> list[dict]:
@@ -107,7 +130,7 @@ class ExtraInfo:
 
 def extras_of(entry: dict, entries: dict, platform: str) -> list[ExtraInfo]:
     result = []
-    for x in entry.get("extras") or []:
+    for x in _extras(entry):
         extra = entries.get(x.get("id"))
         if _usable(extra, platform):
             result.append(ExtraInfo(extra, bool(x.get("required"))))
@@ -127,8 +150,10 @@ def mirror_url_for(sha256: str, name: str) -> str:
     return f"{_MIRROR_PREFIX}{sha256}/{quote(name)}"
 
 
-def game_fields(entry: dict) -> dict:
-    sources = entry.get("sources") or []
+def game_fields(entry: dict, platform: str | None = None) -> dict:
+    """The games.json fields. With `platform`, the platform label is that of the first source for it (the one
+    an install uses); without, the entry's first source."""
+    sources = platform_sources(entry, platform) if platform else _sources(entry)
     platforms = [_PLATFORM_LABELS.get(sources[0].get("platform"), "")] if sources else []
     genres = entry.get("genres") or []
     year = entry.get("year")

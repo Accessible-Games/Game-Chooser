@@ -1,7 +1,7 @@
 import pytest
 
 from engine.entries import (
-    current_platform, extras_of, game_fields, is_mirror_url, mirror_url_for,
+    current_platform, extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources,
     resolve_dependencies, visible_games,
 )
 from engine.errors import DependencyError
@@ -39,6 +39,34 @@ def test_unknown_values_hide_entry():
                 dict(sources=[src(install={"method": "installer", "installer": {"type": "msi", "mode": "x"}})]),
                 dict(sources=[src(steps=[{"action": "shell", "cmd": "x"}])])]:
         assert visible_games({"g": entry("g", **bad)}, "windows") == []
+
+
+@pytest.mark.parametrize("bad_id", ["Bad_ID", "UPPER", "a--b", "-a", "a-", "", "a b", "a.b", "a/b"])
+def test_id_outside_the_catalogs_pattern_hides_the_entry(bad_id):
+    """M9: ids become folder names and appear in elevated command lines; only ^[a-z0-9]+(-[a-z0-9]+)*$ is read."""
+    assert visible_games({bad_id: entry(bad_id)}, "windows") == []
+    assert visible_games({"ok-id-2": entry("ok-id-2")}, "windows")
+
+
+def test_malformed_sources_steps_and_extras_hide_or_skip_never_raise():
+    """Task 2/11 minors: a non-object where an object is due is read leniently, never an AttributeError."""
+    for bad in [dict(sources=[1]), dict(sources="x"), dict(sources=[None, src()]),
+                dict(sources=[src(install=5)]), dict(sources=[src(install={"method": "installer", "installer": "inno"})]),
+                dict(sources=[src(steps=[1])]), dict(sources=[src(steps="copy")]), dict(sources=[src(steps=[None])])]:
+        assert visible_games({"g": entry("g", **bad)}, "windows") == []
+    g = entry("g", extras=[1, "x", None, {"id": "e", "required": True}])
+    e = entry("e", kind="extra")
+    assert [x["id"] for x in visible_games({"g": g, "e": e}, "windows")] == ["g"]
+    assert [x.entry["id"] for x in extras_of(g, {"g": g, "e": e}, "windows")] == ["e"]
+    assert platform_sources({"sources": [1, None, src(), "x"]}, "windows") == [src()]
+
+
+def test_game_fields_label_the_platform_the_install_is_for():
+    """M10: an entry listing a macOS source first still shows Windows for a Windows install."""
+    e = entry("g", sources=[src(platform="macos"), src()])
+    assert game_fields(e)["platforms"] == ["macOS"]
+    assert game_fields(e, "windows")["platforms"] == ["Windows"]
+    assert game_fields(entry("g", sources=[src(platform="macos")]), "windows")["platforms"] == []
 
 
 def test_unknown_fields_are_ignored():

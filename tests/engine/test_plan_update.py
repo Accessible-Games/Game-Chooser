@@ -113,6 +113,11 @@ def test_ops_are_sorted_and_path_falls_back():
     ("config\\user.ini", ["*.ini"], True),
     ("a/b.txt", ["*.ini"], False),
     ("a/b.txt", [], False),
+    ("Saves/s1.dat", ["Saves"], True),      # a folder named without the slash protects what is under it too
+    ("saves/sub/x", ["Saves"], True),
+    ("Saves", ["Saves"], True),
+    ("SavesX/x", ["Saves"], False),
+    ("data/Saves/x", ["Saves"], False),
 ])
 def test_matches_persist(path, pats, expected):
     assert matches_persist(path, pats) is expected

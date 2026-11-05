@@ -50,7 +50,7 @@ from .errors import Cancelled, EngineError, ExtractError, InstallFailed, NoVerif
 from .folders import target_folder
 from .launch import find_launch_exe
 from .messages import Progress
-from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key
+from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key, safe_join
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
 from .recycle import send_to_recycle_bin
 from .installer_watch import ProcessWatch, watch_process
@@ -444,7 +444,7 @@ class InstallEngine:
         record, notes = place(item, _extra_steps(unpacked))
         extra_notes, backups = self._extras_after_installer(entry, record, unpacked, staging, prior, cancel)
         private_notes = self._private_after_installer(entry, record, list(private))
-        return JobResult(action, entry["id"], title, _game_dict(entry, record),
+        return JobResult(action, entry["id"], title, _game_dict(entry, record, self.ctx.platform),
                          [*([fetched.note] if fetched.note else []), *notes, *extra_notes, *private_notes],
                          backups=backups)
 
@@ -622,12 +622,13 @@ class InstallEngine:
         deps = runtimes.plan_runtimes(entry, ctx)  # refuses a dependency cycle
 
         notes: list[str] = []
-        if record is not None:
-            # Its folder is gone (or its library isn't set up any more): a fresh install, whose record
-            # replaces this one. The old system steps are undone first, so none is left untracked and
-            # the new ones record the player's values, not Game Chooser's leftovers.
-            notes = self._forget_steps(record, folder or library_path / record.folder)
         with self._workspace(library_path, game_id) as (staging, work):
+            if record is not None:
+                # Its folder is gone (or its library isn't set up any more): a fresh install, whose record
+                # replaces this one. The old system steps are undone first, so none is left untracked and
+                # the new ones record the player's values, not Game Chooser's leftovers. Only once the new
+                # install can go ahead: with the library's drive unplugged, the old game stays as it is.
+                notes = self._forget_steps(record, folder or library_path / record.folder)
             self._install_runtimes(deps, work, progress, cancel)
             fetched = self._fetch_game(entry, work, progress, cancel)
             if _runs_installer(fetched.source):
@@ -699,7 +700,7 @@ class InstallEngine:
                 raise InstallFailed("\n\n".join([str(e), *undo_failures])) from e
             raise
 
-        return JobResult("install", game_id, _title(entry), _game_dict(entry, record), [*staged.notes(), *notes])
+        return JobResult("install", game_id, _title(entry), _game_dict(entry, record, ctx.platform), [*staged.notes(), *notes])
 
     # ---- changing an installed game -------------------------------------------
 
@@ -816,7 +817,7 @@ class InstallEngine:
         rec.previous_unavailable = None
         rec.uninstalled = False
         ctx.records.save(rec)
-        return JobResult(action, game_id, title, _game_dict(entry, rec),
+        return JobResult(action, game_id, title, _game_dict(entry, rec, ctx.platform),
                          [*staged.notes(), *notes, *_went_without(title, deps)], backups=len(result.backups))
 
     def _stage_recorded(self, entry: dict, source: InstalledSource, extra_sources: dict[str, InstalledSource],
@@ -867,7 +868,7 @@ class InstallEngine:
         rec.method = (staged.game.source.get("install") or {}).get("method", rec.method)
         _keep_backups(rec, result.backups, prior)
         ctx.records.save(rec)
-        return JobResult("repair", game_id, title, _game_dict(entry, rec), notes, backups=len(result.backups))
+        return JobResult("repair", game_id, title, _game_dict(entry, rec, ctx.platform), notes, backups=len(result.backups))
 
     def _undo(self, entry: dict, rec: InstallRecord, game_dir: Path, progress, cancel) -> JobResult:
         """Reinstall the previous version under the same rules, then put back the player's copies the
@@ -918,7 +919,8 @@ class InstallEngine:
                 raise
 
         # The undo has just rewritten those files, so each is compared with what the undo wrote.
-        restore_backups(game_dir, [_rewritten_by(plan.new_files, b) for b in untouched])
+        restored = restore_backups(game_dir, [_rewritten_by(plan.new_files, b) for b in untouched])
+        notes += _backups_kept_note(game_dir, previous.get("backups") or [], restored, title)
         rec.files = plan.new_files
         rec.steps = steps
         rec.source = source
@@ -930,7 +932,7 @@ class InstallEngine:
         rec.previous = None
         rec.previous_unavailable = None
         ctx.records.save(rec)
-        return JobResult("undo", game_id, title, _game_dict(entry, rec), notes, backups=len(result.backups))
+        return JobResult("undo", game_id, title, _game_dict(entry, rec, ctx.platform), notes, backups=len(result.backups))
 
     def _retarget_backups(self, rec: InstallRecord, game_dir: Path, untouched: list[dict],
                           incoming: dict[str, RecordedFile]) -> None:
@@ -985,7 +987,7 @@ class InstallEngine:
         rec.extras.update({x["id"]: _installed_source(x, f, ctx.platform) for x, f in fetched})
         ctx.records.save(rec)
         notes = [*dict.fromkeys(f.note for _, f in fetched if f.note), *notes]
-        return JobResult("extras", game_id, title, _game_dict(entry, rec), notes, backups=len(result.backups))
+        return JobResult("extras", game_id, title, _game_dict(entry, rec, ctx.platform), notes, backups=len(result.backups))
 
     def _apply_extras(self, entry: dict, rec: InstallRecord, game_dir: Path, tree: Path,
                       unpacked: list[tuple[dict, Fetched, Path]], prior: dict | None, cancel, every: bool = False
@@ -1179,8 +1181,8 @@ def _incoming(tree: Path, owners: dict[str, str], game_id: str) -> dict[str, Rec
             for key, (display, sha) in hash_tree(tree).items()}
 
 
-def _game_dict(entry: dict, rec: InstallRecord) -> dict:
-    """The games.json fields for an installed catalog game.
+def _game_dict(entry: dict, rec: InstallRecord, platform: str) -> dict:
+    """The games.json fields for an installed catalog game, labelled with the platform it was installed for.
 
     A game an installer put outside every library is a "manual" game with an absolute launch path.
     """
@@ -1189,7 +1191,7 @@ def _game_dict(entry: dict, rec: InstallRecord) -> dict:
     else:
         launch_path, library_name = str(Path(rec.folder) / rec.launch_path), "manual"
     return {
-        **game_fields(entry),
+        **game_fields(entry, platform),
         "launch_path": launch_path,
         "library_name": library_name,
         "catalog_id": rec.catalog_id,
@@ -1266,6 +1268,21 @@ def _exact_urls(recorded: InstalledSource, catalog_sources: list[dict]) -> list[
 
 def _names_checksum(url: str, sha256: str) -> bool:
     return sha256.lower() in [part.lower() for part in urlparse(url).path.split("/")]
+
+
+def _backups_kept_note(game_dir: Path, backups: list[dict], restored: list[str], title: str) -> list[str]:
+    """After an undo: a note naming the player's copies that are still in the backup folder (the file they
+    would replace has changed since the update, or couldn't be replaced), if there are any."""
+    kept = []
+    for b in backups:
+        try:
+            if b["original"] not in restored and safe_join(game_dir, b["backup"]).is_file():
+                kept.append(b["original"])
+        except (KeyError, TypeError, UnsafePath, OSError):
+            continue
+    if not kept:
+        return []
+    return [messages.UNDO_BACKUPS_KEPT.format(title=title, names=messages.names(list(dict.fromkeys(kept))))]
 
 
 def _untouched_backups(game_dir: Path, backups: list[dict]) -> list[dict]:
