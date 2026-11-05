@@ -195,6 +195,28 @@ def _holds_other_content(folder: Path, claimed: dict[str, str]) -> bool:
     return False
 
 
+def _spans_older_folders(folder: Path, claimed: dict[str, str], since: float) -> bool:
+    """True if the claimed files span several top-level entries of `folder` and one of those already held
+    a file before `since`: then the window's files there may be another program's (a save written
+    meanwhile), not the installer's."""
+    tops = {rel.replace("\\", "/").split("/", 1)[0] for rel in claimed.values()}
+    if len(tops) < 2:
+        return False
+    for top in tops:
+        path = folder / top
+        if not path.is_dir() or is_link(path):
+            continue
+        for _, full in _walk(path):
+            try:
+                st = full.stat()
+            except OSError:
+                continue
+            born = getattr(st, "st_birthtime", None)
+            if (born if born is not None else st.st_mtime) < since:
+                return True
+    return False
+
+
 def _remove_new_files(folder: Path, before: set[str], existed: bool) -> None:
     """Remove the files that weren't in `folder` before the installer ran; never one that was."""
     if not folder.is_dir():
@@ -240,15 +262,22 @@ def _interactive(ctx, installer: dict, title: str) -> bool:
     return True
 
 
+def _not_started(message: str) -> InstallFailed:
+    """The program didn't start, so nothing of it can still be running (`tree_done`)."""
+    error = InstallFailed(message)
+    error.tree_done = True
+    return error
+
+
 def _start(ctx, exe: str, args: str, elevated: bool, cwd: Path | None, title: str) -> tuple[RunningProcess, bool]:
     try:
         return ctx.elevator.start(exe, args, elevated, cwd), elevated
     except ElevationDeclined as e:
-        raise InstallFailed(messages.ELEVATION_DECLINED.format(what=title)) from e
+        raise _not_started(messages.ELEVATION_DECLINED.format(what=title)) from e
     except StepError as e:
         if not elevated and getattr(e.__cause__, "winerror", None) == _ERROR_ELEVATION_REQUIRED:
             return _start(ctx, exe, args, True, cwd, title)  # Its manifest asks for administrator rights.
-        raise InstallFailed(str(e)) from e
+        raise _not_started(str(e)) from e
 
 
 def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Path | None,
@@ -532,7 +561,7 @@ def _track_and_record(ctx, item: RunItem, folder: Path, in_target: bool, before:
     claimed = _claimed(folder, start, time.time(), window_before, CLOCK_SLACK)
     if claimed and not in_target:
         folder, claimed = _narrowed(folder, claimed)  # Not the rest of a shared developer folder.
-        if _holds_other_content(folder, claimed):
+        if _holds_other_content(folder, claimed) or _spans_older_folders(folder, claimed, start - CLOCK_SLACK):
             claimed = {}  # Its files can't be told from what else is there.
     notes = []
     if claimed:
@@ -705,8 +734,10 @@ class _SetAside:
                     raise OSError(f"Copy differs: {rel}")
             except OSError:
                 failed.append(rel)
-        if failed or not tree_done:
+        if failed:
             return self.kept_note(title)
+        if not tree_done:  # Every file is back, but something may still write: the copies stay (R21).
+            return self.kept_note(title, messages.SETASIDE_KEPT_TO_BE_SAFE)
         shutil.rmtree(self.root, ignore_errors=True)
         return []
 
@@ -755,6 +786,8 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
         kept = aside.restore(title, tree_done)
         if kept and isinstance(e, InstallFailed):
             raise InstallFailed("\n\n".join([e.message, *kept])) from e
+        if kept and isinstance(e, Cancelled):
+            raise InstallFailed("\n\n".join([messages.INSTALLER_CANCELLED.format(title=title), *kept])) from e
         raise
     notes = aside.restore(title, tree_done)
 
@@ -842,8 +875,14 @@ def run_vendor_uninstaller(ctx, record: InstallRecord, game_dir: Path, title: st
         raise InstallFailed("\n\n".join([messages.INSTALLER_STILL_RUNNING.format(title=title),
                                          *aside.kept_note(title, messages.SETASIDE_NOT_PUT_BACK)])) from e
     except BaseException as e:
-        if getattr(e, "tree_done", False):
-            aside.restore(title, True)
+        if getattr(e, "tree_done", False):  # It stopped, or never started: the files go back.
+            kept = aside.restore(title, True)
+        else:
+            kept = aside.kept_note(title, messages.SETASIDE_NOT_PUT_BACK)
+        if kept and isinstance(e, InstallFailed):
+            raise InstallFailed("\n\n".join([e.message, *kept])) from e
+        if kept and isinstance(e, Cancelled):
+            raise InstallFailed("\n\n".join([messages.UNINSTALLER_CANCELLED.format(title=title), *kept])) from e
         raise
     notes = [messages.VENDOR_UNINSTALLER_RAN.format(title=title)]
     if outcome.code not in (None, 0, *_RESTART_CODES):

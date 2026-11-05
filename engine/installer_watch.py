@@ -82,62 +82,140 @@ def process_parents() -> list[tuple[int, int]]:
         kernel32.CloseHandle(snapshot)
 
 
-def _creation_time(handle) -> float | None:
-    try:
-        import win32process
-        return win32process.GetProcessTimes(handle)["CreationTime"].timestamp()
-    except Exception:
-        return None
+class ProcessGone(Exception):
+    """The process has already exited and gone."""
 
 
-class _TreeWatch:
-    def __init__(self, process: RunningProcess):
-        self._process = process
-        self._job = getattr(process, "job", None)  # owned by the process; closed by process.close()
-        self._children: dict[int, object] = {}  # pid -> SYNCHRONIZE handle
-        self._known: dict[int, float] = {process.pid: _creation_time(process.handle) or 0.0}
-        self._followed = True
-        self._sweep()
+class _WindowsProcesses:
+    """What the watch needs from Windows. Tests pass a fake with the same methods."""
 
-    def _sweep(self) -> None:
-        """Start watching every new process whose parent is watched."""
+    def processes(self) -> list[tuple[int, int]]:
+        return process_parents()
+
+    def open(self, pid: int):
+        """A SYNCHRONIZE handle to a running process. Raises ProcessGone, or OSError if it can't be opened."""
         import pywintypes
         import win32api
         try:
-            pairs = process_parents()
+            return win32api.OpenProcess(_SYNCHRONIZE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        except pywintypes.error as e:
+            if e.winerror == _ERROR_INVALID_PARAMETER:
+                raise ProcessGone() from e
+            raise OSError(e.winerror, e.strerror) from e
+
+    def hold(self, process: RunningProcess):
+        """A handle of our own to the started program, kept while its own may be closed; None if refused."""
+        import win32api
+        import win32con
+        try:
+            current = win32api.GetCurrentProcess()
+            return win32api.DuplicateHandle(current, process.handle, current, 0, False,
+                                            win32con.DUPLICATE_SAME_ACCESS)
+        except Exception:
+            return None
+
+    def created(self, handle) -> float | None:
+        try:
+            import win32process
+            return win32process.GetProcessTimes(handle)["CreationTime"].timestamp()
+        except Exception:
+            return None
+
+    def running(self, handle) -> bool:
+        import win32event
+        return win32event.WaitForSingleObject(handle, 0) == win32event.WAIT_TIMEOUT
+
+    def kill(self, pid: int) -> None:
+        import win32api
+        try:
+            handle = win32api.OpenProcess(_PROCESS_TERMINATE, False, pid)
+        except Exception:
+            return  # gone, or elevated: usually refused
+        try:
+            win32api.TerminateProcess(handle, 1)
+        except Exception:
+            pass
+        finally:
+            handle.Close()
+
+    def close(self, handle) -> None:
+        try:
+            handle.Close()
+        except Exception:
+            pass
+
+    def job_running(self, job) -> bool:
+        import win32job
+        info = win32job.QueryInformationJobObject(job, win32job.JobObjectBasicAccountingInformation)
+        return info["ActiveProcesses"] > 0
+
+    def kill_job(self, job) -> None:
+        import win32job
+        try:
+            win32job.TerminateJobObject(job, 1)
+        except Exception:
+            pass
+
+
+class _TreeWatch:
+    """Windows reuses a process id once every handle to its process is closed. The watch holds a handle
+    to each process it follows, the started program included (its own handle is closed by `wait`), so
+    a parent id in the process list always means the process the watch knows. If the started program
+    can't be held, it stops counting as a parent once it has exited."""
+
+    def __init__(self, process: RunningProcess, system=None):
+        self._system = system if system is not None else _WindowsProcesses()
+        self._process = process
+        self._job = getattr(process, "job", None)  # owned by the process; closed by process.close()
+        self._root = self._system.hold(process)
+        self._children: dict[int, object] = {}  # pid -> SYNCHRONIZE handle
+        created = self._system.created(self._root if self._root is not None else process.handle)
+        self._known: dict[int, float] = {process.pid: created or 0.0}
+        self._followed = True
+        self._sweep()
+
+    def _parents(self) -> set[int]:
+        """Watched ids that still name the watched process (see the class notes)."""
+        parents = set(self._children)
+        if self._root is not None or self._process.wait(0) is None:
+            parents.add(self._process.pid)
+        return parents
+
+    def _sweep(self) -> None:
+        """Start watching every new process whose parent is watched."""
+        try:
+            pairs = self._system.processes()
         except OSError:
             self._followed = False
             return
+        parents = self._parents()
         grew = True
         while grew:
             grew = False
             for pid, parent in pairs:
-                if pid in self._known or parent not in self._known:
+                if pid in self._known or parent not in parents:
                     continue
                 try:
-                    handle = win32api.OpenProcess(_SYNCHRONIZE | _PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
-                except pywintypes.error as e:
-                    if e.winerror != _ERROR_INVALID_PARAMETER:
-                        self._followed = False  # running, but can't be watched
+                    handle = self._system.open(pid)
+                except ProcessGone:
                     continue
-                created = _creation_time(handle)
+                except OSError:
+                    self._followed = False  # running, but can't be watched
+                    continue
+                created = self._system.created(handle)
                 if created is not None and created < self._known[parent]:
-                    handle.Close()  # an older process whose parent id was reused: not ours
+                    self._system.close(handle)  # an older process whose parent id was reused: not ours
                     continue
                 self._known[pid] = created or 0.0
                 self._children[pid] = handle
+                parents.add(pid)
                 grew = True
 
     def _children_running(self) -> bool:
-        import win32event
-        return any(win32event.WaitForSingleObject(h, 0) == win32event.WAIT_TIMEOUT for h in self._children.values())
+        return any(self._system.running(h) for h in self._children.values())
 
     def _job_running(self) -> bool:
-        if self._job is None:
-            return False
-        import win32job
-        info = win32job.QueryInformationJobObject(self._job, win32job.JobObjectBasicAccountingInformation)
-        return info["ActiveProcesses"] > 0
+        return self._job is not None and self._system.job_running(self._job)
 
     def poll(self, timeout: float) -> bool:
         main_done = self._process.wait(timeout) is not None
@@ -157,39 +235,23 @@ class _TreeWatch:
         return self._followed
 
     def terminate(self) -> None:
-        import win32api
-        import win32job
         if self._job is not None:
-            try:
-                win32job.TerminateJobObject(self._job, 1)
-            except Exception:
-                pass
-        import win32event
+            self._system.kill_job(self._job)
         # Only processes still running whose handle is held: Windows never reuses a pid while a handle
         # to that process is open, so no other program can be hit.
-        running = [pid for pid, h in self._children.items()
-                   if win32event.WaitForSingleObject(h, 0) == win32event.WAIT_TIMEOUT]
+        running = [pid for pid, h in self._children.items() if self._system.running(h)]
         if self._process.wait(0) is None:
             running.append(self._process.pid)
         for pid in running:
-            try:
-                handle = win32api.OpenProcess(_PROCESS_TERMINATE, False, pid)
-            except Exception:
-                continue  # gone, or elevated: usually refused
-            try:
-                win32api.TerminateProcess(handle, 1)
-            except Exception:
-                pass
-            finally:
-                handle.Close()
+            self._system.kill(pid)
 
     def close(self) -> None:
         for handle in self._children.values():
-            try:
-                handle.Close()
-            except Exception:
-                pass
+            self._system.close(handle)
         self._children = {}
+        if self._root is not None:
+            self._system.close(self._root)
+            self._root = None
         self._process.close()
 
 

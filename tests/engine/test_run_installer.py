@@ -831,7 +831,7 @@ def test_update_keeps_copies_when_the_tree_wasnt_seen_to_finish(tmp_path):
     eng.ctx.process_watch = watch_with(observed=False)  # e.g. an elevated bootstrapper's child couldn't be followed
     r = eng.run(InstallRequest("update", "lightcars"), quiet, never)
     assert (target / "cfg.ini").read_bytes() == b"volume=9 mine"
-    assert messages.SETASIDE_KEPT.format(title="Light Cars", path=setaside(eng)) in r.notes
+    assert messages.SETASIDE_KEPT_TO_BE_SAFE.format(title="Light Cars", path=setaside(eng)) in r.notes
     # The child that was still running now deletes the player's files: their copies are still safe.
     (target / "cfg.ini").unlink()
     (target / "saves" / "slot1.sav").unlink()
@@ -858,7 +858,7 @@ def test_done_pressed_early_keeps_the_copies(tmp_path):
         put(target, "cfg.ini", b"volume=7")
     eng.ctx.elevator.on_start = installer
     r = eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert messages.SETASIDE_KEPT.format(title="Light Cars", path=setaside(eng)) in r.notes
+    assert messages.SETASIDE_KEPT_TO_BE_SAFE.format(title="Light Cars", path=setaside(eng)) in r.notes
     assert (setaside(eng) / "cfg.ini").read_bytes() == b"volume=9 mine"
 
 
@@ -1167,3 +1167,147 @@ def test_tree_watch_follows_children_outside_any_job(tmp_path):
         assert time.monotonic() - started >= 1.2 and watch.tree_observed()
     finally:
         watch.close()
+
+
+# ---- fix round 2 -------------------------------------------------------------------------------------------
+
+
+# Finding 2(c): claims spanning a folder that was already there can't be told from another program's files.
+
+def _dev_install(tmp_path, before, during):
+    """Light Cars installed into a shared Dev folder named by its Windows entry; `before` is already
+    there, `during` is written while the installer runs (by it, or by something else)."""
+    routes = {}
+    dev = tmp_path / "Program Files" / "Dev"
+    for rel, data in before.items():
+        put(dev, rel, data)
+    time.sleep(0.05)
+    keys = FakeUninstallKeys()
+    place = writes(dev, during)
+
+    def on_start(exe, args, elevated):
+        place(exe, args, elevated)
+        keys.add("LC", {"DisplayName": "Light Cars", "InstallLocation": str(dev)})
+    eng, lib = setup_engine(tmp_path, [run_game(routes, installer={"type": "inno"})], routes,
+                            on_start=on_start, uninstall_reader=keys)
+    return eng, dev
+
+
+def test_claims_spanning_a_folder_that_was_already_there_are_untracked(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
+    eng, dev = _dev_install(tmp_path, {"OldGame/old.dat": b"o"},
+                            {"NewGame/lc.exe": b"exe", "OldGame/newsave.sav": b"the other game saved"})
+    r = install(eng)
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.tracked is False and rec.files == {}
+    assert messages.UNTRACKED_NOTE.format(title="Light Cars") in r.notes
+    assert (dev / "OldGame" / "newsave.sav").exists()
+
+
+def test_claims_spanning_only_new_folders_stay_tracked(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
+    eng, dev = _dev_install(tmp_path, {}, {"NewGame/lc.exe": b"exe", "Common/shared.dll": b"c"})
+    install(eng)
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.tracked and set(rec.files) == {"newgame/lc.exe", "common/shared.dll"}
+
+
+# Finding A: a program that never started has nothing running; the copies go back and go.
+
+def test_update_whose_installer_never_started_leaves_no_copies_and_can_be_retried(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path, elevation=True)
+    publish_v2(eng, routes, elevation=True)
+    eng.ctx.elevator.decline = True
+    with pytest.raises(InstallFailed) as ei:
+        eng.run(InstallRequest("update", "lightcars"), quiet, never)
+    assert ei.value.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
+    assert not setaside(eng).exists()
+    assert (target / "cfg.ini").read_bytes() == b"volume=9 mine"
+    eng.ctx.elevator.decline = False
+    eng.ctx.elevator.on_start = overwrites_cfg(target)
+    eng.run(InstallRequest("update", "lightcars"), quiet, never)
+    assert eng.ctx.records.load("lightcars").source.version == "2.0"
+
+
+def test_vendor_uninstall_whose_uninstaller_never_started_puts_files_back_and_can_be_retried(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path, vendor=True, elevation=True)
+    eng.ctx.elevator.decline = True
+    with pytest.raises(InstallFailed) as ei:
+        eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert ei.value.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
+    assert not setaside(eng).exists()
+    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save", "unins000.exe": b"uninstaller"}
+    eng.ctx.elevator.decline = False
+    eng.ctx.elevator.on_start = None  # the uninstaller itself changes nothing here
+    eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+
+
+# Findings C and D: a cancel that keeps the copies says where they are, in words that fit what happened.
+
+def hangs_once_started(eng, then):
+    started = []
+
+    def program(exe, args, elevated):
+        started.append(exe)
+        eng.ctx.elevator.hang.add(exe)
+        then(exe, args, elevated)
+    eng.ctx.elevator.on_start = program
+    return lambda: bool(started)
+
+
+def test_cancelled_update_whose_tree_wasnt_seen_to_finish_says_where_the_copies_are(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path)
+    publish_v2(eng, routes)
+    cancel = hangs_once_started(eng, lambda exe, args, elevated: put(target, "cfg.ini", b"volume=7"))
+    eng.ctx.process_watch = watch_with(observed=False)
+    with pytest.raises(InstallFailed) as ei:
+        eng.run(InstallRequest("update", "lightcars"), quiet, cancel)
+    assert ei.value.message == "\n\n".join([
+        messages.INSTALLER_CANCELLED.format(title="Light Cars"),
+        messages.SETASIDE_KEPT_TO_BE_SAFE.format(title="Light Cars", path=setaside(eng))])
+    assert (target / "cfg.ini").read_bytes() == b"volume=9 mine"  # put back
+    assert (setaside(eng) / "cfg.ini").read_bytes() == b"volume=9 mine"  # and still kept
+
+
+def test_cancelled_vendor_uninstall_whose_tree_wasnt_seen_to_finish_says_where_the_copies_are(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
+    cancel = hangs_once_started(eng, lambda exe, args, elevated: None)
+    eng.ctx.process_watch = watch_with(observed=False)
+    with pytest.raises(InstallFailed) as ei:
+        eng.run(InstallRequest("uninstall", "lightcars"), quiet, cancel)
+    assert ei.value.message == "\n\n".join([
+        messages.UNINSTALLER_CANCELLED.format(title="Light Cars"),
+        messages.SETASIDE_NOT_PUT_BACK.format(title="Light Cars", path=setaside(eng))])
+    assert tree(setaside(eng)) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+
+
+def test_cancelled_vendor_uninstall_whose_files_couldnt_be_put_back_says_so(tmp_path, monkeypatch):
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
+
+    def removes_the_save(exe, args, elevated):
+        (target / "saves" / "slot1.sav").unlink()
+    cancel = hangs_once_started(eng, removes_the_save)
+    real_copy = run_installer.shutil.copy2
+
+    def copy2(src, dst, **kw):
+        if ".setaside" in str(src):
+            raise OSError("disk full")
+        return real_copy(src, dst, **kw)
+    monkeypatch.setattr(run_installer.shutil, "copy2", copy2)
+    with pytest.raises(InstallFailed) as ei:
+        eng.run(InstallRequest("uninstall", "lightcars"), quiet, cancel)
+    assert ei.value.message == "\n\n".join([
+        messages.UNINSTALLER_CANCELLED.format(title="Light Cars"),
+        messages.SETASIDE_KEPT.format(title="Light Cars", path=setaside(eng))])
+
+
+def test_cancelled_vendor_uninstall_seen_to_stop_puts_files_back_quietly(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
+
+    def removes_the_save(exe, args, elevated):
+        (target / "saves" / "slot1.sav").unlink()
+    cancel = hangs_once_started(eng, removes_the_save)
+    with pytest.raises(Cancelled):
+        eng.run(InstallRequest("uninstall", "lightcars"), quiet, cancel)
+    assert (target / "saves" / "slot1.sav").read_bytes() == b"save" and not setaside(eng).exists()
