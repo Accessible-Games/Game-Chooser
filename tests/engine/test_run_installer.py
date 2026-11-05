@@ -71,10 +71,10 @@ def writes(root: Path, files: dict[str, bytes], events: list | None = None):
     def on_start(exe, args, elevated):
         if events is not None:
             events.append("start")
-        time.sleep(0.02)  # file times are coarser than time.time(); keep them clearly inside the window
+        time.sleep(0.05)  # file times follow the ~16 ms system tick; keep them clearly inside the window
         for rel, data in files.items():
             put(root, rel, data)
-        time.sleep(0.02)
+        time.sleep(0.05)
     return on_start
 
 
@@ -496,6 +496,9 @@ def installed_run_game(tmp_path, files=None, vendor=None, elevation=False):
     e = run_game(routes, installer={"type": "inno", "elevation": elevation})
     target = tmp_path / "Games" / "Light Cars"
     files = files or {"lc.exe": b"exe v1", "cfg.ini": b"volume=5", "sfx/a.wav": b"a"}
+    if vendor is True:  # the installer also wrote its uninstaller and registered it
+        files = {**files, "unins000.exe": b"uninstaller"}
+        vendor = f'"{target / "unins000.exe"}" /SILENT'
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, files))
     install(eng)
     rec = eng.ctx.records.load("lightcars")
@@ -653,15 +656,14 @@ def test_own_record_uninstall_of_a_run_install(tmp_path):
 
 
 def test_vendor_uninstall_sets_aside_player_files(tmp_path):
-    unins = '"C:\\Games\\Light Cars\\unins000.exe" /SILENT'
-    eng, routes, target = installed_run_game(tmp_path, vendor=unins, elevation=True)
+    eng, routes, target = installed_run_game(tmp_path, vendor=True, elevation=True)
 
     def uninstaller(exe, args, elevated):
         import shutil
         shutil.rmtree(target)  # takes the player's saves with it
     eng.ctx.elevator.on_start = uninstaller
     r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert eng.ctx.elevator.calls[-1] == ("C:\\Games\\Light Cars\\unins000.exe", "/SILENT", True)
+    assert eng.ctx.elevator.calls[-1] == (str(target / "unins000.exe"), "/SILENT", True)
     assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
     assert r.kept_player_files == 2
     rec = eng.ctx.records.load("lightcars")
@@ -670,7 +672,7 @@ def test_vendor_uninstall_sets_aside_player_files(tmp_path):
 
 
 def test_vendor_uninstall_deletes_leftovers_and_recycles_player_files_when_asked(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path, vendor='"X:\\unins000.exe" /SILENT')
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
 
     def uninstaller(exe, args, elevated):
         (target / "lc.exe").unlink()  # leaves sfx/a.wav behind, and the player's files
@@ -682,7 +684,7 @@ def test_vendor_uninstall_deletes_leftovers_and_recycles_player_files_when_asked
 
 
 def test_vendor_uninstall_refuses_before_undoing_anything_while_set_aside_files_remain(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path, vendor='"X:\\unins000.exe" /SILENT')
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
     rec = eng.ctx.records.load("lightcars")
     rec.steps = [{"action": "registry", "hive": "HKCU", "key": r"Software\LC", "name": "P", "type": "REG_SZ",
                   "value": "v", "undo": {"existed": False, "previous": None, "previous_type": None}}]
@@ -696,8 +698,30 @@ def test_vendor_uninstall_refuses_before_undoing_anything_while_set_aside_files_
     assert eng.ctx.records.load("lightcars") == rec and len(eng.ctx.elevator.calls) == 1
 
 
+def test_run_install_updated_by_an_archive_then_uninstalled_by_its_record(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
+    data = zip_bytes({"lc.exe": b"exe v2"})
+    eng.ctx.entries["lightcars"] = dict(eng.ctx.entries["lightcars"], version="2.0",
+                                        sources=[served_source(routes, f"{MIRROR}{sha(data)}/lc.zip", data)])
+    eng.ctx.fetcher.routes.update(routes)
+    eng.run(InstallRequest("update", "lightcars"), quiet, never)
+    assert eng.ctx.records.load("lightcars").vendor_uninstaller is None
+    r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert not (target / "lc.exe").exists() and not (target / "unins000.exe").exists()
+    assert r.kept_player_files == 2 and len(eng.ctx.elevator.calls) == 1
+
+
+def test_missing_vendor_uninstaller_falls_back_to_the_record(tmp_path):
+    gone = tmp_path / "Games" / "Light Cars" / "unins000.exe"
+    eng, routes, target = installed_run_game(tmp_path, vendor=f'"{gone}" /SILENT')
+    r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert messages.VENDOR_UNINSTALLER_MISSING.format(title="Light Cars") in r.notes
+    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert len(eng.ctx.elevator.calls) == 1
+
+
 def test_vendor_uninstaller_error_puts_files_back_and_keeps_record(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path, vendor='"X:\\unins000.exe" /SILENT')
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
     elevator = eng.ctx.elevator
 
     def uninstaller(exe, args, elevated):
@@ -709,7 +733,7 @@ def test_vendor_uninstaller_error_puts_files_back_and_keeps_record(tmp_path):
     assert ei.value.message == messages.UNINSTALLER_FAILED.format(title="Light Cars", code=3)
     assert (target / "cfg.ini").read_bytes() == b"volume=9 mine"
     rec = eng.ctx.records.load("lightcars")
-    assert not rec.uninstalled and set(rec.files) == {"lc.exe", "cfg.ini", "sfx/a.wav"}
+    assert not rec.uninstalled and set(rec.files) == {"lc.exe", "cfg.ini", "sfx/a.wav", "unins000.exe"}
 
 
 # ---- runtimes --------------------------------------------------------------------------------------------

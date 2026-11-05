@@ -170,6 +170,8 @@ class FakeInstallerUI:
 
     def wait_for_installer(self, title: str, finished) -> bool:
         self.events.append("wait")
+        if self.done:
+            finished.wait(2)  # The player presses Done once the installer has finished (or after a while).
         return self.done
 
     def locate_folder(self, title: str) -> Path | None:

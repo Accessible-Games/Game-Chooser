@@ -853,8 +853,15 @@ def run_vendor_uninstaller(ctx, record: InstallRecord, game_dir: Path, title: st
     exe, args = _split_command(record.vendor_uninstaller)
     installer = ((record.source.install or {}).get("installer") or {})
     _check(cancel)
-    aside = _SetAside.copy(ctx, record, game_dir, title) if game_dir.is_dir() else _SetAside(
-        _setaside_root(ctx, record.catalog_id), game_dir, [])
+    program = PureWindowsPath(exe)
+    if program.drive and program.root and not os.path.lexists(exe):
+        # Gone (deleted, or replaced by an update from an archive): Game Chooser's record does the work.
+        return [messages.VENDOR_UNINSTALLER_MISSING.format(title=title)]
+    if game_dir.is_dir():
+        aside = _SetAside.copy(ctx, record, game_dir, title)
+    else:
+        require_no_setaside(ctx, record.catalog_id, title)
+        aside = _SetAside(_setaside_root(ctx, record.catalog_id), game_dir, [])
     try:
         code, finished = _run_and_wait(ctx, title, exe, args, _elevated(installer), None, ctx.installer_ui,
                                        progress, cancel)

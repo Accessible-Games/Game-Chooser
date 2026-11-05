@@ -149,4 +149,6 @@ FILES_NOT_SET_ASIDE = "Your files for {title} couldn't be copied to safety, so i
 SETASIDE_LEFT_OVER = ("Copies of your files for {title} from an earlier try are still in {path}. Move them "
                       "somewhere safe, then try again.")
 SETASIDE_KEPT = "Some of your files for {title} couldn't be put back. Copies of them are in {path}."
+VENDOR_UNINSTALLER_MISSING = ("{title}'s own uninstaller wasn't found, so Game Chooser removed only the files it "
+                              "knows {title} installed.")
 UNINSTALLER_FAILED = "{title}'s uninstaller stopped with error code {code}. Your files were left in place."

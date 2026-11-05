@@ -625,6 +625,7 @@ class InstallEngine:
         rec.extras = {x["id"]: _installed_source(x, f, ctx.platform) for x, f in staged.extras}
         rec.launch_path = staged.launch_path
         rec.method = (staged.game.source.get("install") or {}).get("method", "")
+        rec.vendor_uninstaller = None  # An installer's own uninstaller no longer matches these files.
         rec.previous = {**prior, "backups": [*carried, *result.backups]}
         rec.previous_unavailable = None
         rec.uninstalled = False
