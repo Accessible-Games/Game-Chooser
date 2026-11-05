@@ -89,8 +89,11 @@ _CHAIN_FORMS = [
     ("mkdir", re.compile(r'^mkdir "([^"]+)"$')),
     ("absent", re.compile(r'^\(if exist "([^"]+)" exit 1\)$')),
     ("copy", re.compile(r'^copy /b "([^"]+)" "([^"]+)" >nul$')),
+    ("verify", re.compile(r'^\(\(certutil -hashfile "([^"]+)" SHA256 \| findstr /i /x /l "([0-9a-f]{64})" >nul\) '
+                          r'\|\| \(del /f /q "([^"]+)" & exit 1\)\)$')),
     ("regsvr32", re.compile(r'^regsvr32\.exe /s "([^"]+)"$')),
-    ("copy_or_not", re.compile(r'^\(copy /b "([^"]+)" "([^"]+)" >nul \|\| type nul\)$')),
+    ("marker", re.compile(r'^\(echo ([0-9a-f]{64})\) > "([^"]+)"$')),
+    ("marker_or_not", re.compile(r'^\(\(echo ([0-9a-f]{64})\) > "([^"]+)" \|\| type nul\)$')),
 ]
 
 
@@ -117,11 +120,12 @@ def split_chain(args: str) -> list[str]:
 
 def run_elevated_chain(args: str, owned: set[str] | None = None, exit_codes: dict[str, int] | None = None) -> int:
     """Play one of the engine's elevated chains (`cmd.exe /d /v:off /s /c "a && b && …"`: the lock-down, or
-    regsvr32 followed by the marker copy) on disk, as cmd.exe would, stopping at the first command that
-    fails: mkdir of something that exists, a reparse point where a real folder must be, a destination
-    that is already there, a copy that can't be made, regsvr32 with the exit code `exit_codes` gives it.
-    icacls changes nothing here. Every path the chain reached with `/setowner`, made or copied to is added
-    to `owned` (what Administrators own afterwards). Any other command is a test error."""
+    regsvr32 followed by the marker) on disk, as cmd.exe would, stopping at the first command that fails:
+    mkdir of something that exists, a reparse point where a real folder must be, a destination that is
+    already there, a copy that can't be made, a copy whose SHA256 isn't the one named (the copy is deleted
+    first, as the chain does), regsvr32 with the exit code `exit_codes` gives it. icacls changes nothing
+    here. Every path the chain reached with `/setowner`, made, copied to or wrote the marker at is added to
+    `owned` (what Administrators own afterwards). Any other command is a test error."""
     owned = set() if owned is None else owned
     for command in split_chain(args):
         for kind, form in _CHAIN_FORMS:
@@ -150,17 +154,33 @@ def run_elevated_chain(args: str, owned: set[str] | None = None, exit_codes: dic
             code = (exit_codes or {}).get("regsvr32.exe", 0)
             if code:
                 return code
-        elif kind in ("copy", "copy_or_not"):
+        elif kind == "copy":
             dest = Path(match.group(2))
             if dest.is_dir():
                 dest = dest / path.name  # as cmd's copy does: into the folder (or wherever a junction leads)
             try:
                 shutil.copyfile(path, dest)
             except OSError:
-                if kind == "copy":
-                    return 1
-                continue  # `|| type nul`: a failed marker copy doesn't fail the command
+                return 1
             owned.add(os.path.normcase(str(dest)))
+        elif kind == "verify":
+            assert match.group(3) == match.group(1), command  # the file deleted is the file checked
+            try:
+                digest = hashlib.sha256(path.read_bytes()).hexdigest()
+            except OSError:
+                digest = None
+            if digest != match.group(2):
+                path.unlink(missing_ok=True)
+                return 1
+        elif kind in ("marker", "marker_or_not"):
+            marker = Path(match.group(2))
+            try:
+                marker.write_bytes((match.group(1) + "\r\n").encode())  # as `echo` writes it
+            except OSError:
+                if kind == "marker":
+                    return 1
+                continue  # `|| type nul`: a marker that can't be written doesn't fail the command
+            owned.add(os.path.normcase(str(marker)))
     return 0
 
 
@@ -191,12 +211,14 @@ class FakeElevator:
         self.hang = set(hang or ())
         self.calls: list[tuple[str, str, bool]] = []
         self.cwds: list[Path | None] = []
+        self.shown: list[bool] = []  # whether each call asked for the program's window to be shown
         self.owned: set[str] = set()  # what the elevated chains re-owned, made or copied (FakeSecurity reads it)
 
-    def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> FakeProcess:
+    def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None, show: bool = True) -> FakeProcess:
         from engine.errors import ElevationDeclined
         self.calls.append((exe, args, elevated))
         self.cwds.append(cwd)
+        self.shown.append(show)
         if elevated and self.decline:
             raise ElevationDeclined("The administrator prompt was declined.")
         if self.on_start is not None:
@@ -206,8 +228,8 @@ class FakeElevator:
             code = run_elevated_chain(args, self.owned, self.exit_codes) if exe == "cmd.exe" and elevated else 0
         return FakeProcess(code, 1000 + len(self.calls), running=exe in self.hang)
 
-    def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
-        return self.start(exe, args, elevated, cwd).wait(None)
+    def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None, show: bool = True) -> int:
+        return self.start(exe, args, elevated, cwd, show).wait(None)
 
 
 class FakeWatch:

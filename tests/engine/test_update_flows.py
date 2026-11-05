@@ -506,10 +506,10 @@ def test_uninstall_undoes_system_steps_but_not_runtimes(tmp_path):
     present_at_unregister = []
 
     class WatchingElevator(FakeElevator):
-        def start(self, exe, args, elevated, cwd=None):
+        def start(self, exe, args, elevated, cwd=None, show=True):
             if args.startswith("/u"):
                 present_at_unregister.append(dll.exists())
-            return super().start(exe, args, elevated, cwd)
+            return super().start(exe, args, elevated, cwd, show)
 
     elevator = WatchingElevator()
     eng, game = install_v1(tmp_path, play=False, elevator=elevator, steps=[

@@ -21,22 +21,25 @@ Every account can create folders in %ProgramData%, so a runtime folder is truste
 real folder (no link or junction anywhere on the way to it) and is owned by Administrators or SYSTEM,
 or by the current user. A runtime with an elevated step (regsvr32, an HKLM setting) never gets its
 folder from the player: one elevated command seals the folders above it, makes its folder (or finds
-it already sealed by an earlier install), seals it (owner Administrators, inheritance off,
-Administrators and SYSTEM full control, Users read and execute, nothing for anyone else), and copies
-the files in from where the player unpacked them, so every file there was made by an administrator.
-The folder is then walked and its files hashed again, so a file swapped in the player's staging is
-caught and nothing is registered. The marker is copied in by the elevated command that runs the last
-regsvr32, after it has succeeded, so it exists only for a registered runtime. A marker counts only in
-a folder owned by Administrators or SYSTEM, or, for a runtime with no elevated step, by the current
-user.
+it already sealed by an earlier install), seals it to Administrators and SYSTEM alone (owner
+Administrators, inheritance off, nothing for anyone else), and copies the files in from where the
+player unpacked them, checking each copy's SHA256 against the download's before going on: a copy
+that reads something else (a redirect planted in staging while the prompt waited) is deleted and the
+chain stops, with the folder still unreadable to everyone but administrators. Only as its last act
+does the chain let Users read the folder. It is then walked and its files hashed again, unelevated,
+so nothing is registered unless every file is the download's. The marker is written by the elevated
+command that runs the last regsvr32, after it has succeeded, so it exists only for a registered
+runtime; it holds the download's checksum, which the engine computed, so the elevated command reads
+nothing the player supplied. A marker counts only in a folder owned by Administrators or SYSTEM, or,
+for a runtime with no elevated step, by the current user.
 
-With the preference off, nothing gets an administrator prompt for a game's runtimes. A COM runtime
-(one with a `register` step) is copied into the game's own folder instead, beside its exe, with a
-registration-free COM manifest (engine.comfree). A runtime that only exists as an installer can't be
-made private, so the game is installed without it and a note says it needs that runtime. Runtimes
-with neither are still installed machine-wide (the preference covers COM components only).
-The game's record lists the runtimes made private (`private_runtimes`); Repair and Undo make
-copies of those again, and of no other.
+With the preference off, a COM runtime (one with a `register` step) is copied into the game's own
+folder instead, beside its exe, with a registration-free COM manifest (engine.comfree), and gets no
+administrator prompt. A runtime that only exists as an installer can't be made private, so the game
+is installed without it and a note says it needs that runtime. Runtimes with neither are still
+installed machine-wide (the preference covers COM components only), and one with an HKLM registry
+step still gets the prompt for it. The game's record lists the runtimes made private
+(`private_runtimes`); Repair and Undo make copies of those again, and of no other.
 """
 
 import json
@@ -62,8 +65,11 @@ from .steps import StepContext, run_file_steps, run_system_steps, undo_steps
 log = logging.getLogger(__name__)
 
 _CLASSES = "SOFTWARE\\Classes\\"
-# Left in a runtime's folder once it is installed: {"id", "source_sha256", "files": {path: sha256}}.
+# Left in a runtime's folder once it is installed. In a folder the player filled (no elevated step):
+# {"id", "source_sha256", "files": {path: sha256}}. In a folder an elevated chain sealed and filled: one line,
+# the download's sha256 in hex, written by that chain (see write_marker_args).
 MARKER_NAME = ".gamechooser-runtime.json"
+_HEX64 = re.compile(r"[0-9a-f]{64}")
 
 ADMINISTRATORS, SYSTEM, USERS = "S-1-5-32-544", "S-1-5-18", "S-1-5-32-545"
 CREATOR_OWNER = "S-1-3-0"
@@ -134,27 +140,46 @@ def _depth_first_order(files: list[str]) -> list[tuple[str, bool]]:
     return sorted(entries.items(), key=lambda item: (item[0].count("/"), item[0].lower()))
 
 
-def register_and_mark_args(dll: Path, staged_marker: Path, marker: Path) -> str:
+def _verified(path: Path, sha256: str) -> str:
+    # The copy just made must hash to the download's checksum, or it is deleted again (nobody but
+    # administrators can read the folder yet) and the chain stops. certutil on Windows 10 and later prints the
+    # hex on a line of its own, in lowercase (/i covers case); Windows 7's spaced form isn't matched.
+    # `&` before `exit 1`, not `&&`: the chain stops even if the delete fails.
+    return (f'((certutil -hashfile "{path}" SHA256 | findstr /i /x /l "{sha256}" >nul) || '
+            f'(del /f /q "{path}" & exit 1))')
+
+
+def _write_marker_command(marker: Path, source_sha256: str) -> str:
+    # In parentheses, so cmd reads `echo <hex>` and then the redirect: with `echo <hex>> file` a trailing digit
+    # would be read as a stream number, and the marker would get a trailing space.
+    if not _HEX64.fullmatch(source_sha256):
+        raise ValueError(f"Not a sha256 hex digest: {source_sha256!r}")
+    return f'(echo {source_sha256}) > "{marker}"'
+
+
+def register_and_mark_args(dll: Path, marker: Path, source_sha256: str) -> str:
     """The arguments of the elevated `cmd.exe` that runs a runtime's last register step: regsvr32, and then,
-    only if it succeeded, the marker copied in from the player's work folder. A failed copy doesn't fail
-    the command (the runtime is registered; the next install adopts the folder)."""
-    return f'/d /v:off /s /c "regsvr32.exe /s "{dll}" && (copy /b "{staged_marker}" "{marker}" >nul || type nul)"'
+    only if it succeeded, the marker written with the download's checksum (`source_sha256`, computed by the
+    engine: the command reads nothing the player supplied). A marker that can't be written doesn't fail the
+    command (the runtime is registered; the next install adopts the folder)."""
+    return f'/d /v:off /s /c "regsvr32.exe /s "{dll}" && ({_write_marker_command(marker, source_sha256)} || type nul)"'
 
 
-def copy_marker_args(staged_marker: Path, marker: Path) -> str:
-    """The arguments of the elevated `cmd.exe` that only copies the marker in: for a runtime whose last step
+def write_marker_args(marker: Path, source_sha256: str) -> str:
+    """The arguments of the elevated `cmd.exe` that only writes the marker: for a runtime whose last step
     isn't a register step, once every step has succeeded."""
-    return f'/d /v:off /s /c "copy /b "{staged_marker}" "{marker}" >nul"'
+    return f'/d /v:off /s /c "{_write_marker_command(marker, source_sha256)}"'
 
 
-def lock_down_commands(folder: Path, user_sid: str, staging: Path, files: list[str],
+def lock_down_commands(folder: Path, user_sid: str, staging: Path, files: dict[str, str],
                        existing: set[str] | None = None) -> list[tuple[str, str]]:
     """The elevated commands that make and fill a runtime's folder and lock it, and the two folders above
     it, down: [(exe, arguments)], one per administrator prompt (usually one; more only if the command
-    line would be too long). `files` are the download's files, relative to `folder` and to `staging`
-    (where the player unpacked them) with forward slashes. `existing` is None when `folder` isn't there
-    yet; else the expected entries it already holds (an Administrators-owned folder being adopted).
-    `user_sid` is checked by the caller and appears in no command: the installing user gets no grant.
+    line would be too long). `files` maps each of the download's files, relative to `folder` and to
+    `staging` (where the player unpacked them) with forward slashes, to its sha256. `existing` is None
+    when `folder` isn't there yet; else the expected entries it already holds (an Administrators-owned
+    folder being adopted). `user_sid` is checked by the caller and appears in no command: the installing
+    user gets no grant.
 
     The chain stops at the first command that fails, and never changes the owner or permissions of a
     FILE (a hard link shares them with its other names): icacls runs on folders only, one explicit path
@@ -164,42 +189,55 @@ def lock_down_commands(folder: Path, user_sid: str, staging: Path, files: list[s
       `runtimes` also lets Users create a folder in it (AD, on that folder only; no delete-child) and
       gives the creator full control of the folder they made (CREATOR OWNER, inherited only), for
       runtimes that need no elevated step and are unpacked by the player.
-    - `folder`: made with mkdir, which fails if anything appeared there meanwhile, then sealed; nobody
-      but administrators can put anything in it afterwards (the marker arrives with the last register
-      step, see register_and_mark_args). A folder being adopted is sealed, checked to be real, and must
-      hold no marker, which would say "installed" before anything is registered.
+    - `folder`: made with mkdir, which fails if anything appeared there meanwhile, then sealed to
+      Administrators and SYSTEM alone: while it is filled, nobody else can read it, let alone write to
+      it (the marker arrives with the last register step, see register_and_mark_args). A folder being
+      adopted is sealed the same way (Users lose the read access an earlier install gave them until the
+      end), checked to be real, and must hold no marker, which would say "installed" before anything is
+      registered.
     - Each expected sub-folder the same way, parent first; one already there is sealed and checked.
     - Each expected file not already there is copied in from `staging` by explicit path, so the
-      elevated process creates it and it inherits only from its sealed folder. Into a folder that was
-      already there, the copy first checks that nothing (no link, nothing at all) sits at that name.
+      elevated process creates it and it inherits only from its sealed folder, and then checked against
+      its sha256 (see _verified): the elevated process reads the player's staging, where a redirect to a
+      file the player can't read may have been planted while the prompt waited, so what it copied is
+      deleted again unless it is the download's file. Into a folder that was already there, the copy
+      first checks that nothing (no link, nothing at all) sits at that name.
+    - Last of all, once every check has passed: Users get read and execute on `folder` and on each
+      expected sub-folder (each sealed with inheritance off, so each by name; files inherit it). Until
+      then, and for good if the chain stops, nothing the chain copied can be read by anyone but an
+      administrator.
     """
     runtimes, game_chooser = folder.parent, folder.parent.parent
-    base = f"*{ADMINISTRATORS}:(OI)(CI)F *{SYSTEM}:(OI)(CI)F *{USERS}:(OI)(CI)RX"
+    admins = f"*{ADMINISTRATORS}:(OI)(CI)F *{SYSTEM}:(OI)(CI)F"
+    base = f"{admins} *{USERS}:(OI)(CI)RX"
     owner = f"/setowner *{ADMINISTRATORS}"
     present = None if existing is None else {norm_key(rel) for rel in existing}
 
-    def seal(path: Path, extra: str = "") -> list[str]:
-        return [_icacls(path, owner), _icacls(path, f"/inheritance:r /grant:r {base}{extra}")]
+    def seal(path: Path, grants: str = base, extra: str = "") -> list[str]:
+        return [_icacls(path, owner), _icacls(path, f"/inheritance:r /grant:r {grants}{extra}")]
 
     def there(rel: str) -> bool:
         return present is not None and norm_key(rel) in present
 
-    commands = [*seal(game_chooser), _real(game_chooser), *seal(runtimes, f" *{CREATOR_OWNER}:(OI)(CI)(IO)F"),
+    commands = [*seal(game_chooser), _real(game_chooser), *seal(runtimes, extra=f" *{CREATOR_OWNER}:(OI)(CI)(IO)F"),
                 _icacls(runtimes, f"/grant *{USERS}:(AD)"), _real(runtimes)]
     if present is None:
-        commands += [f'mkdir "{folder}"', *seal(folder)]
+        commands += [f'mkdir "{folder}"', *seal(folder, admins)]
     else:
-        commands += [*seal(folder), _real(folder), _absent(folder / MARKER_NAME)]
+        commands += [*seal(folder, admins), _real(folder), _absent(folder / MARKER_NAME)]
     lead = len(commands)  # always in the first invocation: nothing inside is touched before this is done
-    for rel, is_folder in _depth_first_order(files):
+    opened = [folder]
+    for rel, is_folder in _depth_first_order(list(files)):
         parts = PurePosixPath(rel).parts
         path = folder.joinpath(*parts)
         if is_folder:
-            commands += [*seal(path), _real(path)] if there(rel) else [f'mkdir "{path}"', *seal(path)]
+            commands += [*seal(path, admins), _real(path)] if there(rel) else [f'mkdir "{path}"', *seal(path, admins)]
+            opened.append(path)
         elif not there(rel):
             if present is not None and (len(parts) == 1 or there("/".join(parts[:-1]))):
                 commands += [_real(path), _absent(path)]  # the folder was there: so could something at this name
-            commands.append(f'copy /b "{staging.joinpath(*parts)}" "{path}" >nul')
+            commands += [f'copy /b "{staging.joinpath(*parts)}" "{path}" >nul', _verified(path, files[rel])]
+    commands += [_icacls(path, f"/grant *{USERS}:(OI)(CI)RX") for path in opened]
 
     invocations, batch = [], []
     for i, command in enumerate(commands):
@@ -306,10 +344,19 @@ def runtime_present(entry: dict, records, registry, root: Path | None = None, se
     return detect_present(entry.get("detect"), registry)
 
 
-def _read_marker(folder: Path) -> dict | None:
+def _read_marker(folder: Path) -> dict | str | None:
+    """The marker's contents: the file list (a dict) a player-filled folder's marker holds, the download's
+    checksum (a str) an elevated chain wrote, or None for no marker or one in neither shape."""
     try:
-        data = json.loads((folder / MARKER_NAME).read_text(encoding="utf-8"))
+        text = (folder / MARKER_NAME).read_text(encoding="utf-8")
     except (OSError, ValueError):
+        return None
+    line = text.strip().lower()
+    if _HEX64.fullmatch(line):
+        return line
+    try:
+        data = json.loads(text)
+    except ValueError:
         return None
     if not isinstance(data, dict) or not isinstance(data.get("files"), dict):
         return None
@@ -317,13 +364,19 @@ def _read_marker(folder: Path) -> dict | None:
 
 
 def marker_present(folder: Path, runtime_id: str, security, allow_user: bool = False) -> bool:
-    """True if `folder` has Game Chooser's marker for `runtime_id`, every file it lists is still there,
-    nothing on the way to it is a link, and it is owned by Administrators or SYSTEM (or, with
-    `allow_user`, for a runtime with no elevated step, by the current user)."""
+    """True if `folder` has Game Chooser's marker for `runtime_id`, nothing on the way to it is a link, and
+    it is owned by Administrators or SYSTEM (or, with `allow_user`, for a runtime with no elevated step, by
+    the current user).
+
+    A marker in a sealed folder (one line: the download's checksum) counts only under Administrators or
+    SYSTEM: nobody else can have written it there, which is the evidence. A player-filled folder's marker
+    (the file list) counts only while every file it lists is still there."""
     folder = Path(folder)
     if linked_component(folder.parent, folder) is not None or not _owner_is(security, folder, allow_user):
         return False
     data = _read_marker(folder)
+    if isinstance(data, str):
+        return _owner_is(security, folder, allow_user=False)
     if data is None or data.get("id") != runtime_id:
         return False
     for rel in data["files"]:
@@ -548,9 +601,10 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
     steps there, and leave the record and the marker.
 
     A runtime with no elevated step is copied into `target` by the player. One with an elevated step
-    never is: one elevated command makes `target` (or seals it again), seals it and copies the files in
-    (lock_down_commands), and the folder is then walked and hashed again before any step runs, so a
-    swap in the player's staging is caught and nothing is registered.
+    never is: one elevated command makes `target` (or seals it again), seals it, copies the files in,
+    checking each against the download, and only then lets Users read it (lock_down_commands); the
+    folder is then walked and hashed again before any step runs, so a swap in the player's staging is
+    caught twice over and nothing is registered.
 
     `target`, or a folder on the way to it, that is a link is refused. A `target` that is already there
     (another account's install, or one whose record was lost) is never removed or changed: it is adopted
@@ -558,9 +612,10 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
     a runtime with no elevated step, the current user); for a runtime with an elevated step it may hold
     nothing else and no marker. Only its missing files are added. Otherwise the install is refused. On
     any failure, the system steps already applied are undone (but in a folder it found, never a
-    registration, which may predate this run). A folder the player filled is removed if this run made
-    it, else just the files it added; a sealed folder stays as it is (without a marker it counts as
-    absent, and a retry adopts it).
+    registration, which may predate this run), unless the marker is already there: then the runtime is
+    installed for every account, whatever failed afterwards, and nothing is undone (R45). A folder the
+    player filled is removed if this run made it, else just the files it added; a sealed folder stays as
+    it is (without a marker it counts as absent, and a retry adopts it).
     """
     title = _title(runtime)
     install = fetched.source.get("install") or {}
@@ -585,32 +640,43 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
             _lock_down(ctx, target, title, root, incoming, found)
             made = not found
             # Checked again now that no one else can change it: a junction anywhere on the way to it or
-            # inside it, an entry the download doesn't have, a hard link, or a file swapped in staging.
+            # inside it, an entry the download doesn't have, a hard link, an entry an administrator didn't
+            # make, or a file swapped in staging (defence in depth: the chain checked each copy itself).
             if (linked_component(ctx.runtimes_root, target) is not None
                     or not _owner_is(ctx.security, target, allow_user=False)
-                    or not _only_expected(target, incoming) or not _holds_download(target, incoming)):
+                    or not _only_expected(target, incoming) or not _owned_by_administrators(ctx, target, incoming)
+                    or not _holds_download(target, incoming)):
                 raise InstallFailed(messages.RUNTIME_FOLDER_CHANGED.format(title=title, path=target))
         else:
             if not found:
                 target.mkdir()  # FileExistsError if something made it meanwhile: then it isn't ours
                 made = True
             _copy_into(root, target, added)
-        marker = _marker(runtime["id"], fetched.sha256, incoming)
         if elevated:
             # The marker can only get into the sealed folder elevated: it rides on the last register step.
-            staged_marker = unpack_dir.parent / MARKER_NAME
-            staged_marker.write_text(json.dumps(marker, indent=2), encoding="utf-8")
-            _run_steps_marking(ctx, steps, step_ctx, target, staged_marker, applied)
+            _run_steps_marking(ctx, steps, step_ctx, target, fetched.sha256, applied)
         else:
             for step in steps:  # one at a time, so a failure leaves `applied` true to what was done
                 applied += run_system_steps([step], step_ctx)
         files = {key: RecordedFile(display, sha, runtime["id"]) for key, (display, sha) in incoming.items()}
-        ctx.records.save(InstallRecord(
+        record = InstallRecord(
             catalog_id=runtime["id"], kind="runtime", library_name="", folder=str(target), launch_path="",
             source=_source(runtime, fetched), extras={}, files=files, steps=applied,
-            method=install.get("method", "")))
+            method=install.get("method", ""))
+        if elevated and (target / MARKER_NAME).is_file():
+            # Installed for every account now, whatever happens to this account's record (R45).
+            try:
+                ctx.records.save(record)
+            except OSError:
+                log.warning("The runtime record for %s couldn't be saved; its marker in %s says it is installed",
+                            runtime["id"], target, exc_info=True)
+            return
+        ctx.records.save(record)
     except BaseException as e:
-        undo = [s for s in applied if made or s.get("action") != "register"]
+        if elevated and (target / MARKER_NAME).is_file():
+            undo = []  # registered and marked: installed for every account, so nothing is undone (R45)
+        else:
+            undo = [s for s in applied if made or s.get("action") != "register"]
         undo_failures = [*getattr(e, "undo_failures", []), *undo_steps(undo, step_ctx)]
         if not elevated:  # a sealed folder isn't the player's to change (R39)
             if made:
@@ -623,40 +689,41 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
             raise InstallFailed("\n\n".join([str(e), *undo_failures])) from e
         if isinstance(e, ExtractError):
             raise InstallFailed(str(e)) from e
-        if isinstance(e, Exception) and not isinstance(e, (InstallFailed, Cancelled)):
+        if isinstance(e, Exception) and not isinstance(e, (InstallFailed, Cancelled, OSError)):
             raise InstallFailed(messages.FAILED.format(title=title)) from e
-        raise
+        raise  # an OSError gets its plain words (disk full, locked file) at the engine's boundary
     if not elevated:
-        _write_marker(target, marker)
+        _write_marker(target, _marker(runtime["id"], fetched.sha256, incoming))
     elif not (target / MARKER_NAME).is_file():
-        log.warning("The runtime marker wasn't copied into %s; the next install will adopt the folder", target)
+        log.warning("The runtime marker wasn't written into %s; the next install will adopt the folder", target)
 
 
 def _marker(runtime_id: str, source_sha256: str, incoming: dict[str, tuple[str, str]]) -> dict:
     return {"id": runtime_id, "source_sha256": source_sha256, "files": {d: s for d, s in incoming.values()}}
 
 
-def _run_steps_marking(ctx, steps: list[dict], step_ctx: StepContext, target: Path, staged_marker: Path,
+def _run_steps_marking(ctx, steps: list[dict], step_ctx: StepContext, target: Path, source_sha256: str,
                        applied: list[dict]) -> None:
     """Run the system steps one at a time (so `applied`, which is the caller's, is true to what was done
-    when one fails). The last step, when it is a register step, also copies the marker in once regsvr32
-    has succeeded; otherwise one more elevated command copies it after every step has succeeded. A
-    marker that can't be copied doesn't fail the install: the next install adopts the folder."""
+    when one fails). The last step, when it is a register step, also writes the marker once regsvr32 has
+    succeeded; otherwise one more elevated command writes it after every step has succeeded. A marker
+    that can't be written doesn't fail the install: the next install adopts the folder."""
     for i, step in enumerate(steps):
         if i == len(steps) - 1 and step.get("action") == "register":
-            applied.append(_register_and_mark(ctx, step, target, staged_marker))
+            applied.append(_register_and_mark(ctx, step, target, source_sha256))
         else:
             applied += run_system_steps([step], step_ctx)
     if not steps or steps[-1].get("action") != "register":
         try:
-            code = ctx.elevator.run("cmd.exe", copy_marker_args(staged_marker, target / MARKER_NAME), True)
+            code = ctx.elevator.run("cmd.exe", write_marker_args(target / MARKER_NAME, source_sha256), True,
+                                    show=False)
         except (ElevationDeclined, StepError):
             code = -1
         if code != 0:
-            log.warning("The runtime marker couldn't be copied into %s", target)
+            log.warning("The runtime marker couldn't be written into %s", target)
 
 
-def _register_and_mark(ctx, step: dict, target: Path, staged_marker: Path) -> dict:
+def _register_and_mark(ctx, step: dict, target: Path, source_sha256: str) -> dict:
     """A register step as steps.run_system_steps runs it (same checks, same errors), through
     register_and_mark_args so the marker arrives with a successful registration."""
     rel = step.get("path")
@@ -667,12 +734,20 @@ def _register_and_mark(ctx, step: dict, target: Path, staged_marker: Path) -> di
     if not path.is_file():
         raise StepError(messages.STEP_FILE_MISSING.format(path=rel))
     try:
-        code = ctx.elevator.run("cmd.exe", register_and_mark_args(path, staged_marker, target / MARKER_NAME), True)
+        code = ctx.elevator.run("cmd.exe", register_and_mark_args(path, target / MARKER_NAME, source_sha256), True,
+                                show=False)
     except ElevationDeclined as e:
         raise StepError(messages.ELEVATION_DECLINED.format(what=path.name)) from e
     if code != 0:
         raise StepError(messages.STEP_REGISTER_FAILED.format(name=path.name))
     return {**step}
+
+
+def _owned_by_administrators(ctx, folder: Path, incoming: dict[str, tuple[str, str]]) -> bool:
+    """True if every expected entry that is in `folder` is owned by Administrators or SYSTEM."""
+    return all(_owner_is(ctx.security, folder / rel, allow_user=False)
+               for rel, _ in _depth_first_order([display for display, _ in incoming.values()])
+               if os.path.lexists(folder / rel))
 
 
 def _adoptable(ctx, target: Path, incoming: dict[str, tuple[str, str]], elevated: bool) -> bool:
@@ -686,9 +761,7 @@ def _adoptable(ctx, target: Path, incoming: dict[str, tuple[str, str]], elevated
         # and its owner can always regain write access), nothing but the download's entries, and no
         # marker, which would say "installed" as soon as the files are complete, before anything is
         # registered.
-        files = [display for display, _ in incoming.values()]
-        if not all(_owner_is(ctx.security, target / rel, allow_user=False)
-                   for rel, _ in _depth_first_order(files) if os.path.lexists(target / rel)):
+        if not _owned_by_administrators(ctx, target, incoming):
             return False
         return _only_expected(target, incoming) and not os.path.lexists(target / MARKER_NAME)
     return True
@@ -700,14 +773,14 @@ def _lock_down(ctx, target: Path, title: str, staging: Path, incoming: dict[str,
     passed inline: never through a script file a player could swap. A declined prompt is a declined
     install (R6)."""
     user = ctx.security.current_user()
-    files = [display for display, _ in incoming.values()]
+    files = {display: sha for display, sha in incoming.values()}
     if (not user or not _SID.fullmatch(user) or "%" in str(target) or "%" in str(staging)
-            or any("%" in f for f in files)):
+            or any("%" in f for f in files) or not all(_HEX64.fullmatch(sha) for sha in files.values())):
         raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))  # cmd expands %
-    existing = {rel for rel, _ in _depth_first_order(files) if os.path.lexists(target / rel)} if found else None
+    existing = {rel for rel, _ in _depth_first_order(list(files)) if os.path.lexists(target / rel)} if found else None
     for exe, args in lock_down_commands(target, user, staging, files, existing):
         try:
-            code = ctx.elevator.run(exe, args, True)
+            code = ctx.elevator.run(exe, args, True, show=False)
         except ElevationDeclined as e:
             raise InstallFailed(messages.ELEVATION_DECLINED.format(what=title)) from e
         except StepError as e:

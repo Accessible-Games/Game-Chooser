@@ -29,10 +29,15 @@ class RunningProcess(Protocol):
 
 
 class Elevator(Protocol):
-    def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
-        """Start `exe` with the command-line `args`, wait for it and return its exit code."""
+    def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None, show: bool = True) -> int:
+        """Start `exe` with the command-line `args`, wait for it and return its exit code.
 
-    def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> RunningProcess:
+        With `show` False the program gets no window: for reg.exe, regsvr32 and cmd.exe chains, whose
+        console would flash up and take the focus (and a screen reader's attention) from Game Chooser.
+        An installer the player may need to see keeps its window.
+        """
+
+    def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None, show: bool = True) -> RunningProcess:
         """Start `exe` and return at once."""
 
 
@@ -88,31 +93,36 @@ class WindowsElevator:
         # Test seam only: tests pass "open" to drive the real ShellExecuteEx call without a UAC prompt.
         self._elevated_verb = elevated_verb
 
-    def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
-        process = self.start(exe, args, elevated, cwd)
+    def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None, show: bool = True) -> int:
+        process = self.start(exe, args, elevated, cwd, show)
         try:
             return process.wait(None)
         finally:
             process.close()
 
-    def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> RunningProcess:
+    def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None, show: bool = True) -> RunningProcess:
         if elevated:
-            return self._start_elevated(exe, args, cwd)
-        return self._start_in_job(exe, args, cwd)
+            return self._start_elevated(exe, args, cwd, show)
+        return self._start_in_job(exe, args, cwd, show)
 
-    def _start_in_job(self, exe: str, args: str, cwd: Path | None) -> RunningProcess:
+    def _start_in_job(self, exe: str, args: str, cwd: Path | None, show: bool) -> RunningProcess:
         """Start suspended, put it in a new job, then let it run: a child it starts at once is in the job too.
 
         A refusal to start keeps Windows' error (winerror 740 means it needs administrator rights)
         as the StepError's cause.
         """
         import pywintypes
+        import win32con
         import win32job
         import win32process
+        startup = win32process.STARTUPINFO()
+        if not show:
+            startup.dwFlags |= win32con.STARTF_USESHOWWINDOW
+            startup.wShowWindow = win32con.SW_HIDE
         try:
             process, thread, _, _ = win32process.CreateProcess(
                 None, f'"{exe}" {args}'.rstrip(), None, None, False, win32process.CREATE_SUSPENDED, None,
-                str(cwd) if cwd else None, win32process.STARTUPINFO())
+                str(cwd) if cwd else None, startup)
         except pywintypes.error as e:
             raise StepError(messages.STEP_PROGRAM_NOT_STARTED.format(name=Path(exe).name)) from e
         job = None
@@ -128,7 +138,7 @@ class WindowsElevator:
             thread.Close()
         return _JobProcess(process, job)
 
-    def _start_elevated(self, exe: str, args: str, cwd: Path | None) -> RunningProcess:
+    def _start_elevated(self, exe: str, args: str, cwd: Path | None, show: bool) -> RunningProcess:
         import pythoncom
         import pywintypes
         import win32con
@@ -140,8 +150,10 @@ class WindowsElevator:
             com_started = True
         except pythoncom.com_error:
             com_started = False  # Already initialised in another mode; that works too.
+        # The UAC prompt itself still appears; SW_HIDE only keeps the program's own console window away.
         options = {"fMask": shellcon.SEE_MASK_NOCLOSEPROCESS | _SEE_MASK_NOASYNC, "lpVerb": self._elevated_verb,
-                   "lpFile": exe, "lpParameters": args, "nShow": win32con.SW_SHOWNORMAL}
+                   "lpFile": exe, "lpParameters": args,
+                   "nShow": win32con.SW_SHOWNORMAL if show else win32con.SW_HIDE}
         if cwd:
             options["lpDirectory"] = str(cwd)  # pywin32 refuses None for string fields, so omit it instead.
         try:

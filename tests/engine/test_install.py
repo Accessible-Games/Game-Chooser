@@ -156,9 +156,9 @@ def test_system_steps_run_after_rename_with_final_paths(tmp_path):
     placed_when_run = []
 
     class WatchingElevator(FakeElevator):
-        def start(self, exe, args, elevated, cwd=None):
+        def start(self, exe, args, elevated, cwd=None, show=True):
             placed_when_run.append((lib / "Entombed" / "dx.dll").exists())
-            return super().start(exe, args, elevated, cwd)
+            return super().start(exe, args, elevated, cwd, show)
 
     fake_elev = WatchingElevator()
     engine, ctx, lib = setup(tmp_path, [e], routes, elevator=fake_elev)
