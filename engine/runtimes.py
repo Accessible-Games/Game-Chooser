@@ -590,7 +590,7 @@ def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) 
     # No marker: the installer put the runtime wherever it likes, so the record or the detect hint says.
     try:
         ctx.records.save(InstallRecord(
-            catalog_id=runtime["id"], kind="runtime", library_name="", folder=str(target), launch_path="",
+            catalog_id=runtime["id"], kind="runtime", library_id="", folder=str(target), launch_path="",
             source=_source(runtime, fetched), extras={}, files={}, steps=[], method="run", tracked=False))
     except OSError as e:
         raise InstallFailed(messages.FAILED.format(title=title)) from e
@@ -660,7 +660,7 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
                 applied += run_system_steps([step], step_ctx)
         files = {key: RecordedFile(display, sha, runtime["id"]) for key, (display, sha) in incoming.items()}
         record = InstallRecord(
-            catalog_id=runtime["id"], kind="runtime", library_name="", folder=str(target), launch_path="",
+            catalog_id=runtime["id"], kind="runtime", library_id="", folder=str(target), launch_path="",
             source=_source(runtime, fetched), extras={}, files=files, steps=applied,
             method=install.get("method", ""))
         if elevated and (target / MARKER_NAME).is_file():

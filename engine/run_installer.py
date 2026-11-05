@@ -480,7 +480,7 @@ def run_installer_untracked(file: Path, installer: dict, target: Path, ctx, prog
         raise
 
 
-def install(ctx, item: RunItem, target: Path, library_name: str, library_path: Path,
+def install(ctx, item: RunItem, target: Path, library_id: str, library_path: Path,
             progress, cancel) -> tuple[InstallRecord, list[str]]:
     """Run the installer for a fresh install, find and track the game, and save its record.
 
@@ -511,7 +511,7 @@ def install(ctx, item: RunItem, target: Path, library_name: str, library_path: P
             raise InstallFailed(messages.INSTALL_FOLDER_NOT_FOUND.format(title=title))
         folder, in_target, vendor = found
         record, notes = _track_and_record(ctx, item, folder, in_target, before, start, vendor,
-                                          library_name, library_path)
+                                          library_id, library_path)
         placed = True
     except _StillRunning as e:
         raise InstallFailed(messages.INSTALLER_STILL_RUNNING.format(title=title)) from e
@@ -575,7 +575,7 @@ def _matching_uninstaller(new_entries: list[dict], folder: Path, title: str) -> 
 
 
 def _track_and_record(ctx, item: RunItem, folder: Path, in_target: bool, before: set[str], start: float,
-                      vendor: str | None, library_name: str, library_path: Path
+                      vendor: str | None, library_id: str, library_path: Path
                       ) -> tuple[InstallRecord, list[str]]:
     """Record the files the install window produced, run the file steps on them, and save the record."""
     window_before = before if in_target else None
@@ -596,9 +596,9 @@ def _track_and_record(ctx, item: RunItem, folder: Path, in_target: bool, before:
     exe = find_launch_exe(folder, item.launch_hint, _only(ctx.exclude, folder, claimed if tracked else None))
     if exe is None:
         raise InstallFailed(messages.NO_EXE.format(title=item.title) + "\n\n" + messages.DEFENDER_NOTE)
-    stored_library, stored_folder = _where(folder, library_name, library_path, ctx.libraries)
+    stored_library, stored_folder = _where(folder, library_id, library_path, ctx.libraries)
     record = InstallRecord(
-        catalog_id=item.catalog_id, kind=item.kind, library_name=stored_library, folder=stored_folder,
+        catalog_id=item.catalog_id, kind=item.kind, library_id=stored_library, folder=stored_folder,
         launch_path=exe.relative_to(folder).as_posix(), source=item.source, extras={},
         files=_recorded(folder, claimed, item.catalog_id), steps=[], method="run", tracked=tracked,
         vendor_uninstaller=vendor,
@@ -621,19 +621,19 @@ def _recorded(folder: Path, claimed: dict[str, str], owner: str) -> dict[str, Re
     return {key: RecordedFile(rel, hash_file(folder / rel), owner) for key, rel in claimed.items()}
 
 
-def _where(folder: Path, library_name: str, library_path: Path, libraries: list[dict]) -> tuple[str, str]:
-    """(library name, folder relative to it) for a folder inside a library; ("", absolute path) otherwise.
+def _where(folder: Path, library_id: str, library_path: Path, libraries: list[dict]) -> tuple[str, str]:
+    """(library id, folder relative to it) for a folder inside a library; ("", absolute path) otherwise.
 
     The requested library is tried first.
     """
-    candidates = [{"name": library_name, "path": str(library_path)}, *libraries]
+    candidates = [{"id": library_id, "path": str(library_path)}, *libraries]
     for lib in candidates:
-        if not lib.get("path") or not lib.get("name"):
+        if not lib.get("path") or not lib.get("id"):
             continue
         root = Path(os.path.abspath(lib["path"]))
         absolute = Path(os.path.abspath(folder))
         if inside(absolute, root) and not _same(absolute, root):
-            return lib["name"], Path(os.path.relpath(absolute, root)).as_posix()
+            return lib["id"], Path(os.path.relpath(absolute, root)).as_posix()
     return "", str(Path(os.path.abspath(folder)))
 
 

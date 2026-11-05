@@ -13,7 +13,6 @@ from .errors import InstallFailed
 from .run_installer import silent_args_for
 from .runtimes import _has_elevated_steps, _is_installer_runtime, _runs_installer, is_com_runtime, missing_runtimes
 
-MANUAL_LIBRARY = "manual"
 _DEMO_FLAGS = ("demo", "requires-registration")
 
 
@@ -132,12 +131,12 @@ def _extra_choices(entry: dict, entries: dict, platform: str, installed: set[str
 
 
 def _choose_library(plan: InstallPlan, libraries: list[dict], last_library: str | None) -> None:
-    plan.libraries = [lib for lib in libraries if lib.get("name") != MANUAL_LIBRARY]
+    plan.libraries = list(libraries)
     if not plan.libraries:
         plan.suggested_folder = _suggested_folder()
         return
-    names = [lib.get("name") for lib in plan.libraries]
-    plan.default_library = last_library if last_library in names else names[0]
+    ids = [lib["id"] for lib in plan.libraries]
+    plan.default_library = last_library if last_library in ids else ids[0]
 
 
 def _warnings(entry: dict, action: str, interactive: bool) -> list[str]:

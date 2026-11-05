@@ -60,7 +60,7 @@ def installed_outside(tmp_path):
     eng, lib = setup_engine(tmp_path, [e, music_extra(routes)], routes, on_start=on_start, uninstall_reader=keys)
     install(eng)
     rec = record(eng)
-    assert rec.library_name == "" and Path(rec.folder) == folder and rec.tracked
+    assert rec.library_id == "" and Path(rec.folder) == folder and rec.tracked
     put(folder, "cfg.ini", b"volume=9 mine")
     put(folder, "saves/slot1.sav", b"save")
     return eng, routes, folder

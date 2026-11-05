@@ -56,7 +56,7 @@ class InstalledSource:
 class InstallRecord:
     catalog_id: str
     kind: str
-    library_name: str
+    library_id: str
     folder: str
     launch_path: str
     source: InstalledSource
@@ -75,10 +75,10 @@ class InstallRecord:
 
 
 def record_folder(record: InstallRecord, libraries: list[dict]) -> Path | None:
-    if not record.library_name:
+    if not record.library_id:
         return Path(record.folder)
     for lib in libraries:
-        if lib.get("name") == record.library_name:
+        if lib.get("id") == record.library_id:
             return Path(lib["path"]) / record.folder
     return None
 

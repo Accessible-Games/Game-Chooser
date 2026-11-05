@@ -47,7 +47,7 @@ from exception_manager import ExceptionManager
 from . import messages, run_actions, run_installer, runtimes
 from .entries import extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources
 from .errors import Cancelled, EngineError, ExtractError, InstallFailed, NoVerifiedSource, StepError, UnsafePath
-from .folders import target_folder
+from .folders import library_label, target_folder
 from .launch import find_launch_exe
 from .messages import Progress
 from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key, safe_join
@@ -80,7 +80,7 @@ RUN_ACTIONS = frozenset(ACTIONS)
 class InstallRequest:
     action: str
     catalog_id: str
-    library_name: str = ""
+    library_id: str = ""
     library_path: Path | None = None
     extras: tuple[str, ...] = ()
     delete_player_data: bool = False
@@ -137,7 +137,7 @@ def _same_folder(a: Path, b: Path) -> bool:
 def _library_label(library_path: Path, libraries: list[dict]) -> str:
     for lib in libraries:
         if lib.get("path") and _same_folder(Path(lib["path"]), library_path):
-            return lib.get("name") or str(library_path)
+            return library_label(lib)
     return str(library_path)
 
 
@@ -298,10 +298,10 @@ class InstallEngine:
         for lib in self.ctx.libraries:
             if req.library_path is not None:
                 if lib.get("path") and _same_folder(Path(lib["path"]), Path(req.library_path)):
-                    return lib["name"], Path(req.library_path)
-            elif lib.get("name") == req.library_name:
-                return lib["name"], Path(lib["path"])
-        raise ValueError(f"Not a configured library: {req.library_name!r} {req.library_path!r}")
+                    return lib["id"], Path(req.library_path)
+            elif lib.get("id") == req.library_id:
+                return lib["id"], Path(lib["path"])
+        raise ValueError(f"Not a configured library: {req.library_id!r} {req.library_path!r}")
 
     def _installed(self, entry: dict, action: str) -> tuple[InstallRecord, Path]:
         """The game's record and folder, for the actions that change an installed game."""
@@ -353,12 +353,12 @@ class InstallEngine:
     def _staging_root(self, rec: InstallRecord, game_dir: Path) -> Path:
         """Where changes to an installed game are staged: beside its folder in a library; for a folder
         outside the libraries, under the work folder (Ruling R24)."""
-        return game_dir.parent if rec.library_name else self.ctx.work_root
+        return game_dir.parent if rec.library_id else self.ctx.work_root
 
     def _require_writable(self, rec: InstallRecord, game_dir: Path, title: str) -> None:
         """Refuse, before anything changes, a folder outside the libraries that only an administrator
         can change: Game Chooser never changes files elevated."""
-        if not rec.library_name and not _can_write(game_dir):
+        if not rec.library_id and not _can_write(game_dir):
             raise InstallFailed(messages.FOLDER_NEEDS_ADMIN.format(title=title, path=game_dir))
 
     # ---- fetching and staging ------------------------------------------------
@@ -457,7 +457,7 @@ class InstallEngine:
         game_dir = record_folder(rec, self.ctx.libraries)
         if not copies and not any(runtimes.is_runtime_owner(f.owner) for f in rec.files.values()):
             notes = []
-        elif not rec.tracked or game_dir is None or (not rec.library_name and not _can_write(game_dir)):
+        elif not rec.tracked or game_dir is None or (not rec.library_id and not _can_write(game_dir)):
             notes = runtimes.needs_shared_notes(title, [c.runtime for c in copies])
         else:
             return runtimes.private_after_installer(self.ctx, rec, game_dir, copies, title)
@@ -490,7 +490,7 @@ class InstallEngine:
         game_dir = record_folder(rec, self.ctx.libraries)
         if not rec.tracked:
             return self._extras_skipped(entry, rec, unpacked, messages.EXTRAS_SKIPPED_UNTRACKED), 0
-        if not rec.library_name and not _can_write(game_dir):
+        if not rec.library_id and not _can_write(game_dir):
             return self._extras_skipped(entry, rec, unpacked, messages.EXTRAS_SKIPPED_NEEDS_ADMIN, path=game_dir), 0
         rec.extras = {x["id"]: (recorded or {}).get(x["id"]) or _installed_source(x, f, self.ctx.platform)
                       for x, f, _ in unpacked}
@@ -602,7 +602,7 @@ class InstallEngine:
         ctx = self.ctx
         game_id = entry["id"]
         title = _title(entry)
-        library_name, library_path = self._library(req)
+        library_id, library_path = self._library(req)
         extras = [x.entry for x in extras_of(entry, ctx.entries, ctx.platform)
                   if x.required or x.entry["id"] in req.extras]
 
@@ -638,7 +638,7 @@ class InstallEngine:
                 unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
                                                progress, cancel)
                 result = self._install_run(entry, fetched, unpacked, staging, "install", lambda item, spare: (
-                    run_installer.install(ctx, item, target, library_name, library_path, progress, cancel)), cancel,
+                    run_installer.install(ctx, item, target, library_id, library_path, progress, cancel)), cancel,
                     private=private)
                 result.notes[:0] = notes
                 result.notes += _went_without(title, deps)
@@ -647,7 +647,7 @@ class InstallEngine:
                                  _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
                                  _launch_hint(entry, ctx.platform), progress, cancel, private=deps.private)
             _check(cancel)
-            return self._place(entry, staged, target, library_name, library_path, staging,
+            return self._place(entry, staged, target, library_id, library_path, staging,
                                [*notes, *_went_without(title, deps)])
 
     def _install_runtimes(self, deps: runtimes.RuntimePlan, work: Path, progress, cancel) -> None:
@@ -664,7 +664,7 @@ class InstallEngine:
         self.ctx.records.save(record)
         return notes
 
-    def _place(self, entry: dict, staged: _StagedGame, target: Path, library_name: str, library_path: Path,
+    def _place(self, entry: dict, staged: _StagedGame, target: Path, library_id: str, library_path: Path,
                staging: Path, notes: list[str]) -> JobResult:
         """Move the staged tree into the library, run the system steps there, and save the record."""
         ctx = self.ctx
@@ -681,7 +681,7 @@ class InstallEngine:
             # On failure run_system_steps undoes the steps it applied before raising.
             applied = run_system_steps(staged.system_steps(), step_ctx)
             record = InstallRecord(
-                catalog_id=game_id, kind=entry.get("kind", "game"), library_name=library_name,
+                catalog_id=game_id, kind=entry.get("kind", "game"), library_id=library_id,
                 folder=target.name, launch_path=staged.launch_path,
                 source=_installed_source(entry, staged.game, ctx.platform),
                 extras={x["id"]: _installed_source(x, f, ctx.platform) for x, f in staged.extras},
@@ -1184,16 +1184,16 @@ def _incoming(tree: Path, owners: dict[str, str], game_id: str) -> dict[str, Rec
 def _game_dict(entry: dict, rec: InstallRecord, platform: str) -> dict:
     """The games.json fields for an installed catalog game, labelled with the platform it was installed for.
 
-    A game an installer put outside every library is a "manual" game with an absolute launch path.
+    A game an installer put outside every library has library_id "" and an absolute launch path.
     """
-    if rec.library_name:
-        launch_path, library_name = f"{rec.folder}/{rec.launch_path}", rec.library_name
+    if rec.library_id:
+        launch_path, library_id = f"{rec.folder}/{rec.launch_path}", rec.library_id
     else:
-        launch_path, library_name = str(Path(rec.folder) / rec.launch_path), "manual"
+        launch_path, library_id = str(Path(rec.folder) / rec.launch_path), ""
     return {
         **game_fields(entry, platform),
         "launch_path": launch_path,
-        "library_name": library_name,
+        "library_id": library_id,
         "catalog_id": rec.catalog_id,
         "installed_source": {"url": rec.source.url, "sha256": rec.source.sha256, "size": rec.source.size},
         "installed_extras": list(rec.extras),

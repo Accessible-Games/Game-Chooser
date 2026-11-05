@@ -17,7 +17,7 @@ def make_source(n=1):
 
 def make_record(**kw):
     base = dict(
-        catalog_id="entombed", kind="game", library_name="Main", folder="Entombed",
+        catalog_id="entombed", kind="game", library_id="Main", folder="Entombed",
         launch_path="Entombed/entombed.exe", source=make_source(),
         extras={"patch": make_source(2)},
         files={"entombed.exe": RecordedFile("Entombed.exe", "c" * 64, "entombed")},
@@ -108,11 +108,11 @@ def test_hash_tree_skips_engine_dirs_and_folds_case(tmp_path):
 
 
 def test_record_folder_and_owner(tmp_path):
-    libs = [{"name": "Main", "path": str(tmp_path / "lib")}]
+    libs = [{"id": "Main", "path": str(tmp_path / "lib")}]
     rel = make_record()
     assert record_folder(rel, libs) == tmp_path / "lib" / "Entombed"
-    assert record_folder(make_record(library_name="Gone"), libs) is None
-    absolute = make_record(catalog_id="abs", library_name="", folder=str(tmp_path / "elsewhere"))
+    assert record_folder(make_record(library_id="Gone"), libs) is None
+    absolute = make_record(catalog_id="abs", library_id="", folder=str(tmp_path / "elsewhere"))
     assert record_folder(absolute, libs) == tmp_path / "elsewhere"
 
     store = RecordStore(tmp_path / "records")
@@ -122,3 +122,9 @@ def test_record_folder_and_owner(tmp_path):
     assert found is not None and found.catalog_id == "entombed"
     assert store.owner_of_folder(tmp_path / "ELSEWHERE", libs).catalog_id == "abs"
     assert store.owner_of_folder(tmp_path / "lib" / "Other", libs) is None
+
+
+def test_record_folder_by_id(tmp_path):
+    libs = [{"id": "a1", "path": str(tmp_path / "A")}, {"id": "b2", "path": str(tmp_path / "B")}]
+    assert record_folder(make_record(library_id="b2"), libs) == tmp_path / "B" / "Entombed"
+    assert record_folder(make_record(library_id="zz"), libs) is None

@@ -35,6 +35,8 @@ import wx
 import os
 import platform
 import threading
+from library_manager import LibraryError
+from engine.folders import library_label
 from models import Game
 from validation_service import ValidationService
 from smart_list import SmartList, Column
@@ -92,14 +94,10 @@ class FirstTimeSetupDialog(wx.Dialog):
         """Open directory picker to add library"""
         dlg = wx.DirDialog(self, "Choose Game Library Directory")
         if dlg.ShowModal() == wx.ID_OK:
-            path = dlg.GetPath()
-            # Drive roots (e.g. G:) have no basename; fall back to the path itself
-            name = os.path.basename(path.rstrip("\\/")) or path
-            self.library_manager.config["libraries"].append({
-                "name": name,
-                "path": path
-            })
-            self.library_manager.save_config()
+            try:
+                self.library_manager.add_library(dlg.GetPath())
+            except LibraryError as e:
+                wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
         dlg.Destroy()
 
     def on_add_game(self, event):
@@ -234,20 +232,14 @@ class GameDialog(wx.Dialog):
         self._update_path_ui()
 
     def _get_display_path(self):
-        """Get the path to display in the field (absolute for editing library games)"""
+        """Get the path to display in the field (a hand-added game always has an absolute path)"""
         if not self.game.launch_path:
             return ""
 
         if self.game.launch_path.startswith("http"):
             return self.game.launch_path
 
-        if self.game.library_name and self.game.library_name != "":
-            # Library game - convert to absolute path for editing
-            full_path = self.library_manager.get_full_path(self.game)
-            return full_path if full_path else self.game.launch_path
-        else:
-            # User-managed game - already absolute
-            return self.game.launch_path
+        return self.game.launch_path
 
     def on_platform_change(self, event):
         """Handle platform selection change"""
@@ -384,7 +376,7 @@ class GameDialog(wx.Dialog):
             # For non-web games, also check resolved absolute paths
             if not path.startswith('http') and not game.launch_path.startswith('http'):
                 try:
-                    if game.library_name and game.library_name != "":
+                    if game.library_id:
                         # Library game - resolve to absolute path
                         game_full_path = self.library_manager.get_full_path(game)
                         if game_full_path:
@@ -457,20 +449,9 @@ class GameDialog(wx.Dialog):
         else:
             self.game.platforms = [platform_val]
 
-        # Handle library_name based on path changes
-        if self.is_new:
-            # New game - always user-managed
-            self.game.library_name = ""
-            self.game.launch_path = path
-        else:
-            # Editing existing game
-            if self.game.library_name and path != self.original_path:
-                # Library game with changed path becomes user-managed
-                self.game.library_name = ""
-                self.game.launch_path = path
-            else:
-                # Keep existing library_name, update path
-                self.game.launch_path = path
+        # A game added by hand always has an absolute path and no library
+        self.game.library_id = ""
+        self.game.launch_path = path
 
         self.EndModal(wx.ID_OK)
 
@@ -537,7 +518,7 @@ class PreferencesDialog(wx.Dialog):
         ])
 
         # Populate library list
-        self.lib_list.add_items(self.library_manager.config["libraries"])
+        self._fill_library_list()
 
         lib_sizer.Add(self.lib_list.control.control, 1, wx.EXPAND | wx.RIGHT, 5)
 
@@ -546,9 +527,11 @@ class PreferencesDialog(wx.Dialog):
         lib_btn_sizer = wx.BoxSizer(wx.VERTICAL)
 
         add_lib_btn = wx.Button(lib_btn_panel, label="Add")
+        change_lib_btn = wx.Button(lib_btn_panel, label="Change folder")
         remove_lib_btn = wx.Button(lib_btn_panel, label="Remove")
 
         lib_btn_sizer.Add(add_lib_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
+        lib_btn_sizer.Add(change_lib_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
         lib_btn_sizer.Add(remove_lib_btn, 0, wx.EXPAND)
 
         lib_btn_panel.SetSizer(lib_btn_sizer)
@@ -562,34 +545,47 @@ class PreferencesDialog(wx.Dialog):
 
         # Bind events
         add_lib_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
+        change_lib_btn.Bind(wx.EVT_BUTTON, self.on_change_library_folder)
         remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
 
+    def _fill_library_list(self):
+        """Show the libraries; rows carry the id so actions don't depend on the folder name"""
+        self.lib_list.clear()
+        self.lib_list.add_items([
+            {"id": lib["id"], "name": library_label(lib), "path": lib["path"]}
+            for lib in self.library_manager.config["libraries"]
+        ])
+
+    def _change_libraries(self, action, *args):
+        """Run a manager library change, show why it can't be done, and redraw the list"""
+        try:
+            action(*args)
+        except LibraryError as e:
+            wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
+        self._fill_library_list()
+
     def on_add_library(self, event):
-        """Add a new library path"""
+        """Add a new library path (applies immediately)"""
         dlg = wx.DirDialog(self, "Choose Game Library Directory")
         if dlg.ShowModal() == wx.ID_OK:
-            path = dlg.GetPath()
-            # Drive roots (e.g. G:) have no basename; fall back to the path itself
-            name = os.path.basename(path.rstrip("\\/")) or path
-
-            # Create library dict
-            new_lib = {"name": name, "path": path}
-
-            # Add to list control
-            self.lib_list.add_item(new_lib)
-
-            # Add to config
-            self.library_manager.config["libraries"].append(new_lib)
+            self._change_libraries(self.library_manager.add_library, dlg.GetPath())
         dlg.Destroy()
-    
+
+    def on_change_library_folder(self, event):
+        """Point the selected library at another folder (applies immediately)"""
+        selected = self.lib_list.get_selected_item()
+        if not selected:
+            return
+        dlg = wx.DirDialog(self, "Choose the library's new folder", defaultPath=selected["path"])
+        if dlg.ShowModal() == wx.ID_OK:
+            self._change_libraries(self.library_manager.change_library_folder, selected["id"], dlg.GetPath())
+        dlg.Destroy()
+
     def on_remove_library(self, event):
-        """Remove selected library path"""
-        selected_item = self.lib_list.get_selected_item()
-        if selected_item:
-            # Remove from config
-            self.library_manager.config["libraries"].remove(selected_item)
-            # Remove from list
-            self.lib_list.delete_item(selected_item)
+        """Remove the selected library (applies immediately)"""
+        selected = self.lib_list.get_selected_item()
+        if selected:
+            self._change_libraries(self.library_manager.remove_library, selected["id"])
 
     def on_apply(self, event):
         """Save the config"""

@@ -520,7 +520,7 @@ def test_uninstall_undoes_system_steps_but_not_runtimes(tmp_path):
     runtime_dir = eng.ctx.runtimes_root / "dx8vb"
     put(runtime_dir, "dx8vb.dll", b"runtime")
     runtime = InstallRecord(
-        catalog_id="dx8vb", kind="runtime", library_name="", folder=str(runtime_dir), launch_path="",
+        catalog_id="dx8vb", kind="runtime", library_id="", folder=str(runtime_dir), launch_path="",
         source=InstalledSource("https://files.accessiblegames.net/files/x/dx8vb.zip", "x", 1, "x", 1, 0, "1"),
         extras={}, files={"dx8vb.dll": RecordedFile("dx8vb.dll", sha(b"runtime"), "dx8vb")},
         steps=[{"action": "register", "path": "dx8vb.dll"}], method="zip")
@@ -702,11 +702,11 @@ def test_fresh_install_over_a_stale_record_undoes_its_old_steps(tmp_path):
 def test_fresh_install_when_the_records_library_is_gone_undoes_its_old_steps(tmp_path):
     eng, game = install_v1(tmp_path, play=False, steps=[reg_step("Path", "here")])
     other = tmp_path / "Other"
-    eng.ctx.libraries = [{"name": "Other", "path": str(other)}]
+    eng.ctx.libraries = [{"id": "Other", "path": str(other)}]
     r = eng.run(InstallRequest("install", "pawprints", "Other"), quiet, never)
-    assert r.game["library_name"] == "Other" and (other / "Pawprints" / "pawprints.exe").exists()
+    assert r.game["library_id"] == "Other" and (other / "Pawprints" / "pawprints.exe").exists()
     rec = record(eng)
-    assert rec.library_name == "Other"
+    assert rec.library_id == "Other"
     assert rec.steps[0]["undo"] == {"existed": False, "previous": None, "previous_type": None}
     assert game.exists()   # the old folder is left alone
 
@@ -811,7 +811,7 @@ def test_fresh_install_whose_library_cant_be_created_leaves_the_old_steps_alone(
     eng, game = install_v1(tmp_path, play=False, steps=[reg_step("Path", "here")])
     blocker = tmp_path / "unplugged"
     blocker.write_bytes(b"not a folder")  # a library path under a file can't be created
-    eng.ctx.libraries = [{"name": "Other", "path": str(blocker / "Games")}]
+    eng.ctx.libraries = [{"id": "Other", "path": str(blocker / "Games")}]
     with pytest.raises(InstallFailed) as ei:
         eng.run(InstallRequest("install", "pawprints", "Other"), quiet, never)
     assert ei.value.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=blocker / "Games")

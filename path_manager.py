@@ -62,14 +62,14 @@ class PathManager:
         return None
 
     @staticmethod
-    def get_full_path(launch_path, library_paths, library_name):
+    def get_full_path(launch_path, library_paths, library_id):
         """
         Convert a library-relative path to absolute.
 
         Args:
             launch_path: Library-relative path
             library_paths: List of library path dictionaries
-            library_name: Name of the library containing the game
+            library_id: Id of the library containing the game ("" for an absolute path)
 
         Returns:
             Absolute path as string or None if library not found
@@ -78,12 +78,12 @@ class PathManager:
         if launch_path.startswith("http"):
             return launch_path
 
-        if library_name == "manual" or library_name == "":
+        if not library_id:
             return launch_path
 
         # Find library
         for lib in library_paths:
-            if lib["name"] == library_name:
+            if lib["id"] == library_id:
                 lib_path = Path(lib["path"])
                 full_path = lib_path / launch_path
                 return str(full_path)

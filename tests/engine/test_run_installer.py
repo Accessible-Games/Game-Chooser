@@ -183,11 +183,11 @@ def test_silent_install_into_target_is_tracked(tmp_path):
     exe, args, elevated = eng.ctx.elevator.calls[0]
     assert Path(exe).name == "setup.exe" and args.endswith(f'/DIR="{target}"') and elevated is False
     rec = eng.ctx.records.load("lightcars")
-    assert rec.method == "run" and rec.tracked and rec.library_name == "Games" and rec.folder == "Light Cars"
+    assert rec.method == "run" and rec.tracked and rec.library_id == "Games" and rec.folder == "Light Cars"
     assert set(rec.files) == {"lc.exe", "sfx/a.wav"} and rec.files["lc.exe"].sha256 == sha(b"exe")
     assert rec.launch_path == "lc.exe" and rec.vendor_uninstaller is None
     assert rec.source.install["installer"]["type"] == "inno"
-    assert r.game["launch_path"] == "Light Cars/lc.exe" and r.game["library_name"] == "Games"
+    assert r.game["launch_path"] == "Light Cars/lc.exe" and r.game["library_id"] == "Games"
     assert r.notes == []
     assert not any(eng.ctx.work_root.rglob("setup.exe"))  # the downloaded installer is not kept
 
@@ -266,9 +266,9 @@ def test_out_of_library_install_uses_absolute_paths(tmp_path):
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=on_start, uninstall_reader=keys)
     r = install(eng)
     rec = eng.ctx.records.load("lightcars")
-    assert rec.library_name == "" and Path(rec.folder) == elsewhere / "bin" and Path(rec.folder).is_absolute()
+    assert rec.library_id == "" and Path(rec.folder) == elsewhere / "bin" and Path(rec.folder).is_absolute()
     assert rec.launch_path == "lc.exe" and rec.vendor_uninstaller == "MsiExec.exe /X{1}"
-    assert r.game["library_name"] == "manual"
+    assert r.game["library_id"] == "" and Path(r.game["launch_path"]).is_absolute() and "manual" not in r.game
     assert Path(r.game["launch_path"]) == elsewhere / "bin" / "lc.exe" and Path(r.game["launch_path"]).is_absolute()
 
 
@@ -285,8 +285,8 @@ def test_registry_folder_in_a_library_is_stored_relative(tmp_path):
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=on_start, uninstall_reader=keys)
     r = install(eng)
     rec = eng.ctx.records.load("lightcars")
-    assert rec.library_name == "Games" and rec.folder == "LightCars2007"
-    assert r.game["launch_path"] == "LightCars2007/lc.exe" and r.game["library_name"] == "Games"
+    assert rec.library_id == "Games" and rec.folder == "LightCars2007"
+    assert r.game["launch_path"] == "LightCars2007/lc.exe" and r.game["library_id"] == "Games"
 
 
 def test_nothing_found_asks_player_then_untracked(tmp_path, monkeypatch):
@@ -1384,3 +1384,15 @@ def test_cancelled_vendor_uninstall_seen_to_stop_puts_files_back_quietly(tmp_pat
     with pytest.raises(Cancelled):
         eng.run(InstallRequest("uninstall", "lightcars"), quiet, cancel)
     assert (target / "saves" / "slot1.sav").read_bytes() == b"save" and not setaside(eng).exists()
+
+
+def test_game_dict_outside_libraries():
+    from engine.jobs import _game_dict
+    entry = {"id": "lightcars", "title": "Light Cars", "platforms": ["Windows"]}
+    elsewhere = Path(os.path.abspath("Old Games")) / "Light Cars"
+    rec = InstallRecord(catalog_id="lightcars", kind="game", library_id="", folder=str(elsewhere),
+                        launch_path="lc.exe", method="run", source=InstalledSource("u", "s" * 64, 1, "c" * 64, 1, 0, "1.0"),
+                        files={}, extras={}, steps=[])
+    game = _game_dict(entry, rec, "windows")
+    assert game["library_id"] == "" and Path(game["launch_path"]) == elsewhere / "lc.exe"
+    assert Path(game["launch_path"]).is_absolute() and "library_name" not in game and "manual" not in game.values()

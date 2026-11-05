@@ -38,7 +38,7 @@ def vb6():
 
 
 def libs(*names):
-    return [{"name": n, "path": f"C:/Games/{n}"} for n in names]
+    return [{"id": n, "path": f"C:/Games/{n}"} for n in names]
 
 
 def plan(tmp_path, entry, entries=None, libraries=None, records=None, registry=None, shared=True, last=None,
@@ -49,10 +49,10 @@ def plan(tmp_path, entry, entries=None, libraries=None, records=None, registry=N
                               last, WIN, action, **kw)
 
 
-def test_library_choices_exclude_manual_and_default_to_last(tmp_path):
-    libraries = [*libs("a", "b"), {"name": "manual", "path": ""}]
+def test_library_choices_default_to_last_library_id(tmp_path):
+    libraries = libs("a", "b")
     p = plan(tmp_path, game(), libraries=libraries, last="b")
-    assert [lib["name"] for lib in p.libraries] == ["a", "b"]
+    assert [lib["id"] for lib in p.libraries] == ["a", "b"]
     assert p.default_library == "b"
     assert p.suggested_folder is None
     assert plan(tmp_path, game(), libraries=libraries, last="gone").default_library == "a"
@@ -61,7 +61,7 @@ def test_library_choices_exclude_manual_and_default_to_last(tmp_path):
 
 def test_no_library_suggests_userprofile_games(tmp_path, monkeypatch):
     monkeypatch.setenv("USERPROFILE", "C:/Users/x")
-    p = plan(tmp_path, game(), libraries=[{"name": "manual", "path": ""}])
+    p = plan(tmp_path, game(), libraries=[])
     assert p.libraries == [] and p.default_library is None
     assert p.suggested_folder == Path("C:/Users/x/Games")
 
@@ -158,7 +158,7 @@ def test_web_game_plan(tmp_path):
 
 def record(extras):
     src = InstalledSource("https://x/50.zip", "a" * 64, 50, None, None, 0, None)
-    return InstallRecord(catalog_id="entombed", kind="game", library_name="a", folder="Entombed",
+    return InstallRecord(catalog_id="entombed", kind="game", library_id="a", folder="Entombed",
                          launch_path="e.exe", source=src, extras={x: src for x in extras}, files={}, steps=[],
                          method="extract")
 

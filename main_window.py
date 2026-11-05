@@ -30,6 +30,7 @@ from pathlib import Path
 
 from models import Game
 from library_manager import GameLibraryManager
+from engine.folders import library_label
 from game_list import GameListCtrl
 from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
 
@@ -60,11 +61,9 @@ class FilterWorker(threading.Thread):
                 return
 
             # Apply library filter
-            # Manual games and web games are always included
-            if game.library_name and game.library_name != "manual" and game.library_name != "":
-                # Skip games from libraries the user has hidden
-                if game.library_name in self.library_filter:
-                    continue
+            # Games outside every library (library_id "") and web games are always included
+            if game.library_id and game.library_id in self.library_filter:
+                continue
 
             # Apply tree filter
             if self.tree_criteria:
@@ -728,7 +727,7 @@ class MainFrame(wx.Frame):
 
                     # Any path on disk will do; it is no longer tied to a library
                     game.launch_path = new_path
-                    game.library_name = ""
+                    game.library_id = ""
                     self.library_manager.save_games()
                 dlg.Destroy()
                 return
@@ -911,21 +910,10 @@ class MainFrame(wx.Frame):
         self.filter_year_item.Check("year" in self.current_tree_filters)
 
     def _load_hidden_libraries(self):
-        """Load hidden libraries from saved state, migrating the old active_libraries format"""
-        config = self.library_manager.config
-        state = config["SavedState"]
-
-        if "hidden_libraries" in state:
-            return set(state["hidden_libraries"])
-
-        hidden = set()
-        active = state.pop("active_libraries", None)
-        if isinstance(active, list):
-            # Old format stored shown libraries; hide configured ones that weren't shown
-            hidden = {lib["name"] for lib in config["libraries"]
-                      if lib["name"] and lib["name"] not in active}
-        state["hidden_libraries"] = sorted(hidden)
-        return hidden
+        """The ids of the libraries the player has hidden"""
+        state = self.library_manager.config["SavedState"]
+        state.setdefault("hidden_libraries", [])
+        return set(state["hidden_libraries"])
 
     def build_libraries_menu(self):
         """Build/rebuild the libraries submenu with current libraries"""
@@ -935,33 +923,29 @@ class MainFrame(wx.Frame):
             self.libraries_menu.Delete(item)
         self.library_menu_items = []
 
-        # Unique library names, in config order. Games are tagged by library name,
-        # so libraries sharing a name are toggled together. Empty names (e.g. a
-        # drive root) are skipped: their games are never filtered.
-        names = []
+        # One item per library, in config order. Two libraries with the same folder name
+        # (two folders both named Games) are separate items, told apart by their path.
         for lib in self.library_manager.config["libraries"]:
-            name = lib["name"]
-            if name and name != "manual" and name not in names:
-                names.append(name)
-
-        for lib_name in names:
+            library_id = lib["id"]
+            label = library_label(lib)
             # Escape & so it isn't treated as a mnemonic marker
-            menu_item = self.libraries_menu.AppendCheckItem(wx.ID_ANY, lib_name.replace("&", "&&"))
-            self.library_menu_items.append((lib_name, menu_item))
-            self.Bind(wx.EVT_MENU, lambda evt, name=lib_name: self.on_toggle_library(evt, name), menu_item)
-            menu_item.Check(lib_name not in self.hidden_libraries)
+            text = f"{label} ({lib['path']})".replace("&", "&&")
+            menu_item = self.libraries_menu.AppendCheckItem(wx.ID_ANY, text)
+            self.library_menu_items.append((library_id, menu_item))
+            self.Bind(wx.EVT_MENU, lambda evt, lid=library_id: self.on_toggle_library(evt, lid), menu_item)
+            menu_item.Check(library_id not in self.hidden_libraries)
 
-    def on_toggle_library(self, event, library_name):
+    def on_toggle_library(self, event, library_id):
         """Toggle library visibility"""
-        if library_name in self.hidden_libraries:
-            self.hidden_libraries.discard(library_name)
+        if library_id in self.hidden_libraries:
+            self.hidden_libraries.discard(library_id)
         else:
-            self.hidden_libraries.add(library_name)
+            self.hidden_libraries.add(library_id)
 
         # Update menu state
-        for name, item in self.library_menu_items:
-            if name == library_name:
-                item.Check(library_name not in self.hidden_libraries)
+        for item_id, item in self.library_menu_items:
+            if item_id == library_id:
+                item.Check(library_id not in self.hidden_libraries)
 
         # Save state
         self.library_manager.config["SavedState"]["hidden_libraries"] = sorted(self.hidden_libraries)

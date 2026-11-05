@@ -23,10 +23,25 @@ import json
 import os
 import sys
 import platform
+import secrets
 from pathlib import Path
 
+from engine import messages
+from engine.folders import library_label
 from models import Game
 from path_manager import PathManager
+
+
+class LibraryError(Exception):
+    """A library change that can't be made; the message is plain words for the player."""
+
+
+def _norm(path):
+    return os.path.normcase(os.path.abspath(path))
+
+
+def _is_inside(path, parent):
+    return path != parent and os.path.commonpath([path, parent]) == parent
 
 
 class GameLibraryManager:
@@ -88,7 +103,16 @@ class GameLibraryManager:
                         for state_key in default_config["SavedState"]:
                             if state_key not in loaded["SavedState"]:
                                 loaded["SavedState"][state_key] = default_config["SavedState"][state_key]
+                    # The only old-file handling: ids are assigned once and then saved, so they stay stable
+                    upgraded = loaded.pop("exceptions", None) is not None
+                    for lib in loaded["libraries"]:
+                        upgraded |= lib.pop("name", None) is not None
+                        if "id" not in lib:
+                            lib["id"] = secrets.token_hex(6)
+                            upgraded = True
                     self.config = loaded
+                    if upgraded:
+                        self.save_config()
             except:
                 self.config = default_config
         else:
@@ -117,19 +141,62 @@ class GameLibraryManager:
         with open(self.games_file, 'w') as f:
             json.dump([g.to_dict() for g in self.games], f, indent=2)
 
-    def get_library_by_name(self, name):
-        """Get library path by name"""
+    def library_by_id(self, library_id):
+        """The library with this id, or None"""
         for lib in self.config["libraries"]:
-            if lib["name"] == name:
-                return lib["path"]
+            if lib["id"] == library_id:
+                return lib
         return None
+
+    def library_reachable(self, library_id):
+        """True if the library's folder is there right now (a drive can be unplugged)"""
+        lib = self.library_by_id(library_id)
+        return lib is not None and Path(lib["path"]).is_dir()
+
+    def _check_folder(self, path, ignoring=None):
+        """Raise LibraryError unless path can be a library (other than the library `ignoring`)"""
+        if not Path(path).is_dir():
+            raise LibraryError(messages.LIBRARY_FOLDER_MISSING)
+        new = _norm(path)
+        for lib in self.config["libraries"]:
+            if lib["id"] == ignoring:
+                continue
+            existing = _norm(lib["path"])
+            if new == existing:
+                raise LibraryError(messages.LIBRARY_ALREADY_ADDED)
+            if _is_inside(new, existing):
+                raise LibraryError(messages.LIBRARY_INSIDE.format(label=library_label(lib)))
+            if _is_inside(existing, new):
+                raise LibraryError(messages.LIBRARY_CONTAINS.format(label=library_label(lib)))
+
+    def add_library(self, path):
+        """Add a library folder and return it; raises LibraryError if it can't be one"""
+        self._check_folder(path)
+        lib = {"id": secrets.token_hex(6), "path": path}
+        self.config["libraries"].append(lib)
+        self.save_config()
+        return lib
+
+    def change_library_folder(self, library_id, path):
+        """Point a library at another folder; its games follow because they are stored relative to it"""
+        lib = self.library_by_id(library_id)
+        if lib is None:
+            raise LibraryError(messages.LIBRARY_FOLDER_MISSING)
+        self._check_folder(path, ignoring=library_id)
+        lib["path"] = path
+        self.save_config()
+
+    def remove_library(self, library_id):
+        """Forget a library (config only; nothing on disk or in games.json changes)"""
+        self.config["libraries"] = [lib for lib in self.config["libraries"] if lib["id"] != library_id]
+        self.save_config()
     
     def get_full_path(self, game):
         """Construct full path from relative path and library"""
         return self.path_manager.get_full_path(
             game.launch_path,
             self.config["libraries"],
-            game.library_name
+            game.library_id
         )
     
     def is_executable(self, path):

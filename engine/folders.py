@@ -1,10 +1,17 @@
 """Choosing the folder a catalog game is installed into."""
 
+import os
 from pathlib import Path
 
 from .entries import first_developer
 from .paths import sanitize_title
 from .records import RecordStore
+
+
+def library_label(lib: dict) -> str:
+    """What a library is called on screen: its folder's name, or the whole path for a drive root."""
+    path = str(lib.get("path") or "")
+    return os.path.basename(os.path.normpath(path)) or path
 
 
 def target_folder(entry: dict, library_path: Path, records: RecordStore, libraries: list[dict]) -> Path:

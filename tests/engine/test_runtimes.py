@@ -234,7 +234,7 @@ def test_runtime_installed_once_into_programdata_folder(tmp_path):
     assert eng.ctx.fetcher.requests.count(rt["sources"][0]["url"]) == 1
     assert Progress("installing_dependency", detail=DX8VB_TITLE) in seen
     rec = eng.ctx.records.load("dx8vb")
-    assert rec.kind == "runtime" and rec.library_name == "" and Path(rec.folder) == runtimes_root / "dx8vb"
+    assert rec.kind == "runtime" and rec.library_id == "" and Path(rec.folder) == runtimes_root / "dx8vb"
     assert set(rec.files) == {"dx8vb.dll"} and rec.files["dx8vb.dll"].owner == "dx8vb"
     assert rec.steps == [{"action": "register", "path": "dx8vb.dll"}] and rec.method == "none"
     assert (lib / "Entombed" / "entombed.exe").exists() and (lib / "Pawprints" / "pawprints.exe").exists()

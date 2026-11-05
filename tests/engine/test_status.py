@@ -8,7 +8,7 @@ from engine.status import EXE_NOT_FOUND, READY, UPDATE_AVAILABLE, game_status, u
 def record(url="https://dev/x.zip", sha256="a" * 64, size=10, catalog_sha256=None, catalog_size=None,
            version=None, position=0, kind="game", tracked=True, uninstalled=False, extras=None):
     return InstallRecord(
-        catalog_id="g", kind=kind, library_name="", folder="g", launch_path="g.exe",
+        catalog_id="g", kind=kind, library_id="", folder="g", launch_path="g.exe",
         source=InstalledSource(url, sha256, size, catalog_sha256, catalog_size, position, version),
         extras=extras or {}, files={}, steps=[], method="extract", tracked=tracked, uninstalled=uninstalled)
 

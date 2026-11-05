@@ -535,7 +535,7 @@ def make_engine(tmp_path: Path, entries, **ctx_overrides):
         registry=FakeRegistry(),
         work_root=tmp_path / "work",
         runtimes_root=tmp_path / "runtimes",
-        libraries=[{"name": "Games", "path": str(lib)}],
+        libraries=[{"id": "Games", "path": str(lib)}],
         today=lambda: date(2026, 11, 4),
         recycle=FakeRecycle(),
         process_watch=FakeWatch,

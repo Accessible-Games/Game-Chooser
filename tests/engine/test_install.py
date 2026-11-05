@@ -61,12 +61,12 @@ def test_fresh_install(tmp_path):
     assert isinstance(r, JobResult) and r.action == "install" and r.title == "Entombed" and r.notes == []
     assert r.game == {
         "title": "Entombed", "developer": "Ghorse", "genre": "Arcade", "year": "2008", "platforms": ["Windows"],
-        "launch_path": "Entombed/entombed.exe", "library_name": "Games", "catalog_id": "entombed",
+        "launch_path": "Entombed/entombed.exe", "library_id": "Games", "catalog_id": "entombed",
         "installed_source": {"url": e["sources"][0]["url"], "sha256": e["sources"][0]["sha256"],
                              "size": e["sources"][0]["size"]},
         "installed_extras": [],
     }
-    assert rec.launch_path == "entombed.exe" and rec.library_name == "Games" and rec.method == "zip"
+    assert rec.launch_path == "entombed.exe" and rec.library_id == "Games" and rec.method == "zip"
     assert rec.source.sha256 == e["sources"][0]["sha256"] and rec.source.catalog_sha256 == e["sources"][0]["sha256"]
     assert rec.source.position == 0 and rec.source.version == "1.0" and rec.extras == {} and rec.steps == []
     assert set(rec.files) == {"entombed.exe", "sounds/a.wav"}
@@ -410,7 +410,7 @@ def test_library_found_by_name_alone(tmp_path):
     routes = {}
     engine, ctx, lib = setup(tmp_path, [game(routes)], routes)
     r = engine.run(InstallRequest("install", "entombed", "Games"), lambda p: None, never)
-    assert (lib / "Entombed" / "entombed.exe").exists() and r.game["library_name"] == "Games"
+    assert (lib / "Entombed" / "entombed.exe").exists() and r.game["library_id"] == "Games"
 
 
 def test_default_exclude_is_the_scanners_rules(tmp_path):
@@ -562,9 +562,9 @@ def test_install_into_a_library_folder_that_does_not_exist_yet(tmp_path):
     routes = {}
     new_lib = tmp_path / "Profile" / "Games"
     engine, ctx, _ = setup(tmp_path, [game(routes)], routes,
-                           libraries=[{"name": "Games", "path": str(new_lib)}])
+                           libraries=[{"id": "Games", "path": str(new_lib)}])
     r = engine.run(InstallRequest("install", "entombed", "Games", new_lib), lambda p: None, never)
-    assert (new_lib / "Entombed" / "entombed.exe").exists() and r.game["library_name"] == "Games"
+    assert (new_lib / "Entombed" / "entombed.exe").exists() and r.game["library_id"] == "Games"
     assert ctx.records.load("entombed").folder == "Entombed"
     if hasattr(os.stat(new_lib), "st_file_attributes"):
         assert not os.stat(new_lib).st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN
@@ -576,7 +576,7 @@ def test_library_folder_that_cannot_be_created_fails_plainly(tmp_path):
     (tmp_path / "blocker").write_text("a file where the library's parent folder should be")
     bad_lib = tmp_path / "blocker" / "Games"
     engine, ctx, _ = setup(tmp_path, [game(routes)], routes,
-                           libraries=[{"name": "Games", "path": str(bad_lib)}])
+                           libraries=[{"id": "Games", "path": str(bad_lib)}])
     with pytest.raises(InstallFailed) as ei:
         engine.run(InstallRequest("install", "entombed", "Games", bad_lib), lambda p: None, never)
     assert ei.value.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=bad_lib)
