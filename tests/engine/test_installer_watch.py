@@ -145,6 +145,7 @@ def test_a_new_program_on_the_roots_id_isnt_adopted_when_the_root_couldnt_be_hel
     system.start(100, 7, 2000.0)  # the player's program now has the installer's old id ...
     system.start(200, 100, 2001.0)  # ... and starts a long-lived program of its own
     assert watch.poll(0.01)  # not the installer's: the tree is still over
+    assert not watch.tree_observed()  # but a child it started just before exiting could have been missed
     watch.terminate()
     assert system.killed == []
     watch.close()

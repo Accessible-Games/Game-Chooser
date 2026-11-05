@@ -179,6 +179,10 @@ class _TreeWatch:
         parents = set(self._children)
         if self._root is not None or self._process.wait(0) is None:
             parents.add(self._process.pid)
+        else:
+            # A child it started just before exiting can't be told from a stranger's on its reused id,
+            # so the tree can't be said to have been followed.
+            self._followed = False
         return parents
 
     def _sweep(self) -> None:
