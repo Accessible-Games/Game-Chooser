@@ -27,10 +27,11 @@ from . import comfree, messages
 from .entries import platform_sources
 from .errors import Cancelled, ElevationDeclined, ExtractError, InstallFailed, StepError, UnsafePath
 from .messages import Progress
-from .paths import safe_join
-from .records import InstalledSource, InstallRecord, RecordedFile, hash_tree
+from .paths import norm_key, safe_join
+from .records import InstalledSource, InstallRecord, RecordedFile, hash_tree, is_runtime_owner, runtime_owner
 from .run_installer import run_installer_untracked
-from .safety import _prune_empty_dirs, is_link
+from .safety import _prune_empty_dirs, _resolve_game_path, is_link
+from .sources import hash_file
 from .steps import StepContext, run_file_steps, run_system_steps, undo_steps
 
 _CLASSES = "SOFTWARE\\Classes\\"
@@ -310,12 +311,29 @@ class PrivateCopy:
     dirs: list[Path]    # the folders it created for them
     dlls: list[str]     # its COM servers (the `register` steps' paths), relative to its own folder
     usable: bool = True
+    root: Path | None = None  # where it was unpacked in staging
 
 
 def stage_private(ctx, runtimes: list[dict], tree: Path, staging: Path, work: Path, fetch,
                   progress, cancel) -> list[PrivateCopy]:
     """Download each COM runtime, unpack it in staging, run its file steps, and copy its files into
     `tree` (a file the game already ships is kept, not replaced). Call before the exe is detected."""
+    copies = unpack_private(ctx, runtimes, staging, work, fetch, progress, cancel)
+    for copy in copies:
+        if not copy.usable:
+            continue
+        try:
+            _copy_into(copy.root, tree, copy)
+        except OSError as e:
+            _remove_copy(copy, tree)
+            raise InstallFailed(messages.FAILED.format(title=_title(copy.runtime))) from e
+    return copies
+
+
+def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
+                   progress, cancel) -> list[PrivateCopy]:
+    """Download each COM runtime and unpack it in `staging/runtimes/<id>`, with its file steps run there.
+    A runtime whose downloaded file is an installer that must run can't be copied: it is marked unusable."""
     copies = []
     for runtime in runtimes:
         _check(cancel)
@@ -340,13 +358,8 @@ def stage_private(ctx, runtimes: list[dict], tree: Path, staging: Path, work: Pa
         finally:
             _clear(work_dir)
         _check(cancel)
-        copy = PrivateCopy(runtime, [], [], [s.get("path") for s in steps if s.get("action") == "register"])
-        try:
-            _copy_into(root, tree, copy)
-        except OSError as e:
-            _remove_copy(copy, tree)
-            raise InstallFailed(messages.FAILED.format(title=_title(runtime))) from e
-        copies.append(copy)
+        copies.append(PrivateCopy(runtime, [], [], [s.get("path") for s in steps if s.get("action") == "register"],
+                                  root=root))
     return copies
 
 
@@ -434,3 +447,70 @@ def _move_beside(copy: PrivateCopy, tree: Path, beside: Path) -> None:
     for folder in reversed(old_dirs):
         _prune_empty_dirs(folder, tree)
     copy.files = moved
+
+
+# ---- private copies after an installer has run --------------------------------------------------------------
+
+def private_after_installer(ctx, rec: InstallRecord, game_dir: Path, copies: list[PrivateCopy],
+                            title: str) -> list[str]:
+    """For a tracked game whose installer has run and whose launch exe is known: replace its private COM
+    copies with `copies` (already unpacked), beside the exe, with the manifest, and save the record.
+
+    The earlier copies' files (recorded with a runtime owner) are removed where unchanged; a changed
+    one is the player's now. The new files are recorded with their runtime as owner, so uninstall
+    removes them and the extras never claim them. If the copies can't work, they are removed again
+    and the notes say the game needs each shared component. Returns those notes.
+    """
+    _remove_recorded_private(rec, game_dir)
+    usable = [c for c in copies if c.usable]
+    notes = needs_shared_notes(title, [c.runtime for c in copies if not c.usable])
+    if usable:
+        exe = game_dir / rec.launch_path
+        manifest = exe.with_name(exe.name + ".manifest")
+        wrote_manifest = False
+        try:
+            for copy in usable:
+                _copy_into(copy.root, exe.parent, copy)
+            dlls = [safe_join(exe.parent, rel) for copy in usable for rel in copy.dlls]
+            if not comfree.PRIVATE_COM_SUPPORTED:
+                raise comfree.PrivateComUnavailable("private COM is turned off")
+            comfree.write_private_com(game_dir, exe, dlls, reader=comfree.read_com_info)
+            wrote_manifest = True
+            added = {path: copy.runtime["id"] for copy in usable for path in copy.files}
+            added[manifest] = usable[0].runtime["id"]
+            recorded = {}
+            for path, runtime_id in added.items():
+                rel = path.relative_to(game_dir).as_posix()
+                recorded[norm_key(rel)] = RecordedFile(rel, hash_file(path), runtime_owner(runtime_id))
+            rec.files.update(recorded)
+        except (comfree.PrivateComUnavailable, UnsafePath, OSError, TypeError):
+            if wrote_manifest:
+                _unlink_quietly(manifest)
+            for copy in usable:
+                _remove_copy(copy, game_dir)
+            notes += needs_shared_notes(title, [c.runtime for c in usable])
+    ctx.records.save(rec)
+    return notes
+
+
+def _remove_recorded_private(rec: InstallRecord, game_dir: Path) -> None:
+    for key, recorded in list(rec.files.items()):
+        if not is_runtime_owner(recorded.owner):
+            continue
+        try:
+            path, linked = _resolve_game_path(game_dir, recorded.path)
+            if not linked and path.is_file() and hash_file(path) == recorded.sha256:
+                path.unlink()
+                _prune_empty_dirs(path.parent, game_dir)
+        except UnsafePath:
+            pass
+        except OSError:
+            continue  # still there (in use?): it stays recorded
+        rec.files.pop(key)
+
+
+def _unlink_quietly(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        pass

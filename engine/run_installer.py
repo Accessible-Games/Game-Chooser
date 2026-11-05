@@ -33,7 +33,7 @@ from .installer_watch import ProcessWatch, watch_process  # noqa: F401  (re-expo
 from .launch import find_launch_exe
 from .messages import Progress
 from .paths import EXECUTABLE_CODE_SUFFIXES, STAGING_DIR_NAME, is_engine_dir, norm_key, unique_path
-from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, record_folder
+from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is_runtime_owner, record_folder
 from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link
 from .sources import hash_file
 from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, undo_steps
@@ -821,6 +821,10 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     for key in theirs:
         claimed.pop(key, None)
     files = _recorded(game_dir, claimed, item.catalog_id)
+    for key, old in record.files.items():
+        # A private COM copy the installer left as it was stays the runtime's, even inside the window.
+        if is_runtime_owner(old.owner) and key in files and files[key].sha256 == old.sha256:
+            files[key] = old
     on_disk = hash_tree(game_dir)
     older = (undo_of or {}).get("files") or {}
     not_removed = []

@@ -8,14 +8,15 @@ from xml.dom import minidom
 
 import pytest
 
-from engine import comfree, messages
+from engine import comfree, messages, run_installer
 from engine.comfree import PrivateComUnavailable, com_manifest_xml, has_embedded_manifest, write_private_com
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from engine.messages import Progress
 from engine.runtimes import (default_runtimes_root, detect_present, is_com_runtime, missing_runtimes,
                              runtime_present)
-from tests.engine.fakes import FakeElevator, FakeFetcher, FakeRegistry, make_engine, served_source, zip_bytes
+from tests.engine.fakes import (FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry, make_engine,
+                                served_source, zip_bytes)
 
 MIRROR = "https://files.accessiblegames.net/files/"
 DX8VB = b"MZ fake dx8vb.dll"
@@ -447,28 +448,123 @@ def test_preference_off_non_com_runtime_still_installs_shared(tmp_path):
     assert (eng.ctx.runtimes_root / "bass" / "bass.dll").exists() and eng.ctx.records.load("bass") is not None
 
 
-def test_preference_off_run_mode_game_notes_com_runtime(tmp_path, private_com):
+def run_mode_game(routes, setup_exe=b"MZ fake game setup", silent=True, version="1.0", **fields):
+    installer = {"type": "other", "mode": "run", **({"silent_args": "/S"} if silent else {})}
+    source = served_source(routes, f"{MIRROR}{sha(setup_exe)}/setup.exe", setup_exe, method="installer",
+                           installer=installer)
+    return {"id": "lightcars", "kind": "game", "title": "Light Cars", "developer": ["Draconis"],
+            "genres": ["Racing"], "year": 2007, "version": version, "sources": [source],
+            "dependencies": ["dx8vb"], **fields}
+
+
+def writes_game(folder: Path, files: dict[str, bytes] | None = None):
+    """A fake game installer: when started, it writes the game into `folder`."""
+    def on_start(exe, args, elevated):
+        if exe.endswith("setup.exe"):
+            time.sleep(0.05)
+            for rel, data in (files or {"lightcars.exe": b"lc", "data/track.dat": b"t"}).items():
+                (folder / rel).parent.mkdir(parents=True, exist_ok=True)
+                (folder / rel).write_bytes(data)
+            time.sleep(0.05)
+    return on_start
+
+
+def test_preference_off_tracked_run_install_gets_private_copy_and_uninstall_removes_it(tmp_path, private_com):
+    routes = {}
+    rt, g = dx8vb(routes), run_mode_game(routes)
+    folder = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False,
+                     elevator=FakeElevator(on_start=writes_game(folder)))
+    r = run(eng, "install", id="lightcars")
+    assert r.notes == [] and eng.ctx.elevator.calls[0][0].endswith("setup.exe") and len(eng.ctx.elevator.calls) == 1
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB
+    assert DX8VB_CLSID in (folder / "lightcars.exe.manifest").read_text(encoding="utf-8")
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.tracked and rec.files["dx8vb.dll"].owner == "runtime:dx8vb"
+    assert rec.files["lightcars.exe.manifest"].owner == "runtime:dx8vb"
+    assert rec.files["lightcars.exe"].owner == "lightcars"
+    assert eng.ctx.records.load("dx8vb") is None and not (eng.ctx.runtimes_root / "dx8vb").exists()
+
+    run(eng, "uninstall", id="lightcars")
+    assert not folder.exists() and eng.ctx.records.load("lightcars") is None
+
+
+def test_preference_off_run_update_replaces_the_private_copy_and_extras_leave_it(tmp_path, private_com):
     routes = {}
     rt = dx8vb(routes)
-    setup_exe = b"MZ fake game setup"
-    source = served_source(routes, f"{MIRROR}{sha(setup_exe)}/setup.exe", setup_exe, method="installer",
-                           installer={"type": "other", "mode": "run", "silent_args": "/S"})
-    g = {"id": "lightcars", "kind": "game", "title": "Light Cars", "developer": ["Draconis"], "genres": ["Racing"],
-         "year": 2007, "version": "1.0", "sources": [source], "dependencies": ["dx8vb"]}
-    lib = tmp_path / "Games"
+    x_data = zip_bytes({"tracks/extra.dat": b"x"})
+    x = {"id": "lc-tracks", "kind": "extra", "title": "Tracks", "install_into": "lightcars", "version": "1",
+         "sources": [served_source(routes, f"{MIRROR}{sha(x_data)}/tracks.zip", x_data)]}
+    g = run_mode_game(routes, extras=[{"id": "lc-tracks", "required": True}])
+    folder = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup(tmp_path, [rt, x, g], routes, register_shared_components=False,
+                     elevator=FakeElevator(on_start=writes_game(folder)))
+    run(eng, "install", id="lightcars")
+    assert (folder / "dx8vb.dll").exists() and (folder / "tracks" / "extra.dat").exists()
 
-    def installs(exe, args, elevated):
-        time.sleep(0.05)
-        (lib / "Light Cars").mkdir(parents=True, exist_ok=True)
-        (lib / "Light Cars" / "lightcars.exe").write_bytes(b"lc")
-        time.sleep(0.05)
+    eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=b"MZ setup v2", version="2.0",
+                                                 extras=[{"id": "lc-tracks", "required": True}])
+    eng.ctx.elevator.on_start = writes_game(folder, {"lightcars.exe": b"lc v2", "data/track.dat": b"t2"})
+    r = run(eng, "update", id="lightcars")
+    assert r.notes == [] and (folder / "lightcars.exe").read_bytes() == b"lc v2"
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / "lightcars.exe.manifest").exists()
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.files["dx8vb.dll"].owner == "runtime:dx8vb" and rec.files["tracks/extra.dat"].owner == "lc-tracks"
+    run(eng, "repair", id="lightcars")  # runs the installer again, puts the extras back: the copy stays
+    assert (folder / "dx8vb.dll").exists() and (folder / "lightcars.exe.manifest").exists()
+    assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == "runtime:dx8vb"
 
+    eng.ctx.register_shared_components = True  # now shared: the private copy goes, the runtime is registered
+    eng.ctx.elevator.on_start = writes_game(folder, {"lightcars.exe": b"lc v2", "data/track.dat": b"t2"})
+    run(eng, "update", id="lightcars")
+    assert not (folder / "dx8vb.dll").exists() and not (folder / "lightcars.exe.manifest").exists()
+    assert eng.ctx.records.load("dx8vb").kind == "runtime"
+    assert not any(runtimes_owner.startswith("runtime:")
+                   for runtimes_owner in (f.owner for f in eng.ctx.records.load("lightcars").files.values()))
+
+
+def test_preference_off_run_install_with_embedded_manifest_notes_and_copies_nothing(tmp_path, private_com,
+                                                                                    monkeypatch):
+    monkeypatch.setattr(comfree, "has_embedded_manifest", lambda exe: True)
+    routes = {}
+    rt, g = dx8vb(routes), run_mode_game(routes)
+    folder = tmp_path / "Games" / "Light Cars"
     eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False,
-                     elevator=FakeElevator(on_start=installs))
+                     elevator=FakeElevator(on_start=writes_game(folder)))
     r = run(eng, "install", id="lightcars")
+    assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Light Cars", component=DX8VB_TITLE)]
+    assert not (folder / "dx8vb.dll").exists() and not (folder / "lightcars.exe.manifest").exists()
+    assert set(eng.ctx.records.load("lightcars").files) == {"lightcars.exe", "data/track.dat"}
+    assert [c for c in eng.ctx.elevator.calls if c[0] == "regsvr32.exe"] == []
+
+
+def test_preference_off_untracked_run_install_notes(tmp_path, private_com, monkeypatch):
+    monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
+    routes = {}
+    rt, g = dx8vb(routes), run_mode_game(routes, silent=False)
+    chosen = tmp_path / "Somewhere" / "LC"
+    chosen.mkdir(parents=True)
+    (chosen / "lc.exe").write_bytes(b"exe")  # an old copy: nothing in it was written during the install
+    time.sleep(0.05)
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False,
+                     installer_ui=FakeInstallerUI(locate=chosen))
+    r = run(eng, "install", id="lightcars")
+    assert not eng.ctx.records.load("lightcars").tracked
     assert messages.NEEDS_SHARED_COMPONENT.format(title="Light Cars", component=DX8VB_TITLE) in r.notes
-    assert [c[0] for c in eng.ctx.elevator.calls if c[0] == "regsvr32.exe"] == []
-    assert rt["sources"][0]["url"] not in eng.ctx.fetcher.requests
+    assert sorted(p.name for p in chosen.iterdir()) == ["lc.exe"]
+
+
+def test_preference_off_bad_runtime_download_leaves_the_installer_unstarted(tmp_path, private_com):
+    routes = {}
+    rt, g = dx8vb(routes), run_mode_game(routes)
+    del routes[rt["sources"][0]["url"]]
+    folder = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False,
+                     elevator=FakeElevator(on_start=writes_game(folder)))
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install", id="lightcars")
+    assert ei.value.message.startswith(f"{DX8VB_TITLE} couldn't be downloaded.")
+    assert eng.ctx.elevator.calls == [] and not folder.exists() and eng.ctx.records.load("lightcars") is None
 
 
 def test_preference_off_repair_and_update_keep_the_private_copy(tmp_path, private_com):

@@ -18,7 +18,19 @@ from .sources import hash_file
 class RecordedFile:
     path: str
     sha256: str
-    owner: str
+    owner: str  # the catalog id that shipped it (the game or an extra), or runtime_owner(id)
+
+
+RUNTIME_OWNER_PREFIX = "runtime:"
+
+
+def runtime_owner(runtime_id: str) -> str:
+    """The owner recorded for a file a runtime's private copy put in a game's folder (not the installer's)."""
+    return RUNTIME_OWNER_PREFIX + runtime_id
+
+
+def is_runtime_owner(owner: str) -> bool:
+    return owner.startswith(RUNTIME_OWNER_PREFIX)
 
 
 @dataclass
