@@ -490,6 +490,23 @@ def test_remove_library_refused_while_an_untracked_game_is_busy(rig):
     assert rig.manager.library_by_id(lib["id"]) is not None and rig.manager.catalog_game("pawprints") is not None
 
 
+def test_unrelated_failed_job_leaves_a_pending_removal(rig):
+    lib = _two_installed(rig)
+    rig.publish(game_entry(rig.routes), game_entry(rig.routes, id="pawprints", title="Pawprints"),
+                game_entry(rig.routes, id="third", title="Third"))
+    rig.run("install", "third", library_id=lib["id"])
+    _untrack(rig, "third")  # kept, not uninstalled
+    rig.service.queue.hold.update({"entombed", "pawprints"})
+    jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
+    assert [j.request.catalog_id for j in jobs] == ["entombed", "pawprints"]
+    rig.service.queue.fail.add("third")
+    other = rig.service.submit("repair", "third")  # a job in the same library that isn't one of its uninstalls
+    rig.service.job_failed(other)
+    assert lib["id"] in rig.service.pending_removal
+    rig.service.job_failed(jobs[1])  # one of its uninstalls: the library stays
+    assert lib["id"] not in rig.service.pending_removal
+
+
 def test_forget_deletes_the_record_first(rig, monkeypatch):
     _two_installed(rig)
     def broken(catalog_id):

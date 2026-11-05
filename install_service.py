@@ -231,12 +231,13 @@ class InstallService:
         self.manager.remove_catalog_game(catalog_id)
 
     def job_failed(self, job: Job) -> None:
-        """A job failed (or was cancelled): a library waiting on it to be removed stays."""
-        game = self.manager.catalog_game(job.request.catalog_id)
-        rec = self.manager.records.load(job.request.catalog_id) if game is None else None
-        library_id = game.library_id if game is not None else rec.library_id if rec is not None else None
-        self.pending_removal.discard(library_id)
-        self._removal_waits.pop(library_id, None)
+        """A job failed (or was cancelled): a library waiting on it (one of the uninstalls its removal submitted)
+        stays. Any other job's failure changes nothing here."""
+        catalog_id = job.request.catalog_id
+        for library_id, waits in list(self._removal_waits.items()):
+            if catalog_id in waits:
+                self.pending_removal.discard(library_id)
+                del self._removal_waits[library_id]
 
     # ---- library status -------------------------------------------------------------------------------------
 

@@ -1429,8 +1429,10 @@ class MainFrame(wx.Frame):
         except OSError as e:
             log.warning("Couldn't forget %s: %s", live.catalog_id, e)
             self._tell(messages.FORGET_FAILED.format(title=live.title), messages.FORGET_GAME_TITLE)
-            self._after_delete(current_index)  # the list shows what is true now
-            self.focus_active_list()
+            if self._live_game(live) is None:  # it left the list after all (games.json couldn't be saved)
+                self._after_delete(current_index)
+            else:  # nothing changed: the selection stays on it
+                self.focus_active_list()
             return
         self._after_delete(current_index)
 
@@ -1537,10 +1539,14 @@ class MainFrame(wx.Frame):
         if not self:
             return
         self._counting.discard(game.catalog_id)
-        self.run_when_no_dialog(self._confirm_uninstall, game, player_files)
+        if not self._quitting:
+            self.run_when_no_dialog(self._confirm_uninstall, game, player_files)
 
     def _confirm_uninstall(self, game, player_files):
-        """The count arrived and no dialog is open: check again (things may have changed), then ask"""
+        """The count arrived and no dialog is open: check again (things may have changed), then ask. Never while
+        quitting: the quit's run of deferred work only brings the library up to date."""
+        if self._quitting:
+            return
         live = self._live_game(game)
         try:
             if live is None or not live.catalog_id or self._library_unreachable(live) or self._game_busy(live):

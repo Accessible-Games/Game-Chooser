@@ -482,6 +482,8 @@ class PreferencesDialog(wx.Dialog):
         # Nested prompts are modal dialogs that may hold games: they defer job results like any other
         self._modal = getattr(parent, "modal_dialog", None) or nullcontext
         self._notify = getattr(parent, "notify", None)  # the main window's notification, for a slow count
+        # Runs work once no prompt is open over Preferences (the main window's; it doesn't count Preferences itself)
+        self._when_no_prompt = getattr(parent, "run_when_no_dialog", None) or (lambda fn, *args: fn(*args))
         self._counting = False  # a Remove is counting the player's files in the background
 
         # Create notebook
@@ -683,9 +685,14 @@ class PreferencesDialog(wx.Dialog):
         label = library_label(lib)
         self._counting = True
         run_in_background(lambda: sum(service.player_files(cid) for cid in ids),
-                          lambda count: self._confirm_remove(library_id, count), "library-player-files",
+                          lambda count: self._counted(library_id, count), "library-player-files",
                           slow=(lambda: notify(messages.COUNTING_LIBRARY_FILES.format(label=label))) if notify else None,
                           default=0)
+
+    def _counted(self, library_id, player_files):
+        """The count arrived (UI thread): ask once no other prompt (a folder dialog, an error box) is open on top"""
+        if self:
+            self._when_no_prompt(self._confirm_remove, library_id, player_files)
 
     def _confirm_remove(self, library_id, player_files):
         """The count arrived (UI thread): check again, then ask"""
