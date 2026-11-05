@@ -21,6 +21,7 @@ Game list control for Game Chooser application
 
 import sys
 from pathlib import Path
+from typing import Callable
 
 # Add smart_list and resource_finder submodules to path
 smart_list_path = Path(__file__).parent / "smart_list"
@@ -34,12 +35,15 @@ if resource_finder_path.exists() and str(resource_finder_path) not in sys.path:
 import wx
 from smart_list import VirtualSmartList, Column
 
+from models import Game
+
 
 class GameListCtrl:
     """Custom VirtualSmartList wrapper for game display with sorting and keyboard navigation"""
 
-    def __init__(self, parent, library_manager):
+    def __init__(self, parent, library_manager, status_lookup: Callable[[Game], str]):
         self.library_manager = library_manager
+        self.status_lookup = status_lookup
         self.games_displayed = []
 
         # Create VirtualSmartList
@@ -59,7 +63,8 @@ class GameListCtrl:
             Column(title="Genre", model_field="genre", width=150),
             Column(title="Developer", model_field="developer", width=150),
             Column(title="Year", model_field="year", width=80),
-            Column(title="Platform", model_field=lambda g: ", ".join(g.platforms), width=150)
+            Column(title="Platform", model_field=lambda g: ", ".join(g.platforms), width=150),
+            Column(title="Status", model_field=status_lookup, width=150)
         ]
         self.list.set_columns(columns)
 
@@ -120,6 +125,9 @@ class GameListCtrl:
         elif self.sort_column == 4:  # Platform
             self.games_displayed.sort(key=lambda g: len(g.platforms),
                                      reverse=not self.sort_ascending)
+        elif self.sort_column == 5:  # Status
+            self.games_displayed.sort(key=lambda g: self.status_lookup(g).lower(),
+                                     reverse=not self.sort_ascending)
 
         # Refresh the virtual list display
         if self.games_displayed:
@@ -154,7 +162,7 @@ class GameListCtrl:
     def on_char(self, event):
         """Handle keyboard shortcuts for sorting"""
         key = event.GetKeyCode()
-        if ord('1') <= key <= ord('5'):
+        if ord('1') <= key <= ord('6'):
             col = key - ord('1')
             if col < self.GetColumnCount():
                 if col == self.sort_column:
@@ -170,6 +178,18 @@ class GameListCtrl:
                 self.library_manager.save_config()
         else:
             event.Skip()
+
+    def refresh_rows(self):
+        """Redraw the rows after the Status values change, keeping the selected game selected"""
+        if self.sort_column == 5:
+            game = self.get_selected_game()
+            self.sort_list()
+            for index, shown in enumerate(self.games_displayed):
+                if shown is game:
+                    self.Select(index)
+                    break
+        if self.list.control.control.GetItemCount() > 0:  # refreshing an empty list trips a wx check
+            self.list.refresh()
 
     def get_selected_game(self):
         """Get currently selected game"""

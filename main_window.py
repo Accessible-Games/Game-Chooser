@@ -21,6 +21,7 @@ Main window for Game Chooser application
 
 import wx
 import os
+import logging
 import subprocess
 import platform
 import webbrowser
@@ -30,9 +31,38 @@ from pathlib import Path
 
 from models import Game
 from library_manager import GameLibraryManager
+from install_service import InstallService
+from catalog_view import description_text, initial_tab
 from engine.folders import library_label
 from game_list import GameListCtrl
+from description_field import DescriptionField
 from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
+
+log = logging.getLogger(__name__)
+
+TABS = ("library", "catalog")  # notebook page order
+
+
+class _NoQueueListener:
+    """Ignores the install queue's events until the real listener exists (Task 10)."""
+
+    def job_started(self, job):
+        pass
+
+    def job_progress(self, job, progress):
+        pass
+
+    def job_finished(self, job, result):
+        pass
+
+    def job_failed(self, job, message):
+        pass
+
+    def job_cancelled(self, job):
+        pass
+
+    def queue_changed(self, waiting):
+        pass
 
 
 class FilterWorker(threading.Thread):
@@ -105,6 +135,12 @@ class MainFrame(wx.Frame):
         super().__init__(None, title="Game Chooser (0)")
         
         self.library_manager = GameLibraryManager()
+        # The no-op listener and installer_ui=None stand in until the install progress UI exists (Task 10)
+        self.service = InstallService(self.library_manager, _NoQueueListener(), installer_ui=None)
+        self.statuses = {}  # (library_id, launch_path) -> Status text, filled by refresh_statuses()
+        self._status_generation = 0  # only the newest status computation is shown
+        # Before the list is first filled: using the saved index may adopt catalog launch paths
+        self.service.load_cached_index()
         self.filtered_games = []
         self.filter_worker = None  # Background filtering thread
         self._tree_cache = None  # Cache for tree categories
@@ -129,18 +165,28 @@ class MainFrame(wx.Frame):
         
         # Update title
         self.update_title()
+
+        # Status column, then the catalog index from the network (the saved copy is already in use)
+        self.refresh_statuses()
+        self._start_index_fetch()
         
         # Bind close event
         self.Bind(wx.EVT_CLOSE, self.on_close)
     
     def init_ui(self):
         """Initialize the user interface"""
-        panel = wx.Panel(self)
+        # Notebook: page 0 Library (the player's games), page 1 Catalog (a placeholder until Task 8)
+        self.notebook = wx.Notebook(self)
+        self.library_page = wx.Panel(self.notebook)
+        self.catalog_page = wx.Panel(self.notebook)
+        self.notebook.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self.on_tab_changed)
+        panel = self.library_page
         main_sizer = wx.BoxSizer(wx.VERTICAL)
         
         # Menu bar
         self.create_menu_bar()
         
+        # Library tab order: search, game list, tree, Launch, description
         # Search combo box
         search_sizer = wx.BoxSizer(wx.HORIZONTAL)
         search_label = wx.StaticText(panel, label="Search:")
@@ -157,7 +203,7 @@ class MainFrame(wx.Frame):
         splitter = wx.SplitterWindow(panel)
         
         # Game list
-        self.game_list = GameListCtrl(splitter, self.library_manager)
+        self.game_list = GameListCtrl(splitter, self.library_manager, self.status_lookup)
         self.game_list.SetLabel("Games")
         self.game_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_game_selected)
         self.game_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.on_game_activated)
@@ -193,7 +239,16 @@ class MainFrame(wx.Frame):
         self.launch_btn.Bind(wx.EVT_BUTTON, self.on_launch)
         main_sizer.Add(self.launch_btn, 0, wx.ALIGN_CENTER | wx.ALL, 5)
         
+        # Description of the selected catalog game (empty for other games)
+        self.description = DescriptionField(panel, "Description")
+        self.description.SetMinSize((-1, 120))
+        main_sizer.Add(self.description.label_ctrl, 0, wx.LEFT | wx.RIGHT, 5)
+        main_sizer.Add(self.description, 0, wx.EXPAND | wx.ALL, 5)
+        
         panel.SetSizer(main_sizer)
+
+        self.notebook.AddPage(self.library_page, "Library")
+        self.notebook.AddPage(self.catalog_page, "Catalog")
         
         # Store splitter reference
         self.splitter = splitter
@@ -230,11 +285,12 @@ class MainFrame(wx.Frame):
 
         # Edit menu
         edit_menu = wx.Menu()
-        edit_game_item = edit_menu.Append(wx.ID_ANY, "&Edit Game\tCtrl+E")
-        self.Bind(wx.EVT_MENU, self.on_edit_game, edit_game_item)
+        # Kept so they can be disabled while the Catalog tab is active
+        self.edit_game_item = edit_menu.Append(wx.ID_ANY, "&Edit Game\tCtrl+E")
+        self.Bind(wx.EVT_MENU, self.on_edit_game, self.edit_game_item)
 
-        delete_game_item = edit_menu.Append(wx.ID_ANY, "&Delete Game\tDel")
-        self.Bind(wx.EVT_MENU, self.on_delete_game, delete_game_item)
+        self.delete_game_item = edit_menu.Append(wx.ID_ANY, "&Delete Game\tDel")
+        self.Bind(wx.EVT_MENU, self.on_delete_game, self.delete_game_item)
 
         edit_menu.AppendSeparator()
 
@@ -285,7 +341,7 @@ class MainFrame(wx.Frame):
         # Ctrl+F for search
         search_id = wx.NewIdRef()
         accel_entries.append((wx.ACCEL_CTRL, ord('F'), search_id))
-        self.Bind(wx.EVT_MENU, lambda e: self.search_combo.SetFocus(), id=search_id)
+        self.Bind(wx.EVT_MENU, self.on_find, id=search_id)
 
         # Ctrl+N for new game
         new_game_id = wx.NewIdRef()
@@ -310,6 +366,101 @@ class MainFrame(wx.Frame):
         accel_table = wx.AcceleratorTable(accel_entries)
         self.SetAcceleratorTable(accel_table)
     
+    def active_tab(self):
+        """The notebook page showing now, as a TABS name ("library" or "catalog")"""
+        return TABS[self.notebook.GetSelection()]
+
+    def on_tab_changed(self, event):
+        """Remember the tab, enable its menu items, and put focus in its games list"""
+        event.Skip()
+        self.library_manager.config["SavedState"]["last_tab"] = self.active_tab()
+        self.library_manager.save_config()
+        self.update_tab_menus()
+        wx.CallAfter(self.focus_active_list)
+
+    def update_tab_menus(self):
+        """Edit Game and Delete Game act on the Library list only (disabling them also stops Ctrl+E and Del)"""
+        on_library = self.active_tab() == "library"
+        self.edit_game_item.Enable(on_library)
+        self.delete_game_item.Enable(on_library)
+
+    def focus_active_list(self):
+        """Move keyboard focus to the active tab's games list (screen reader pattern: Select, Focus, SetFocus)"""
+        if not self:  # the window closed before this ran
+            return
+        if self.active_tab() == "library":
+            index = self.game_list.GetFirstSelected()
+            if index < 0 and self.filtered_games:
+                index = 0
+            if index >= 0:
+                self.game_list.Select(index)
+                self.game_list.Focus(index)
+            self.game_list.SetFocus()
+        else:
+            # The Catalog tab has no list yet (Task 8); never leave focus on a control of the hidden page
+            self.notebook.SetFocus()
+
+    def on_find(self, event):
+        """Ctrl+F: the Library search box"""
+        if self.active_tab() == "library":
+            self.search_combo.SetFocus()
+
+    def status_lookup(self, game):
+        """The Status column's text for a game"""
+        return self.statuses.get((game.library_id, game.launch_path), "")
+
+    def refresh_statuses(self):
+        """Work out every game's Status in the background (statuses() only reads), then show it"""
+        self._status_generation += 1
+        generation = self._status_generation
+        service = self.service
+
+        def work():
+            try:
+                statuses = service.statuses()
+            except Exception:
+                log.warning("Couldn't work out the games' status", exc_info=True)
+                return
+            wx.CallAfter(self._statuses_ready, generation, statuses)
+
+        threading.Thread(target=work, name="library-status", daemon=True).start()
+
+    def _statuses_ready(self, generation, statuses):
+        if not self or generation != self._status_generation:  # closed, or a newer result is coming
+            return
+        self.statuses = statuses
+        self.game_list.refresh_rows()
+
+    def _start_index_fetch(self):
+        """Fetch the catalog index on a daemon thread; only fetch_index() may run off the UI thread"""
+        service = self.service
+
+        def work():
+            try:
+                state = service.fetch_index()
+            except Exception:
+                log.warning("Couldn't fetch the catalog index", exc_info=True)
+                return
+            wx.CallAfter(self._index_fetched, state)
+
+        threading.Thread(target=work, name="catalog-index", daemon=True).start()
+
+    def _index_fetched(self, state):
+        """Use a fetched index (UI thread: it may adopt catalog launch paths, which saves games.json)"""
+        if not self:
+            return
+        games_before = self.library_manager.games
+        self.service.take_index(state)
+        if self.library_manager.games is not games_before:  # a game was adopted (the list is replaced)
+            self.refresh_game_list()
+            self.build_tree(force_rebuild=True)
+        self.refresh_statuses()
+        self.show_description(self.game_list.get_selected_game())
+
+    def show_description(self, game):
+        """The Library description: the catalog text for a catalog game, empty otherwise"""
+        self.description.set_text(description_text(self.service.entry_for(game)) if game else "")
+
     def check_libraries(self):
         """Check if first run and show setup dialog"""
         if self.library_manager.is_first_run:
@@ -324,7 +475,7 @@ class MainFrame(wx.Frame):
 
         # Always continue to main window
         self.initializing = False
-        self.game_list.SetFocus()
+        self.focus_active_list()
     
     def build_tree(self, filters=None, force_rebuild=False, restore_selections=True):
         """Build the tree control hierarchy with flat 2-level structure using cache"""
@@ -558,6 +709,8 @@ class MainFrame(wx.Frame):
             self.game_list.Select(selected_index)
             self.game_list.Focus(selected_index)
             # Removed SetFocus() - was stealing focus from tree control on every filter change
+        else:
+            self.show_description(None)
     
     def refresh_game_list(self):
         """Refresh the game list display"""
@@ -580,6 +733,7 @@ class MainFrame(wx.Frame):
             return
 
         game = self.game_list.get_selected_game()
+        self.show_description(game)
         if game:
             self.launch_btn.SetLabel(f"Launch {game.title}")
 
@@ -651,6 +805,8 @@ class MainFrame(wx.Frame):
 
     def on_open_folder(self, event):
         """Open the game's folder in the file manager"""
+        if self.active_tab() != "library":
+            return
         game = self.game_list.get_selected_game()
         if not game:
             return
@@ -729,6 +885,7 @@ class MainFrame(wx.Frame):
                     game.launch_path = new_path
                     game.library_id = ""
                     self.library_manager.save_games()
+                    self.refresh_statuses()
                 dlg.Destroy()
                 return
 
@@ -760,6 +917,8 @@ class MainFrame(wx.Frame):
 
     def on_random_game(self, event):
         """Pick a random game from filtered list and offer to launch it"""
+        if self.active_tab() != "library":
+            return
         if not self.filtered_games:
             wx.MessageBox("No games available to choose from.",
                         "No Games", wx.OK | wx.ICON_INFORMATION)
@@ -803,6 +962,8 @@ class MainFrame(wx.Frame):
 
     def on_edit_game(self, event):
         """Edit selected game"""
+        if self.active_tab() != "library":
+            return
         game = self.game_list.get_selected_game()
         if not game:
             return
@@ -815,12 +976,15 @@ class MainFrame(wx.Frame):
             if dlg.ShowModal() == wx.ID_OK:
                 self.library_manager.save_games()
                 self.refresh_game_list()
+                self.refresh_statuses()
         finally:
             self.dialog_active = False
             dlg.Destroy()
     
     def on_delete_game(self, event):
         """Delete selected game"""
+        if self.active_tab() != "library":
+            return
         game = self.game_list.get_selected_game()
         if not game:
             return
@@ -861,6 +1025,7 @@ class MainFrame(wx.Frame):
                 self.library_manager.games.append(dlg.game)
                 self.library_manager.save_games()
                 self.refresh_game_list()
+                self.refresh_statuses()
         finally:
             self.dialog_active = False
             dlg.Destroy()
@@ -974,12 +1139,16 @@ class MainFrame(wx.Frame):
         self.refresh_game_list()
         self.build_tree(force_rebuild=True)
         self.build_libraries_menu()
+        self.refresh_statuses()  # a library may have been added, moved or removed
     
     def on_refresh(self, event):
-        """Rebuild the game list and tree"""
+        """F5 on the Library tab: rebuild the game list and tree and recheck each game's Status"""
+        if self.active_tab() != "library":
+            return
         self.refresh_game_list()
         self.build_tree(force_rebuild=True)
         self.build_libraries_menu()
+        self.refresh_statuses()
 
     def on_exit(self, event):
         """Exit application"""
@@ -1033,6 +1202,12 @@ class MainFrame(wx.Frame):
         # Build libraries menu with current state
         self.build_libraries_menu()
 
+        # Opening tab: the saved one, else Catalog on a first run and Library otherwise.
+        # ChangeSelection, not SetSelection: no page-changed event (and no focus move) during startup.
+        tab = initial_tab(state.get("last_tab"), self.library_manager.is_first_run)
+        self.notebook.ChangeSelection(TABS.index(tab))
+        self.update_tab_menus()
+
         # Re-filter now that all saved state (search, filters, hidden libraries) is loaded
         self.refresh_game_list()
 
@@ -1044,6 +1219,7 @@ class MainFrame(wx.Frame):
         state["window_position"] = list(self.GetPosition())
         state["splitter_position"] = self.splitter.GetSashPosition()
         state["last_search"] = self.search_combo.GetValue()
+        state["last_tab"] = self.active_tab()
 
         # Save tree filters
         state["tree_filters"] = list(self.current_tree_filters)
