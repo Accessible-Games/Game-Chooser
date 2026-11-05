@@ -82,14 +82,15 @@ def delete_kind(game, record) -> str:
     return "delete"
 
 
-def launch_problem(game, library_reachable: bool, record) -> str:
+def launch_problem(game, library_reachable: bool, record, entry: dict | None) -> str:
     """Which missing-executable branch of a launch applies: "unreachable" (the game's library folder can't be
-    reached), "repair" (a tracked catalog install: offer Repair), "catalog" (another catalog game: say so, no file
-    picker, since the player doesn't choose a catalog game's executable) or "locate" (a game added by hand)."""
+    reached), "repair" (a tracked catalog install still in the catalog: offer Repair), "catalog" (another catalog
+    game: say so, no file picker, since the player doesn't choose a catalog game's executable) or "locate" (a game
+    added by hand)."""
     if game.library_id and not library_reachable:
         return "unreachable"
     if game.catalog_id:
-        return "repair" if is_tracked(record) else "catalog"
+        return "repair" if is_tracked(record) and entry is not None else "catalog"
     return "locate"
 
 

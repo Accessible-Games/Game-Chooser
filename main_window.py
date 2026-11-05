@@ -1223,7 +1223,7 @@ class MainFrame(wx.Frame):
             full_path = self.library_manager.get_full_path(game)
             if not full_path or not Path(full_path).exists():
                 problem = launch_problem(game, self.library_manager.library_reachable(game.library_id),
-                                         self.service.record_for(game))
+                                         self.service.record_for(game), self.service.entry_for(game))
                 if problem != "locate":
                     self._launch_problem(game, problem)
                     return

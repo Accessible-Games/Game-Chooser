@@ -96,12 +96,14 @@ def test_delete_kind():
 
 
 def test_launch_problem_branches():
-    assert launch_problem(catalog_game(), False, record()) == "unreachable"
-    assert launch_problem(catalog_game(), True, record()) == "repair"
-    assert launch_problem(catalog_game(), True, record(tracked=False)) == "catalog"
-    assert launch_problem(catalog_game(), True, None) == "catalog"
-    assert launch_problem(Game(title="Hand", launch_path="C:/hand.exe"), True, None) == "locate"
-    assert launch_problem(Game(title="Old", launch_path="old.exe", library_id="lib1"), False, None) == "unreachable"
+    assert launch_problem(catalog_game(), False, record(), entry()) == "unreachable"
+    assert launch_problem(catalog_game(), True, record(), entry()) == "repair"
+    assert launch_problem(catalog_game(), True, record(), None) == "catalog"  # left the catalog: Repair can't work
+    assert launch_problem(catalog_game(), True, record(tracked=False), entry()) == "catalog"
+    assert launch_problem(catalog_game(), True, None, entry()) == "catalog"
+    assert launch_problem(Game(title="Hand", launch_path="C:/hand.exe"), True, None, None) == "locate"
+    assert launch_problem(Game(title="Old", launch_path="old.exe", library_id="lib1"), False, None, None) == \
+        "unreachable"
 
 
 def test_uninstall_and_remove_library_text():

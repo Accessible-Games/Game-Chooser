@@ -640,7 +640,8 @@ class PreferencesDialog(wx.Dialog):
     def _remove_library(self, library_id):
         manager = self.library_manager
         lib = manager.library_by_id(library_id)
-        if lib is None:  # gone meanwhile (its last uninstall just finished)
+        if lib is None:  # gone meanwhile (its last uninstall just finished): say so, as Change folder does
+            self._tell(messages.LIBRARY_FOLDER_MISSING)
             self._fill_library_list()
             return
         if self.service is None:
