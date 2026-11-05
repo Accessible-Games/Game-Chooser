@@ -231,3 +231,5 @@ LIBRARY_FOLDER_MISSING = "That folder doesn't exist."
 LIBRARY_UNREACHABLE = ("The library folder {path} can't be reached. If it's on a drive that isn't connected, "
                        "connect it and try again. If it moved, use Change folder in Preferences.")
 CATALOG_NOT_EDITABLE = "{title} comes from the catalog, so its details can't be edited."
+LIBRARY_REMOVE_UNREACHABLE = ("That library's folder can't be reached, so its games can't be uninstalled. Connect the "
+                              "drive, or use Change folder if it moved.")

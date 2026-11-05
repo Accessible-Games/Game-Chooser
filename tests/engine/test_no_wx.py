@@ -5,7 +5,7 @@ REPO_DIR = Path(__file__).resolve().parent.parent.parent
 ENGINE_DIR = REPO_DIR / "engine"
 
 # Top-level modules that must stay wx-free; append as they are added.
-WX_FREE_MODULES = ["library_manager.py"]
+WX_FREE_MODULES = ["library_manager.py", "install_service.py"]
 
 _WX_IMPORT = re.compile(r"^\s*(import wx|from wx)", re.M)
 
