@@ -170,3 +170,6 @@ STEP_TOUCHES_OTHER_FILES = ("A setup step for {title} would change files its ins
                             "stopped.")
 FILE_STEPS_SKIPPED = ("Some setup steps for {title} weren't run, because Game Chooser couldn't tell which files are "
                       "the game's.")
+FOLDER_NEEDS_ADMIN = ("{title}'s folder {path} needs administrator permission to change, so Game Chooser can't "
+                      "change it. You can update {title} by hand, or give your Windows account permission to change "
+                      "that folder.")

@@ -7,7 +7,8 @@ Uninstall entry that is the game's, else the one the player points to. Files cre
 install window are recorded as shipped. A folder that also holds other content (a shared
 `Program Files\\<Developer>`) is never recorded as covering it: the install is then untracked.
 
-Run-mode updates and vendor uninstalls can't control what the installer touches, so the player's
+Run-mode updates (and the Repair and Undo that run a recorded installer again, engine.run_actions)
+and vendor uninstalls can't control what the installer touches, so the player's
 files (not recorded, or changed since install) are copied to `work/.setaside/<id>` first and put
 back afterwards if the installer changed or removed them; the installer's version is kept as
 `<name>.new`. The copies are deleted only when every file is back AND the installer's whole
@@ -742,12 +743,19 @@ class _SetAside:
         return []
 
 
-def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, cancel
+# Passed as `previous` to update(): the record's undo point stays as it is.
+KEEP_UNDO_POINT = object()
+
+
+def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, cancel, *, previous
            ) -> tuple[InstallRecord, list[str]]:
-    """Run a newer installer over an installed game, keeping the player's files.
+    """Run an installer over an installed game, keeping the player's files: a newer one for Update,
+    the recorded one for Repair, the previous one for Undo.
 
     The player's .exe/.dll/.ocx files aren't set aside: like any update, the installer's code
-    replaces them without a copy. Returns the saved record and notes for the player.
+    replaces them without a copy. `previous` is the record's undo point afterwards (KEEP_UNDO_POINT
+    leaves it as it is); it is saved with the installer's files, before the system steps run.
+    Returns the saved record and notes for the player.
     """
     title = item.title
     interactive = _interactive(ctx, item.installer, title)
@@ -821,8 +829,9 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
         record.launch_path = exe.relative_to(game_dir).as_posix()
     new_entries = new_uninstall_entries(keys_before, snapshot_uninstall_keys(ctx.uninstall_reader))
     record.vendor_uninstaller = _matching_uninstaller(new_entries, game_dir, title) or record.vendor_uninstaller
-    record.previous = None  # Undo can't run an older installer under these rules.
-    record.previous_unavailable = None
+    if previous is not KEEP_UNDO_POINT:
+        record.previous = previous
+        record.previous_unavailable = None
     record.uninstalled = False
     ctx.records.save(record)
     notes = [*_code_notes(title, outcome.code), *notes]

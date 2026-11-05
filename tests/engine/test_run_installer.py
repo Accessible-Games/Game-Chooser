@@ -638,13 +638,6 @@ def test_untracked_run_install_cannot_be_updated(tmp_path):
     assert ei.value.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Light Cars")
 
 
-def test_repair_of_a_run_mode_install_is_refused_plainly(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path)
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("repair", "lightcars"), quiet, never)
-    assert ei.value.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Light Cars")
-
-
 # ---- uninstall -------------------------------------------------------------------------------------------
 
 
