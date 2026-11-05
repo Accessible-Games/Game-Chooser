@@ -20,6 +20,7 @@ Game library management for Game Chooser application
 """
 
 import json
+import logging
 import os
 import sys
 import platform
@@ -121,8 +122,9 @@ class GameLibraryManager:
             if upgraded:
                 try:
                     self.save_config()
-                except OSError:
-                    pass  # keep the loaded config; the upgrade is saved with the next change
+                except OSError as e:
+                    # keep the loaded config; the upgrade is saved with the next change
+                    logging.getLogger(__name__).warning("Couldn't save the upgraded config: %s", e)
         else:
             self.config = default_config
             self.save_config()

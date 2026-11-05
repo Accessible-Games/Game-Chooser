@@ -158,11 +158,17 @@ def test_libraries_on_other_drives_are_not_nested(isolated_manager_factory, tmp_
 def test_failed_upgrade_save_keeps_loaded_config(isolated_manager_factory, tmp_path, monkeypatch):
     from library_manager import GameLibraryManager
 
-    isolated_manager_factory(config={"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}]})
+    old = {"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}]}
+    (isolated_manager_factory.config_dir).mkdir(exist_ok=True)
+    (isolated_manager_factory.config_dir / "config.json").write_text(json.dumps(old), encoding="utf-8")
+    attempts = []
 
     def fail(self):
+        attempts.append(1)
         raise OSError("read-only")
 
     monkeypatch.setattr(GameLibraryManager, "save_config", fail)
     m = GameLibraryManager()
+    assert attempts, "the upgrade save was never attempted"
     assert len(m.config["libraries"]) == 1 and len(m.config["libraries"][0]["id"]) == 12
+    assert m.config["libraries"][0]["path"] == old["libraries"][0]["path"]
