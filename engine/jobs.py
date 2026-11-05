@@ -228,6 +228,7 @@ class _StagedGame:
     owners: dict[str, str]  # norm_key -> extra id, for files an extra wrote last
     launch_path: str
     dependency_notes: list[str] = field(default_factory=list)  # runtimes it had to go without
+    private_ids: list[str] = field(default_factory=list)  # runtimes it has private COM copies of
 
     def system_steps(self) -> list[dict]:
         """The game's steps, then each extra's, as one list (the shape `record.steps` is built from)."""
@@ -423,12 +424,17 @@ class InstallEngine:
         folder, or one outside the libraries that needs administrator permission, gets none: the notes
         say it needs each shared component."""
         title = _title(entry)
-        if not copies and not any(runtimes.is_runtime_owner(f.owner) for f in rec.files.values()):
-            return []
         game_dir = record_folder(rec, self.ctx.libraries)
-        if not rec.tracked or game_dir is None or (not rec.library_name and not _can_write(game_dir)):
-            return runtimes.needs_shared_notes(title, [c.runtime for c in copies])
-        return runtimes.private_after_installer(self.ctx, rec, game_dir, copies, title)
+        if not copies and not any(runtimes.is_runtime_owner(f.owner) for f in rec.files.values()):
+            notes = []
+        elif not rec.tracked or game_dir is None or (not rec.library_name and not _can_write(game_dir)):
+            notes = runtimes.needs_shared_notes(title, [c.runtime for c in copies])
+        else:
+            return runtimes.private_after_installer(self.ctx, rec, game_dir, copies, title)
+        if rec.private_runtimes is None:
+            rec.private_runtimes = []
+            self.ctx.records.save(rec)
+        return notes
 
     def _extras_after_installer(self, entry: dict, rec: InstallRecord, unpacked: list[tuple[dict, Fetched, Path]],
                                 staging: Path, prior: dict | None, cancel,
@@ -520,8 +526,9 @@ class InstallEngine:
         exe = find_launch_exe(tree, launch, lambda path: self.ctx.exclude(path) or copied(path))
         if exe is None:
             raise InstallFailed(messages.NO_EXE.format(title=_title(entry)) + "\n\n" + messages.DEFENDER_NOTE)
-        notes = runtimes.finish_private(tree, exe, copies, _title(entry))
-        return _StagedGame(tree, fetched, fetched_extras, owners, exe.relative_to(tree).as_posix(), notes)
+        notes, private_ids = runtimes.finish_private(tree, exe, copies, _title(entry))
+        return _StagedGame(tree, fetched, fetched_extras, owners, exe.relative_to(tree).as_posix(), notes,
+                           private_ids)
 
     def _merge_extras(self, tree: Path, extras: list[dict], staging: Path, work: Path, fetch: Fetch,
                       progress, cancel) -> tuple[dict[str, str], list[tuple[dict, Fetched]]]:
@@ -648,6 +655,7 @@ class InstallEngine:
                 source=_installed_source(entry, staged.game, ctx.platform),
                 extras={x["id"]: _installed_source(x, f, ctx.platform) for x, f in staged.extras},
                 files=files, steps=applied, method=(staged.game.source.get("install") or {}).get("method", ""),
+                private_runtimes=staged.private_ids,
             )
             ctx.records.save(record)
         except BaseException as e:
@@ -771,6 +779,7 @@ class InstallEngine:
         rec.source = _installed_source(entry, staged.game, ctx.platform)
         rec.extras = {x["id"]: _installed_source(x, f, ctx.platform) for x, f in staged.extras}
         rec.launch_path = staged.launch_path
+        rec.private_runtimes = staged.private_ids
         rec.method = (staged.game.source.get("install") or {}).get("method", "")
         rec.vendor_uninstaller = None  # An installer's own uninstaller no longer matches these files.
         rec.previous = {**prior, "backups": [*carried, *result.backups]}
@@ -782,17 +791,16 @@ class InstallEngine:
 
     def _stage_recorded(self, entry: dict, source: InstalledSource, extra_sources: dict[str, InstalledSource],
                         folder_name: str, staging: Path, work: Path, progress, cancel,
-                        private: bool = False) -> _StagedGame:
+                        private: list[dict] = ()) -> _StagedGame:
         """Rebuild exactly a recorded version in staging: its files, unpacked and set up as recorded.
 
-        With `private`, the game's private COM copies are made again too (from today's catalog), so
-        a Repair or Undo doesn't remove the ones its install made."""
+        `private` are the runtimes that version had private COM copies of (runtimes.private_runtimes):
+        they are made again (from today's catalog), so a Repair or Undo doesn't remove them."""
         ctx = self.ctx
         extras = [ctx.entries.get(x) or {"id": x} for x in extra_sources]
         fetch = self._exact_fetch({entry["id"]: source, **extra_sources}, progress, cancel)
-        copies = runtimes.private_runtimes(entry, ctx) if private else []
         return self._stage(entry, extras, folder_name, staging, work, fetch,
-                           _recorded_launch(source, entry, ctx.platform), progress, cancel, private=copies)
+                           _recorded_launch(source, entry, ctx.platform), progress, cancel, private=private)
 
     def _repair(self, entry: dict, rec: InstallRecord, game_dir: Path, progress, cancel) -> JobResult:
         """Put back the exact files that were installed; changed code is restored, the player's edits kept.
@@ -805,11 +813,12 @@ class InstallEngine:
         if self._recorded_runs_installer(game_id, rec.source):
             return run_actions.repair(self, entry, rec, game_dir, progress, cancel)
         self._require_writable(rec, game_dir, title)
+        private = runtimes.private_runtimes(rec, entry, ctx)
         prior = _snapshot(rec)
         with self._workspace(self._staging_root(rec, game_dir), game_id) as (staging, work):
             try:
                 staged = self._stage_recorded(entry, rec.source, rec.extras, game_dir.name, staging, work,
-                                              progress, cancel, private=True)
+                                              progress, cancel, private=private)
             except NoVerifiedSource as e:
                 raise InstallFailed(_repair_failure_text(e, game_id, title)) from e
             except _NoUnpackSpec as e:
@@ -824,6 +833,7 @@ class InstallEngine:
         rec.files = plan.new_files
         rec.steps = steps
         rec.launch_path = staged.launch_path
+        rec.private_runtimes = staged.private_ids
         rec.method = (staged.game.source.get("install") or {}).get("method", rec.method)
         _keep_backups(rec, result.backups, prior)
         ctx.records.save(rec)
@@ -847,11 +857,13 @@ class InstallEngine:
             return run_actions.undo(self, entry, rec, game_dir, source, progress, cancel)
         self._require_writable(rec, game_dir, title)
         extra_sources = {k: _source_from(v) for k, v in (previous.get("extras") or {}).items()}
+        # The previous version's private copies; an undo point from before they were kept: the current ones.
+        private = runtimes.private_runtimes(rec, entry, ctx, previous.get("private_runtimes"))
         prior = _snapshot(rec)
         with self._workspace(self._staging_root(rec, game_dir), game_id) as (staging, work):
             try:
                 staged = self._stage_recorded(entry, source, extra_sources, game_dir.name, staging, work,
-                                              progress, cancel, private=True)
+                                              progress, cancel, private=private)
             except NoVerifiedSource as e:
                 if not e.downloaded:  # Nothing could be reached: maybe only for now, so Undo stays offered.
                     raise InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title)) from e
@@ -882,6 +894,7 @@ class InstallEngine:
         rec.source = source
         rec.extras = extra_sources
         rec.launch_path = staged.launch_path
+        rec.private_runtimes = staged.private_ids
         rec.method = (staged.game.source.get("install") or {}).get("method", rec.method)
         rec.vendor_uninstaller = previous.get("vendor_uninstaller")  # the previous version's, if it had one
         rec.previous = None
@@ -1154,7 +1167,8 @@ def _snapshot(rec: InstallRecord) -> dict:
     shipped too from one only the newer version had (engine.run_installer.update).
     """
     snapshot = {"source": asdict(rec.source), "extras": {k: asdict(v) for k, v in rec.extras.items()},
-                "backups": [], "steps": [dict(s) for s in rec.steps], "vendor_uninstaller": rec.vendor_uninstaller}
+                "backups": [], "steps": [dict(s) for s in rec.steps], "vendor_uninstaller": rec.vendor_uninstaller,
+                "private_runtimes": rec.private_runtimes}
     if rec.method == "run":
         snapshot["files"] = {k: asdict(f) for k, f in rec.files.items()}
     return snapshot

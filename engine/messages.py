@@ -126,10 +126,13 @@ REPAIR_NOT_POSSIBLE = ("Game Chooser no longer has the details it needs to rebui
 FILES_NOT_CHANGED = ("Some of {title}'s files couldn't be changed. Close the game if it's running, then try "
                      "again. Any file of yours that was replaced is in the game's backup folder.")
 UNINSTALL_FAILED = "Some of {title}'s files couldn't be removed. Close the game if it's running, then try again."
-DEPENDENCY_CYCLE = ("The catalog's list of other software {title} needs goes round in a circle, so {title} "
-                    "wasn't installed.")
-DEPENDENCY_UNAVAILABLE = ("{title} needs other software that the catalog doesn't offer right now, so {title} "
-                          "wasn't installed.")
+DEPENDENCY_CYCLE = ("The catalog's list of other software {title} needs goes round in a circle, so Game "
+                    "Chooser can't install or change {title} right now.")
+DEPENDENCY_UNAVAILABLE = ("{title} needs other software that the catalog doesn't offer right now, so Game Chooser "
+                          "can't install or change {title}.")
+RUNTIME_FOLDER_NOT_OURS = ("{title} wasn't installed, because the folder {path} is already there and its files "
+                           "don't match. Game Chooser didn't make that folder, so it won't remove it. If no other "
+                           "program uses it, delete it yourself, then try again.")
 RUNTIME_FOLDER_NOT_CREATED = ("Game Chooser couldn't create the folder {path} for {title}. Check that the drive has "
                               "free space, then try again.")
 TEMP_FOLDER_NOT_CLEARED = ("Game Chooser couldn't empty its temporary folder {path}. Close any program using "

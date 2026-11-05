@@ -1,6 +1,8 @@
 """Dependencies: runtimes installed before the game, shared machine-wide or as a private COM copy."""
 
 import hashlib
+import json
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -13,8 +15,9 @@ from engine.comfree import PrivateComUnavailable, com_manifest_xml, has_embedded
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from engine.messages import Progress
-from engine.runtimes import (default_runtimes_root, detect_present, is_com_runtime, missing_runtimes,
-                             runtime_present)
+from engine.records import RecordedFile, RecordStore
+from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present, is_com_runtime, missing_runtimes,
+                             recorded_private, runtime_present)
 from tests.engine.fakes import (FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry, make_engine,
                                 served_source, zip_bytes)
 
@@ -286,15 +289,109 @@ def test_failed_register_fails_install_and_leaves_no_runtime(tmp_path):
     assert eng.ctx.records.load("dx8vb") is None and not (eng.ctx.runtimes_root / "dx8vb").exists()
 
 
-def test_leftover_runtime_folder_without_record_is_replaced(tmp_path):
+def snapshot(root: Path) -> dict[str, bytes]:
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def put_marker(folder: Path, files: dict[str, bytes], runtime_id: str = "dx8vb") -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    for rel, data in files.items():
+        (folder / rel).write_bytes(data)
+    (folder / MARKER_NAME).write_text(json.dumps(
+        {"id": runtime_id, "source_sha256": "x", "files": {rel: sha(data) for rel, data in files.items()}}))
+
+
+def test_installed_runtime_leaves_a_marker_other_accounts_read(tmp_path):
+    routes = {}
+    rt, one = dx8vb(routes), game(routes)
+    two = game(routes, id="pawprints", title="Pawprints", files={"pawprints.exe": b"paw"})
+    eng, lib = setup(tmp_path, [rt, one, two], routes)
+    run(eng, "install")
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    marker = json.loads((folder / MARKER_NAME).read_text())
+    assert marker == {"id": "dx8vb", "source_sha256": sha(DX8VB), "files": {"dx8vb.dll": sha(DX8VB)}}
+    assert set(eng.ctx.records.load("dx8vb").files) == {"dx8vb.dll"}  # the marker isn't one of its files
+
+    # Another Windows account: its own records, the same machine-wide runtimes folder.
+    other = make_engine(tmp_path, [rt, one, two], fetcher=FakeFetcher(routes), records=RecordStore(tmp_path / "b"),
+                        runtimes_root=eng.ctx.runtimes_root)
+    run(other, "install", id="pawprints")
+    assert other.ctx.fetcher.requests == [two["sources"][0]["url"]] and other.ctx.elevator.calls == []
+    assert other.ctx.records.load("dx8vb") is None and (folder / "dx8vb.dll").read_bytes() == DX8VB
+
+
+def test_existing_marker_counts_as_present_only_while_its_files_are_there(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes)
-    stale = eng.ctx.runtimes_root / "dx8vb" / "stale.dll"
-    stale.parent.mkdir(parents=True)
-    stale.write_bytes(b"from a failed try")
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    put_marker(folder, {"dx8vb.dll": DX8VB})
+    assert runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root)
+    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry)  # no root given: the marker isn't read
     run(eng, "install")
-    assert not stale.exists() and set(eng.ctx.records.load("dx8vb").files) == {"dx8vb.dll"}
+    assert eng.ctx.fetcher.requests == [g["sources"][0]["url"]] and eng.ctx.elevator.calls == []
+    (folder / "dx8vb.dll").unlink()
+    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root)
+    put_marker(folder, {"dx8vb.dll": DX8VB}, runtime_id="other")
+    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root)
+
+
+def test_matching_folder_without_marker_is_adopted(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    folder.mkdir(parents=True)
+    (folder / "dx8vb.dll").write_bytes(DX8VB)
+    (folder / "readme.txt").write_bytes(b"someone else's note")
+    run(eng, "install")
+    assert eng.ctx.elevator.calls == [regsvr32(folder / "dx8vb.dll")]
+    assert snapshot(folder) == {"dx8vb.dll": DX8VB, "readme.txt": b"someone else's note",
+                                MARKER_NAME: (folder / MARKER_NAME).read_bytes()}
+    assert json.loads((folder / MARKER_NAME).read_text())["files"] == {"dx8vb.dll": sha(DX8VB)}
+    assert set(eng.ctx.records.load("dx8vb").files) == {"dx8vb.dll"}
+    assert (lib / "Entombed" / "entombed.exe").exists()
+
+
+def test_empty_folder_without_marker_is_adopted_and_filled(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    folder.mkdir(parents=True)
+    run(eng, "install")
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / MARKER_NAME).exists()
+
+
+def test_folder_that_doesnt_match_is_refused_and_left_alone(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    folder.mkdir(parents=True)
+    (folder / "dx8vb.dll").write_bytes(b"a different dx8vb")
+    (folder / "other.dll").write_bytes(b"other")
+    before = snapshot(folder)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert "temporary" not in ei.value.message
+    assert snapshot(folder) == before and eng.ctx.elevator.calls == []
+    assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
+
+
+def test_failed_install_removes_only_what_it_added_to_a_folder_it_found(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    folder.mkdir(parents=True)
+    (folder / "readme.txt").write_bytes(b"someone else's note")
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
+    assert snapshot(folder) == {"readme.txt": b"someone else's note"}
+    assert eng.ctx.records.load("dx8vb") is None
 
 
 def test_installer_runtime_runs_untracked_then_is_checked(tmp_path, monkeypatch):
@@ -380,6 +477,7 @@ def test_preference_off_private_copy_and_manifest(tmp_path, private_com):
     assert eng.ctx.records.load("dx8vb") is None and not (eng.ctx.runtimes_root / "dx8vb").exists()
     rec = eng.ctx.records.load("entombed")
     assert {"dx8vb.dll", "entombed.exe.manifest"} <= set(rec.files) and rec.launch_path == "entombed.exe"
+    assert rec.private_runtimes == ["dx8vb"]
     assert not (eng.ctx.work_root / "entombed").exists()
 
 
@@ -406,6 +504,7 @@ def test_preference_off_embedded_manifest_notes_and_installs(tmp_path, private_c
     assert (folder / "entombed.exe").exists() and not (folder / "dx8vb.dll").exists()
     assert not (folder / "entombed.exe.manifest").exists() and eng.ctx.elevator.calls == []
     assert set(eng.ctx.records.load("entombed").files) == {"entombed.exe", "sounds/a.wav"}
+    assert eng.ctx.records.load("entombed").private_runtimes == []
 
 
 def test_preference_off_private_com_not_supported_notes_and_installs(tmp_path, private_com, monkeypatch):
@@ -482,7 +581,7 @@ def test_preference_off_tracked_run_install_gets_private_copy_and_uninstall_remo
     rec = eng.ctx.records.load("lightcars")
     assert rec.tracked and rec.files["dx8vb.dll"].owner == "runtime:dx8vb"
     assert rec.files["lightcars.exe.manifest"].owner == "runtime:dx8vb"
-    assert rec.files["lightcars.exe"].owner == "lightcars"
+    assert rec.files["lightcars.exe"].owner == "lightcars" and rec.private_runtimes == ["dx8vb"]
     assert eng.ctx.records.load("dx8vb") is None and not (eng.ctx.runtimes_root / "dx8vb").exists()
 
     run(eng, "uninstall", id="lightcars")
@@ -535,6 +634,7 @@ def test_preference_off_run_install_with_embedded_manifest_notes_and_copies_noth
     assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Light Cars", component=DX8VB_TITLE)]
     assert not (folder / "dx8vb.dll").exists() and not (folder / "lightcars.exe.manifest").exists()
     assert set(eng.ctx.records.load("lightcars").files) == {"lightcars.exe", "data/track.dat"}
+    assert eng.ctx.records.load("lightcars").private_runtimes == []
     assert [c for c in eng.ctx.elevator.calls if c[0] == "regsvr32.exe"] == []
 
 
@@ -590,11 +690,77 @@ def test_repair_keeps_a_private_copy_after_the_preference_is_turned_on(tmp_path,
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
     run(eng, "install")
+    assert eng.ctx.records.load("entombed").private_runtimes == ["dx8vb"]
     eng.ctx.register_shared_components = True
     run(eng, "repair")
     folder = lib / "Entombed"
     assert (folder / "dx8vb.dll").exists() and (folder / "entombed.exe.manifest").exists()
     assert eng.ctx.elevator.calls == [] and eng.ctx.records.load("dx8vb") is None
+
+
+def test_repair_restores_a_missing_private_copy(tmp_path, private_com):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    run(eng, "install")
+    folder = lib / "Entombed"
+    (folder / "dx8vb.dll").unlink()
+    run(eng, "repair")
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / "entombed.exe.manifest").exists()
+    assert eng.ctx.records.load("entombed").private_runtimes == ["dx8vb"]
+
+
+def test_repair_of_a_game_installed_shared_never_adds_a_private_copy(tmp_path, private_com):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    run(eng, "install")
+    assert eng.ctx.records.load("entombed").private_runtimes == []
+    # The runtime has gone missing since (its record and folder lost), and the preference is now off.
+    eng.ctx.records.delete("dx8vb")
+    shutil.rmtree(eng.ctx.runtimes_root / "dx8vb")
+    eng.ctx.register_shared_components = False
+    run(eng, "repair")
+    folder = lib / "Entombed"
+    assert not (folder / "dx8vb.dll").exists() and not (folder / "entombed.exe.manifest").exists()
+    assert rt["sources"][0]["url"] not in eng.ctx.fetcher.requests[1:]
+
+
+def test_undo_makes_the_previous_versions_private_copies(tmp_path, private_com):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    run(eng, "install")
+    eng.ctx.register_shared_components = True  # v2 is installed with the runtime shared
+    eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0")
+    run(eng, "update")
+    folder = lib / "Entombed"
+    assert eng.ctx.records.load("entombed").private_runtimes == [] and not (folder / "dx8vb.dll").exists()
+    run(eng, "undo")
+    assert (folder / "dx8vb.dll").exists() and (folder / "entombed.exe.manifest").exists()
+    assert eng.ctx.records.load("entombed").private_runtimes == ["dx8vb"]
+
+
+def test_older_record_without_the_field_is_read_from_its_files(tmp_path, private_com):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    run(eng, "install")
+    rec = eng.ctx.records.load("entombed")
+    rec.private_runtimes = None
+    assert recorded_private(rec, g, eng.ctx.entries) == ["dx8vb"]  # its DLL beside a recorded manifest
+    eng.ctx.records.save(rec)
+    run(eng, "repair")
+    assert (lib / "Entombed" / "dx8vb.dll").exists()
+
+    shipped = eng.ctx.records.load("entombed")
+    shipped.private_runtimes = None
+    del shipped.files["entombed.exe.manifest"]  # a dx8vb.dll the game shipped itself, with no manifest
+    assert recorded_private(shipped, g, eng.ctx.entries) == []
+    run_owned = eng.ctx.records.load("entombed")
+    run_owned.private_runtimes = None
+    run_owned.files = {"x.dll": RecordedFile("x.dll", "0", "runtime:other-rt")}
+    assert recorded_private(run_owned, g, eng.ctx.entries) == ["other-rt"]
 
 
 # ---- the manifest --------------------------------------------------------------------------------------

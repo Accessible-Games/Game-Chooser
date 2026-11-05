@@ -67,6 +67,8 @@ class InstallRecord:
     previous_unavailable: str | None = None
     uninstalled: bool = False
     format: int = 1
+    # Runtime ids the install made private COM copies of (engine.runtimes); None in older records.
+    private_runtimes: list[str] | None = None
 
 
 def record_folder(record: InstallRecord, libraries: list[dict]) -> Path | None:
