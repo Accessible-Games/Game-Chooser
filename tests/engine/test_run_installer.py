@@ -459,17 +459,62 @@ def test_web_game_is_not_installed_by_the_engine(tmp_path):
     assert eng.ctx.fetcher.requests == []
 
 
-def test_extras_on_a_run_mode_game_are_refused_plainly(tmp_path):
-    routes = {}
+def run_game_with_patch(routes, patch_route=True):
+    """Light Cars (run-mode) with a required archive extra that patches its exe and sets a registry value."""
     e = run_game(routes, installer={"type": "inno"}, extras=[{"id": "lc-patch", "required": True}])
-    data = zip_bytes({"patch.dat": b"p"})
+    data = zip_bytes({"patch.dat": b"p", "lc.exe": b"exe patched"})
+    step = {"action": "registry", "hive": "HKCU", "key": r"Software\LightCars", "name": "Patch", "type": "REG_SZ",
+            "value": "on"}
+    source = served_source(routes, f"{MIRROR}{sha(data)}/p.zip", data, steps=[step])
+    if not patch_route:
+        del routes[source["url"]]
     x = {"id": "lc-patch", "kind": "extra", "title": "Patch", "install_into": "lightcars", "version": "1",
-         "sources": [served_source(routes, f"{MIRROR}{sha(data)}/p.zip", data)]}
-    eng, lib = setup_engine(tmp_path, [e, x], routes)
+         "sources": [source]}
+    return e, x
+
+
+def test_run_mode_game_gets_its_required_archive_extra_after_the_installer(tmp_path):
+    routes = {}
+    e, x = run_game_with_patch(routes)
+    target = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, {"lc.exe": b"exe", "data.dat": b"d"}))
+    r = install(eng)
+    assert (target / "lc.exe").read_bytes() == b"exe patched" and (target / "patch.dat").read_bytes() == b"p"
+    rec = eng.ctx.records.load("lightcars")
+    assert set(rec.extras) == {"lc-patch"} and rec.method == "run" and rec.tracked
+    assert rec.files["patch.dat"].owner == "lc-patch" and rec.files["lc.exe"].owner == "lc-patch"
+    assert rec.files["data.dat"].owner == "lightcars"
+    assert [s["name"] for s in rec.steps] == ["Patch"]
+    assert eng.ctx.registry.get("HKCU", r"Software\LightCars", "Patch") == (True, "on", "REG_SZ")
+    assert r.game["installed_extras"] == ["lc-patch"]
+    eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert not target.exists() and eng.ctx.registry.get("HKCU", r"Software\LightCars", "Patch")[0] is False
+
+
+def test_a_bad_extra_download_fails_before_the_installer_starts(tmp_path):
+    routes = {}
+    e, x = run_game_with_patch(routes, patch_route=False)
+    target = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, {"lc.exe": b"exe"}))
     with pytest.raises(InstallFailed) as ei:
         install(eng)
-    assert ei.value.message == messages.RUN_INSTALLER_EXTRAS.format(title="Light Cars")
-    assert eng.ctx.elevator.calls == []
+    assert ei.value.message.startswith(messages.NO_SOURCE.format(title="Patch", reasons="").strip())
+    assert eng.ctx.elevator.calls == [] and not target.exists() and eng.ctx.records.load("lightcars") is None
+
+
+def test_an_untracked_run_install_skips_its_extras_and_says_so(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
+    routes = {}
+    e, x = run_game_with_patch(routes)
+    e["sources"][0]["install"]["installer"]["type"] = "other"  # interactive, so the player can locate it
+    chosen = tmp_path / "Somewhere" / "LC"
+    put(chosen, "lc.exe", b"exe")
+    time.sleep(0.05)
+    eng, lib = setup_engine(tmp_path, [e, x], routes, ui=FakeInstallerUI(locate=chosen))
+    r = install(eng)
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.tracked is False and rec.extras == {} and not (chosen / "patch.dat").exists()
+    assert messages.EXTRAS_SKIPPED_UNTRACKED.format(title="Light Cars") in r.notes
 
 
 def test_run_mode_extra_is_refused_plainly(tmp_path):

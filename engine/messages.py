@@ -134,10 +134,11 @@ FOLDER_NOT_REMOVED = ("The game's folder {path} couldn't be fully removed. Game 
                       "it, so you can delete it yourself.")
 LIBRARY_FOLDER_NOT_CREATED = ("The library folder {path} couldn't be created. Check that the drive is connected, "
                               "then try again.")
+WORK_FOLDER_NOT_CREATED = ("Game Chooser couldn't create its work folder {path}. Check that the drive is "
+                           "connected and has free space, then try again.")
 
 WEB_GAME_NOT_INSTALLED = "{title} is played in your web browser, so there's nothing to install."
 EXTRA_NOT_SUPPORTED = "{extra} has its own installer, so Game Chooser can't add it."
-RUN_INSTALLER_EXTRAS = "{title} has its own installer, so Game Chooser can't add extras to it."
 INSTALLER_NEEDS_PLAYER = ("{title}'s installer asks questions you need to answer, and Game Chooser can't show it "
                           "right now.")
 INSTALLER_FAILED = "{title}'s installer stopped with error code {code}, so {title} wasn't installed."
@@ -173,3 +174,7 @@ FILE_STEPS_SKIPPED = ("Some setup steps for {title} weren't run, because Game Ch
 FOLDER_NEEDS_ADMIN = ("{title}'s folder {path} needs administrator permission to change, so Game Chooser can't "
                       "change it. You can update {title} by hand, or give your Windows account permission to change "
                       "that folder.")
+EXTRAS_SKIPPED_UNTRACKED = ("Game Chooser couldn't tell which files {title}'s installer added, so it didn't add "
+                            "{title}'s extras.")
+EXTRAS_SKIPPED_NEEDS_ADMIN = ("{title}'s folder {path} needs administrator permission to change, so Game Chooser "
+                              "didn't add {title}'s extras.")

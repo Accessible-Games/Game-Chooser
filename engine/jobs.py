@@ -15,6 +15,8 @@ Which way a game is installed is decided by the source that was actually downloa
 that must run goes to engine.run_installer (install, update, and a vendor uninstaller at uninstall);
 a web game is never installed here. Repair and Undo follow the recorded source they put back: an
 installer that must run goes to engine.run_actions, an archive is rebuilt in staging as above.
+A game whose installer runs gets its extras after the installer: they are downloaded and unpacked
+before it starts, so a bad download changes nothing, and applied over its folder once it is tracked.
 
 A game an installer put outside the libraries is staged under the work folder instead, since its
 own folder's parent may be Program Files or shared with other games. Game Chooser never runs
@@ -284,6 +286,8 @@ class InstallEngine:
             # A new library's folder may not exist yet; only the staging folder inside it is hidden.
             staging_root.mkdir(parents=True, exist_ok=True)
         except OSError as e:
+            if _same_folder(library_path, self.ctx.work_root):
+                raise InstallFailed(messages.WORK_FOLDER_NOT_CREATED.format(path=library_path)) from e
             raise InstallFailed(messages.LIBRARY_FOLDER_NOT_CREATED.format(path=library_path)) from e
         _hide(staging_root)
         _clear_or_fail(staging)
@@ -386,19 +390,48 @@ class InstallEngine:
             raise InstallFailed(messages.WEB_GAME_NOT_INSTALLED.format(title=_title(entry)))
         return fetched
 
-    def _install_run(self, entry: dict, fetched: Fetched, extras: list[dict], action: str,
-                     place: Callable[[RunItem], tuple[InstallRecord, list[str]]]) -> JobResult:
-        """Hand a downloaded installer that must run to engine.run_installer, through `place`."""
+    def _install_run(self, entry: dict, fetched: Fetched, unpacked: list[tuple[dict, Fetched, Path]],
+                     staging: Path, action: str,
+                     place: Callable[[RunItem, list[dict]], tuple[InstallRecord, list[str]]],
+                     cancel, prior: dict | None = None) -> JobResult:
+        """Hand a downloaded installer that must run to engine.run_installer, through `place` (given the
+        item and the extras' steps), then apply the already unpacked extras over the game's folder."""
         title = _title(entry)
-        if extras:
-            raise InstallFailed(messages.RUN_INSTALLER_EXTRAS.format(title=title))
         install = fetched.source.get("install") or {}
         item = RunItem(entry["id"], entry.get("kind", "game"), title, fetched.path,
                        dict(install.get("installer") or {}), _steps(fetched),
                        _installed_source(entry, fetched, self.ctx.platform), _launch_hint(entry, self.ctx.platform))
-        record, notes = place(item)
+        record, notes = place(item, _extra_steps(unpacked))
+        extra_notes, backups = self._extras_after_installer(entry, record, unpacked, staging, prior, cancel)
         return JobResult(action, entry["id"], title, _game_dict(entry, record),
-                         [*([fetched.note] if fetched.note else []), *notes])
+                         [*([fetched.note] if fetched.note else []), *notes, *extra_notes], backups=backups)
+
+    def _extras_after_installer(self, entry: dict, rec: InstallRecord, unpacked: list[tuple[dict, Fetched, Path]],
+                                staging: Path, prior: dict | None, cancel,
+                                recorded: dict[str, InstalledSource] | None = None) -> tuple[list[str], int]:
+        """After an installer has run: apply the game's extras over its folder and record them.
+
+        They are all its extras now, so files an earlier extra shipped that none of them ships are
+        removed if unchanged. `recorded` gives the exact sources they were fetched by (Repair, Undo);
+        otherwise they are recorded as the catalog's. An untracked folder, or one outside the libraries
+        that needs administrator permission, gets no extras, and a note says so. Returns notes for the
+        player and the number of backups made.
+        """
+        title = _title(entry)
+        if not unpacked and all(f.owner == rec.catalog_id for f in rec.files.values()):
+            return [], 0
+        if not rec.tracked:
+            return ([messages.EXTRAS_SKIPPED_UNTRACKED.format(title=title)] if unpacked else []), 0
+        game_dir = record_folder(rec, self.ctx.libraries)
+        if not rec.library_name and not _can_write(game_dir):
+            return [messages.EXTRAS_SKIPPED_NEEDS_ADMIN.format(title=title, path=game_dir)], 0
+        tree = run_actions.copy_installed_files(rec, game_dir, staging / "game" / game_dir.name)
+        fetched, result, notes = self._apply_extras(entry, rec, game_dir, tree, unpacked,
+                                                    prior or _snapshot(rec), cancel, every=True)
+        rec.extras = {x["id"]: (recorded or {}).get(x["id"]) or _installed_source(x, f, self.ctx.platform)
+                      for x, f in fetched}
+        self.ctx.records.save(rec)
+        return [*dict.fromkeys(f.note for _, f in fetched if f.note), *notes], len(result.backups)
 
     def _fetch_and_unpack(self, item: dict, dest: Path, work_dir: Path, fetch: Fetch,
                           progress, cancel) -> tuple[Fetched, Path]:
@@ -442,13 +475,24 @@ class InstallEngine:
 
         Returns which extra wrote each file last (norm_key -> extra id) and what was fetched.
         """
+        return self._merge_unpacked(tree, self._unpack_extras(extras, staging, work, fetch, progress, cancel),
+                                    cancel)
+
+    def _unpack_extras(self, extras: list[dict], staging: Path, work: Path, fetch: Fetch,
+                       progress, cancel) -> list[tuple[dict, Fetched, Path]]:
+        """Download and unpack each extra into staging: (extra, what was fetched, its unpacked root)."""
+        return [(extra, *self._fetch_and_unpack(extra, staging / "extras" / extra["id"],
+                                                work / "extras" / extra["id"], fetch, progress, cancel))
+                for extra in extras]
+
+    def _merge_unpacked(self, tree: Path, unpacked: list[tuple[dict, Fetched, Path]],
+                        cancel) -> tuple[dict[str, str], list[tuple[dict, Fetched]]]:
+        """Copy each unpacked extra over `tree`, in order, and run its file steps there."""
         owners: dict[str, str] = {}
         fetched_extras = []
-        for extra in extras:
+        for extra, x_fetched, x_root in unpacked:
             extra_id = extra["id"]
             before = _file_states(tree)
-            x_fetched, x_root = self._fetch_and_unpack(extra, staging / "extras" / extra_id,
-                                                       work / "extras" / extra_id, fetch, progress, cancel)
             shipped = set(_file_states(x_root))
             shutil.copytree(x_root, tree, dirs_exist_ok=True)
             _run_file_steps(_steps(x_fetched), tree)
@@ -496,8 +540,10 @@ class InstallEngine:
         with self._workspace(library_path, game_id) as (staging, work):
             fetched = self._fetch_game(entry, work, progress, cancel)
             if _runs_installer(fetched.source):
-                result = self._install_run(entry, fetched, extras, "install", lambda item: run_installer.install(
-                    ctx, item, target, library_name, library_path, progress, cancel))
+                unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
+                                               progress, cancel)
+                result = self._install_run(entry, fetched, unpacked, staging, "install", lambda item, spare: (
+                    run_installer.install(ctx, item, target, library_name, library_path, progress, cancel)), cancel)
                 result.notes[:0] = notes
                 return result
             staged = self._stage(entry, extras, target.name, staging, work,
@@ -630,8 +676,14 @@ class InstallEngine:
         with self._work_folder(game_id) as work:
             fetched = self._fetch_game(entry, work, progress, cancel)
             if _runs_installer(fetched.source):
-                return self._install_run(entry, fetched, extras, action, lambda item: run_installer.update(
-                    ctx, item, rec, game_dir, progress, cancel, previous=prior))
+                if extras or rec.extras:  # applied by Game Chooser after the installer, so checked first
+                    self._require_writable(rec, game_dir, title)
+                with self._staging_folder(self._staging_root(rec, game_dir), game_id) as staging:
+                    unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
+                                                   progress, cancel)
+                    return self._install_run(entry, fetched, unpacked, staging, action, lambda item, spare: (
+                        run_installer.update(ctx, item, rec, game_dir, progress, cancel, previous=prior,
+                                             spare_steps=spare)), cancel, prior)
             self._require_writable(rec, game_dir, title)
             with self._staging_folder(self._staging_root(rec, game_dir), game_id) as staging:
                 staged = self._stage(entry, extras, game_dir.name, staging, work,
@@ -757,7 +809,7 @@ class InstallEngine:
         rec.extras = extra_sources
         rec.launch_path = staged.launch_path
         rec.method = (staged.game.source.get("install") or {}).get("method", rec.method)
-        rec.vendor_uninstaller = None  # An installer's own uninstaller no longer matches these files.
+        rec.vendor_uninstaller = previous.get("vendor_uninstaller")  # the previous version's, if it had one
         rec.previous = None
         rec.previous_unavailable = None
         ctx.records.save(rec)
@@ -809,30 +861,46 @@ class InstallEngine:
                     raise InstallFailed(text.format(title=title)) from e
                 except _NoUnpackSpec as e:
                     raise InstallFailed(messages.EXTRAS_NEED_UPDATE.format(title=title)) from e
-            before = set(hash_tree(tree))
-            owners, fetched = self._merge_extras(tree, chosen, staging, work,
-                                                 self._catalog_fetch(progress, cancel), progress, cancel)
-            _check(cancel)
-            after = _incoming(tree, owners, game_id)
-            removed = before - set(after)
-            incoming = {key: f for key, f in after.items() if key in owners}
-            planned = set(incoming) | removed
-            installed = {key: f for key, f in rec.files.items() if key in planned}
-            # Steps already applied stay as they are; only the extras' new steps run.
-            wanted_steps = [*(_bare(s) for s in rec.steps), *(s for _, f in fetched for s in _steps(f))]
-            plan, result, steps, notes = self._change_folder(
-                rec, game_dir, tree, incoming, installed, wanted_steps, prior, title,
-                persist=entry.get("persist") or [])
+            unpacked = self._unpack_extras(chosen, staging, work, self._catalog_fetch(progress, cancel),
+                                           progress, cancel)
+            fetched, result, notes = self._apply_extras(entry, rec, game_dir, tree, unpacked, prior, cancel)
 
-        for key in removed:
-            rec.files.pop(key, None)
-        rec.files.update(plan.new_files)
         rec.extras.update({x["id"]: _installed_source(x, f, ctx.platform) for x, f in fetched})
-        rec.steps = steps
-        _keep_backups(rec, result.backups, prior)
         ctx.records.save(rec)
         notes = [*dict.fromkeys(f.note for _, f in fetched if f.note), *notes]
         return JobResult("extras", game_id, title, _game_dict(entry, rec), notes, backups=len(result.backups))
+
+    def _apply_extras(self, entry: dict, rec: InstallRecord, game_dir: Path, tree: Path,
+                      unpacked: list[tuple[dict, Fetched, Path]], prior: dict, cancel, every: bool = False
+                      ) -> tuple[list[tuple[dict, Fetched]], ApplyResult, list[str]]:
+        """Merge unpacked extras over `tree` (the installed version) and change only their files in
+        `game_dir`: the files they wrote and the installed files their steps removed. With `every`, they
+        are all the game's extras now, so the files earlier extras shipped that none of them ships are
+        planned too, and removed where unchanged. Updates the record's files and steps (not its extras)
+        and keeps the backups for Undo; the caller saves it.
+        """
+        game_id = entry["id"]
+        before = set(hash_tree(tree))
+        owners, fetched = self._merge_unpacked(tree, unpacked, cancel)
+        _check(cancel)
+        after = _incoming(tree, owners, game_id)
+        removed = before - set(after)
+        incoming = {key: f for key, f in after.items() if key in owners}
+        dropped = ({key for key, f in rec.files.items() if f.owner != game_id and key not in incoming}
+                   if every else set())
+        planned = set(incoming) | removed | dropped
+        installed = {key: f for key, f in rec.files.items() if key in planned}
+        # Steps already applied stay as they are; only the extras' new steps run.
+        wanted_steps = [*(_bare(s) for s in rec.steps), *(s for _, f in fetched for s in _steps(f))]
+        plan, result, steps, notes = self._change_folder(
+            rec, game_dir, tree, incoming, installed, wanted_steps, prior, _title(entry),
+            persist=entry.get("persist") or [])
+        for key in removed | dropped:
+            rec.files.pop(key, None)
+        rec.files.update(plan.new_files)
+        rec.steps = steps
+        _keep_backups(rec, result.backups, prior)
+        return fetched, result, notes
 
     # ---- uninstall -----------------------------------------------------------
 
@@ -908,6 +976,11 @@ def _method(source: dict) -> str | None:
 def _runs_installer(source: dict) -> bool:
     install = source.get("install") or {}
     return install.get("method") == "installer" and (install.get("installer") or {}).get("mode") == "run"
+
+
+def _extra_steps(unpacked: list[tuple[dict, Fetched, Path]]) -> list[dict]:
+    """The steps of the extras about to be applied, in order."""
+    return [s for _, fetched, _ in unpacked for s in _steps(fetched)]
 
 
 def _prefetched(fetch: Fetch, item_id: str, fetched: Fetched) -> Fetch:
@@ -995,9 +1068,16 @@ def _bare(step: dict) -> dict:
 
 
 def _snapshot(rec: InstallRecord) -> dict:
-    """The record's current version as a `previous` value (with no backups yet)."""
-    return {"source": asdict(rec.source), "extras": {k: asdict(v) for k, v in rec.extras.items()},
-            "backups": [], "steps": [dict(s) for s in rec.steps]}
+    """The record's current version as a `previous` value (with no backups yet).
+
+    An installer's version also keeps its recorded files, so undoing back to it can tell a file it
+    shipped too from one only the newer version had (engine.run_installer.update).
+    """
+    snapshot = {"source": asdict(rec.source), "extras": {k: asdict(v) for k, v in rec.extras.items()},
+                "backups": [], "steps": [dict(s) for s in rec.steps], "vendor_uninstaller": rec.vendor_uninstaller}
+    if rec.method == "run":
+        snapshot["files"] = {k: asdict(f) for k, f in rec.files.items()}
+    return snapshot
 
 
 def _keep_backups(rec: InstallRecord, backups: list[dict], prior: dict) -> None:

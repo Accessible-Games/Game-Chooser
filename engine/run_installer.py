@@ -617,17 +617,20 @@ def _where(folder: Path, library_name: str, library_path: Path, libraries: list[
     return "", str(Path(os.path.abspath(folder)))
 
 
-def _apply_system_steps(ctx, record: InstallRecord, steps: list[dict], keep: list[dict] = ()) -> list[str]:
+def _apply_system_steps(ctx, record: InstallRecord, steps: list[dict], keep: list[dict] = (),
+                        spare: list[dict] = ()) -> list[str]:
     """Run the source's registry/register/run steps in the game's folder and record them.
 
-    Applied steps in `keep` that are still wanted stay as they are; the others are undone first.
-    Returns notes for undo failures. A failing step leaves the game recorded and raises InstallFailed.
+    Applied steps in `keep` that are still wanted, or are in `spare` (the steps of extras applied
+    next, which run them), stay as they are; the others are undone first. Returns notes for undo
+    failures. A failing step leaves the game recorded and raises InstallFailed.
     """
     folder = record_folder(record, ctx.libraries)
     step_ctx = StepContext(Path(os.path.abspath(folder)), ctx.elevator, ctx.registry)
     wanted = [_bare(s) for s in steps]
-    kept = [s for s in keep if _bare(s) in wanted]
-    notes = undo_steps([s for s in keep if _bare(s) not in wanted], step_ctx)
+    spared = [_bare(s) for s in spare]
+    kept = [s for s in keep if _bare(s) in wanted or _bare(s) in spared]
+    notes = undo_steps([s for s in keep if s not in kept], step_ctx)
     record.steps = kept
     ctx.records.save(record)
     try:
@@ -747,14 +750,21 @@ class _SetAside:
 KEEP_UNDO_POINT = object()
 
 
-def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, cancel, *, previous
-           ) -> tuple[InstallRecord, list[str]]:
+def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, cancel, *, previous,
+           spare_steps: list[dict] = (), undo_of: dict | None = None) -> tuple[InstallRecord, list[str]]:
     """Run an installer over an installed game, keeping the player's files: a newer one for Update,
     the recorded one for Repair, the previous one for Undo.
 
     The player's .exe/.dll/.ocx files aren't set aside: like any update, the installer's code
     replaces them without a copy. `previous` is the record's undo point afterwards (KEEP_UNDO_POINT
     leaves it as it is); it is saved with the installer's files, before the system steps run.
+    Applied steps in `spare_steps` (the extras' steps, for extras the caller applies next) aren't
+    undone. The record's extras are emptied: the caller records the extras it applies.
+
+    For Undo, `undo_of` is the undo point being undone. A file the newer version recorded that this
+    run didn't claim, and that is unchanged, is removed, unless the older version recorded it too
+    with the same contents (an installer skipping a file it found in place). The older version's
+    vendor uninstaller comes back unless this run registered one.
     Returns the saved record and notes for the player.
     """
     title = item.title
@@ -810,12 +820,20 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
         claimed.pop(key, None)
     files = _recorded(game_dir, claimed, item.catalog_id)
     on_disk = hash_tree(game_dir)
+    older = (undo_of or {}).get("files") or {}
     for key, old in record.files.items():
         # A shipped file that wasn't the player's is the installer's now, even one it rewrote
         # keeping its old dates. The player's files aren't recorded: they stay theirs.
         if key in files or key in theirs or key not in on_disk:
             continue
         rel, sha = on_disk[key]
+        if undo_of is not None and sha == old.sha256:
+            had = older.get(key) or {}
+            if had.get("sha256") == sha:
+                files[key] = RecordedFile(had.get("path") or rel, sha, had.get("owner") or old.owner)
+                continue
+            if _remove_unchanged(game_dir, rel, sha):
+                continue  # the newer version's, unchanged: Undo removes it, as an update would
         files[key] = old if sha == old.sha256 else RecordedFile(rel, sha, item.catalog_id)
 
     exe = (find_launch_exe(game_dir, item.launch_hint, _only(ctx.exclude, game_dir, files))
@@ -828,14 +846,31 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     if exe is not None:
         record.launch_path = exe.relative_to(game_dir).as_posix()
     new_entries = new_uninstall_entries(keys_before, snapshot_uninstall_keys(ctx.uninstall_reader))
-    record.vendor_uninstaller = _matching_uninstaller(new_entries, game_dir, title) or record.vendor_uninstaller
+    if undo_of is not None and "vendor_uninstaller" in undo_of:
+        fallback = undo_of["vendor_uninstaller"]
+    else:
+        fallback = record.vendor_uninstaller
+    record.vendor_uninstaller = _matching_uninstaller(new_entries, game_dir, title) or fallback
     if previous is not KEEP_UNDO_POINT:
         record.previous = previous
         record.previous_unavailable = None
     record.uninstalled = False
     ctx.records.save(record)
     notes = [*_code_notes(title, outcome.code), *notes]
-    return record, [*notes, *_apply_system_steps(ctx, record, item.steps, keep=record.steps)]
+    return record, [*notes, *_apply_system_steps(ctx, record, item.steps, keep=record.steps, spare=spare_steps)]
+
+
+def _remove_unchanged(game_dir: Path, rel: str, sha: str) -> bool:
+    """Delete the game's file at `rel` if it still has contents `sha`. True if it is gone."""
+    try:
+        path, linked = _resolve_game_path(game_dir, rel)
+        if linked or not path.is_file() or hash_file(path) != sha:
+            return False
+        path.unlink()
+    except (UnsafePath, OSError):
+        return False
+    _prune_empty_dirs(path.parent, game_dir)
+    return True
 
 
 # ---- vendor uninstallers ---------------------------------------------------------------------------------

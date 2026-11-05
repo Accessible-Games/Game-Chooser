@@ -3,11 +3,12 @@
 Every game folder here holds a player's save and an edited config, which must survive each action.
 """
 
+import time
 from pathlib import Path
 
 import pytest
 
-from engine import jobs, messages
+from engine import jobs, messages, run_installer
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from tests.engine.fakes import FakeUninstallKeys, served_source, zip_bytes
@@ -16,7 +17,7 @@ from tests.engine.test_run_installer import (MIRROR, SETUP, install, installed_r
 
 V1 = {"lc.exe": b"exe v1", "cfg.ini": b"volume=5", "sfx/a.wav": b"a"}  # what installed_run_game's installer writes
 SETUP_V2 = b"MZ setup v2"
-V2 = {"lc.exe": b"exe v2", "cfg.ini": b"volume=7", "sfx/b.wav": b"b"}
+V2 = {"lc.exe": b"exe v2", "cfg.ini": b"volume=7", "sfx/b.wav": b"b", "v2.txt": b"new in v2"}
 
 
 def run(eng, action, **kw):
@@ -359,33 +360,131 @@ def test_extra_with_its_own_installer_is_refused_on_a_run_record_as_on_any_game(
     assert record(eng).extras == {} and len(eng.ctx.elevator.calls) == 1
 
 
-def test_repair_and_undo_of_a_run_record_with_extras_are_refused_plainly(tmp_path):
+def music_v2(eng, target, clobbers_music=False):
+    """v2 of Light Cars, still listing the optional music extra; its installer may overwrite the music."""
+    routes = dict(eng.ctx.fetcher.routes)
+    publish_v2(eng, routes, setup=SETUP_V2)["extras"] = [{"id": "lc-music", "required": False}]
+    install_version = versioned(target)
+
+    def installer(exe, args, elevated):
+        install_version(exe, args, elevated)
+        if clobbers_music and Path(exe).read_bytes() == SETUP_V2:
+            put(target, "music/theme.ogg", b"the installer's own theme")
+    eng.ctx.elevator.on_start = installer
+
+
+def test_run_update_reapplies_an_installed_optional_extra(tmp_path):
     eng, target = run_game_with_music(tmp_path)
     run(eng, "extras", extras=("lc-music",))
+    music_v2(eng, target, clobbers_music=True)
+    r = run(eng, "update")
+    assert (target / "music" / "theme.ogg").read_bytes() == b"theme" and (target / "lc.exe").read_bytes() == b"exe v2"
+    assert_players_files_kept(target)
     rec = record(eng)
-    rec.previous = {**jobs._snapshot(rec), "backups": []}
-    eng.ctx.records.save(rec)
+    assert set(rec.extras) == {"lc-music"} and rec.files["music/theme.ogg"].owner == "lc-music"
+    assert set(rec.previous["extras"]) == {"lc-music"} and r.game["installed_extras"] == ["lc-music"]
+
+
+def test_repair_of_a_run_install_with_an_extra_puts_both_back(tmp_path):
+    eng, target = run_game_with_music(tmp_path)
+    run(eng, "extras", extras=("lc-music",))
+    before = record(eng)
+    (target / "lc.exe").unlink()
+    (target / "music" / "theme.ogg").unlink()
+    run(eng, "repair")
+    assert (target / "lc.exe").read_bytes() == b"exe v1" and (target / "music" / "theme.ogg").read_bytes() == b"theme"
+    assert_players_files_kept(target)
+    rec = record(eng)
+    assert rec.extras == before.extras and rec.source == before.source and rec.previous is None
+    assert rec.files["music/theme.ogg"].owner == "lc-music"
+
+
+def test_repair_when_an_extras_download_changed_fails_before_the_installer_starts(tmp_path):
+    eng, target = run_game_with_music(tmp_path)
+    run(eng, "extras", extras=("lc-music",))
+    eng.ctx.fetcher.routes[eng.ctx.entries["lc-music"]["sources"][0]["url"]] = b"not the music"
     files = tree(target)
-    for action in ("repair", "undo"):
-        with pytest.raises(InstallFailed) as ei:
-            run(eng, action)
-        assert ei.value.message == messages.RUN_INSTALLER_EXTRAS.format(title="Light Cars")
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "repair")
+    assert ei.value.message == messages.REPAIR_EXTRA_CHANGED.format(extra="Music", title="Light Cars")
     assert tree(target) == files and len(eng.ctx.elevator.calls) == 1
 
 
-def test_undo_of_a_run_update_after_extras_were_added_is_refused_plainly(tmp_path):
+def test_undo_of_a_run_update_puts_back_the_previous_extras(tmp_path):
     eng, target = run_game_with_music(tmp_path)
-    routes = dict(eng.ctx.fetcher.routes)
-    publish_v2(eng, routes, setup=SETUP_V2)["extras"] = [{"id": "lc-music", "required": False}]
-    eng.ctx.elevator.on_start = versioned(target)
+    run(eng, "extras", extras=("lc-music",))
+    music = record(eng).extras["lc-music"]
+    music_v2(eng, target, clobbers_music=True)
+    run(eng, "update")
+    (target / "music" / "theme.ogg").unlink()
+    run(eng, "undo")
+    assert (target / "music" / "theme.ogg").read_bytes() == b"theme" and (target / "lc.exe").read_bytes() == b"exe v1"
+    assert_players_files_kept(target)
+    rec = record(eng)
+    assert rec.extras == {"lc-music": music} and rec.previous is None and rec.source.sha256 == sha(SETUP)
+
+
+def test_undo_after_extras_were_added_removes_them_with_the_newer_version(tmp_path, monkeypatch):
+    eng, target = run_game_with_music(tmp_path)
+    music_v2(eng, target)
     run(eng, "update")
     run(eng, "extras", extras=("lc-music",))
     assert record(eng).previous["extras"] == {}
-    files, calls = tree(target), len(eng.ctx.elevator.calls)
+    settle(monkeypatch)
+    run(eng, "undo")
+    rec = record(eng)
+    assert rec.extras == {} and not (target / "music").exists()
+    assert not any(f.owner == "lc-music" for f in rec.files.values())
+    assert_players_files_kept(target)
+
+
+def settle(monkeypatch):
+    """Let the files written so far fall outside the next install window."""
+    monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
+    time.sleep(0.1)
+
+
+# ---- Undo reverses the newer installer (R26) -----------------------------------------------------------------
+
+
+def test_undo_removes_the_newer_versions_unchanged_files_and_keeps_the_rest(tmp_path, monkeypatch):
+    eng, routes, target = updated_run_game(tmp_path)
+    put(target, "sfx/b.wav", b"b, edited by the player")
+
+    def old_installer(exe, args, elevated):  # it skips sfx/a.wav, which it finds already there
+        writes(target, {"lc.exe": b"exe v1", "cfg.ini": b"volume=5"})(exe, args, elevated)
+    eng.ctx.elevator.on_start = old_installer
+    settle(monkeypatch)
+    run(eng, "undo")
+    assert not (target / "v2.txt").exists()  # v2's, unchanged, and not v1's
+    assert (target / "sfx" / "b.wav").read_bytes() == b"b, edited by the player"
+    assert (target / "sfx" / "a.wav").read_bytes() == b"a"  # v1 had it too
+    assert_players_files_kept(target)
+    rec = record(eng)
+    assert "v2.txt" not in rec.files and "sfx/b.wav" not in rec.files
+    assert rec.files["sfx/a.wav"].sha256 == sha(b"a") and rec.files["lc.exe"].sha256 == sha(b"exe v1")
+
+
+def test_undo_puts_the_previous_vendor_uninstaller_back(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
+    vendor = record(eng).vendor_uninstaller
+    publish_archive(eng, routes, {"lc.exe": b"exe v2", "cfg.ini": b"volume=7"})
+    run(eng, "update")
+    assert record(eng).vendor_uninstaller is None and record(eng).previous["vendor_uninstaller"] == vendor
+    run(eng, "undo")
+    rec = record(eng)
+    assert rec.vendor_uninstaller == vendor and (target / "unins000.exe").exists()
+
+
+def test_a_work_folder_that_cant_be_created_is_named_as_such(tmp_path):
+    eng, routes, folder = installed_outside(tmp_path)
+    blocker = tmp_path / "blocker"
+    blocker.write_bytes(b"")
+    eng.ctx.work_root = blocker / "work"
     with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    assert ei.value.message == messages.RUN_INSTALLER_EXTRAS.format(title="Light Cars")
-    assert tree(target) == files and len(eng.ctx.elevator.calls) == calls
+        with eng._staging_folder(eng.ctx.work_root, "lightcars"):
+            pass
+    assert ei.value.message == messages.WORK_FOLDER_NOT_CREATED.format(path=eng.ctx.work_root)
 
 
 # ---- what stays refused --------------------------------------------------------------------------------------
