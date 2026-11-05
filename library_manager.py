@@ -29,6 +29,9 @@ from pathlib import Path
 
 from engine import messages
 from engine.folders import library_label
+from engine.index import DEFAULT_CATALOG_URL, CatalogIndex
+from engine.jobs import game_fields_for
+from engine.records import RecordStore
 from models import Game
 from path_manager import PathManager
 
@@ -61,6 +64,9 @@ class GameLibraryManager:
         self.path_manager = PathManager()
         self.load_config()
         self.load_games()
+        self.config_dir = self.config_file.parent
+        self.records = RecordStore(self.config_dir / "installs")
+        self.reconcile_catalog_records()
     
     def get_config_path(self):
         """Get platform-specific config path"""
@@ -91,7 +97,16 @@ class GameLibraryManager:
                 "column_widths": None,
                 "tree_expansion": {},
                 "tree_selections": [],
-                "tree_filters": ["platform", "genre", "developer", "year"]
+                "tree_filters": ["platform", "genre", "developer", "year"],
+                "last_tab": None,
+                "catalog_last_selected": None,
+                "catalog_last_search": "",
+                "catalog_tree_selections": []
+            },
+            "install": {
+                "catalog_url": DEFAULT_CATALOG_URL,
+                "register_shared_components": True,
+                "last_library": None
             }
         }
         
@@ -104,10 +119,11 @@ class GameLibraryManager:
                     for key in default_config:
                         if key not in loaded:
                             loaded[key] = default_config[key]
-                    if "SavedState" in loaded:
-                        for state_key in default_config["SavedState"]:
-                            if state_key not in loaded["SavedState"]:
-                                loaded["SavedState"][state_key] = default_config["SavedState"][state_key]
+                    for section in ("SavedState", "install"):
+                        if isinstance(loaded.get(section), dict):
+                            for state_key, value in default_config[section].items():
+                                if state_key not in loaded[section]:
+                                    loaded[section][state_key] = value
                     # The only old-file handling: ids are assigned once and then saved, so they stay stable
                     upgraded = loaded.pop("exceptions", None) is not None
                     for lib in loaded["libraries"]:
@@ -150,6 +166,58 @@ class GameLibraryManager:
         """Save games to JSON file"""
         with open(self.games_file, 'w') as f:
             json.dump([g.to_dict() for g in self.games], f, indent=2)
+
+    def catalog_game(self, catalog_id):
+        """The game installed from this catalog entry, or None"""
+        for game in self.games:
+            if game.catalog_id == catalog_id:
+                return game
+        return None
+
+    def add_catalog_game(self, fields):
+        """Add the game for an installed catalog entry (replacing its old one) and save"""
+        game = Game.from_dict(fields)
+        self.games = [g for g in self.games if g.catalog_id != game.catalog_id]
+        self.games.append(game)
+        self.save_games()
+        return game
+
+    def remove_catalog_game(self, catalog_id):
+        self.games = [g for g in self.games if g.catalog_id != catalog_id]
+        self.save_games()
+
+    def catalog_games_in(self, library_id):
+        return [g for g in self.games if g.catalog_id and g.library_id == library_id]
+
+    def reconcile_catalog_records(self):
+        """Make games.json agree with the install records (they are the truth about what is installed).
+
+        A record with no game gets one, using the cached catalog index only (never the network); a game
+        whose record is gone becomes a game added by hand and is kept.
+        """
+        records = self.records.all()
+        changed = False
+        for game in self.games:
+            rec = records.get(game.catalog_id) if game.catalog_id else None
+            if game.catalog_id and (rec is None or rec.uninstalled):
+                path = self.get_full_path(game)
+                if path:
+                    game.launch_path, game.library_id = str(path), ""
+                game.catalog_id, game.installed_source, game.installed_extras = "", None, None
+                changed = True
+        missing = [r for r in records.values() if not r.uninstalled and self.catalog_game(r.catalog_id) is None]
+        if missing:
+            entries = self._cached_entries()
+            for rec in missing:
+                entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id, "title": rec.catalog_id}
+                self.games.append(Game.from_dict(game_fields_for(entry, rec)))
+            changed = True
+        if changed:
+            self.save_games()
+
+    def _cached_entries(self):
+        url = self.config.get("install", {}).get("catalog_url", DEFAULT_CATALOG_URL)
+        return CatalogIndex(self.config_dir / "catalog", url, fetcher=None).load_cached().entries
 
     def library_by_id(self, library_id):
         """The library with this id, or None"""
