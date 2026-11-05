@@ -264,3 +264,57 @@ CONFIRM_BUTTON_UPDATE = "Update"
 CONFIRM_BUTTON_EXTRAS = "Add extras"
 CONFIRM_BUTTON_CANCEL = "Cancel"
 CONFIRM_LIBRARY_ERROR_TITLE = "Install folder"
+
+# Background installs: the progress area, notifications, the installer prompts and the close guard
+REPAIRED = "{title} is repaired"
+UNDONE = "{title} is restored to the previous version"
+EXTRAS_INSTALLED = "{title}'s extras are installed"
+INSTALL_PROBLEM_TITLE = "Install problem"
+PROGRESS_GAUGE_NAME = "Install progress"
+PROGRESS_STATUS_NAME = "Install status"
+PROGRESS_DONE = "Done"
+PROGRESS_CANCEL = "Cancel"
+JOB_PREPARING = "Preparing {title}"
+JOB_CANCELLING = "Cancelling {title}"
+ONE_MORE_WAITING = "1 more waiting"
+MORE_WAITING = "{count} more waiting"
+INSTALLER_WAITING = "Waiting for the installer"
+INSTALLER_TARGET_TITLE = "Installing {title}"
+INSTALLER_TARGET = "When the installer asks where to install, use: {path}\n\nThe path is on your clipboard."
+LOCATE_FOLDER = "Locate where {title} was installed"
+QUIT_WHILE_BUSY = "{title} is still installing. Cancel it and quit?"
+QUIT_WHILE_BUSY_TITLE = "Quit Game Chooser"
+JOB_ALREADY_RUNNING = "{title} is already installing. Its progress is shown below the games list."
+JOB_ALREADY_WAITING = "{title} is already waiting to install. It starts when the install before it finishes."
+INSTALL_NOT_STARTED = "Game Chooser couldn't start installing {title}. Try again."
+
+
+def with_waiting(label: str, waiting: int) -> str:
+    """The progress status: the phase, then how many jobs wait behind it ("..., 1 more waiting")."""
+    if waiting <= 0:
+        return label
+    return f"{label}, " + (ONE_MORE_WAITING if waiting == 1 else MORE_WAITING.format(count=waiting))
+
+
+def job_status(progress: Progress | None, title: str, waiting: int) -> str:
+    """The progress status for a job; before its first progress report it is being prepared."""
+    label = phase_label(progress, title) if progress is not None else JOB_PREPARING.format(title=title)
+    return with_waiting(label, waiting)
+
+
+def _sentence(text: str) -> str:
+    text = text.strip()
+    return text if text.endswith((".", "!", "?")) else text + "."
+
+
+def finished_text(action: str, title: str, notes=(), backups: int = 0) -> str:
+    """The notification for a finished job: what happened, then each note as a sentence of its own."""
+    if action == "update":
+        text = update_summary(title, backups)
+    else:
+        text = {"uninstall": UNINSTALLED, "repair": REPAIRED, "undo": UNDONE,
+                "extras": EXTRAS_INSTALLED}.get(action, INSTALLED).format(title=title)
+    notes = [n for n in notes if n and n.strip()]
+    if not notes:
+        return text
+    return " ".join([_sentence(text), *(_sentence(n) for n in notes)])

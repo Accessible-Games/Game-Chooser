@@ -20,3 +20,41 @@ def test_update_summary():
     assert update_summary("Pawprints", 0) == "Pawprints is updated"
     assert update_summary("Pawprints", 1) == "Updated Pawprints. Kept a backup of 1 file you'd changed."
     assert update_summary("Pawprints", 2) == "Updated Pawprints. Kept a backup of 2 files you'd changed."
+
+
+def test_with_waiting():
+    from engine.messages import with_waiting
+    assert with_waiting("Verifying", 0) == "Verifying"
+    assert with_waiting("Verifying", 1) == "Verifying, 1 more waiting"
+    assert with_waiting("Verifying", 3) == "Verifying, 3 more waiting"
+
+
+def test_job_status():
+    from engine.messages import job_status
+    assert job_status(None, "Entombed", 0) == "Preparing Entombed"
+    assert job_status(Progress("extracting"), "Entombed", 2) == "Extracting, 2 more waiting"
+    assert job_status(Progress("downloading", 1024, 2048), "Entombed", 1) == \
+        "Downloading Entombed, 1 of 2 kilobytes, 1 more waiting"
+
+
+def test_finished_text_per_action():
+    from engine.messages import finished_text
+    assert finished_text("install", "Entombed") == "Entombed is installed"
+    assert finished_text("uninstall", "Entombed") == "Entombed is uninstalled"
+    assert finished_text("repair", "Entombed") == "Entombed is repaired"
+    assert finished_text("undo", "Entombed") == "Entombed is restored to the previous version"
+    assert finished_text("extras", "Entombed") == "Entombed's extras are installed"
+    assert finished_text("update", "Entombed") == "Entombed is updated"
+    assert finished_text("update", "Entombed", backups=2) == \
+        "Updated Entombed. Kept a backup of 2 files you'd changed."
+
+
+def test_finished_text_appends_each_note_as_a_sentence():
+    from engine.messages import finished_text
+    assert finished_text("install", "Entombed", ["Restart Windows to finish installing Entombed."]) == \
+        "Entombed is installed. Restart Windows to finish installing Entombed."
+    assert finished_text("install", "Entombed", ["One note", "Two notes."]) == \
+        "Entombed is installed. One note. Two notes."
+    assert finished_text("update", "Entombed", ["A note."], backups=1) == \
+        "Updated Entombed. Kept a backup of 1 file you'd changed. A note."
+    assert finished_text("install", "Entombed", ["", "  "]) == "Entombed is installed"

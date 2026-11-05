@@ -40,40 +40,15 @@ from game_list import GameListCtrl
 from catalog_panel import CatalogPanel
 from description_field import DescriptionField
 from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
+from engine import messages
+from progress_area import ProgressArea
+from wx_bridge import WxInstallerUI, WxQueueListener
+from wx_bridge import call_after as _call_after  # wx.CallAfter that does nothing once the app is gone
 
 log = logging.getLogger(__name__)
 
 TABS = ("library", "catalog")  # notebook page order
-
-
-def _call_after(fn, *args):
-    """wx.CallAfter from a worker thread; does nothing once the app is gone (closing while a worker runs)"""
-    try:
-        wx.CallAfter(fn, *args)
-    except Exception:
-        log.debug("The app closed before %s could run", getattr(fn, "__name__", fn))
-
-
-class _NoQueueListener:
-    """Ignores the install queue's events until the real listener exists (Task 10)."""
-
-    def job_started(self, job):
-        pass
-
-    def job_progress(self, job, progress):
-        pass
-
-    def job_finished(self, job, result):
-        pass
-
-    def job_failed(self, job, message):
-        pass
-
-    def job_cancelled(self, job):
-        pass
-
-    def queue_changed(self, waiting):
-        pass
+QUIT_WAIT_SECONDS = 10  # how long quitting waits for a cancelled install to stop
 
 
 class FilterWorker(threading.Thread):
@@ -146,8 +121,20 @@ class MainFrame(wx.Frame):
         super().__init__(None, title="Game Chooser (0)")
         
         self.library_manager = GameLibraryManager()
-        # The no-op listener and installer_ui=None stand in until the install progress UI exists (Task 10)
-        self.service = InstallService(self.library_manager, _NoQueueListener(), installer_ui=None)
+        # Windows toast notifications; False in a development run, where notify() falls back to a balloon
+        try:
+            wx.adv.NotificationMessage.MSWUseToasts()
+        except Exception:
+            log.debug("Toast notifications aren't available", exc_info=True)
+        # The queue's events and the engine's installer prompts reach this window on the UI thread only
+        self.installer_ui = WxInstallerUI(self)
+        self.service = InstallService(self.library_manager, WxQueueListener(self), installer_ui=self.installer_ui)
+        self._shown_job_id = None  # the job the progress areas show
+        self._cancelling_job_id = None  # the job the player pressed Cancel on
+        self._installer_wait_done = None  # Done's handler while "Waiting for the installer" shows
+        # Called with the Job on the UI thread after each finished, failed or cancelled job has been applied
+        # to the library (Preferences can refresh its library list from here)
+        self.job_done_hooks = []
         self._index_fetching = False  # a catalog index fetch is running or waiting for a dialog to close
         self.statuses = {}  # (library_id, launch_path) -> Status text, filled by refresh_statuses()
         self._status_generation = 0  # only the newest status computation is shown
@@ -249,10 +236,17 @@ class MainFrame(wx.Frame):
         
         main_sizer.Add(splitter, 1, wx.EXPAND)
         
-        # Launch button
+        # Launch button, and beside it the install progress while a job runs (it follows Launch in tab order)
+        launch_sizer = wx.BoxSizer(wx.HORIZONTAL)
         self.launch_btn = wx.Button(panel, label="Launch")
         self.launch_btn.Bind(wx.EVT_BUTTON, self.on_launch)
-        main_sizer.Add(self.launch_btn, 0, wx.ALIGN_CENTER | wx.ALL, 5)
+        launch_sizer.Add(self.launch_btn, 0, wx.ALIGN_CENTER_VERTICAL)
+        self.library_progress = ProgressArea(panel)
+        self.library_progress.on_cancel = self.cancel_current_job
+        self.library_progress.Hide()
+        launch_sizer.Add(self.library_progress, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
+        main_sizer.Add(launch_sizer, 0, wx.ALIGN_CENTER | wx.ALL, 5)
+        self.catalog_panel.progress_area.on_cancel = self.cancel_current_job
         
         # Description of the selected catalog game (empty for other games)
         self.description = DescriptionField(panel, "Description")
@@ -838,6 +832,162 @@ class MainFrame(wx.Frame):
         except Exception:
             log.warning("Couldn't show a notification", exc_info=True)
 
+    # ---- background installs (WxQueueListener and WxInstallerUI call these on the UI thread) -------------------
+
+    @property
+    def progress_areas(self):
+        """Both progress areas (Library, beside Launch; Catalog, in place of its action button). They show the
+        same job, whatever is selected."""
+        return [self.library_progress, self.catalog_panel.progress_area]
+
+    def on_job_started(self, job):
+        if self:
+            self._sync_progress()
+
+    def on_queue_changed(self, waiting):
+        if self:
+            self._sync_progress()
+
+    def on_job_progress(self, job, progress):
+        """Progress only changes the areas' gauge and status, never focus or games, so it applies at once"""
+        if not self:
+            return
+        self._sync_progress()
+        if self.service.queue.current() is not job or job.id == self._cancelling_job_id:
+            return  # a late report from a job that has ended, or one being cancelled (it says so)
+        waiting = self.service.queue.waiting_count()
+        for area in self.progress_areas:
+            area.update(progress, waiting)
+
+    def on_job_finished(self, job, result):
+        if not self:
+            return
+        self._job_ended(job)
+        self.run_when_no_dialog(self._apply_finished, job, result)
+
+    def on_job_failed(self, job, message):
+        if not self:
+            return
+        self._job_ended(job)
+        self.run_when_no_dialog(self._apply_failed, job, message)
+
+    def on_job_cancelled(self, job):
+        if not self:
+            return
+        self._job_ended(job)
+        self.run_when_no_dialog(self._apply_cancelled, job)
+
+    def _job_ended(self, job):
+        if self._cancelling_job_id == job.id:
+            self._cancelling_job_id = None
+        self._sync_progress()
+
+    def _sync_progress(self):
+        """Show the progress areas while a job runs or waits (and the queue's current job in them); hide them
+        once the queue is empty. The queue itself is the truth: its events can arrive after it has moved on."""
+        self.installer_ui.check_wait()
+        queue = self.service.queue
+        job = queue.current()
+        waiting = queue.waiting_count()
+        if job is not None and job.id != self._shown_job_id:
+            self._shown_job_id = job.id
+            for area in self.progress_areas:
+                area.show_job(job.title)
+                if job.id == self._cancelling_job_id:
+                    area.set_label(messages.JOB_CANCELLING.format(title=job.title))
+            # the installer's prompt can arrive before job_started (they come from different threads)
+            if self._installer_wait_done is not None and self.installer_ui.waiting():
+                self.show_installer_wait(self._installer_wait_done)
+        for area in self.progress_areas:
+            area.set_waiting(waiting)
+        self._show_progress(job is not None or waiting > 0)
+
+    def _show_progress(self, active):
+        lost_focus = False
+        if self.library_progress.IsShown() != active:
+            lost_focus = not active and self.library_progress.has_focus_inside()
+            self.library_progress.Show(active)
+            self.library_page.Layout()
+        self.catalog_panel.set_busy(active)
+        if not active:
+            self._shown_job_id = None
+        if lost_focus and not self.dialog_active:  # never leave focus on a control that just hid
+            self.focus_active_list()
+
+    def show_installer_wait(self, on_done):
+        """WxInstallerUI: "Waiting for the installer", with Done, in both areas (focus stays where it is)"""
+        self._installer_wait_done = on_done
+        for area in self.progress_areas:
+            area.set_label(messages.INSTALLER_WAITING)
+            area.show_done_button(on_done)
+
+    def hide_installer_wait(self):
+        self._installer_wait_done = None
+        for area in self.progress_areas:
+            area.hide_done_button()
+
+    def cancel_current_job(self):
+        """Cancel, in either progress area: stop the running job (an installer wait answers False first)"""
+        queue = self.service.queue
+        job = queue.current()
+        if job is None:
+            return
+        self._cancelling_job_id = job.id
+        self.installer_ui.cancel_wait()
+        queue.cancel(job.id)
+        for area in self.progress_areas:
+            area.hide_done_button()
+            area.set_label(messages.JOB_CANCELLING.format(title=job.title))
+
+    def _apply_finished(self, job, result):
+        """A finished job (any action) reaches the library, then the player hears about it. Runs only while
+        no dialog is open (run_when_no_dialog), so no dialog holds a game this replaces."""
+        try:
+            self.service.apply_result(result)
+        except Exception:
+            log.exception("Couldn't apply the result of %s", job.title)
+        self._refresh_after_job()
+        self.notify(messages.finished_text(result.action, result.title or job.title, result.notes,
+                                           result.backups))
+        self._run_job_done_hooks(job)
+
+    def _apply_failed(self, job, message):
+        try:
+            self.service.job_failed(job)
+        except Exception:
+            log.exception("Couldn't clean up after %s failed", job.title)
+        self._refresh_after_job()
+        self.notify(messages.FAILED.format(title=job.title))
+        with self.modal_dialog():  # a second failure waits for this box instead of stacking on it
+            wx.MessageBox(message, messages.INSTALL_PROBLEM_TITLE, wx.OK | wx.ICON_ERROR, self)
+        self._run_job_done_hooks(job)
+
+    def _apply_cancelled(self, job):
+        """A cancelled job is a failed one to the service (an uninstall's library stays), without the message"""
+        try:
+            self.service.job_failed(job)
+        except Exception:
+            log.exception("Couldn't clean up after %s was cancelled", job.title)
+        self._refresh_after_job()
+        self._run_job_done_hooks(job)
+
+    def _refresh_after_job(self):
+        """Both lists, the Library tree, the Libraries menu and the statuses (a game or a library may have
+        come or gone). None of these moves focus."""
+        for refresh in (self.refresh_game_list, lambda: self.build_tree(force_rebuild=True),
+                        self.build_libraries_menu, self.catalog_panel.refresh_rows, self.refresh_statuses):
+            try:
+                refresh()
+            except Exception:
+                log.exception("Couldn't refresh after an install job")
+
+    def _run_job_done_hooks(self, job):
+        for hook in list(self.job_done_hooks):
+            try:
+                hook(job)
+            except Exception:
+                log.exception("A job-done hook failed")
+
     def refresh_game_list(self):
         """Refresh the game list display"""
         self.apply_filters()
@@ -1373,8 +1523,31 @@ class MainFrame(wx.Frame):
         self.library_manager.save_config()
     
     def on_close(self, event):
-        """Handle window close"""
+        """Handle window close. While a job runs, ask first; quitting cancels it and waits for it to stop."""
+        queue = self.service.queue
+        job = queue.current()
+        if job is not None and event.CanVeto() and not self.confirm_quit_while_busy(job.title):
+            event.Veto()
+            return
+        # A prompt the worker is blocked on answers "cancelled" first, so nothing can wait on this window
+        self.installer_ui.release_all()
+        queue.cancel_all()
         self.save_state()
+        if queue.busy():
+            self.Hide()  # the window goes at once; the cancelled job gets a moment to stop and tidy up
+        if not queue.shutdown(QUIT_WAIT_SECONDS):
+            log.warning("The install queue didn't stop within %s seconds", QUIT_WAIT_SECONDS)
         self.library_manager.save_games()
         self.library_manager.save_config()
         self.Destroy()
+        # A notification shown as a balloon (no toasts) keeps a hidden window, and so the app, alive for a while
+        app = wx.GetApp()
+        if app is not None:
+            app.ExitMainLoop()
+
+    def confirm_quit_while_busy(self, title):
+        """"<title> is still installing. Cancel it and quit?" True for Yes."""
+        with self.modal_dialog():
+            answer = wx.MessageBox(messages.QUIT_WHILE_BUSY.format(title=title), messages.QUIT_WHILE_BUSY_TITLE,
+                                   wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
+        return answer == wx.YES

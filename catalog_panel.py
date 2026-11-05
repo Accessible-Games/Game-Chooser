@@ -37,6 +37,7 @@ from engine import messages
 from engine.entries import current_platform, game_fields, platform_sources
 from install_dialogs import InstallConfirmDialog
 from install_service import InstallService
+from progress_area import ProgressArea
 
 log = logging.getLogger(__name__)
 
@@ -114,11 +115,15 @@ class CatalogPanel(wx.Panel):
         splitter.SetMinimumPaneSize(100)
         sizer.Add(splitter, 1, wx.EXPAND)
 
-        # Task 10 swaps its progress area into this sizer in place of the button
+        # The action button, or while an install job runs or waits, the install progress in its place
+        # (created next, so it takes the button's place in tab order too)
         self.action_sizer_slot = wx.BoxSizer(wx.HORIZONTAL)
         self.action_btn = wx.Button(self, label=action_label(None))
         self.action_btn.Bind(wx.EVT_BUTTON, lambda event: self.on_action())
         self.action_sizer_slot.Add(self.action_btn, 0, wx.ALIGN_CENTER)
+        self.progress_area = ProgressArea(self)
+        self.progress_area.Hide()
+        self.action_sizer_slot.Add(self.progress_area, 0, wx.ALIGN_CENTER)
         sizer.Add(self.action_sizer_slot, 0, wx.ALIGN_CENTER | wx.ALL, 5)
 
         self.description = DescriptionField(self, "Description")
@@ -332,6 +337,19 @@ class CatalogPanel(wx.Panel):
         self.description.set_text(description_text(row.entry) if row else "")
         self.action_sizer_slot.Layout()
 
+    def set_busy(self, busy: bool):
+        """While an install job runs or waits, the progress area takes the action button's place.
+        Focus never moves into the progress area; if it was on the control that hides, it goes to the list."""
+        if self.progress_area.IsShown() == busy:
+            return
+        lost_focus = self.action_btn.HasFocus() if busy else self.progress_area.has_focus_inside()
+        self.action_btn.Show(not busy)
+        self.progress_area.Show(busy)
+        self.action_sizer_slot.Layout()
+        self.Layout()
+        if lost_focus and not self.frame.dialog_active:
+            self.focus_list()
+
     def on_selected(self, event):
         if self.frame.dialog_active:  # spurious events while a modal dialog is open
             return
@@ -392,7 +410,19 @@ class CatalogPanel(wx.Panel):
         if action_kind(row) == "add":
             self._add_web_game(row)
             return
-        plan = self.service.plan(row.id)
+        job = self.service.queue.job_for(row.id)
+        if job is not None:  # already queued or running: say so, and change nothing (not even last_library)
+            text = messages.JOB_ALREADY_RUNNING if job.state == "running" else messages.JOB_ALREADY_WAITING
+            self._tell(text.format(title=row.title), wx.ICON_INFORMATION)
+            self._focus_row(row)
+            return
+        try:
+            plan = self.service.plan(row.id)
+        except Exception:
+            log.exception("Couldn't plan installing %s", row.id)
+            self._tell(messages.INSTALL_NOT_STARTED.format(title=row.title), wx.ICON_ERROR)
+            self._focus_row(row)
+            return
         choice = None
         with self.frame.modal_dialog():
             dlg = InstallConfirmDialog(self.frame, plan, self.service)
@@ -402,11 +432,19 @@ class CatalogPanel(wx.Panel):
             finally:
                 dlg.Destroy()
         if choice is not None:
-            self.service.submit(plan.action, row.id, choice.library_id, choice.library_path, choice.extras)
+            try:
+                self.service.submit(plan.action, row.id, choice.library_id, choice.library_path, choice.extras)
+            except Exception:
+                log.exception("Couldn't queue installing %s", row.id)
+                self._tell(messages.INSTALL_NOT_STARTED.format(title=row.title), wx.ICON_ERROR)
             self.frame.refresh_game_list()
             self.refresh_rows()
             self.frame.refresh_statuses()
         self._focus_row(row)
+
+    def _tell(self, text, icon):
+        with self.frame.modal_dialog():
+            wx.MessageBox(text, "Catalog", wx.OK | icon, self.frame)
 
     def _add_web_game(self, row):
         sources = platform_sources(row.entry, current_platform())
