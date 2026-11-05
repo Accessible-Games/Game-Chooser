@@ -196,6 +196,7 @@ def test_register_is_elevated_regsvr32(tmp_path, ctx, fake_elev):
     assert fake_elev.calls == [("regsvr32.exe", f'/s "{tmp_path / "dx8vb.dll"}"', True)]
     assert undo_steps(applied, ctx) == []
     assert fake_elev.calls[-1] == ("regsvr32.exe", f'/u /s "{tmp_path / "dx8vb.dll"}"', True)
+    assert fake_elev.shown == [False, False]  # no console window flashing up and taking the focus (I2)
 
 
 def test_register_missing_file_or_failure_is_step_error(tmp_path):
@@ -251,6 +252,7 @@ def test_hklm_registry_step_and_undo_go_through_reg_exe(tmp_path, ctx, fake_elev
     hklm = {"action": "registry", "hive": "HKLM", "key": r"Software\X", "name": "P", "type": "REG_SZ", "value": "v"}
     applied = run_system_steps([hklm], ctx)
     assert fake_elev.calls == [("reg.exe", r'add "HKLM\Software\X" /v "P" /t REG_SZ /d "v" /f /reg:32', True)]
+    assert fake_elev.shown == [False]  # reg.exe gets no console window (I2)
     # The fake reg.exe doesn't really write, so the value reads as absent and undo has nothing to delete.
     assert undo_steps(applied, ctx) == []
 
@@ -363,6 +365,10 @@ def test_windows_elevator_elevated_path_without_uac(monkeypatch, tmp_path):
         WindowsElevator().run("regsvr32.exe", '/s "x.dll"', True, cwd=tmp_path)
     assert seen[0]["lpVerb"] == "runas" and seen[0]["lpFile"] == "regsvr32.exe"
     assert seen[0]["lpParameters"] == '/s "x.dll"' and seen[0]["fMask"] == 0x40 | 0x100
+    assert seen[0]["nShow"] == win32con.SW_SHOWNORMAL  # an installer the player may need to see
+    with pytest.raises(ElevationDeclined):
+        WindowsElevator().run("regsvr32.exe", '/s "x.dll"', True, show=False)
+    assert seen[1]["nShow"] == win32con.SW_HIDE  # a helper program whose console would steal the focus
 
     child = subprocess.Popen([sys.executable, "-c", "import sys; sys.exit(5)"])
     access = win32con.SYNCHRONIZE | 0x1000  # PROCESS_QUERY_LIMITED_INFORMATION

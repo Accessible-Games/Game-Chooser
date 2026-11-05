@@ -19,6 +19,7 @@ def test_hklm_write_goes_through_reg_exe(fake_elev, fake_winreg):
     reg = RegistryAccess(elevator=fake_elev, hkcu=fake_winreg)
     reg.set("HKLM", r"Software\X", "Path", "REG_SZ", "C:\\G")
     assert fake_elev.calls == [("reg.exe", r'add "HKLM\Software\X" /v "Path" /t REG_SZ /d "C:\G" /f /reg:32', True)]
+    assert fake_elev.shown == [False]  # hidden: its console window would take the focus from Game Chooser
     assert fake_winreg.keys == {}
 
 

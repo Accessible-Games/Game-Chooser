@@ -341,6 +341,7 @@ def test_silent_installer_error_code_fails_and_removes_its_files(tmp_path):
         install(eng)
     assert ei.value.message == messages.INSTALLER_FAILED.format(title="Light Cars", code=5)
     assert not target.exists() and eng.ctx.records.load("lightcars") is None
+    assert elevator.shown == [True]  # an installer keeps its window: the player may need to see it (I2)
 
 
 def test_interactive_error_code_after_done_is_a_note(tmp_path):

@@ -125,5 +125,5 @@ class RegistryAccess:
         full_key = f"HKLM\\{self._safe(key).strip('\\')}"
         value_arg = "/ve" if name == "" else f"/v {_reg_quote(self._safe(name))}"
         args = f"{verb} {_reg_quote(full_key)} {value_arg}{rest} /f /reg:32"
-        if self._elevator.run("reg.exe", args, True) != 0:
+        if self._elevator.run("reg.exe", args, True, show=False) != 0:  # no console window: it would take the focus
             raise StepError(messages.REGISTRY_WRITE_FAILED.format(key=full_key))

@@ -123,7 +123,7 @@ def _existing_file(ctx: StepContext, rel: object) -> Path:
 def _apply_register(step: dict, ctx: StepContext) -> dict:
     path = _existing_file(ctx, step["path"])
     try:
-        code = ctx.elevator.run("regsvr32.exe", f'/s "{path}"', True)
+        code = ctx.elevator.run("regsvr32.exe", f'/s "{path}"', True, show=False)
     except ElevationDeclined as e:
         raise StepError(messages.ELEVATION_DECLINED.format(what=path.name)) from e
     if code != 0:
@@ -175,7 +175,7 @@ def _undo_one(item: dict, ctx: StepContext) -> None:
             ctx.registry.delete(item["hive"], item["key"], item["name"])
     elif item.get("action") == "register":
         path = _path(ctx.dir, item["path"])
-        if ctx.elevator.run("regsvr32.exe", f'/u /s "{path}"', True) != 0:
+        if ctx.elevator.run("regsvr32.exe", f'/u /s "{path}"', True, show=False) != 0:
             raise StepError(messages.UNDO_UNREGISTER_FAILED.format(name=path.name))
 
 
