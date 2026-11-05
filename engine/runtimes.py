@@ -615,9 +615,16 @@ def _adoptable(ctx, target: Path, incoming: dict[str, tuple[str, str]], elevated
     if not _owner_is(ctx.security, target, allow_user=not elevated) or not _matches_download(target, incoming):
         return False
     if elevated:
-        # The elevated command adds the missing files and leaves everything else alone, so the folder may
-        # hold only the download's files; and no marker, which would say "installed" as soon as the files
-        # are complete, before anything is registered.
+        # The elevated command adds the missing files and leaves everything else alone, so what is there
+        # must be what an earlier install's elevated command left: every expected entry owned by
+        # Administrators or SYSTEM (a matching file the player put there would be registered as theirs,
+        # and its owner can always regain write access), nothing but the download's entries, and no
+        # marker, which would say "installed" as soon as the files are complete, before anything is
+        # registered.
+        files = [display for display, _ in incoming.values()]
+        if not all(_owner_is(ctx.security, target / rel, allow_user=False)
+                   for rel, _ in _depth_first_order(files) if os.path.lexists(target / rel)):
+            return False
         return _only_expected(target, incoming) and not os.path.lexists(target / MARKER_NAME)
     return True
 

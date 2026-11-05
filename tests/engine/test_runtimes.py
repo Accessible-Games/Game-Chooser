@@ -400,7 +400,8 @@ def test_administrators_owned_folder_is_adopted_and_only_missing_files_are_copie
     folder = eng.ctx.runtimes_root / "vbx"
     (folder / "lib").mkdir(parents=True)  # locked by an earlier install that lost its marker and record
     (folder / "vbx.ocx").write_bytes(b"MZ vbx")
-    eng.ctx.security.set_owner(folder, ADMINISTRATORS)
+    for made in (folder, folder / "lib", folder / "vbx.ocx"):
+        eng.ctx.security.set_owner(made, ADMINISTRATORS)
     run(eng, "install")
     files = ["vbx.ocx", "lib/helper.dll", "lib/deep/more.dll"]
     assert eng.ctx.elevator.calls == [*lock_down(eng, folder, files, existing={"vbx.ocx", "lib"}),
@@ -489,7 +490,23 @@ def test_found_folder_with_an_extra_file_isnt_adopted_for_a_lock_down(tmp_path):
     folder.mkdir(parents=True)
     (folder / "dx8vb.dll").write_bytes(DX8VB)
     (folder / "readme.txt").write_bytes(b"someone else's note")
-    eng.ctx.security.set_owner(folder, ADMINISTRATORS)
+    for made in (folder, folder / "dx8vb.dll"):
+        eng.ctx.security.set_owner(made, ADMINISTRATORS)
+    before = snapshot(folder)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert snapshot(folder) == before and eng.ctx.elevator.calls == []
+
+
+def test_found_folder_holding_a_player_owned_matching_file_isnt_adopted_for_a_lock_down(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    folder = eng.ctx.runtimes_root / "dx8vb"
+    folder.mkdir(parents=True)
+    (folder / "dx8vb.dll").write_bytes(DX8VB)  # the right bytes, but the player's file (FakeSecurity's default)
+    eng.ctx.security.set_owner(folder, ADMINISTRATORS)  # an administrator made the folder, not Game Chooser
     before = snapshot(folder)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
@@ -727,9 +744,10 @@ def adoptable_folder(eng, files: dict[str, bytes] | None = None) -> Path:
     """A dx8vb folder locked by an earlier install (owned by Administrators) that lost its marker."""
     folder = eng.ctx.runtimes_root / "dx8vb"
     folder.mkdir(parents=True)
+    eng.ctx.security.set_owner(folder, ADMINISTRATORS)
     for rel, data in ({"dx8vb.dll": DX8VB} if files is None else files).items():
         (folder / rel).write_bytes(data)
-    eng.ctx.security.set_owner(folder, ADMINISTRATORS)
+        eng.ctx.security.set_owner(folder / rel, ADMINISTRATORS)
     return folder
 
 

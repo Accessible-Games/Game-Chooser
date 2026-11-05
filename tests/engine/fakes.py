@@ -113,11 +113,13 @@ def split_chain(args: str) -> list[str]:
     return [*commands, current]
 
 
-def run_elevated_chain(args: str) -> int:
+def run_elevated_chain(args: str, owned: set[str] | None = None) -> int:
     """Play the engine's elevated lock-down chain (`cmd.exe /d /v:off /s /c "a && b && …"`) on disk, as
     cmd.exe would, stopping at the first command that fails: mkdir of something that exists, a reparse
     point where a real folder must be, a destination that is already there, a copy that can't be made.
-    icacls calls are recorded by the caller and change nothing here. Any other command is a test error."""
+    icacls changes nothing here. Every path the chain reached with `/setowner`, made or copied to is added
+    to `owned` (what Administrators own afterwards). Any other command is a test error."""
+    owned = set() if owned is None else owned
     for command in split_chain(args):
         for kind, form in _CHAIN_FORMS:
             match = form.match(command)
@@ -126,7 +128,10 @@ def run_elevated_chain(args: str) -> int:
         else:
             raise AssertionError(f"unexpected command in the elevated chain: {command}")
         path = Path(match.group(1))
-        if kind == "not_reparse":
+        if kind == "icacls":
+            if "/setowner" in command:
+                owned.add(os.path.normcase(str(path)))
+        elif kind == "not_reparse":
             if _is_reparse_point(path):
                 return 1
         elif kind == "mkdir":
@@ -134,6 +139,7 @@ def run_elevated_chain(args: str) -> int:
                 os.mkdir(path)
             except OSError:
                 return 1
+            owned.add(os.path.normcase(str(path)))
         elif kind == "absent":
             if os.path.lexists(path):
                 return 1
@@ -145,6 +151,7 @@ def run_elevated_chain(args: str) -> int:
                 shutil.copyfile(path, dest)
             except OSError:
                 return 1
+            owned.add(os.path.normcase(str(dest)))
     return 0
 
 
@@ -175,6 +182,7 @@ class FakeElevator:
         self.hang = set(hang or ())
         self.calls: list[tuple[str, str, bool]] = []
         self.cwds: list[Path | None] = []
+        self.owned: set[str] = set()  # what the elevated chains re-owned, made or copied (FakeSecurity reads it)
 
     def start(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> FakeProcess:
         from engine.errors import ElevationDeclined
@@ -186,7 +194,7 @@ class FakeElevator:
             self.on_start(exe, args, elevated)
         code = self.exit_codes.get(exe)
         if code is None:
-            code = run_elevated_chain(args) if exe == "cmd.exe" and elevated else 0
+            code = run_elevated_chain(args, self.owned) if exe == "cmd.exe" and elevated else 0
         return FakeProcess(code, 1000 + len(self.calls), running=exe in self.hang)
 
     def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
@@ -451,8 +459,8 @@ ADMINISTRATORS = "S-1-5-32-544"
 class FakeSecurity:
     """Stands in for engine.runtimes.WindowsSecurity.
 
-    A path's owner is the one set with `set_owner`; else Administrators once the elevator has run the
-    lock-down for it; else, if it exists, the current user (`user`).
+    A path's owner is the one set with `set_owner`; else Administrators once an elevated chain the elevator
+    played has re-owned, made or copied it; else, if it exists, the current user (`user`).
     """
 
     def __init__(self, elevator=None, user: str = "S-1-5-21-1000-1000-1000-1001"):
@@ -470,9 +478,8 @@ class FakeSecurity:
         found = self.owners.get(os.path.normcase(str(path)))
         if found:
             return found
-        for exe, args, _ in (self.elevator.calls if self.elevator is not None else []):
-            if exe == "cmd.exe" and "/setowner" in args and f'icacls "{path}" /setowner' in args:
-                return ADMINISTRATORS
+        if self.elevator is not None and os.path.normcase(str(path)) in self.elevator.owned:
+            return ADMINISTRATORS
         return self.user if os.path.lexists(path) else None
 
 
