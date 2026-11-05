@@ -482,17 +482,27 @@ class MainFrame(wx.Frame):
         self.run_when_no_dialog(self._take_index, state)
 
     def _take_index(self, state):
+        taken = False
         try:
             games_before = self.library_manager.games
             self.service.take_index(state)
+            taken = True
             if self.library_manager.games is not games_before:  # a game was adopted (the list is replaced)
                 self.refresh_game_list()
                 self.build_tree(force_rebuild=True)
             self.refresh_statuses()
             self.show_description(self.game_list.get_selected_game())
+        except Exception:
+            log.exception("Couldn't use the fetched catalog index")
         finally:
             self._index_fetching = False
-        self.catalog_panel.set_index_state(state)
+        try:
+            if taken:
+                self.catalog_panel.set_index_state(state)
+        except Exception:
+            log.exception("Couldn't show the fetched catalog index")
+        finally:
+            self.catalog_panel.set_checking(False)  # "Checking for catalog updates" never outlives the fetch
 
     def show_description(self, game):
         """The Library description: the catalog text for a catalog game, empty otherwise"""

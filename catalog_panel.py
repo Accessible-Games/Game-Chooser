@@ -62,6 +62,7 @@ class CatalogPanel(wx.Panel):
         self._all_rows = []
         self._displayed = []
         self._categories = None  # the tree's categories; None until the tree is first built
+        self._tree_has_values = False  # until it is, the saved tree selections wait (offline start, no cache)
         self._selected_id = self._saved()["catalog_last_selected"]
         self._populating = False
         self.restoring_tree = False
@@ -164,6 +165,9 @@ class CatalogPanel(wx.Panel):
         self._checking = False
         self._update_status()
         self.refresh_rows()
+        if (self.retry_btn.IsShown() and self.frame.active_tab() == "catalog" and not self.frame.initializing
+                and not self.frame.dialog_active):
+            self.status.SetFocus()  # no catalog at all: a screen reader reads why, and Retry is next
 
     def set_checking(self, checking: bool):
         """Show or clear "Checking for catalog updates" while MainFrame fetches the index"""
@@ -216,10 +220,11 @@ class CatalogPanel(wx.Panel):
         categories = tree_categories(self._all_rows)
         if categories == self._categories:
             return
-        paths = self._saved()["catalog_tree_selections"] if self._categories is None else self._selected_paths()
+        paths = self._selected_paths() if self._tree_has_values else self._saved()["catalog_tree_selections"]
         self._categories = categories
         self._build_tree(categories)
         self._restore_tree(paths)
+        self._tree_has_values = any(categories.values())
 
     def _build_tree(self, categories):
         tree = self.tree_ctrl
@@ -389,7 +394,8 @@ class CatalogPanel(wx.Panel):
     def on_random_game(self):
         """Ctrl+R: pick a random game from the list as shown (filters applied) and offer to act on it"""
         if not self._displayed:
-            wx.MessageBox(messages.CATALOG_NO_GAMES, "No Games", wx.OK | wx.ICON_INFORMATION)
+            with self.frame.modal_dialog():
+                wx.MessageBox(messages.CATALOG_NO_GAMES, "No Games", wx.OK | wx.ICON_INFORMATION)
             return
         row = random.choice(self._displayed)
         # The row is held across the prompt, so no index refresh may replace it meanwhile
@@ -417,10 +423,10 @@ class CatalogPanel(wx.Panel):
             return
         menu = wx.Menu()
         action = menu.Append(wx.ID_ANY, action_label(row))
-        self.Bind(wx.EVT_MENU, lambda e: self.on_action(), action)
+        menu.Bind(wx.EVT_MENU, lambda e: self.on_action(), action)
         for label, url in link_items(row.entry):
             item = menu.Append(wx.ID_ANY, label)
-            self.Bind(wx.EVT_MENU, lambda e, link=url: webbrowser.open(link), item)
+            menu.Bind(wx.EVT_MENU, lambda e, link=url: webbrowser.open(link), item)
         if event.GetEventType() == wx.wxEVT_LIST_ITEM_RIGHT_CLICK:
             self.list_ctrl.PopupMenu(menu)
         else:  # keyboard: next to the selected row
