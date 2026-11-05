@@ -38,7 +38,9 @@ from .messages import Progress
 from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
 from .recycle import send_to_recycle_bin
-from .run_installer import InstallerUI, ProcessWatch, RunItem, UninstallReader
+from .installer_watch import ProcessWatch, watch_process
+from .run_installer import InstallerUI, RunItem
+from .uninstall_keys import UninstallReader, _winreg_reader
 from .safety import (ApplyResult, UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall, is_link,
                      plan_uninstall, plan_update, preflight, restore_backups)
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
@@ -95,9 +97,9 @@ class EngineContext:
     recycle: Callable[[list[Path]], None] = send_to_recycle_bin
     exclude: Callable[[Path], bool] = field(default_factory=_scanner_exclude)
     # How a started installer is watched (a job object, or the handle when elevated).
-    process_watch: Callable[[object, bool], ProcessWatch] = run_installer.watch_process
+    process_watch: Callable[[object, bool], ProcessWatch] = watch_process
     # Reads one Uninstall key location (hive, key, view) -> {subkey: values}; read-only.
-    uninstall_reader: UninstallReader = run_installer._winreg_reader
+    uninstall_reader: UninstallReader = _winreg_reader
 
 
 # Downloads one catalog item (the game or an extra) into an empty work folder.
@@ -792,9 +794,11 @@ class InstallEngine:
     def _uninstall(self, req: InstallRequest, entry: dict | None, progress, cancel) -> JobResult:
         """Undo the system steps, delete the recorded unchanged files, and keep (or recycle) the rest.
 
-        A game whose installer registered its own uninstaller has that run first, with the player's
-        files set aside and put back. Runtimes are separate records in their own folders, and are
-        never touched here.
+        The record goes first. A game whose installer registered its own uninstaller then has that run
+        too, only for what the record can't undo (its entries in Windows), with the player's files set
+        aside; the record's leftovers are removed afterwards. If the record can't remove the files
+        itself (an install in Program Files), the vendor uninstaller still runs and the record tries
+        again after it. Runtimes are separate records in their own folders, and are never touched here.
         """
         ctx = self.ctx
         rec = ctx.records.load(req.catalog_id)
@@ -805,26 +809,33 @@ class InstallEngine:
         game_dir = record_folder(rec, ctx.libraries)
         if game_dir is None:
             raise InstallFailed(messages.GAME_FOLDER_MISSING.format(title=title, path=rec.folder))
-        if rec.vendor_uninstaller:
+        vendor = rec.vendor_uninstaller
+        if vendor:
             run_installer.require_no_setaside(ctx, rec.catalog_id, title)
         # Steps first: unregistering a component needs its file still in place.
         notes = undo_steps(rec.steps, StepContext(game_dir.absolute(), ctx.elevator, ctx.registry))
         rec.steps = []
-        if rec.vendor_uninstaller:
+        try:
+            plan = plan_uninstall(rec, game_dir)
+            if vendor:
+                plan = run_installer.keep_vendor_uninstaller(plan, vendor, game_dir)
+            kept = apply_uninstall(plan, game_dir, req.delete_player_data, ctx.recycle)
+        except Exception as e:
+            if not vendor:
+                self._uninstall_failed(rec, game_dir, title, notes, e)
+        if vendor:
             try:
                 notes += run_installer.run_vendor_uninstaller(ctx, rec, game_dir, title, progress, cancel)
             except BaseException:
-                ctx.records.save(rec)  # Its steps are undone; its files are as they were.
+                rec.files = {key: f for key, f in rec.files.items() if _still_there(game_dir, f)}
+                rec.uninstalled = True  # Its files are removed; uninstalling again runs its uninstaller again.
+                ctx.records.save(rec)
                 raise
-        try:
-            kept = apply_uninstall(plan_uninstall(rec, game_dir), game_dir, req.delete_player_data, ctx.recycle)
-        except Exception as e:
-            rec.files = {key: f for key, f in rec.files.items() if _still_there(game_dir, f)}
-            rec.uninstalled = True
-            ctx.records.save(rec)
-            plain = isinstance(e, EngineError) and not isinstance(e, UnsafePath)
-            raise InstallFailed("\n\n".join([str(e) if plain else messages.UNINSTALL_FAILED.format(title=title),
-                                             *notes])) from e
+            rec.vendor_uninstaller = None
+            try:  # The record's leftovers: the uninstaller's own files, and anything it couldn't remove.
+                kept = apply_uninstall(plan_uninstall(rec, game_dir), game_dir, req.delete_player_data, ctx.recycle)
+            except Exception as e:
+                self._uninstall_failed(rec, game_dir, title, notes, e)
         if os.path.lexists(game_dir):
             # The player's files are still there; the record keeps the folder recognised as this game's.
             rec.uninstalled = True
@@ -833,6 +844,16 @@ class InstallEngine:
         else:
             ctx.records.delete(rec.catalog_id)
         return JobResult("uninstall", rec.catalog_id, title, None, notes, kept_player_files=kept)
+
+    def _uninstall_failed(self, rec: InstallRecord, game_dir: Path, title: str, notes: list[str],
+                          e: Exception) -> None:
+        """Save what is left of an uninstall that stopped partway, and raise its plain words."""
+        rec.files = {key: f for key, f in rec.files.items() if _still_there(game_dir, f)}
+        rec.uninstalled = True
+        self.ctx.records.save(rec)
+        plain = isinstance(e, EngineError) and not isinstance(e, UnsafePath)
+        raise InstallFailed("\n\n".join([str(e) if plain else messages.UNINSTALL_FAILED.format(title=title),
+                                         *notes])) from e
 
 
 def _method(source: dict) -> str | None:

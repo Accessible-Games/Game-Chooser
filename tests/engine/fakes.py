@@ -113,16 +113,25 @@ class FakeElevator:
 
 
 class FakeWatch:
-    """Stands in for the job-object watcher: done once the fake process has stopped running."""
+    """Stands in for the installer watch: done once the fake process (and, if `children_running`, the
+    children it started) have stopped.
 
-    def __init__(self, process: FakeProcess, elevated: bool):
+    `observed=False` is a watch that couldn't follow the whole tree; `unstoppable=True` ignores
+    terminate, like an elevated installer refusing to be stopped.
+    """
+
+    def __init__(self, process: FakeProcess, elevated: bool, observed: bool = True,
+                 children_running: bool = False, unstoppable: bool = False):
         self.process = process
         self.elevated = elevated
+        self.observed = observed
+        self.children_running = children_running
+        self.unstoppable = unstoppable
         self.terminated = False
         self.closed = False
 
     def poll(self, timeout: float) -> bool:
-        if self.process.running:
+        if self.process.running or self.children_running:
             time.sleep(min(timeout, 0.01))
             return False
         return True
@@ -130,13 +139,29 @@ class FakeWatch:
     def exit_code(self) -> int | None:
         return self.process.wait(0)
 
+    def tree_observed(self) -> bool:
+        return self.observed
+
     def terminate(self) -> None:
         self.terminated = True
+        if self.unstoppable:
+            return
         self.process.running = False
+        self.children_running = False
         self.process.code = 1
 
     def close(self) -> None:
         self.closed = True
+
+
+def watch_with(**options):
+    """A process_watch factory making FakeWatch objects with `options`; the made watches are in `.made`."""
+    def make(process, elevated):
+        watch = FakeWatch(process, elevated, **options)
+        make.made.append(watch)
+        return watch
+    make.made = []
+    return make
 
 
 class FakeUninstallKeys:
@@ -158,10 +183,12 @@ class FakeUninstallKeys:
 class FakeInstallerUI:
     """Records what the engine asked the player, in `events` (shared with a fake installer if given)."""
 
-    def __init__(self, events: list | None = None, done: bool = True, locate: Path | None = None):
+    def __init__(self, events: list | None = None, done: bool = True, locate: Path | None = None,
+                 early: bool = False):
         self.events = events if events is not None else []
         self.done = done
         self.locate = locate
+        self.early = early  # Done pressed at once, whether or not the installer has finished
         self.announced: list[tuple[str, Path]] = []
 
     def announce_target(self, title: str, target: Path) -> None:
@@ -170,7 +197,7 @@ class FakeInstallerUI:
 
     def wait_for_installer(self, title: str, finished) -> bool:
         self.events.append("wait")
-        if self.done:
+        if self.done and not self.early:
             finished.wait(2)  # The player presses Done once the installer has finished (or after a while).
         return self.done
 

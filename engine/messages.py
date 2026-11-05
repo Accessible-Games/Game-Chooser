@@ -69,6 +69,8 @@ def phase_label(p: Progress, title: str) -> str:
         return f"Downloading {title}"
     if p.phase == "installing_dependency":
         return f"Installing {p.detail}"
+    if p.phase == "vendor_uninstaller":
+        return f"Running {title}'s own uninstaller"
     return _SIMPLE_PHASES.get(p.phase, p.phase.replace("_", " ").capitalize())
 
 
@@ -151,4 +153,15 @@ SETASIDE_LEFT_OVER = ("Copies of your files for {title} from an earlier try are 
 SETASIDE_KEPT = "Some of your files for {title} couldn't be put back. Copies of them are in {path}."
 VENDOR_UNINSTALLER_MISSING = ("{title}'s own uninstaller wasn't found, so Game Chooser removed only the files it "
                               "knows {title} installed.")
-UNINSTALLER_FAILED = "{title}'s uninstaller stopped with error code {code}. Your files were left in place."
+UNINSTALLER_FAILED = ("{title}'s own uninstaller stopped with error code {code}, so some of the settings it added "
+                      "to Windows may be left behind.")
+VENDOR_UNINSTALLER_RAN = ("Game Chooser also ran {title}'s own uninstaller, to remove the settings it added to "
+                          "Windows.")
+SETASIDE_NOT_PUT_BACK = ("{title}'s own uninstaller may still be running, so your files weren't put back into its "
+                         "folder. Copies of them are in {path}.")
+INSTALLER_STILL_RUNNING = ("{title}'s installer is still running, so Game Chooser left everything as it is. Close "
+                           "the installer, then try again.")
+STEP_TOUCHES_OTHER_FILES = ("A setup step for {title} would change files its installer didn't add, so Game Chooser "
+                            "stopped.")
+FILE_STEPS_SKIPPED = ("Some setup steps for {title} weren't run, because Game Chooser couldn't tell which files are "
+                      "the game's.")
