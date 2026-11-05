@@ -89,6 +89,8 @@ _CHAIN_FORMS = [
     ("mkdir", re.compile(r'^mkdir "([^"]+)"$')),
     ("absent", re.compile(r'^\(if exist "([^"]+)" exit 1\)$')),
     ("copy", re.compile(r'^copy /b "([^"]+)" "([^"]+)" >nul$')),
+    ("regsvr32", re.compile(r'^regsvr32\.exe /s "([^"]+)"$')),
+    ("copy_or_not", re.compile(r'^\(copy /b "([^"]+)" "([^"]+)" >nul \|\| type nul\)$')),
 ]
 
 
@@ -113,10 +115,11 @@ def split_chain(args: str) -> list[str]:
     return [*commands, current]
 
 
-def run_elevated_chain(args: str, owned: set[str] | None = None) -> int:
-    """Play the engine's elevated lock-down chain (`cmd.exe /d /v:off /s /c "a && b && …"`) on disk, as
-    cmd.exe would, stopping at the first command that fails: mkdir of something that exists, a reparse
-    point where a real folder must be, a destination that is already there, a copy that can't be made.
+def run_elevated_chain(args: str, owned: set[str] | None = None, exit_codes: dict[str, int] | None = None) -> int:
+    """Play one of the engine's elevated chains (`cmd.exe /d /v:off /s /c "a && b && …"`: the lock-down, or
+    regsvr32 followed by the marker copy) on disk, as cmd.exe would, stopping at the first command that
+    fails: mkdir of something that exists, a reparse point where a real folder must be, a destination
+    that is already there, a copy that can't be made, regsvr32 with the exit code `exit_codes` gives it.
     icacls changes nothing here. Every path the chain reached with `/setowner`, made or copied to is added
     to `owned` (what Administrators own afterwards). Any other command is a test error."""
     owned = set() if owned is None else owned
@@ -143,14 +146,20 @@ def run_elevated_chain(args: str, owned: set[str] | None = None) -> int:
         elif kind == "absent":
             if os.path.lexists(path):
                 return 1
-        elif kind == "copy":
+        elif kind == "regsvr32":
+            code = (exit_codes or {}).get("regsvr32.exe", 0)
+            if code:
+                return code
+        elif kind in ("copy", "copy_or_not"):
             dest = Path(match.group(2))
             if dest.is_dir():
                 dest = dest / path.name  # as cmd's copy does: into the folder (or wherever a junction leads)
             try:
                 shutil.copyfile(path, dest)
             except OSError:
-                return 1
+                if kind == "copy":
+                    return 1
+                continue  # `|| type nul`: a failed marker copy doesn't fail the command
             owned.add(os.path.normcase(str(dest)))
     return 0
 
@@ -194,7 +203,7 @@ class FakeElevator:
             self.on_start(exe, args, elevated)
         code = self.exit_codes.get(exe)
         if code is None:
-            code = run_elevated_chain(args, self.owned) if exe == "cmd.exe" and elevated else 0
+            code = run_elevated_chain(args, self.owned, self.exit_codes) if exe == "cmd.exe" and elevated else 0
         return FakeProcess(code, 1000 + len(self.calls), running=exe in self.hang)
 
     def run(self, exe: str, args: str, elevated: bool, cwd: Path | None = None) -> int:
