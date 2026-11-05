@@ -41,6 +41,12 @@ from catalog_panel import CatalogPanel
 from description_field import DescriptionField
 from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
 from engine import messages
+from engine.entries import current_platform as catalog_platform
+from engine.records import record_folder
+from engine.status import update_available
+from install_dialogs import InstallConfirmDialog, UninstallDialog
+import library_actions
+from library_actions import catalog_menu_items, delete_kind, is_editable, launch_problem
 from progress_area import ProgressArea
 from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener
 from wx_bridge import call_after as _call_after  # wx.CallAfter that does nothing once the app is gone
@@ -375,6 +381,11 @@ class MainFrame(wx.Frame):
         accel_entries.append((wx.ACCEL_CTRL, ord('R'), random_game_id))
         self.Bind(wx.EVT_MENU, self.on_random_game, id=random_game_id)
 
+        # Ctrl+E for Edit Game, also while the menu item is disabled for a catalog game: it then says why
+        edit_game_id = wx.NewIdRef()
+        accel_entries.append((wx.ACCEL_CTRL, ord('E'), edit_game_id))
+        self.Bind(wx.EVT_MENU, self.on_edit_game, id=edit_game_id)
+
         accel_table = wx.AcceleratorTable(accel_entries)
         self.SetAcceleratorTable(accel_table)
     
@@ -395,9 +406,12 @@ class MainFrame(wx.Frame):
         wx.CallAfter(self.focus_active_list)
 
     def update_tab_menus(self):
-        """Edit Game and Delete Game act on the Library list only (disabling them also stops Ctrl+E and Del)"""
+        """Edit Game and Delete Game act on the Library list only (disabling them also stops their menu shortcuts).
+        Edit Game is also unavailable while a catalog game is selected; Ctrl+E then still says why (on_edit_game),
+        through its own accelerator."""
         on_library = self.active_tab() == "library"
-        self.edit_game_item.Enable(on_library)
+        game = self.game_list.get_selected_game() if on_library else None
+        self.edit_game_item.Enable(on_library and (game is None or is_editable(game)))
         self.delete_game_item.Enable(on_library)
 
     def focus_active_list(self):
@@ -524,9 +538,12 @@ class MainFrame(wx.Frame):
                 wx.CallAfter(self._run_deferred)
 
     def _modal_open(self):
+        """True while a modal dialog that may hold a game is open. A dialog marked `holds_no_games`
+        (Preferences, which holds library ids only) doesn't count; the prompts it opens do."""
         if self.dialog_active:
             return True
-        return any(isinstance(w, wx.Dialog) and w.IsModal() for w in wx.GetTopLevelWindows())
+        return any(isinstance(w, wx.Dialog) and w.IsModal() and not getattr(w, "holds_no_games", False)
+                   for w in wx.GetTopLevelWindows())
 
     def run_when_no_dialog(self, fn, *args):
         """Run fn(*args) now on the UI thread if no modal dialog is open, else once the last one closes.
@@ -827,6 +844,7 @@ class MainFrame(wx.Frame):
             # Removed SetFocus() - was stealing focus from tree control on every filter change
         else:
             self.show_description(None)
+        self.update_tab_menus()  # Edit Game follows the selected game
     
     def notify(self, text: str):
         """Tell the player something without a dialog (a Windows notification)"""
@@ -1047,6 +1065,7 @@ class MainFrame(wx.Frame):
 
         game = self.game_list.get_selected_game()
         self.show_description(game)
+        self.update_tab_menus()  # Edit Game is unavailable for a catalog game
         if game:
             self.launch_btn.SetLabel(f"Launch {game.title}")
 
@@ -1058,28 +1077,45 @@ class MainFrame(wx.Frame):
         """Handle double-click on game"""
         self.on_launch(None)
     
-    def on_list_context(self, event):
-        """Show context menu for list (supports both mouse and keyboard)"""
+    def build_list_menu(self, game):
+        """The games list's context menu for a game (or None): Launch, Edit (games added by hand only), Open folder,
+        Delete, then a catalog game's actions and links (library_actions decides which), then Add Game.
+        Handlers are bound on the menu, so nothing piles up on the frame."""
         menu = wx.Menu()
-
-        game = self.game_list.get_selected_game()
         if game:
-            launch_item = menu.Append(wx.ID_ANY, "Launch")
-            self.Bind(wx.EVT_MENU, self.on_launch, launch_item)
-
-            edit_item = menu.Append(wx.ID_ANY, "Edit")
-            self.Bind(wx.EVT_MENU, self.on_edit_game, edit_item)
-
-            open_folder_item = menu.Append(wx.ID_ANY, "Open folder")
-            self.Bind(wx.EVT_MENU, self.on_open_folder, open_folder_item)
-
-            delete_item = menu.Append(wx.ID_ANY, "Delete")
-            self.Bind(wx.EVT_MENU, self.on_delete_game, delete_item)
-
+            for label, handler in [("Launch", self.on_launch),
+                                   ("Edit", self.on_edit_game) if is_editable(game) else (None, None),
+                                   ("Open folder", self.on_open_folder), ("Delete", self.on_delete_game)]:
+                if label:
+                    item = menu.Append(wx.ID_ANY, label)
+                    menu.Bind(wx.EVT_MENU, handler, item)
+            for action in self._catalog_menu_items(game):
+                item = menu.Append(wx.ID_ANY, action.label.replace("&", "&&"))
+                item.Enable(action.enabled)
+                menu.Bind(wx.EVT_MENU, lambda e, a=action, g=game: self.on_catalog_action(a, g), item)
             menu.AppendSeparator()
 
         add_game_item = menu.Append(wx.ID_ANY, "Add Game")
-        self.Bind(wx.EVT_MENU, self.on_add_game, add_game_item)
+        menu.Bind(wx.EVT_MENU, self.on_add_game, add_game_item)
+        return menu
+
+    def _catalog_menu_items(self, game):
+        if not game.catalog_id:
+            return []
+        record = self.service.record_for(game)
+        entry = self.service.entry_for(game)
+        extras = False
+        if entry is not None and library_actions.is_tracked(record):
+            try:
+                extras = bool(self.service.plan(game.catalog_id, "extras").extras)
+            except Exception:
+                log.warning("Couldn't list the extras of %s", game.catalog_id, exc_info=True)
+        return catalog_menu_items(game, record, entry, update_available(record, entry, catalog_platform()), extras)
+
+    def on_list_context(self, event):
+        """Show context menu for list (supports both mouse and keyboard)"""
+        game = self.game_list.get_selected_game()
+        menu = self.build_list_menu(game)
 
         # Determine if this is a mouse event or keyboard event
         if hasattr(event, 'GetEventType') and event.GetEventType() == wx.wxEVT_LIST_ITEM_RIGHT_CLICK:
@@ -1186,9 +1222,14 @@ class MainFrame(wx.Frame):
             # Regular game
             full_path = self.library_manager.get_full_path(game)
             if not full_path or not Path(full_path).exists():
+                problem = launch_problem(game, self.library_manager.library_reachable(game.library_id),
+                                         self.service.record_for(game))
+                if problem != "locate":
+                    self._launch_problem(game, problem)
+                    return
                 with self.modal_dialog():
-                    wx.MessageBox("Game executable not found. Please locate the game.",
-                                "File Not Found", wx.OK | wx.ICON_ERROR)
+                    wx.MessageBox(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE,
+                                  wx.OK | wx.ICON_ERROR)
 
                     # File dialog to relocate
                     dlg = wx.FileDialog(self, "Locate Game Executable")
@@ -1222,6 +1263,22 @@ class MainFrame(wx.Frame):
             except Exception as e:
                 wx.MessageBox(f"Failed to launch game: {e}",
                             "Launch Error", wx.OK | wx.ICON_ERROR)
+
+    def _launch_problem(self, game, problem):
+        """A launch found no executable: the library is unreachable, or a catalog game's files are missing (a
+        tracked one is offered Repair; the player never picks a catalog game's executable)"""
+        if problem == "unreachable":
+            self._library_unreachable(game)
+            return
+        if problem == "catalog":
+            self._tell(messages.LAUNCH_NOT_FOUND_CATALOG, messages.LAUNCH_NOT_FOUND_TITLE)
+            return
+        with self.modal_dialog():
+            answer = wx.MessageBox(messages.LAUNCH_NOT_FOUND_REPAIR.format(title=game.title),
+                                   messages.LAUNCH_NOT_FOUND_TITLE, wx.YES_NO | wx.ICON_ERROR, self)
+        live = self._live_game(game)
+        if answer == wx.YES and live is not None and live.catalog_id and not self._game_busy(live):
+            self._submit_catalog("repair", live)
 
     def on_launch(self, event):
         """Launch selected game"""
@@ -1285,6 +1342,12 @@ class MainFrame(wx.Frame):
         game = self._live_game(self.game_list.get_selected_game())
         if not game:
             return
+        if not is_editable(game):  # the catalog owns a catalog game's details; Ctrl+E says so, never silent
+            with self.modal_dialog():
+                wx.MessageBox(messages.CATALOG_NOT_EDITABLE.format(title=game.title), messages.EDIT_GAME_TITLE,
+                              wx.OK | wx.ICON_INFORMATION, self)
+            self.focus_active_list()
+            return
 
         dlg = GameDialog(self, self.library_manager, game)
 
@@ -1302,12 +1365,20 @@ class MainFrame(wx.Frame):
         """Delete selected game"""
         if self.active_tab() != "library":
             return
-        game = self.game_list.get_selected_game()
+        game = self._live_game(self.game_list.get_selected_game())
         if not game:
             return
 
         # Remember the current index position to maintain list position after deletion
         current_index = self.game_list.GetFirstSelected()
+
+        kind = delete_kind(game, self.service.record_for(game))
+        if kind == "uninstall":  # a catalog install: uninstalled, it leaves the list when that finishes
+            self.uninstall_game(game)
+            return
+        if kind == "forget":
+            self._forget_game(game, current_index)
+            return
 
         # Show custom delete dialog
         dlg = DeleteGameDialog(self, game.title)
@@ -1328,13 +1399,135 @@ class MainFrame(wx.Frame):
                     del games[i]
                     break
             self.library_manager.save_games()
-            self.refresh_game_list()
+            self._after_delete(current_index)
 
-            # Select previous item to stay in same area of list
-            new_index = max(0, current_index - 1) if current_index > 0 else 0
-            if new_index < len(self.filtered_games):
-                self.game_list.Select(new_index)
-                self.game_list.Focus(new_index)
+    def _after_delete(self, current_index):
+        """A game left the list: refresh, and select the previous row to stay in the same area of the list"""
+        self.refresh_game_list()
+        self.catalog_panel.refresh_rows()  # a catalog game it was is no longer installed
+        self.refresh_statuses()
+        new_index = max(0, current_index - 1) if current_index > 0 else 0
+        if new_index < len(self.filtered_games):
+            self.game_list.Select(new_index)
+            self.game_list.Focus(new_index)
+
+    def _forget_game(self, game, current_index):
+        """Delete an untracked catalog install: it leaves the list and its record goes, its files stay"""
+        with self.modal_dialog():
+            answer = wx.MessageBox(messages.FORGET_GAME_CONFIRM.format(title=game.title), messages.FORGET_GAME_TITLE,
+                                   wx.YES_NO | wx.ICON_QUESTION, self)
+        if answer != wx.YES:
+            self.focus_active_list()
+            return
+        live = self._live_game(game)
+        if live is not None and live.catalog_id:
+            try:
+                self.service.forget(live.catalog_id)
+            except OSError as e:
+                log.warning("Couldn't forget %s: %s", live.catalog_id, e)
+        self._after_delete(current_index)
+
+    # ---- a catalog game's actions (Library context menu, Delete, a launch that finds no executable) ------------
+
+    def _tell(self, text, caption, icon=wx.ICON_ERROR):
+        with self.modal_dialog():
+            wx.MessageBox(text, caption, wx.OK | icon, self)
+
+    def _library_unreachable(self, game):
+        """Say so and return True when the game's library folder can't be reached (a drive that isn't connected)"""
+        if not game.library_id or self.library_manager.library_reachable(game.library_id):
+            return False
+        lib = self.library_manager.library_by_id(game.library_id)
+        self._tell(messages.LIBRARY_UNREACHABLE.format(path=lib["path"] if lib else game.library_id),
+                   messages.LIBRARY_NOT_FOUND_TITLE)
+        return True
+
+    def _game_busy(self, game):
+        """Say so and return True while the game has a job queued or running"""
+        if self.service.queue.job_for(game.catalog_id) is None:
+            return False
+        self._tell(messages.GAME_BUSY.format(title=game.title), "Game Chooser", wx.ICON_INFORMATION)
+        return True
+
+    def _submit_catalog(self, action, game, extras=(), delete_player_data=False):
+        """Queue a job for a catalog game (update, undo, extras, repair, uninstall); its progress shows below the
+        games list. No library is passed: these act on the game's own folder (and last_library stays)."""
+        try:
+            self.service.submit(action, game.catalog_id, extras=extras, delete_player_data=delete_player_data)
+        except Exception:
+            log.exception("Couldn't queue %s of %s", action, game.catalog_id)
+            self._tell(messages.ACTION_NOT_STARTED.format(title=game.title), "Game Chooser")
+        self.refresh_statuses()
+
+    def _fixed_library(self, game):
+        """The library an update or extras go into: the game's own (shown in the dialog, not chosen)"""
+        lib = self.library_manager.library_by_id(game.library_id) if game.library_id else None
+        if lib is not None:
+            return lib
+        record = self.service.record_for(game)
+        folder = record_folder(record, self.library_manager.config["libraries"]) if record else None
+        return {"id": game.library_id, "path": str(folder.parent) if folder else ""}
+
+    def on_catalog_action(self, item, game):
+        """A catalog item of the Library context menu"""
+        if item.action == library_actions.LINK:
+            webbrowser.open(item.url)
+            return
+        game = self._live_game(game)
+        if game is None or not game.catalog_id:
+            return
+        try:
+            if item.action == library_actions.UNINSTALL:
+                self.uninstall_game(game)
+            elif not self._library_unreachable(game) and not self._game_busy(game):
+                if item.action in (library_actions.UPDATE, library_actions.EXTRAS):
+                    self._confirm_change(game, item.action)
+                else:  # undo, repair
+                    self._submit_catalog(item.action, game)
+        finally:
+            self.focus_active_list()
+
+    def _confirm_change(self, game, action):
+        """Update or Extras: the confirmation dialog for that plan, with the game's library fixed"""
+        try:
+            plan = self.service.plan(game.catalog_id, action)
+        except Exception:
+            log.exception("Couldn't plan %s of %s", action, game.catalog_id)
+            self._tell(messages.ACTION_NOT_STARTED.format(title=game.title), "Game Chooser")
+            return
+        choice = None
+        with self.modal_dialog():
+            dlg = InstallConfirmDialog(self, plan, self.service, fixed_library=self._fixed_library(game))
+            try:
+                if dlg.ShowModal() == wx.ID_OK:
+                    choice = dlg.get_choice()
+            finally:
+                dlg.Destroy()
+        live = self._live_game(game)
+        if choice is not None and live is not None and live.catalog_id:
+            self._submit_catalog(plan.action, live, extras=choice.extras)
+
+    def uninstall_game(self, game):
+        """Uninstall a catalog install (Del, Delete or Uninstall): "Uninstall <title>", the player's files kept
+        unless ticked. The game leaves the list when the uninstall finishes."""
+        try:
+            if self._library_unreachable(game) or self._game_busy(game):
+                return
+            with wx.BusyCursor():
+                player_files = self.service.player_files(game.catalog_id)
+            confirmed = delete_player_data = False
+            with self.modal_dialog():
+                dlg = UninstallDialog(self, game.title, player_files)
+                try:
+                    confirmed = dlg.ShowModal() == wx.ID_OK
+                    delete_player_data = dlg.delete_player_data()
+                finally:
+                    dlg.Destroy()
+            live = self._live_game(game)
+            if confirmed and live is not None and live.catalog_id:
+                self._submit_catalog("uninstall", live, delete_player_data=delete_player_data)
+        finally:
+            self.focus_active_list()
     
     def on_add_game(self, event):
         """Add a new game"""
@@ -1441,24 +1634,29 @@ class MainFrame(wx.Frame):
         self.apply_filters()
 
     def on_preferences(self, event):
-        """Show preferences dialog"""
-        dlg = PreferencesDialog(self, self.library_manager)
+        """Show preferences dialog.
 
-        # Block spurious selection events (and game-changing refreshes) while modal dialog is active
-        with self.modal_dialog():
-            try:
-                dlg.ShowModal()
-                # Refresh even on Cancel: Apply may already have saved changes.
-                # Deferred to avoid blocking the dialog close.
-                wx.CallAfter(self.refresh_ui_after_preferences)
-            finally:
-                dlg.Destroy()
+        Preferences holds library ids, never a Game, so finished installs are applied while it is open (it is
+        marked holds_no_games, and isn't opened in modal_dialog()): a library whose last uninstall finishes
+        leaves its list at once. The prompts it opens still defer them, through modal_dialog()."""
+        dlg = PreferencesDialog(self, self.library_manager, self.service)
+        hook = dlg.on_job_done
+        self.job_done_hooks.append(hook)
+        try:
+            dlg.ShowModal()
+            # Refresh even on Cancel: Apply may already have saved changes.
+            # Deferred to avoid blocking the dialog close.
+            wx.CallAfter(self.refresh_ui_after_preferences)
+        finally:
+            self.job_done_hooks.remove(hook)
+            dlg.Destroy()
 
     def refresh_ui_after_preferences(self):
         """Refresh UI after preferences dialog closes"""
         self.refresh_game_list()
         self.build_tree(force_rebuild=True)
         self.build_libraries_menu()
+        self.catalog_panel.refresh_rows()
         self.refresh_statuses()  # a library may have been added, moved or removed
     
     def on_refresh(self, event):

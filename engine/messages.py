@@ -325,3 +325,33 @@ def failed_text(action: str, title: str) -> str:
     """The notification for a failed job, by its action."""
     return {"update": FAILED_UPDATE, "uninstall": FAILED_UNINSTALL, "repair": FAILED_REPAIR, "undo": FAILED_UNDO,
             "extras": FAILED_EXTRAS}.get(action, FAILED).format(title=title)
+
+# The Library tab's actions for catalog games: the context menu, Uninstall, removing a library, launch problems
+MENU_UPDATE = "Update"
+MENU_UNDO = "Undo last update"
+MENU_UNDO_UNAVAILABLE = "Undo last update (not available: {reason})"
+MENU_EXTRAS = "Extras…"
+MENU_REPAIR = "Repair"
+MENU_UNINSTALL = "Uninstall"
+MENU_UPDATE_BY_HAND = "Update available: install it by hand"
+UNINSTALL_TITLE = "Uninstall {title}"
+UNINSTALL_DELETE_FILES = "Also delete files {title} created, like saves and settings ({count} files)"
+UNINSTALL_BUTTON = "Uninstall"
+UNINSTALL_INTRO = "Uninstall {title}? The files Game Chooser installed are removed."
+REMOVE_LIBRARY_TITLE = "Remove {label}"
+REMOVE_LIBRARY_TEXT = "{label} has {count} games installed from the catalog: {titles}. Removing it uninstalls them first."
+REMOVE_LIBRARY_DELETE_FILES = "Also delete files these games created, like saves and settings ({count} files)"
+REMOVE_LIBRARY_BUTTON = "Uninstall and remove"
+LIBRARY_BEING_REMOVED_LABEL = "{label} (being removed)"
+FORGET_GAME_CONFIRM = ("Remove {title} from the list? Game Chooser didn't keep track of its files, so they stay "
+                       "where they are.")
+FORGET_GAME_TITLE = "Confirm Delete"
+LAUNCH_NOT_FOUND_TITLE = "File Not Found"
+LAUNCH_NOT_FOUND_LOCATE = "Game executable not found. Please locate the game.\n\n" + DEFENDER_NOTE
+LAUNCH_NOT_FOUND_REPAIR = "Game executable not found.\n\n" + DEFENDER_NOTE + "\n\nRepair {title} now?"
+LAUNCH_NOT_FOUND_CATALOG = "Game executable not found.\n\n" + DEFENDER_NOTE
+EDIT_GAME_TITLE = "Edit Game"
+LIBRARY_NOT_FOUND_TITLE = "Library Not Found"
+GAME_BUSY = "Game Chooser is still working on {title}. Wait for it to finish, then try again."
+ACTION_NOT_STARTED = "Game Chooser couldn't start that for {title}. Try again."
+INSTALL_PROBLEM_NAME = "Install problem"

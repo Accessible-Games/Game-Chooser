@@ -30,6 +30,7 @@ from pathlib import Path
 from engine import messages
 from engine.elevation import WindowsElevator
 from engine.entries import current_platform
+from engine.errors import EngineError
 from engine.entries import visible_games as _visible_games
 from engine.extract import Extractor, default_tools_dir
 from engine.http import Fetcher
@@ -41,6 +42,7 @@ from engine.queue import InstallQueue, Job, QueueListener
 from engine.records import InstallRecord, record_folder
 from engine.registry import RegistryAccess
 from engine.runtimes import WindowsSecurity, default_runtimes_root
+from engine.safety import count_player_files
 from engine.status import game_status
 from library_manager import LibraryError
 
@@ -197,6 +199,28 @@ class InstallService:
         for library_id in list(self.pending_removal):
             if not self.manager.catalog_games_in(library_id):
                 self._finish_removal(library_id)
+
+    def player_files(self, catalog_id: str) -> int:
+        """How many files in an installed game's folder are the player's (saves, settings), for the Uninstall and
+        Remove-library checkboxes; 0 when that can't be told. Reads and hashes the folder's files."""
+        rec = self.manager.records.load(catalog_id)
+        if rec is None or rec.uninstalled:
+            return 0
+        folder = record_folder(rec, self.manager.config["libraries"])
+        if folder is None or not folder.is_dir():
+            return 0
+        try:
+            return count_player_files(rec, folder)
+        except (OSError, EngineError) as e:
+            log.warning("Couldn't count the player's files in %s: %s", folder, e)
+            return 0
+
+    def forget(self, catalog_id: str) -> None:
+        """Delete a catalog game Game Chooser can't uninstall (an untracked install): it leaves the list and its
+        install record goes too, so reconcile_catalog_records doesn't add it back at the next start. Its files
+        stay where they are."""
+        self.manager.remove_catalog_game(catalog_id)
+        self.manager.records.delete(catalog_id)
 
     def job_failed(self, job: Job) -> None:
         """A job failed (or was cancelled): a library waiting on it to be removed stays."""

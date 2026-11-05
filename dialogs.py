@@ -35,8 +35,12 @@ import wx
 import os
 import platform
 import threading
+from contextlib import nullcontext
 from library_manager import LibraryError
+from engine import messages
 from engine.folders import library_label
+from install_dialogs import RemoveLibraryDialog
+from library_actions import library_row_name
 from models import Game
 from validation_service import ValidationService
 from smart_list import SmartList, Column
@@ -110,7 +114,7 @@ class FirstTimeSetupDialog(wx.Dialog):
 
     def on_preferences(self, event):
         """Open preferences dialog"""
-        dlg = PreferencesDialog(self, self.library_manager)
+        dlg = PreferencesDialog(self, self.library_manager, getattr(self.parent_frame, "service", None))
         dlg.ShowModal()
         dlg.Destroy()
 
@@ -458,12 +462,24 @@ class GameDialog(wx.Dialog):
 
 
 class PreferencesDialog(wx.Dialog):
-    """Preferences dialog with tabbed layout"""
+    """Preferences dialog with tabbed layout.
 
-    def __init__(self, parent, library_manager):
+    It holds library ids only, never a Game, so the main window applies finished installs while it is open
+    (`holds_no_games`) and calls on_job_done after each, which redraws the library list from the config. The
+    prompts it opens itself still wait for job results (the parent's modal_dialog()). `service` (the
+    InstallService) uninstalls a library's catalog games before Remove takes it away; without one, Remove only
+    forgets the library.
+    """
+
+    holds_no_games = True
+
+    def __init__(self, parent, library_manager, service=None):
         super().__init__(parent, title="Preferences", size=(700, 500))
 
         self.library_manager = library_manager
+        self.service = service
+        # Nested prompts are modal dialogs that may hold games: they defer job results like any other
+        self._modal = getattr(parent, "modal_dialog", None) or nullcontext
 
         # Create notebook
         self.notebook = wx.Notebook(self)
@@ -549,43 +565,108 @@ class PreferencesDialog(wx.Dialog):
         remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
 
     def _fill_library_list(self):
-        """Show the libraries; rows carry the id so actions don't depend on the folder name"""
+        """Show the libraries; rows carry the id so actions don't depend on the folder name. A library waiting
+        for its games' uninstalls says so. The selected library stays selected (or the row where it was)."""
+        selected = self._selected_library()
+        index = self.lib_list.get_selected_index()
+        removing = self.service.pending_removal if self.service is not None else set()
+        rows = [{"id": lib["id"], "name": library_row_name(library_label(lib), lib["id"] in removing),
+                 "path": lib["path"]}
+                for lib in self.library_manager.config["libraries"]]
         self.lib_list.clear()
-        self.lib_list.add_items([
-            {"id": lib["id"], "name": library_label(lib), "path": lib["path"]}
-            for lib in self.library_manager.config["libraries"]
-        ])
+        self.lib_list.add_items(rows)
+        if not rows or index < 0:
+            return
+        ids = [row["id"] for row in rows]
+        if selected is not None and selected["id"] in ids:
+            index = ids.index(selected["id"])
+        self.lib_list.set_selected_index(min(index, len(rows) - 1))
+
+    def _selected_library(self):
+        """The selected row ({"id", "name", "path"}), or None"""
+        index = self.lib_list.get_selected_index()
+        return self.lib_list.find_item_from_index(index) if index >= 0 else None
+
+    def _tell(self, text):
+        with self._modal():
+            wx.MessageBox(text, "Library", wx.OK | wx.ICON_ERROR, self)
 
     def _change_libraries(self, action, *args):
-        """Run a manager library change, show why it can't be done, and redraw the list"""
+        """Run a library change, show why it can't be done, and redraw the list"""
         try:
             action(*args)
         except LibraryError as e:
-            wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
+            self._tell(str(e))
         self._fill_library_list()
+
+    def on_job_done(self, job):
+        """An install job ended and the library was updated (the main window's job_done_hooks): a library whose
+        last uninstall finished is gone from the config now, so it leaves the list"""
+        if self:
+            self._fill_library_list()
 
     def on_add_library(self, event):
         """Add a new library path (applies immediately)"""
         dlg = wx.DirDialog(self, "Choose Game Library Directory")
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._modal():
+            chosen = dlg.ShowModal() == wx.ID_OK
+        if chosen:
             self._change_libraries(self.library_manager.add_library, dlg.GetPath())
         dlg.Destroy()
 
     def on_change_library_folder(self, event):
         """Point the selected library at another folder (applies immediately)"""
-        selected = self.lib_list.get_selected_item()
+        selected = self._selected_library()
         if not selected:
             return
         dlg = wx.DirDialog(self, "Choose the library's new folder", defaultPath=selected["path"])
-        if dlg.ShowModal() == wx.ID_OK:
+        with self._modal():
+            chosen = dlg.ShowModal() == wx.ID_OK
+        if chosen:
             self._change_libraries(self.library_manager.change_library_folder, selected["id"], dlg.GetPath())
         dlg.Destroy()
 
     def on_remove_library(self, event):
-        """Remove the selected library (applies immediately)"""
-        selected = self.lib_list.get_selected_item()
-        if selected:
-            self._change_libraries(self.library_manager.remove_library, selected["id"])
+        """Remove the selected library (applies immediately). One holding catalog installs is removed once they
+        are uninstalled, after the player confirms; its folder must be reachable for that."""
+        selected = self._selected_library()
+        if not selected:
+            return
+        try:
+            self._remove_library(selected["id"])
+        finally:
+            self.lib_list.control.SetFocus()  # back to the list (the prompts would otherwise leave it on Remove)
+
+    def _remove_library(self, library_id):
+        manager = self.library_manager
+        lib = manager.library_by_id(library_id)
+        if lib is None:  # gone meanwhile (its last uninstall just finished)
+            self._fill_library_list()
+            return
+        if self.service is None:
+            self._change_libraries(manager.remove_library, library_id)
+            return
+        if library_id in self.service.pending_removal:
+            self._tell(messages.LIBRARY_BEING_REMOVED)
+            return
+        games = manager.catalog_games_in(library_id)
+        if not games:
+            self._change_libraries(self.service.remove_library, library_id, False)
+            return
+        if not manager.library_reachable(library_id):
+            self._tell(messages.LIBRARY_REMOVE_UNREACHABLE)
+            return
+        with wx.BusyCursor():
+            player_files = sum(self.service.player_files(g.catalog_id) for g in games)
+        dlg = RemoveLibraryDialog(self, library_label(lib), [g.title or g.catalog_id for g in games], player_files)
+        try:
+            with self._modal():
+                confirmed = dlg.ShowModal() == wx.ID_OK
+            delete_player_data = dlg.delete_player_data()
+        finally:
+            dlg.Destroy()
+        if confirmed:
+            self._change_libraries(self.service.remove_library, library_id, delete_player_data)
 
     def on_apply(self, event):
         """Save the config"""

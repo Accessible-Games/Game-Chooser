@@ -436,3 +436,28 @@ def test_nothing_installs_into_a_library_being_removed(rig):
     assert lib["id"] in rig.service.pending_removal
     assert rig.service.blocked("third", rig.tmp_path / "Games") == messages.LIBRARY_BEING_REMOVED
     assert rig.service.blocked("third", rig.tmp_path / "Other") is None
+
+
+def test_player_files_counts_what_the_player_added(rig):
+    _two_installed(rig)
+    assert rig.service.player_files("entombed") == 0
+    (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")
+    (rig.tmp_path / "Games" / "Entombed" / "sounds" / "a.wav").write_bytes(b"changed")  # changed: kept too
+    assert rig.service.player_files("entombed") == 2
+    assert rig.service.player_files("nothing") == 0
+    shutil.rmtree(rig.tmp_path / "Games")  # an unplugged drive: nothing to count
+    assert rig.service.player_files("entombed") == 0
+
+
+def test_forget_an_untracked_game_keeps_its_files_and_it_stays_gone(rig, isolated_manager_factory):
+    lib = _two_installed(rig)
+    rec = rig.manager.records.load("entombed")
+    rec.tracked = False
+    rig.manager.records.save(rec)
+    rig.service.forget("entombed")
+    assert rig.manager.catalog_game("entombed") is None and not rig.manager.records.exists("entombed")
+    assert [g["catalog_id"] for g in _games_json(rig.manager) if g.get("catalog_id")] == ["pawprints"]
+    assert (rig.tmp_path / "Games" / "Entombed" / "entombed.exe").exists()  # its files stay where they are
+    assert rig.manager.records.exists("pawprints") and rig.manager.library_by_id(lib["id"]) is not None
+    restarted = isolated_manager_factory()  # reconcile at the next start doesn't bring it back
+    assert restarted.catalog_game("entombed") is None and restarted.catalog_game("pawprints") is not None
