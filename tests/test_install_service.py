@@ -438,6 +438,69 @@ def test_nothing_installs_into_a_library_being_removed(rig):
     assert rig.service.blocked("third", rig.tmp_path / "Other") is None
 
 
+def _untrack(rig, catalog_id):
+    rec = rig.manager.records.load(catalog_id)
+    rec.tracked = False
+    rig.manager.records.save(rec)
+
+
+def test_remove_library_uninstalls_tracked_and_keeps_untracked_as_hand_added(rig, isolated_manager_factory):
+    lib = _two_installed(rig)
+    _untrack(rig, "pawprints")
+    assert [[g.catalog_id for g in part] for part in rig.service.library_games(lib["id"])] == \
+        [["entombed"], ["pawprints"]]
+    jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
+    assert [(j.request.action, j.request.catalog_id) for j in jobs] == [("uninstall", "entombed")]
+    assert rig.manager.catalog_game("pawprints") is not None  # kept as it is until the library actually goes
+    rig.service.apply_result(rig.listener.result_for(jobs[0]))
+    assert rig.manager.library_by_id(lib["id"]) is None and rig.service.pending_removal == set()
+    kept = [g for g in rig.manager.games if g.title == "Pawprints"]
+    folder = rig.tmp_path / "Games" / "Pawprints"
+    assert len(kept) == 1 and kept[0].catalog_id == "" and kept[0].library_id == ""
+    assert kept[0].launch_path == str(folder / "pawprints.exe")
+    assert not rig.manager.records.exists("pawprints") and (folder / "pawprints.exe").exists()  # files untouched
+    assert not (rig.tmp_path / "Games" / "Entombed").exists()
+    restarted = isolated_manager_factory()  # still a game added by hand at the next start
+    assert [(g.title, g.catalog_id, g.library_id) for g in restarted.games] == [("Pawprints", "", "")]
+
+
+def test_remove_library_with_only_untracked_games_goes_at_once(rig):
+    lib = _two_installed(rig)
+    _untrack(rig, "entombed")
+    rec = rig.manager.records.load("pawprints")
+    rig.manager.records.delete("pawprints")  # record-less
+    engines = len(rig.service.queue.engines)
+    assert rig.service.remove_library(lib["id"], delete_player_data=True) == []
+    assert len(rig.service.queue.engines) == engines  # nothing uninstalled
+    assert rig.manager.library_by_id(lib["id"]) is None and rig.service.pending_removal == set()
+    assert sorted((g.title, g.catalog_id, g.library_id) for g in rig.manager.games) == \
+        [("Entombed", "", ""), ("Pawprints", "", "")]
+    assert not rig.manager.records.exists("entombed")
+    assert (rig.tmp_path / "Games" / "Entombed" / "entombed.exe").exists()
+    assert (rig.tmp_path / "Games" / "Pawprints" / "pawprints.exe").exists() and rec is not None
+
+
+def test_remove_library_refused_while_an_untracked_game_is_busy(rig):
+    lib = _two_installed(rig)
+    _untrack(rig, "pawprints")
+    rig.service.queue.hold.add("pawprints")
+    rig.service.submit("repair", "pawprints")
+    with pytest.raises(LibraryError):
+        rig.service.remove_library(lib["id"], delete_player_data=False)
+    assert rig.manager.library_by_id(lib["id"]) is not None and rig.manager.catalog_game("pawprints") is not None
+
+
+def test_forget_deletes_the_record_first(rig, monkeypatch):
+    _two_installed(rig)
+    def broken(catalog_id):
+        raise PermissionError("locked")
+    monkeypatch.setattr(rig.manager.records, "delete", broken)
+    with pytest.raises(OSError):
+        rig.service.forget("entombed")
+    assert rig.manager.catalog_game("entombed") is not None  # nothing changed
+    assert "entombed" in [g["catalog_id"] for g in _games_json(rig.manager)]
+
+
 def test_player_files_counts_what_the_player_added(rig):
     _two_installed(rig)
     assert rig.service.player_files("entombed") == 0

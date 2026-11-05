@@ -188,6 +188,14 @@ class GameLibraryManager:
         self.games = [g for g in self.games if g.catalog_id != catalog_id]
         self.save_games()
 
+    def unlink_catalog_game(self, game):
+        """Make a catalog game a game added by hand, in place (not saved): an absolute launch path outside every
+        library and no catalog fields. The game stays in the list (games are never dropped silently)."""
+        path = self.get_full_path(game)
+        if path:
+            game.launch_path, game.library_id = str(path), ""
+        game.catalog_id, game.installed_source, game.installed_extras = "", None, None
+
     def catalog_games_in(self, library_id):
         return [g for g in self.games if g.catalog_id and g.library_id == library_id]
 
@@ -205,10 +213,7 @@ class GameLibraryManager:
                 continue  # web games have no install record by design
             gone = rec.uninstalled if rec else not self.records.exists(game.catalog_id)
             if gone:  # an unreadable record file is not a gone one: leave that game alone
-                path = self.get_full_path(game)
-                if path:
-                    game.launch_path, game.library_id = str(path), ""
-                game.catalog_id, game.installed_source, game.installed_extras = "", None, None
+                self.unlink_catalog_game(game)
                 changed = True
         missing = [r for r in records.values() if not r.uninstalled and self.catalog_game(r.catalog_id) is None]
         if missing:

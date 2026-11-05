@@ -98,8 +98,13 @@ def uninstall_checkbox_label(title: str, player_files: int) -> str:
     return messages.UNINSTALL_DELETE_FILES.format(title=title, count=player_files)
 
 
-def remove_library_text(label: str, titles: list[str]) -> str:
-    return messages.REMOVE_LIBRARY_TEXT.format(label=label, count=len(titles), titles=messages.names(titles))
+def remove_library_text(label: str, titles: list[str], kept=()) -> str:
+    """What removing a library does: its tracked games are uninstalled; the games it can't uninstall (`kept`)
+    stay in the list as games added by hand."""
+    text = messages.REMOVE_LIBRARY_TEXT.format(label=label, count=len(titles), titles=messages.names(titles))
+    if kept:
+        text += " " + messages.REMOVE_LIBRARY_KEPT.format(titles=messages.names(list(kept)))
+    return text
 
 
 def remove_library_checkbox_label(player_files: int) -> str:

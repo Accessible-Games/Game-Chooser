@@ -48,7 +48,7 @@ from install_dialogs import InstallConfirmDialog, UninstallDialog
 import library_actions
 from library_actions import catalog_menu_items, delete_kind, is_editable, launch_problem
 from progress_area import ProgressArea
-from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener
+from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener, run_in_background
 from wx_bridge import call_after as _call_after  # wx.CallAfter that does nothing once the app is gone
 
 log = logging.getLogger(__name__)
@@ -141,6 +141,7 @@ class MainFrame(wx.Frame):
         self._shown_job_id = None  # the job the progress areas show
         self._cancelling_job_id = None  # the job the player pressed Cancel on
         self._installer_wait_done = None  # Done's handler while "Waiting for the installer" shows
+        self._counting = set()  # catalog ids whose player files are being counted for the Uninstall dialog
         # Called with the Job on the UI thread after each finished, failed or cancelled job has been applied
         # to the library (Preferences can refresh its library list from here)
         self.job_done_hooks = []
@@ -1412,19 +1413,25 @@ class MainFrame(wx.Frame):
             self.game_list.Focus(new_index)
 
     def _forget_game(self, game, current_index):
-        """Delete an untracked catalog install: it leaves the list and its record goes, its files stay"""
+        """Delete an untracked catalog install: its record goes and it leaves the list; its files stay"""
+        if self._game_busy(game):
+            self.focus_active_list()
+            return
         with self.modal_dialog():
             answer = wx.MessageBox(messages.FORGET_GAME_CONFIRM.format(title=game.title), messages.FORGET_GAME_TITLE,
                                    wx.YES_NO | wx.ICON_QUESTION, self)
-        if answer != wx.YES:
+        live = self._live_game(game)
+        if answer != wx.YES or live is None or not live.catalog_id or self._game_busy(live):
             self.focus_active_list()
             return
-        live = self._live_game(game)
-        if live is not None and live.catalog_id:
-            try:
-                self.service.forget(live.catalog_id)
-            except OSError as e:
-                log.warning("Couldn't forget %s: %s", live.catalog_id, e)
+        try:
+            self.service.forget(live.catalog_id)
+        except OSError as e:
+            log.warning("Couldn't forget %s: %s", live.catalog_id, e)
+            self._tell(messages.FORGET_FAILED.format(title=live.title), messages.FORGET_GAME_TITLE)
+            self._after_delete(current_index)  # the list shows what is true now
+            self.focus_active_list()
+            return
         self._after_delete(current_index)
 
     # ---- a catalog game's actions (Library context menu, Delete, a launch that finds no executable) ------------
@@ -1438,8 +1445,9 @@ class MainFrame(wx.Frame):
         if not game.library_id or self.library_manager.library_reachable(game.library_id):
             return False
         lib = self.library_manager.library_by_id(game.library_id)
-        self._tell(messages.LIBRARY_UNREACHABLE.format(path=lib["path"] if lib else game.library_id),
-                   messages.LIBRARY_NOT_FOUND_TITLE)
+        text = (messages.LIBRARY_UNREACHABLE.format(path=lib["path"]) if lib
+                else messages.LIBRARY_ROW_GONE.format(title=game.title))  # its library was removed from the config
+        self._tell(text, messages.LIBRARY_NOT_FOUND_TITLE)
         return True
 
     def _game_busy(self, game):
@@ -1509,21 +1517,43 @@ class MainFrame(wx.Frame):
 
     def uninstall_game(self, game):
         """Uninstall a catalog install (Del, Delete or Uninstall): "Uninstall <title>", the player's files kept
-        unless ticked. The game leaves the list when the uninstall finishes."""
+        unless ticked. The game leaves the list when the uninstall finishes.
+
+        The player's files are counted (hashed) on a worker thread first, after the checks that could refuse it;
+        a slow count is announced with a notification, and the dialog opens when the count arrives."""
+        cid = game.catalog_id
+        if cid in self._counting:  # already counting for this game: its dialog is coming
+            return
+        if self._library_unreachable(game) or self._game_busy(game):
+            self.focus_active_list()
+            return
+        self._counting.add(cid)
+        service, title = self.service, game.title
+        run_in_background(lambda: service.player_files(cid), lambda count: self._uninstall_counted(game, count),
+                          "player-files", slow=lambda: self and self.notify(messages.COUNTING_FILES.format(title=title)),
+                          default=0, post=_call_after)
+
+    def _uninstall_counted(self, game, player_files):
+        if not self:
+            return
+        self._counting.discard(game.catalog_id)
+        self.run_when_no_dialog(self._confirm_uninstall, game, player_files)
+
+    def _confirm_uninstall(self, game, player_files):
+        """The count arrived and no dialog is open: check again (things may have changed), then ask"""
+        live = self._live_game(game)
         try:
-            if self._library_unreachable(game) or self._game_busy(game):
+            if live is None or not live.catalog_id or self._library_unreachable(live) or self._game_busy(live):
                 return
-            with wx.BusyCursor():
-                player_files = self.service.player_files(game.catalog_id)
             confirmed = delete_player_data = False
             with self.modal_dialog():
-                dlg = UninstallDialog(self, game.title, player_files)
+                dlg = UninstallDialog(self, live.title, player_files)
                 try:
                     confirmed = dlg.ShowModal() == wx.ID_OK
                     delete_player_data = dlg.delete_player_data()
                 finally:
                     dlg.Destroy()
-            live = self._live_game(game)
+            live = self._live_game(live)
             if confirmed and live is not None and live.catalog_id:
                 self._submit_catalog("uninstall", live, delete_player_data=delete_player_data)
         finally:

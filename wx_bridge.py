@@ -48,6 +48,32 @@ def call_after(fn, *args) -> bool:
         return False
 
 
+SLOW_CUE_MS = 600  # work still running after this long gets a cue, so the player knows something is happening
+
+
+def run_in_background(work, done, name: str, slow=None, default=None, post=call_after, later=None):
+    """Run `work()` on a daemon thread, then `done(result)` on the UI thread through `post` (nothing runs once
+    the app is gone). A failing `work()` is logged and `done(default)` still runs. If the work is still going
+    after SLOW_CUE_MS, `slow()` runs on the UI thread (for example a notification). Call on the UI thread.
+    `later(ms, fn)` defaults to wx.CallLater."""
+    finished = threading.Event()
+
+    def run():
+        try:
+            result = work()
+        except Exception:
+            log.exception("Background work %s failed", name)
+            result = default
+        finished.set()
+        post(done, result)
+
+    if slow is not None:
+        (later or wx.CallLater)(SLOW_CUE_MS, lambda: None if finished.is_set() else slow())
+    thread = threading.Thread(target=run, name=name, daemon=True)
+    thread.start()
+    return thread
+
+
 def _call_if_alive(frame, name, *args):
     if frame:  # a destroyed window is falsy; its events are dropped
         getattr(frame, name)(*args)

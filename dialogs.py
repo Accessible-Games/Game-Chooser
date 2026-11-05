@@ -41,6 +41,7 @@ from engine import messages
 from engine.folders import library_label
 from install_dialogs import RemoveLibraryDialog
 from library_actions import library_row_name
+from wx_bridge import run_in_background
 from models import Game
 from validation_service import ValidationService
 from smart_list import SmartList, Column
@@ -480,6 +481,8 @@ class PreferencesDialog(wx.Dialog):
         self.service = service
         # Nested prompts are modal dialogs that may hold games: they defer job results like any other
         self._modal = getattr(parent, "modal_dialog", None) or nullcontext
+        self._notify = getattr(parent, "notify", None)  # the main window's notification, for a slow count
+        self._counting = False  # a Remove is counting the player's files in the background
 
         # Create notebook
         self.notebook = wx.Notebook(self)
@@ -619,6 +622,10 @@ class PreferencesDialog(wx.Dialog):
         selected = self._selected_library()
         if not selected:
             return
+        if self.service is not None and selected["id"] in self.service.pending_removal:
+            # its queued uninstalls find the game folders through the library when they run
+            self._tell(messages.LIBRARY_BEING_REMOVED)
+            return
         dlg = wx.DirDialog(self, "Choose the library's new folder", defaultPath=selected["path"])
         with self._modal():
             chosen = dlg.ShowModal() == wx.ID_OK
@@ -628,46 +635,83 @@ class PreferencesDialog(wx.Dialog):
 
     def on_remove_library(self, event):
         """Remove the selected library (applies immediately). One holding catalog installs is removed once they
-        are uninstalled, after the player confirms; its folder must be reachable for that."""
+        are uninstalled, after the player confirms; its folder must be reachable for that. The player's files
+        are counted in the background first; the confirmation opens when the count arrives."""
         selected = self._selected_library()
-        if not selected:
+        if not selected or self._counting:
             return
         try:
             self._remove_library(selected["id"])
         finally:
             self.lib_list.control.SetFocus()  # back to the list (the prompts would otherwise leave it on Remove)
 
-    def _remove_library(self, library_id):
+    def _removable(self, library_id):
+        """The library and its tracked catalog games, or None after saying why it can't be removed now (gone
+        meanwhile, already being removed, unreachable, a game busy). With no tracked games it is removed here
+        (its other catalog games stay in the list as games added by hand)."""
         manager = self.library_manager
         lib = manager.library_by_id(library_id)
         if lib is None:  # gone meanwhile (its last uninstall just finished): say so, as Change folder does
             self._tell(messages.LIBRARY_FOLDER_MISSING)
             self._fill_library_list()
-            return
+            return None
         if self.service is None:
             self._change_libraries(manager.remove_library, library_id)
-            return
+            return None
         if library_id in self.service.pending_removal:
             self._tell(messages.LIBRARY_BEING_REMOVED)
-            return
-        games = manager.catalog_games_in(library_id)
-        if not games:
-            self._change_libraries(self.service.remove_library, library_id, False)
-            return
-        if not manager.library_reachable(library_id):
-            self._tell(messages.LIBRARY_REMOVE_UNREACHABLE)
-            return
-        with wx.BusyCursor():
-            player_files = sum(self.service.player_files(g.catalog_id) for g in games)
-        dlg = RemoveLibraryDialog(self, library_label(lib), [g.title or g.catalog_id for g in games], player_files)
+            return None
         try:
-            with self._modal():
-                confirmed = dlg.ShowModal() == wx.ID_OK
-            delete_player_data = dlg.delete_player_data()
+            self.service.check_library_removable(library_id)  # before any file is read
+        except LibraryError as e:
+            self._tell(str(e))
+            return None
+        tracked, kept = self.service.library_games(library_id)
+        if not tracked:
+            self._change_libraries(self.service.remove_library, library_id, False)
+            return None
+        return lib, tracked, kept
+
+    def _remove_library(self, library_id):
+        found = self._removable(library_id)
+        if found is None:
+            return
+        lib, tracked, _ = found
+        service = self.service
+        ids = [g.catalog_id for g in tracked]
+        notify = self._notify
+        label = library_label(lib)
+        self._counting = True
+        run_in_background(lambda: sum(service.player_files(cid) for cid in ids),
+                          lambda count: self._confirm_remove(library_id, count), "library-player-files",
+                          slow=(lambda: notify(messages.COUNTING_LIBRARY_FILES.format(label=label))) if notify else None,
+                          default=0)
+
+    def _confirm_remove(self, library_id, player_files):
+        """The count arrived (UI thread): check again, then ask"""
+        if not self:  # Preferences closed meanwhile
+            return
+        self._counting = False
+        if not self.IsModal():
+            return
+        try:
+            found = self._removable(library_id)
+            if found is None:
+                return
+            lib, tracked, kept = found
+            dlg = RemoveLibraryDialog(self, library_label(lib), [g.title or g.catalog_id for g in tracked],
+                                      player_files, [g.title or g.catalog_id for g in kept])
+            try:
+                with self._modal():
+                    confirmed = dlg.ShowModal() == wx.ID_OK
+                delete_player_data = dlg.delete_player_data()
+            finally:
+                dlg.Destroy()
+            if confirmed:
+                self._change_libraries(self.service.remove_library, library_id, delete_player_data)
         finally:
-            dlg.Destroy()
-        if confirmed:
-            self._change_libraries(self.service.remove_library, library_id, delete_player_data)
+            if self:
+                self.lib_list.control.SetFocus()
 
     def on_apply(self, event):
         """Save the config"""

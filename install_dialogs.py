@@ -270,9 +270,10 @@ class UninstallDialog(_UninstallConfirm):
 
 
 class RemoveLibraryDialog(_UninstallConfirm):
-    """"Remove <label>", for a library holding catalog installs: they are uninstalled first."""
+    """"Remove <label>", for a library holding catalog installs: `games` are uninstalled first; `kept` (installs
+    Game Chooser can't uninstall) stay in the list as games added by hand. `player_files` counts `games` only."""
 
-    def __init__(self, parent, label: str, games: list[str], player_files: int):
+    def __init__(self, parent, label: str, games: list[str], player_files: int, kept=()):
         super().__init__(parent, messages.REMOVE_LIBRARY_TITLE.format(label=label),
-                         remove_library_text(label, games), remove_library_checkbox_label(player_files),
+                         remove_library_text(label, games, kept), remove_library_checkbox_label(player_files),
                          messages.REMOVE_LIBRARY_BUTTON)

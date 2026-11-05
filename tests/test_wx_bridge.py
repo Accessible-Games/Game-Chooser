@@ -157,3 +157,23 @@ def test_each_job_end_is_applied_once():
     assert outcomes.drain() == [("failed", b, "M"), ("cancelled", c, None)]  # quitting applies the rest
     assert not outcomes.take(b) and not outcomes.take(c)  # a late UI event for them applies nothing
     assert outcomes.drain() == []
+
+
+def test_run_in_background_posts_the_result_and_cues_only_slow_work():
+    post, timers = Recorder(), []
+    later = lambda ms, fn: timers.append(fn)
+    done = []
+    gate = threading.Event()
+    thread = wx_bridge.run_in_background(lambda: (gate.wait(5), 7)[1], done.append, "count", slow=lambda: done.append("slow"),
+                                         post=post, later=later)
+    timers[0]()  # the cue's timer fires while the work is still going
+    assert done == ["slow"] and post.posts == []
+    gate.set()
+    thread.join(5)
+    assert post.posts == [(done.append, (7,))]
+    timers.clear()
+    thread = wx_bridge.run_in_background(lambda: 1 / 0, done.append, "broken", slow=lambda: done.append("late"),
+                                         default=0, post=post, later=later)
+    thread.join(5)
+    timers[0]()  # finished before the cue: no cue
+    assert post.posts[-1] == (done.append, (0,)) and done == ["slow"]

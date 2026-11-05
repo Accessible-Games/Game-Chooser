@@ -30,8 +30,8 @@ from pathlib import Path
 from engine import messages
 from engine.elevation import WindowsElevator
 from engine.entries import current_platform
-from engine.errors import EngineError
 from engine.entries import visible_games as _visible_games
+from engine.errors import EngineError
 from engine.extract import Extractor, default_tools_dir
 from engine.http import Fetcher
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex, IndexState, normalize_catalog_url
@@ -44,6 +44,7 @@ from engine.registry import RegistryAccess
 from engine.runtimes import WindowsSecurity, default_runtimes_root
 from engine.safety import count_player_files
 from engine.status import game_status
+from library_actions import is_tracked
 from library_manager import LibraryError
 
 log = logging.getLogger(__name__)
@@ -65,6 +66,8 @@ class InstallService:
         self.security = WindowsSecurity()
         self.index_state = IndexState()  # entries come from it, so the two never disagree
         self.pending_removal: set[str] = set()  # library ids waiting for their games' uninstalls
+        # library id -> catalog ids whose uninstall result hasn't been applied yet (the library goes once none are)
+        self._removal_waits: dict[str, set[str]] = {}
         self.queue = InstallQueue(self._new_engine, listener, manager.config_dir / "install.log")
 
     # ---- the catalog index ----------------------------------------------------------------------------------
@@ -196,9 +199,14 @@ class InstallService:
             self.manager.add_catalog_game(result.game)
         elif result.action == "uninstall":
             self.manager.remove_catalog_game(result.catalog_id)
+            for waits in self._removal_waits.values():
+                waits.discard(result.catalog_id)
         for library_id in list(self.pending_removal):
-            if not self.manager.catalog_games_in(library_id):
-                self._finish_removal(library_id)
+            if not self._removal_waits.get(library_id):  # the last uninstall is applied
+                try:
+                    self._finish_removal(library_id)
+                except LibraryError:
+                    pass  # logged; the library stays, and removing it again finishes the job
 
     def player_files(self, catalog_id: str) -> int:
         """How many files in an installed game's folder are the player's (saves, settings), for the Uninstall and
@@ -216,11 +224,11 @@ class InstallService:
             return 0
 
     def forget(self, catalog_id: str) -> None:
-        """Delete a catalog game Game Chooser can't uninstall (an untracked install): it leaves the list and its
-        install record goes too, so reconcile_catalog_records doesn't add it back at the next start. Its files
-        stay where they are."""
-        self.manager.remove_catalog_game(catalog_id)
+        """Delete a catalog game Game Chooser can't uninstall (an untracked install): its install record goes, so
+        reconcile_catalog_records doesn't add it back at the next start, then it leaves the list. Its files stay
+        where they are. The record goes first: if that fails (OSError), nothing has changed."""
         self.manager.records.delete(catalog_id)
+        self.manager.remove_catalog_game(catalog_id)
 
     def job_failed(self, job: Job) -> None:
         """A job failed (or was cancelled): a library waiting on it to be removed stays."""
@@ -228,6 +236,7 @@ class InstallService:
         rec = self.manager.records.load(job.request.catalog_id) if game is None else None
         library_id = game.library_id if game is not None else rec.library_id if rec is not None else None
         self.pending_removal.discard(library_id)
+        self._removal_waits.pop(library_id, None)
 
     # ---- library status -------------------------------------------------------------------------------------
 
@@ -261,22 +270,60 @@ class InstallService:
             raise LibraryError(messages.LIBRARY_FOLDER_NOT_CREATED.format(path=folder)) from e
         return self.manager.add_library(str(folder))
 
-    def remove_library(self, library_id: str, delete_player_data: bool) -> list[Job]:
-        """Remove a library; its catalog games are uninstalled first, and it goes once they all are."""
-        games = self.manager.catalog_games_in(library_id)
-        if not games:
-            self.manager.remove_library(library_id)
-            return []
-        if not self.manager.library_reachable(library_id):
+    def library_games(self, library_id: str) -> tuple[list, list]:
+        """A library's catalog games, split: (tracked, kept). Tracked ones are uninstalled before the library is
+        removed. The others (untracked, or with no readable record) can't be uninstalled; they are kept in the
+        list as games added by hand when the library goes."""
+        tracked, kept = [], []
+        for game in self.manager.catalog_games_in(library_id):
+            if is_tracked(self.manager.records.load(game.catalog_id)):
+                tracked.append(game)
+            elif not _is_web(game):
+                kept.append(game)
+        return tracked, kept
+
+    def check_library_removable(self, library_id: str) -> None:
+        """Raise LibraryError when removing the library would be refused: its folder can't be reached while it
+        holds games to uninstall, or one of its catalog games has a job queued or running."""
+        tracked, kept = self.library_games(library_id)
+        if tracked and not self.manager.library_reachable(library_id):
             raise LibraryError(messages.LIBRARY_REMOVE_UNREACHABLE)
-        for game in games:  # its job (an update, say) would stand in for the uninstall
+        for game in tracked + kept:  # its job (an update, say) would stand in for the uninstall
             if self.queue.job_for(game.catalog_id) is not None:
                 raise LibraryError(messages.LIBRARY_REMOVE_BUSY.format(title=game.title or game.catalog_id))
+
+    def remove_library(self, library_id: str, delete_player_data: bool) -> list[Job]:
+        """Remove a library. Its tracked catalog games are uninstalled first, and it goes once they all are; with
+        none, it goes now (returning []). Its other catalog games stay in the list as games added by hand."""
+        self.check_library_removable(library_id)
+        tracked, _ = self.library_games(library_id)
+        if not tracked:
+            self._finish_removal(library_id)
+            return []
         self.pending_removal.add(library_id)
-        return [self.submit("uninstall", g.catalog_id, delete_player_data=delete_player_data) for g in games]
+        self._removal_waits[library_id] = {g.catalog_id for g in tracked}
+        return [self.submit("uninstall", g.catalog_id, delete_player_data=delete_player_data) for g in tracked]
 
     def _finish_removal(self, library_id: str) -> None:
+        """The library goes: the games it still holds that can't be uninstalled become games added by hand (their
+        records deleted first, their files untouched), the records of its uninstalled games are deleted, and the
+        library leaves the config. Raises LibraryError (the library then stays) if a record can't be deleted."""
         self.pending_removal.discard(library_id)
+        self._removal_waits.pop(library_id, None)
+        tracked, kept = self.library_games(library_id)
+        if tracked:  # never expected (nothing installs into a library being removed): keep it rather than orphan
+            log.warning("Library %s still holds installed games, so it wasn't removed", library_id)
+            return
+        try:
+            for game in kept:
+                self.manager.records.delete(game.catalog_id)
+        except OSError as e:
+            log.warning("Couldn't delete an install record while removing library %s: %s", library_id, e)
+            raise LibraryError(messages.LIBRARY_NOT_REMOVED) from e
+        for game in kept:
+            self.manager.unlink_catalog_game(game)
+        if kept:
+            self.manager.save_games()
         for cid, rec in self.manager.records.all().items():
             if rec.uninstalled and rec.library_id == library_id:
                 self.manager.records.delete(cid)

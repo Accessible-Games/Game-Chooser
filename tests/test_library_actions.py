@@ -111,6 +111,9 @@ def test_uninstall_and_remove_library_text():
         "Also delete files Entombed created, like saves and settings (3 files)"
     assert remove_library_text("Games", ["Entombed", "Pawprints"]) == \
         "Games has 2 games installed from the catalog: Entombed and Pawprints. Removing it uninstalls them first."
+    assert remove_library_text("Games", ["Entombed"], ["Pawprints", "Lone"]) == (
+        "Games has 1 games installed from the catalog: Entombed. Removing it uninstalls them first. "
+        "Pawprints and Lone will stay in your list as games added by hand. Their files aren't touched.")
     assert remove_library_checkbox_label(5) == \
         "Also delete files these games created, like saves and settings (5 files)"
     assert messages.UNINSTALL_TITLE.format(title="Entombed") == "Uninstall Entombed"

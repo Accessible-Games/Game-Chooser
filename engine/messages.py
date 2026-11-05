@@ -343,6 +343,14 @@ REMOVE_LIBRARY_TEXT = "{label} has {count} games installed from the catalog: {ti
 REMOVE_LIBRARY_DELETE_FILES = "Also delete files these games created, like saves and settings ({count} files)"
 REMOVE_LIBRARY_BUTTON = "Uninstall and remove"
 LIBRARY_BEING_REMOVED_LABEL = "{label} (being removed)"
+REMOVE_LIBRARY_KEPT = "{titles} will stay in your list as games added by hand. Their files aren't touched."
+LIBRARY_NOT_REMOVED = ("Game Chooser couldn't finish removing that library, because one of its install records "
+                       "couldn't be deleted. Try again.")
+LIBRARY_ROW_GONE = ("{title}'s library is no longer in Preferences, so Game Chooser can't find it. Delete it and add "
+                    "it again with Add Game.")
+FORGET_FAILED = "Game Chooser couldn't remove {title} from the list. Try again."
+COUNTING_FILES = "Checking {title}'s files"
+COUNTING_LIBRARY_FILES = "Checking the files of the games in {label}"
 FORGET_GAME_CONFIRM = ("Remove {title} from the list? Game Chooser didn't keep track of its files, so they stay "
                        "where they are.")
 FORGET_GAME_TITLE = "Confirm Delete"
