@@ -142,3 +142,27 @@ def test_ids_are_assigned_once(isolated_manager_factory, tmp_path):
     assert isolated_manager_factory().config["libraries"][0]["id"] == first
     saved = json.loads((isolated_manager_factory.config_dir / "config.json").read_text())
     assert saved["libraries"] == [{"id": first, "path": str(tmp_path / "Games")}]
+
+
+def test_libraries_on_other_drives_are_not_nested(isolated_manager_factory, tmp_path):
+    from library_manager import _is_inside
+
+    assert _is_inside(r"D:\a\b", r"D:\a") and not _is_inside(r"D:\a", r"E:\b") and not _is_inside(r"E:\b", r"D:\a")
+    # an existing library on another drive letter must not make the check raise ValueError
+    m = isolated_manager_factory(config={"libraries": [{"id": "e1", "path": r"E:\Games"}]})
+    lib = m.add_library(_folder(tmp_path, "Games"))
+    m.change_library_folder(lib["id"], _folder(tmp_path, "Games2"))
+    assert len(m.config["libraries"]) == 2
+
+
+def test_failed_upgrade_save_keeps_loaded_config(isolated_manager_factory, tmp_path, monkeypatch):
+    from library_manager import GameLibraryManager
+
+    isolated_manager_factory(config={"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}]})
+
+    def fail(self):
+        raise OSError("read-only")
+
+    monkeypatch.setattr(GameLibraryManager, "save_config", fail)
+    m = GameLibraryManager()
+    assert len(m.config["libraries"]) == 1 and len(m.config["libraries"][0]["id"]) == 12

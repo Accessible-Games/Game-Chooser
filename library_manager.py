@@ -41,7 +41,10 @@ def _norm(path):
 
 
 def _is_inside(path, parent):
-    return path != parent and os.path.commonpath([path, parent]) == parent
+    try:
+        return path != parent and os.path.commonpath([path, parent]) == parent
+    except ValueError:  # different drives: never inside each other
+        return False
 
 
 class GameLibraryManager:
@@ -91,6 +94,7 @@ class GameLibraryManager:
             }
         }
         
+        upgraded = False
         if self.config_file.exists():
             try:
                 with open(self.config_file, 'r') as f:
@@ -111,10 +115,14 @@ class GameLibraryManager:
                             lib["id"] = secrets.token_hex(6)
                             upgraded = True
                     self.config = loaded
-                    if upgraded:
-                        self.save_config()
             except:
                 self.config = default_config
+                upgraded = False
+            if upgraded:
+                try:
+                    self.save_config()
+                except OSError:
+                    pass  # keep the loaded config; the upgrade is saved with the next change
         else:
             self.config = default_config
             self.save_config()

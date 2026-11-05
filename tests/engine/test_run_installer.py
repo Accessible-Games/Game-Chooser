@@ -269,7 +269,7 @@ def test_out_of_library_install_uses_absolute_paths(tmp_path):
     assert rec.library_id == "" and Path(rec.folder) == elsewhere / "bin" and Path(rec.folder).is_absolute()
     assert rec.launch_path == "lc.exe" and rec.vendor_uninstaller == "MsiExec.exe /X{1}"
     assert r.game["library_id"] == "" and Path(r.game["launch_path"]).is_absolute() and "manual" not in r.game
-    assert Path(r.game["launch_path"]) == elsewhere / "bin" / "lc.exe" and Path(r.game["launch_path"]).is_absolute()
+    assert Path(r.game["launch_path"]) == elsewhere / "bin" / "lc.exe"
 
 
 def test_registry_folder_in_a_library_is_stored_relative(tmp_path):
