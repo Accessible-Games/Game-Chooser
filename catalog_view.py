@@ -115,6 +115,7 @@ def _prose_to_text(text: str) -> str:
     text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)[^)]*\)", r"\1 (\2)", text)
     text = re.sub(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$", r"\1", text, flags=re.M)
     text = re.sub(r"^[ \t]*>[ \t]?", "", text, flags=re.M)
+    text = re.sub(r"^[ \t]{0,3}([*_-])(?:[ \t]*\1){2,}[ \t]*$", "", text, flags=re.M)
     text = re.sub(r"^([ \t]*)[*+][ \t]+", r"\1- ", text, flags=re.M)
     text = re.sub(r"`([^`\n]+)`", r"\1", text)
     text = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"\1", text)
@@ -122,7 +123,9 @@ def _prose_to_text(text: str) -> str:
     text = re.sub(r"(?<![\w*])\*(?=\w)([^*\n]+?)(?<=\w)\*(?![\w*])", r"\1", text)
     text = re.sub(r"(?<![\w_])_(?=\w)([^_\n]+?)(?<=\w)_(?![\w_])", r"\1", text)
     text = re.sub(r"</?[A-Za-z][^>\n]*>", "", text)
-    return text
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    # Next to a fence at most one blank line remains (the fence's own newline is added when joining).
+    return re.sub(r"\A\n{2,}", "\n", re.sub(r"\n{2,}\Z", "\n", text))
 
 
 def markdown_to_text(md: str) -> str:
@@ -132,7 +135,7 @@ def markdown_to_text(md: str) -> str:
     in_fence = False
     for line in md.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
         if _FENCE.match(line):
-            if not in_fence:
+            if not in_fence and prose:
                 segments.append(_prose_to_text("\n".join(prose)))
                 prose = []
             in_fence = not in_fence
@@ -140,8 +143,10 @@ def markdown_to_text(md: str) -> str:
             segments.append(line)
         else:
             prose.append(line)
-    segments.append(_prose_to_text("\n".join(prose)))
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(segments)).strip()
+    if prose:
+        segments.append(_prose_to_text("\n".join(prose)))
+    text = re.sub(r"\A(?:[ \t]*\n)+", "", "\n".join(segments))
+    return text.rstrip()
 
 
 def description_text(entry: dict | None) -> str:

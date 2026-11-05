@@ -61,6 +61,12 @@ def test_markdown_bold_labels_star_bullets_and_code_fences():
     assert markdown_to_text("```\n# comment\nx = *y*\n```\n\n# Head") == "# comment\nx = *y*\n\nHead"
 
 
+def test_markdown_fences_verbatim_and_horizontal_rules():
+    assert markdown_to_text("```\na\n\n\n\nb\n```") == "a\n\n\n\nb"
+    assert markdown_to_text("```\n    indented\n```") == "    indented"
+    assert markdown_to_text("one\n\n* * *\n\n---\n\ntwo") == "one\n\ntwo"
+
+
 def test_description_text_links_on_own_lines():
     t = description_text(entry_with_links)
     assert t.startswith("A fun game.\n\n")
