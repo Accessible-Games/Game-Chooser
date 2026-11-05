@@ -62,6 +62,7 @@ _CLASSES = "SOFTWARE\\Classes\\"
 MARKER_NAME = ".gamechooser-runtime.json"
 
 ADMINISTRATORS, SYSTEM, USERS = "S-1-5-32-544", "S-1-5-18", "S-1-5-32-545"
+CREATOR_OWNER = "S-1-3-0"
 _TRUSTED_OWNERS = frozenset({ADMINISTRATORS, SYSTEM})
 _FILE_ATTRIBUTE_REPARSE_POINT = 0x400
 _SID = re.compile(r"S-1-[0-9]+(-[0-9]+)*")
@@ -99,15 +100,29 @@ class WindowsSecurity:
 
 
 def lock_down_command(folder: Path, user_sid: str) -> tuple[str, str]:
-    """The one elevated command that locks a runtime's folder down: (exe, arguments).
+    """The one elevated command that locks a runtime's folder, and the folders above it, down: (exe, arguments).
 
-    It empties (or creates) the marker, makes Administrators the owner of everything, turns
-    inheritance off on the folder with Administrators and SYSTEM full control and Users read and
-    execute, resets everything inside to inherit only that (dropping any explicit grants), and lets
-    the current user rewrite the marker, so it can say "installed" once the elevated steps succeed.
+    `folder` is `<GameChooser>/runtimes/<id>`. The two parent folders themselves (not what is in them)
+    get Administrators as owner, inheritance off, Administrators and SYSTEM full control and Users read
+    and execute, so no one else can rename, delete or replace what is in them. `runtimes` also lets
+    Users create a folder in it (AD, on that folder only; no delete-child), and gives the creator full
+    control of the folder they made (CREATOR OWNER, inherited only), so the next runtime can still be
+    unpacked by the player before its own lock-down.
+
+    For `folder` it empties (or creates) the marker, makes Administrators the owner of everything,
+    turns inheritance off with Administrators and SYSTEM full control and Users read and execute,
+    resets everything inside to inherit only that (dropping any explicit grants), and lets the current
+    user rewrite the marker, so it can say "installed" once the elevated steps succeed.
     """
     marker = folder / MARKER_NAME
+    runtimes, game_chooser = folder.parent, folder.parent.parent
+    base = f"*{ADMINISTRATORS}:(OI)(CI)F *{SYSTEM}:(OI)(CI)F *{USERS}:(OI)(CI)RX"
     commands = [
+        f'icacls "{game_chooser}" /setowner *{ADMINISTRATORS} /Q',
+        f'icacls "{game_chooser}" /inheritance:r /grant:r {base} /Q',
+        f'icacls "{runtimes}" /setowner *{ADMINISTRATORS} /Q',
+        f'icacls "{runtimes}" /inheritance:r /grant:r {base} *{CREATOR_OWNER}:(OI)(CI)(IO)F /Q',
+        f'icacls "{runtimes}" /grant *{USERS}:(AD) /Q',
         f'type nul > "{marker}"',
         f'icacls "{folder}" /setowner *{ADMINISTRATORS} /T /Q',
         f'icacls "{folder}" /inheritance:r /grant:r *{ADMINISTRATORS}:(OI)(CI)F *{SYSTEM}:(OI)(CI)F '
@@ -487,7 +502,8 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
         _copy_into(root, target, added)
         if elevated:
             _lock_down(ctx, target, title)
-            # Hashed again now that no one else can change it: a swap before the lock is caught here.
+            # Checked again now that no one else can change it: a junction put anywhere on the way to it,
+            # or a file swapped, before the lock is caught here.
             if (linked_component(ctx.runtimes_root, target) is not None
                     or not _owner_is(ctx.security, target, allow_user=False) or not _holds_download(target, incoming)):
                 raise InstallFailed(messages.RUNTIME_FOLDER_CHANGED.format(title=title, path=target))
@@ -518,7 +534,8 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
 
 
 def _lock_down(ctx, target: Path, title: str) -> None:
-    """Run lock_down_command elevated. A declined prompt is a declined install (R6)."""
+    """Run lock_down_command elevated (the runtime's folder and the two above it). A declined prompt is a
+    declined install (R6)."""
     user = ctx.security.current_user()
     if not user or not _SID.fullmatch(user) or "%" in str(target):  # cmd would expand a % in the path
         raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))

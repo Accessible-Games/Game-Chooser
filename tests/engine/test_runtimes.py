@@ -438,7 +438,15 @@ def test_lock_down_command_is_exact():
     marker = folder / MARKER_NAME
     assert exe == "cmd.exe"
     assert args == (
-        f'/d /v:off /s /c "type nul > "{marker}" && '
+        '/d /v:off /s /c "'
+        r'icacls "C:\ProgramData\GameChooser" /setowner *S-1-5-32-544 /Q && '
+        r'icacls "C:\ProgramData\GameChooser" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F '
+        r'*S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX /Q && '
+        r'icacls "C:\ProgramData\GameChooser\runtimes" /setowner *S-1-5-32-544 /Q && '
+        r'icacls "C:\ProgramData\GameChooser\runtimes" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F '
+        r'*S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX *S-1-3-0:(OI)(CI)(IO)F /Q && '
+        r'icacls "C:\ProgramData\GameChooser\runtimes" /grant *S-1-5-32-545:(AD) /Q && '
+        f'type nul > "{marker}" && '
         f'icacls "{folder}" /setowner *S-1-5-32-544 /T /Q && '
         f'icacls "{folder}" /inheritance:r /grant:r *S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F '
         f'*S-1-5-32-545:(OI)(CI)RX /Q && '
@@ -477,6 +485,51 @@ def test_file_swapped_before_the_lock_down_is_caught_and_nothing_is_registered(t
     assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
     assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("swapped", ["id", "runtimes"])
+def test_junction_swapped_in_during_the_lock_down_is_caught_and_nothing_is_registered(tmp_path, swapped):
+    import _winapi
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    root = tmp_path / "GameChooser" / "runtimes"
+    decoy = tmp_path / "decoy"
+
+    def swap(exe, args, elevated):
+        if exe != "cmd.exe":
+            return
+        # Another account moves the folder away and puts a junction to a look-alike in its place.
+        path = root / "dx8vb" if swapped == "id" else root
+        shutil.copytree(path, decoy / path.name)
+        path.rename(path.with_name(path.name + "-moved"))
+        _winapi.CreateJunction(str(decoy / path.name), str(path))
+
+    eng, lib = setup(tmp_path, [rt, g], routes, runtimes_root=root, elevator=FakeElevator(on_start=swap))
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=root / "dx8vb")
+    assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
+    assert eng.ctx.records.load("dx8vb") is None
+
+
+def test_a_new_runtime_folder_still_installs_after_the_parents_are_locked(tmp_path):
+    routes = {}
+    rt = dx8vb(routes)
+    vbx_data = b"MZ fake vbx.ocx"
+    vbx = {"id": "vbx", "kind": "runtime", "title": "VBX", "version": "1",
+           "sources": [served_source(routes, f"{MIRROR}{sha(vbx_data)}/vbx.ocx", vbx_data, method="none",
+                                     steps=[{"action": "register", "path": "vbx.ocx"}])]}
+    one, two = game(routes), game(routes, id="pawprints", title="Pawprints", files={"pawprints.exe": b"paw"},
+                                  dependencies=["vbx"])
+    eng, lib = setup(tmp_path, [rt, vbx, one, two], routes)
+    run(eng, "install")  # dx8vb: locks GameChooser, runtimes and runtimes/dx8vb
+    run(eng, "install", id="pawprints")  # vbx: a new folder in the locked runtimes folder
+    root = eng.ctx.runtimes_root
+    assert (root / "vbx" / "vbx.ocx").read_bytes() == vbx_data
+    assert eng.ctx.elevator.calls == [lock_down(eng, root / "dx8vb"), regsvr32(root / "dx8vb" / "dx8vb.dll"),
+                                      lock_down(eng, root / "vbx"), regsvr32(root / "vbx" / "vbx.ocx")]
+    assert all('icacls "%s" /grant *S-1-5-32-545:(AD) /Q' % root in c[1] for c in eng.ctx.elevator.calls[::2])
 
 
 def test_declined_lock_down_fails_plainly(tmp_path):
