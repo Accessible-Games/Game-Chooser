@@ -107,20 +107,41 @@ def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[Catalo
     return result
 
 
-def markdown_to_text(md: str) -> str:
-    text = md.replace("\r\n", "\n").replace("\r", "\n")
-    text = re.sub(r"^[ \t]*(```|~~~)[^\n]*$", "", text, flags=re.M)
+_FENCE = re.compile(r"^[ \t]*(```|~~~)")
+
+
+def _prose_to_text(text: str) -> str:
     text = re.sub(r"!\[([^\]]*)\]\([^)]*\)", r"\1", text)
     text = re.sub(r"\[([^\]]+)\]\(([^)\s]+)[^)]*\)", r"\1 (\2)", text)
     text = re.sub(r"^[ \t]{0,3}#{1,6}[ \t]+(.*?)(?:[ \t]+#+)?[ \t]*$", r"\1", text, flags=re.M)
     text = re.sub(r"^[ \t]*>[ \t]?", "", text, flags=re.M)
+    text = re.sub(r"^([ \t]*)[*+][ \t]+", r"\1- ", text, flags=re.M)
     text = re.sub(r"`([^`\n]+)`", r"\1", text)
-    text = re.sub(r"(\*\*|__)(?=\w)(.+?)(?<=\w)\1", r"\2", text)
+    text = re.sub(r"\*\*(?=\S)(.+?)(?<=\S)\*\*", r"\1", text)
+    text = re.sub(r"(?<!\w)__(?=\S)(.+?)(?<=\S)__(?!\w)", r"\1", text)
     text = re.sub(r"(?<![\w*])\*(?=\w)([^*\n]+?)(?<=\w)\*(?![\w*])", r"\1", text)
     text = re.sub(r"(?<![\w_])_(?=\w)([^_\n]+?)(?<=\w)_(?![\w_])", r"\1", text)
     text = re.sub(r"</?[A-Za-z][^>\n]*>", "", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    return text.strip()
+    return text
+
+
+def markdown_to_text(md: str) -> str:
+    """Plain text from Markdown. Fenced code keeps its lines verbatim (only the fence lines are dropped)."""
+    segments: list[str] = []
+    prose: list[str] = []
+    in_fence = False
+    for line in md.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        if _FENCE.match(line):
+            if not in_fence:
+                segments.append(_prose_to_text("\n".join(prose)))
+                prose = []
+            in_fence = not in_fence
+        elif in_fence:
+            segments.append(line)
+        else:
+            prose.append(line)
+    segments.append(_prose_to_text("\n".join(prose)))
+    return re.sub(r"\n{3,}", "\n\n", "\n".join(segments)).strip()
 
 
 def description_text(entry: dict | None) -> str:

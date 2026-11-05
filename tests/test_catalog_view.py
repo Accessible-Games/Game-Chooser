@@ -54,6 +54,13 @@ def test_markdown_to_text():
         "quote\n\nalt x snake_case_name\n\ncode"
 
 
+def test_markdown_bold_labels_star_bullets_and_code_fences():
+    assert markdown_to_text('**Note:** hi **Warning.** **"T"** **Free!** __Hey!__ a__b__c') == \
+        'Note: hi Warning. "T" Free! Hey! a__b__c'
+    assert markdown_to_text("* item one\n  + item two\n* item three") == "- item one\n  - item two\n- item three"
+    assert markdown_to_text("```\n# comment\nx = *y*\n```\n\n# Head") == "# comment\nx = *y*\n\nHead"
+
+
 def test_description_text_links_on_own_lines():
     t = description_text(entry_with_links)
     assert t.startswith("A fun game.\n\n")
