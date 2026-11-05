@@ -211,8 +211,11 @@ def _prune_empty_dirs(start: Path, stop: Path) -> None:
         current = current.parent
 
 
-def _preflight(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date) -> None:
-    """Check every op before any file is touched. Never resolves a conflict by removing a folder."""
+def preflight(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date) -> None:
+    """Check every op before any file is touched. Never resolves a conflict by removing a folder.
+
+    Changes nothing; apply_plan runs it too. Callers run it on its own to refuse before other work.
+    """
     for op in plan.ops:
         target = safe_join(game_dir, op.path)
         if op.op not in (Op.WRITE, Op.BACKUP_AND_WRITE):
@@ -263,7 +266,7 @@ def apply_plan(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: dat
     game_dir, incoming_root = Path(game_dir), Path(incoming_root)
     result = ApplyResult()
     try:
-        _preflight(plan, game_dir, incoming_root, today)
+        preflight(plan, game_dir, incoming_root, today)
         for op in plan.ops:
             _apply_op(op, plan, game_dir, incoming_root, today, result)
     except BaseException as exc:

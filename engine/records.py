@@ -30,6 +30,11 @@ class InstalledSource:
     catalog_size: int | None
     position: int
     version: str | None
+    # How this source was unpacked and set up, as the catalog said when it was installed, so repair
+    # and undo rebuild exactly that tree. None in records written before these were kept.
+    install: dict | None = None
+    steps: list[dict] | None = None
+    launch: str | None = None  # the entry's launch path hint for this platform (game sources)
 
 
 @dataclass

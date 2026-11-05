@@ -54,9 +54,10 @@ def snapshot(root: Path) -> dict[str, bytes]:
     return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
-def pawprints(routes, files, version, url=None, steps=None, **fields):
+def pawprints(routes, files, version, url=None, steps=None, install=None, **fields):
     data = zip_bytes(files)
-    source = served_source(routes, url or f"{MIRROR}{sha(data)}/pawprints.zip", data, steps=steps)
+    source = served_source(routes, url or f"{MIRROR}{sha(data)}/pawprints.zip", data, steps=steps,
+                           **(install or {}))
     return {"id": "pawprints", "kind": "game", "title": "Pawprints", "developer": ["Kitty Games"],
             "genres": ["Adventure"], "year": 2010, "version": version, "sources": [source],
             "extras": [{"id": "pawprints-patch", "required": True},
@@ -211,6 +212,8 @@ def test_update_records_previous_and_new_source(tmp_path):
     assert set(rec.previous["extras"]) == {"pawprints-patch", "pawprints-music"}
     assert rec.source.sha256 == v2["sources"][0]["sha256"] and rec.source.version == "2.0"
     assert rec.previous_unavailable is None
+    assert rec.source.install == {"method": "zip"} and rec.source.steps == []   # R17: the spec is recorded
+    assert rec.previous["source"]["install"] == {"method": "zip"}
     assert r.game["installed_source"]["sha256"] == v2["sources"][0]["sha256"]
 
 
@@ -426,12 +429,14 @@ def test_repair_refuses_when_download_changed(tmp_path):
     eng, game = install_v1(tmp_path)
     url = record(eng).source.url
     eng.ctx.fetcher.routes[url] = zip_bytes(V2)
+    eng.ctx.fetcher.requests.clear()
     (game / "pawprints.exe").unlink()
     before = snapshot(game)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "repair")
     assert ei.value.message == messages.REPAIR_FILE_CHANGED.format(title="Pawprints")
     assert snapshot(game) == before
+    assert eng.ctx.fetcher.requests == [url]   # the recorded URL is the mirror's copy itself
 
 
 # ---- extras ------------------------------------------------------------------
@@ -444,7 +449,9 @@ def test_add_extras_later_touches_only_extra_paths(tmp_path):
     eng.ctx.fetcher.requests.clear()
     r = run(eng, "extras", extras=("pawprints-voices",))
     assert r.action == "extras" and r.backups == 0
-    assert eng.ctx.fetcher.requests == [eng.ctx.entries["pawprints-voices"]["sources"][0]["url"]]
+    # The installed version is rebuilt exactly (game and installed extras), then the new extra.
+    assert eng.ctx.fetcher.requests == [before.source.url, before.extras["pawprints-patch"].url,
+                                        eng.ctx.entries["pawprints-voices"]["sources"][0]["url"]]
     after_files = snapshot(game)
     assert after_files == {**before_files, "voices/hi.ogg": b"hi"}
     rec = record(eng)
@@ -546,3 +553,196 @@ def test_uninstall_after_keeping_data_can_remove_it_later(tmp_path):
     run(eng, "uninstall")
     r = run(eng, "uninstall", delete_player_data=True)
     assert r.kept_player_files == 0 and not game.exists() and record(eng) is None
+
+
+# ---- fix round 1 ---------------------------------------------------------------
+
+V3 = {"pawprints.exe": b"exe v3", "pawprints.ini": b"volume=8", "bass.dll": b"bass v3", "sounds/b.wav": b"b",
+      "sounds/c.wav": b"c"}
+
+
+def failing_write(monkeypatch, name):
+    """Make writing the file called `name` fail, as if it were in use; returns a function that stops it."""
+    real_write = engine.safety._write_file
+
+    def write_file(source, target, backup_to, game_dir):
+        if Path(target).name == name:
+            raise PermissionError("in use")
+        return real_write(source, target, backup_to, game_dir)
+
+    monkeypatch.setattr(engine.safety, "_write_file", write_file)
+    return lambda: monkeypatch.setattr(engine.safety, "_write_file", real_write)
+
+
+def reg_step(name, value):
+    return {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": name, "type": "REG_SZ",
+            "value": value}
+
+
+def test_failed_update_backup_survives_a_retry_after_an_earlier_update(tmp_path, monkeypatch):
+    eng, game = install_v1(tmp_path)
+    publish(eng, V2)
+    run(eng, "update")                                        # previous = v1
+    put(game, "pawprints.ini", b"second edit")
+    publish(eng, V3, version="3.0")
+    stop = failing_write(monkeypatch, "c.wav")
+    with pytest.raises(InstallFailed):
+        run(eng, "update")                                    # the ini was moved aside and v3's written
+    stop()
+    assert run(eng, "update").backups == 0
+    assert record(eng).source.version == "3.0"
+    run(eng, "undo")
+    assert record(eng).source.version == "2.0"
+    assert (game / "pawprints.ini").read_bytes() == b"second edit"
+
+
+def test_failed_undo_retried_still_puts_the_players_copy_back(tmp_path, monkeypatch):
+    eng, game = install_v1(tmp_path)
+    publish(eng, V2)
+    run(eng, "update")
+    stop = failing_write(monkeypatch, "a.wav")
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "undo")
+    assert ei.value.message == messages.FILES_NOT_CHANGED.format(title="Pawprints")
+    assert (game / "pawprints.ini").read_bytes() == V1["pawprints.ini"]   # the undo got this far
+    assert record(eng).previous is not None
+    stop()
+    run(eng, "undo")
+    assert (game / "pawprints.ini").read_bytes() == EDITED_INI
+    assert (game / "sounds" / "a.wav").read_bytes() == b"a" and record(eng).previous is None
+
+
+def test_undo_rebuilds_the_previous_version_with_its_recorded_spec(tmp_path):
+    routes = {}
+    v1 = pawprints(routes, {"Pawprints v1/pawprints.exe": b"exe v1", "Pawprints v1/bin/tool.dat": b"tool"},
+                   "1.0", install={"extract_dir": "Pawprints v1"},
+                   steps=[{"action": "move", "from": "bin/tool.dat", "to": "tool.dat"}])
+    v1["extras"] = []
+    eng = make_engine(tmp_path, [v1], fetcher=FakeFetcher(routes))
+    run(eng, "install")
+    game = tmp_path / "Games" / "Pawprints"
+    assert snapshot(game) == {"pawprints.exe": b"exe v1", "tool.dat": b"tool"}
+    v2 = publish(eng, {"Pawprints v2/pawprints.exe": b"exe v2", "Pawprints v2/tool.dat": b"tool 2"},
+                 install={"extract_dir": "Pawprints v2"})
+    v2["extras"] = []
+    run(eng, "update")
+    assert snapshot(game) == {"pawprints.exe": b"exe v2", "tool.dat": b"tool 2"}
+    run(eng, "undo")
+    assert snapshot(game) == {"pawprints.exe": b"exe v1", "tool.dat": b"tool"}
+    assert record(eng).source.install == {"method": "zip", "extract_dir": "Pawprints v1"}
+
+
+def test_repair_keeps_the_recorded_steps_not_todays_catalog(tmp_path):
+    eng, game = install_v1(tmp_path, steps=[reg_step("Path", "here")])
+    eng.ctx.entries["pawprints"]["sources"][0]["steps"] = [reg_step("Mode", "new")]   # same file, new steps
+    (game / "pawprints.exe").unlink()
+    run(eng, "repair")
+    assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Path") == (True, "here", "REG_SZ")
+    assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Mode") == (False, None, None)
+    assert [s["name"] for s in record(eng).steps] == ["Path"]
+    assert (game / "pawprints.exe").read_bytes() == V1["pawprints.exe"]
+
+
+def test_repair_works_after_an_optional_extra_left_the_catalog(tmp_path):
+    eng, game = install_v1(tmp_path)
+    del eng.ctx.entries["pawprints-music"]
+    (game / "music" / "theme.ogg").unlink()
+    run(eng, "repair")
+    assert (game / "music" / "theme.ogg").read_bytes() == b"theme"
+
+
+def test_repair_of_a_record_without_specs_falls_back_to_the_catalog(tmp_path):
+    eng, game = install_v1(tmp_path)
+    rec = record(eng)
+    for source in [rec.source, *rec.extras.values()]:
+        source.install = source.steps = source.launch = None   # as written before specs were recorded
+    eng.ctx.records.save(rec)
+    (game / "sounds" / "a.wav").unlink()
+    run(eng, "repair")
+    assert (game / "sounds" / "a.wav").read_bytes() == b"a"
+
+    del eng.ctx.entries["pawprints-music"]
+    before = snapshot(game)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "repair")
+    assert ei.value.message == messages.REPAIR_NOT_POSSIBLE.format(title="Pawprints")
+    assert snapshot(game) == before
+
+
+def test_repair_prefers_the_catalogs_mirror_copy_of_the_recorded_file(tmp_path):
+    routes = {}
+    entry = pawprints(routes, V1, "1.0", url=DEV_URL)
+    entry["extras"] = []
+    data = routes[DEV_URL]
+    mirror_url = f"{MIRROR}{sha(data)}/pawprints-1.0.zip"
+    entry["sources"].append(served_source(routes, mirror_url, data))
+    eng = make_engine(tmp_path, [entry], fetcher=FakeFetcher(routes))
+    run(eng, "install")
+    game = tmp_path / "Games" / "Pawprints"
+    assert record(eng).source.url == DEV_URL
+    eng.ctx.fetcher.routes[DEV_URL] = b"the developer re-uploaded this"
+    (game / "pawprints.exe").unlink()
+    eng.ctx.fetcher.requests.clear()
+    run(eng, "repair")
+    assert eng.ctx.fetcher.requests == [DEV_URL, mirror_url]
+    assert (game / "pawprints.exe").read_bytes() == V1["pawprints.exe"]
+
+
+def test_fresh_install_over_a_stale_record_undoes_its_old_steps(tmp_path):
+    eng, game = install_v1(tmp_path, play=False, steps=[reg_step("Path", "here")])
+    shutil.rmtree(game)
+    run(eng, "install")
+    assert record(eng).steps[0]["undo"] == {"existed": False, "previous": None, "previous_type": None}
+    run(eng, "uninstall")
+    assert eng.ctx.registry.values == {}
+
+
+def test_fresh_install_when_the_records_library_is_gone_undoes_its_old_steps(tmp_path):
+    eng, game = install_v1(tmp_path, play=False, steps=[reg_step("Path", "here")])
+    other = tmp_path / "Other"
+    eng.ctx.libraries = [{"name": "Other", "path": str(other)}]
+    r = eng.run(InstallRequest("install", "pawprints", "Other"), quiet, never)
+    assert r.game["library_name"] == "Other" and (other / "Pawprints" / "pawprints.exe").exists()
+    rec = record(eng)
+    assert rec.library_name == "Other"
+    assert rec.steps[0]["undo"] == {"existed": False, "previous": None, "previous_type": None}
+    assert game.exists()   # the old folder is left alone
+
+
+def test_added_extra_can_copy_from_a_base_file(tmp_path):
+    eng, game = install_v1(tmp_path, optional=())
+    routes = eng.ctx.fetcher.routes
+    publish(eng, extra(routes, "pawprints-voices", {"voices/hi.ogg": b"hi"},
+                       steps=[{"action": "copy", "from": "sounds/a.wav", "to": "voices/a.wav"}]))
+    before = snapshot(game)
+    run(eng, "extras", extras=("pawprints-voices",))
+    assert snapshot(game) == {**before, "voices/hi.ogg": b"hi", "voices/a.wav": b"a"}
+    files = record(eng).files
+    assert files["voices/a.wav"].owner == "pawprints-voices" and files["sounds/a.wav"].owner == "pawprints"
+
+
+def test_added_extra_can_delete_a_base_file_but_not_a_players(tmp_path):
+    eng, game = install_v1(tmp_path, optional=())
+    routes = eng.ctx.fetcher.routes
+    publish(eng, extra(routes, "pawprints-voices", {"voices/hi.ogg": b"hi"},
+                       steps=[{"action": "delete", "path": "sounds/a.wav"},
+                              {"action": "delete", "path": "pawprints.ini"}]))
+    before = snapshot(game)
+    run(eng, "extras", extras=("pawprints-voices",))
+    expected = {**before, "voices/hi.ogg": b"hi"}
+    del expected["sounds/a.wav"]
+    assert snapshot(game) == expected                      # the player's edited ini is kept
+    files = record(eng).files
+    assert "sounds/a.wav" not in files and "pawprints.ini" not in files   # the kept ini is the player's now
+
+
+def test_path_conflict_refuses_before_undoing_dropped_steps(tmp_path):
+    eng, game = install_v1(tmp_path, steps=[reg_step("Mode", "old")])
+    (game / "sounds" / "b.wav").mkdir()                     # a folder where v2 ships a file
+    publish(eng, V2)                                        # v2 no longer sets Mode
+    before = record(eng)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "update")
+    assert ei.value.message == messages.UPDATE_PATH_CONFLICT.format(path="sounds/b.wav", kind="folder")
+    assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Mode") == (True, "old", "REG_SZ")
+    assert record(eng) == before
