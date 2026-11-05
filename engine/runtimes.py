@@ -99,38 +99,70 @@ class WindowsSecurity:
             return None
 
 
-def lock_down_command(folder: Path, user_sid: str) -> tuple[str, str]:
-    """The one elevated command that locks a runtime's folder, and the folders above it, down: (exe, arguments).
+# cmd.exe refuses a command line longer than 8191 characters; leave room for "cmd.exe " and the quoting.
+COMMAND_LINE_LIMIT = 8000
 
-    `folder` is `<GameChooser>/runtimes/<id>`. The two parent folders themselves (not what is in them)
-    get Administrators as owner, inheritance off, Administrators and SYSTEM full control and Users read
-    and execute, so no one else can rename, delete or replace what is in them. `runtimes` also lets
-    Users create a folder in it (AD, on that folder only; no delete-child), and gives the creator full
-    control of the folder they made (CREATOR OWNER, inherited only), so the next runtime can still be
-    unpacked by the player before its own lock-down.
 
-    For `folder` it empties (or creates) the marker, makes Administrators the owner of everything,
-    turns inheritance off with Administrators and SYSTEM full control and Users read and execute,
-    resets everything inside to inherit only that (dropping any explicit grants), and lets the current
-    user rewrite the marker, so it can say "installed" once the elevated steps succeed.
+def _icacls(path: Path, what: str) -> str:
+    # /L: act on a link itself, never on what it points to. No /T and no wildcard, ever: only the paths
+    # listed here are touched, so nothing planted inside the folder can steer an elevated change elsewhere.
+    return f'icacls "{path}" {what} /L /Q'
+
+
+def _depth_first_order(files: list[str]) -> list[tuple[str, bool]]:
+    """(relative path, is a folder) for every expected entry, each folder before anything inside it."""
+    entries: dict[str, bool] = {}
+    for rel in files:
+        parts = PurePosixPath(rel).parts
+        for i in range(1, len(parts)):
+            entries.setdefault("/".join(parts[:i]), True)
+        entries[rel] = False
+    return sorted(entries.items(), key=lambda item: (item[0].count("/"), item[0].lower()))
+
+
+def lock_down_commands(folder: Path, user_sid: str, files: list[str]) -> list[tuple[str, str]]:
+    """The elevated commands that lock a runtime's folder, and the two folders above it, down:
+    [(exe, arguments)], one per administrator prompt (usually one; more only if the command line would
+    be too long). `files` are the download's files, relative to `folder` with forward slashes.
+
+    Nothing is ever recursive: every icacls call names one path and carries /L. Each folder is sealed
+    (owner Administrators, then inheritance off with Administrators and SYSTEM full control and Users
+    read and execute) before anything inside it is touched:
+    - `<GameChooser>` and `<GameChooser>/runtimes` themselves. `runtimes` also lets Users create a
+      folder in it (AD, on that folder only; no delete-child), and gives the creator full control of
+      the folder they made (CREATOR OWNER, inherited only), so the next runtime can still be unpacked
+      by the player before its own lock-down.
+    - `folder`, then each expected sub-folder, parent first.
+    - Each expected file, and the marker: owner Administrators, then reset to inherit only from its
+      sealed folder (dropping any explicit grant). The current user may then rewrite the marker only,
+      so it can say "installed" once the elevated steps succeed.
     """
-    marker = folder / MARKER_NAME
     runtimes, game_chooser = folder.parent, folder.parent.parent
     base = f"*{ADMINISTRATORS}:(OI)(CI)F *{SYSTEM}:(OI)(CI)F *{USERS}:(OI)(CI)RX"
-    commands = [
-        f'icacls "{game_chooser}" /setowner *{ADMINISTRATORS} /Q',
-        f'icacls "{game_chooser}" /inheritance:r /grant:r {base} /Q',
-        f'icacls "{runtimes}" /setowner *{ADMINISTRATORS} /Q',
-        f'icacls "{runtimes}" /inheritance:r /grant:r {base} *{CREATOR_OWNER}:(OI)(CI)(IO)F /Q',
-        f'icacls "{runtimes}" /grant *{USERS}:(AD) /Q',
-        f'type nul > "{marker}"',
-        f'icacls "{folder}" /setowner *{ADMINISTRATORS} /T /Q',
-        f'icacls "{folder}" /inheritance:r /grant:r *{ADMINISTRATORS}:(OI)(CI)F *{SYSTEM}:(OI)(CI)F '
-        f'*{USERS}:(OI)(CI)RX /Q',
-        f'icacls "{folder}\\*" /reset /T /Q',
-        f'icacls "{marker}" /grant *{user_sid}:M /Q',
-    ]
-    return "cmd.exe", f'/d /v:off /s /c "{" && ".join(commands)}"'
+    owner = f"/setowner *{ADMINISTRATORS}"
+
+    def seal(path: Path, extra: str = "") -> list[str]:
+        return [_icacls(path, owner), _icacls(path, f"/inheritance:r /grant:r {base}{extra}")]
+
+    commands = [*seal(game_chooser), *seal(runtimes, f" *{CREATOR_OWNER}:(OI)(CI)(IO)F"),
+                _icacls(runtimes, f"/grant *{USERS}:(AD)"), *seal(folder)]
+    for rel, is_folder in _depth_first_order([*files, MARKER_NAME]):
+        path = folder.joinpath(*PurePosixPath(rel).parts)
+        commands += seal(path) if is_folder else [_icacls(path, owner), _icacls(path, "/reset")]
+    commands.append(_icacls(folder / MARKER_NAME, f"/grant *{user_sid}:M"))
+
+    invocations, batch = [], []
+    for command in commands:
+        if batch and len(_cmd_args(batch + [command])) > COMMAND_LINE_LIMIT:
+            invocations.append(batch)
+            batch = []
+        batch.append(command)
+    invocations.append(batch)
+    return [("cmd.exe", _cmd_args(batch)) for batch in invocations]
+
+
+def _cmd_args(commands: list[str]) -> str:
+    return f'/d /v:off /s /c "{" && ".join(commands)}"'
 
 
 def linked_component(root: Path, folder: Path) -> Path | None:
@@ -497,15 +529,22 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
         if not found:
             target.mkdir()  # FileExistsError if something made it meanwhile: then it isn't ours
             made = True
-        elif not _owner_is(ctx.security, target, allow_user=True) or not _matches_download(target, incoming):
+        elif (not _owner_is(ctx.security, target, allow_user=True) or not _matches_download(target, incoming)
+              # A folder to be locked down may hold only the download's files: anything else would be
+              # touched by the elevated command, or refused after it.
+              or (elevated and not _only_expected(target, incoming))):
             raise InstallFailed(messages.RUNTIME_FOLDER_NOT_OURS.format(title=title, path=target))
         _copy_into(root, target, added)
         if elevated:
-            _lock_down(ctx, target, title)
-            # Checked again now that no one else can change it: a junction put anywhere on the way to it,
-            # or a file swapped, before the lock is caught here.
+            if not os.path.lexists(target / MARKER_NAME):
+                added.files.append(target / MARKER_NAME)  # removed again if this run fails in a found folder
+            _empty_marker(target, title)
+            _lock_down(ctx, target, title, [display for display, _ in incoming.values()])
+            # Checked again now that no one else can change it: a junction put anywhere on the way to it
+            # or inside it, an entry the download doesn't have, or a file swapped before the lock.
             if (linked_component(ctx.runtimes_root, target) is not None
-                    or not _owner_is(ctx.security, target, allow_user=False) or not _holds_download(target, incoming)):
+                    or not _owner_is(ctx.security, target, allow_user=False)
+                    or not _only_expected(target, incoming) or not _holds_download(target, incoming)):
                 raise InstallFailed(messages.RUNTIME_FOLDER_CHANGED.format(title=title, path=target))
         for step in steps:  # one at a time, so a failure leaves `applied` true to what was done
             applied += run_system_steps([step], step_ctx)
@@ -533,21 +572,64 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
     _write_marker(target, runtime["id"], fetched.sha256, {display: sha for display, sha in incoming.values()})
 
 
-def _lock_down(ctx, target: Path, title: str) -> None:
-    """Run lock_down_command elevated (the runtime's folder and the two above it). A declined prompt is a
-    declined install (R6)."""
-    user = ctx.security.current_user()
-    if not user or not _SID.fullmatch(user) or "%" in str(target):  # cmd would expand a % in the path
-        raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))
-    exe, args = lock_down_command(target, user)
+def _empty_marker(target: Path, title: str) -> None:
+    """Empty (or create) the marker before the lock-down, as the player: a failed run then leaves no stale
+    "installed". It is never written elevated, where a link or hard link planted in its place would
+    steer the write elsewhere."""
     try:
-        code = ctx.elevator.run(exe, args, True)
-    except ElevationDeclined as e:
-        raise InstallFailed(messages.ELEVATION_DECLINED.format(what=title)) from e
-    except StepError as e:
+        (target / MARKER_NAME).write_text("", encoding="utf-8")
+    except OSError as e:
         raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target)) from e
-    if code != 0:
-        raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))
+
+
+def _lock_down(ctx, target: Path, title: str, files: list[str]) -> None:
+    """Run lock_down_commands elevated (the runtime's folder and the two above it), passed inline: never
+    through a script file a player could swap. A declined prompt is a declined install (R6)."""
+    user = ctx.security.current_user()
+    if not user or not _SID.fullmatch(user) or "%" in str(target) or any("%" in f for f in files):
+        raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))  # cmd expands %
+    for exe, args in lock_down_commands(target, user, files):
+        try:
+            code = ctx.elevator.run(exe, args, True)
+        except ElevationDeclined as e:
+            raise InstallFailed(messages.ELEVATION_DECLINED.format(what=title)) from e
+        except StepError as e:
+            raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target)) from e
+        if code != 0:
+            raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))
+
+
+def _expected_entries(incoming: dict[str, tuple[str, str]]) -> tuple[set[str], set[str]]:
+    """(files, folders) the runtime's folder may hold, as norm_keys: the download's files and the marker."""
+    files = {norm_key(display) for display, _ in incoming.values()} | {norm_key(MARKER_NAME)}
+    folders = {norm_key(rel) for rel, is_folder in _depth_first_order(sorted(files)) if is_folder}
+    return files, folders
+
+
+def _only_expected(folder: Path, incoming: dict[str, tuple[str, str]]) -> bool:
+    """True if `folder` holds nothing but expected plain files and folders: walked without following
+    anything, it refuses any link, junction or other reparse point, any hard-linked file, and any entry
+    the download doesn't have."""
+    files, folders = _expected_entries(incoming)
+    pending = [Path(folder)]
+    try:
+        while pending:
+            current = pending.pop()
+            for entry in os.scandir(current):
+                path = Path(entry.path)
+                info = os.lstat(path)
+                key = norm_key(path.relative_to(folder).as_posix())
+                if is_link(path) or getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT:
+                    return False
+                if entry.is_dir(follow_symlinks=False):
+                    if key not in folders:
+                        return False
+                    pending.append(path)
+                elif not entry.is_file(follow_symlinks=False) or key not in files or info.st_nlink > 1:
+                    return False
+    except (OSError, ValueError):
+        return False
+    return True
 
 
 def _holds_download(folder: Path, incoming: dict[str, tuple[str, str]]) -> bool:
