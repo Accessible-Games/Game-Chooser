@@ -171,10 +171,20 @@ STEP_TOUCHES_OTHER_FILES = ("A setup step for {title} would change files its ins
                             "stopped.")
 FILE_STEPS_SKIPPED = ("Some setup steps for {title} weren't run, because Game Chooser couldn't tell which files are "
                       "the game's.")
-FOLDER_NEEDS_ADMIN = ("{title}'s folder {path} needs administrator permission to change, so Game Chooser can't "
-                      "change it. You can update {title} by hand, or give your Windows account permission to change "
-                      "that folder.")
-EXTRAS_SKIPPED_UNTRACKED = ("Game Chooser couldn't tell which files {title}'s installer added, so it didn't add "
-                            "{title}'s extras.")
-EXTRAS_SKIPPED_NEEDS_ADMIN = ("{title}'s folder {path} needs administrator permission to change, so Game Chooser "
-                              "didn't add {title}'s extras.")
+FOLDER_NEEDS_ADMIN = ("{title}'s folder {path} can only be changed with administrator permission, so Game "
+                      "Chooser left it as it is. To let Game Chooser change it, give your Windows account permission "
+                      "to change that folder. Otherwise, make the change by hand.")
+EXTRAS_SKIPPED_UNTRACKED = ("Game Chooser couldn't tell which files {title}'s installer added, so it couldn't add "
+                            "{extras}.")
+EXTRAS_SKIPPED_NEEDS_ADMIN = ("{title}'s folder {path} can only be changed with administrator permission, so Game "
+                              "Chooser couldn't add {extras}.")
+EXTRAS_REQUIRED_MISSING = "{title} may not work properly without {extras}."
+EXTRAS_FILES_NOT_COPIED = ("{title}'s files couldn't be copied to add its extras. Close the game if it's running and "
+                           "check that the drive has free space, then try again.")
+UNDO_FILES_NOT_REMOVED = ("Some files from the newer version of {title} couldn't be removed, so they were left in its "
+                          "folder. Uninstalling {title} removes them.")
+
+
+def names(items: list[str]) -> str:
+    """'A', 'A and B', 'A, B and C'."""
+    return items[0] if len(items) == 1 else ", ".join(items[:-1]) + " and " + items[-1]

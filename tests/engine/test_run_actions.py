@@ -8,12 +8,13 @@ from pathlib import Path
 
 import pytest
 
-from engine import jobs, messages, run_installer
+from engine import jobs, messages, run_actions, run_installer
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from tests.engine.fakes import FakeUninstallKeys, served_source, zip_bytes
 from tests.engine.test_run_installer import (MIRROR, SETUP, install, installed_run_game, never, publish_v2, put,
-                                             quiet, run_game, setaside, setup_engine, sha, tree, writes)
+                                             quiet, run_game, run_game_with_patch, setaside, setup_engine, sha, tree,
+                                             writes)
 
 V1 = {"lc.exe": b"exe v1", "cfg.ini": b"volume=5", "sfx/a.wav": b"a"}  # what installed_run_game's installer writes
 SETUP_V2 = b"MZ setup v2"
@@ -501,3 +502,166 @@ def test_an_untracked_run_record_still_refuses(tmp_path, action):
         run(eng, action, extras=("lc-music",) if action == "extras" else ())
     assert ei.value.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Light Cars")
     assert len(eng.ctx.elevator.calls) == 1
+
+
+# ---- fix round 1 -----------------------------------------------------------------------------------------------
+
+
+def fails_once(monkeypatch, module, name):
+    """Make module.name raise OSError the first time it is called."""
+    real = getattr(module, name)
+    calls = []
+
+    def once(*args, **kw):
+        calls.append(1)
+        if len(calls) == 1:
+            raise OSError("the disk was busy")
+        return real(*args, **kw)
+    monkeypatch.setattr(module, name, once)
+
+
+# Finding 1: a failed extras phase keeps the extras in the record, so a retry still applies them.
+
+def test_a_failed_extras_phase_keeps_the_extras_for_a_retried_update(tmp_path, monkeypatch):
+    eng, target = run_game_with_music(tmp_path)
+    run(eng, "extras", extras=("lc-music",))
+    music_v2(eng, target, clobbers_music=True)
+    fails_once(monkeypatch, jobs, "apply_plan")
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "update")
+    assert ei.value.message == messages.FILES_NOT_CHANGED.format(title="Light Cars")
+    assert set(record(eng).extras) == {"lc-music"}
+    run(eng, "update")
+    assert (target / "music" / "theme.ogg").read_bytes() == b"theme" and set(record(eng).extras) == {"lc-music"}
+    assert_players_files_kept(target)
+
+
+def test_a_failed_extras_phase_keeps_the_extras_for_a_retried_repair(tmp_path, monkeypatch):
+    eng, target = run_game_with_music(tmp_path)
+    run(eng, "extras", extras=("lc-music",))
+    music = record(eng).extras["lc-music"]
+    (target / "music" / "theme.ogg").unlink()
+    fails_once(monkeypatch, jobs, "apply_plan")
+    with pytest.raises(InstallFailed):
+        run(eng, "repair")
+    assert record(eng).extras == {"lc-music": music}
+    run(eng, "repair")
+    assert (target / "music" / "theme.ogg").read_bytes() == b"theme" and record(eng).extras == {"lc-music": music}
+    assert_players_files_kept(target)
+
+
+# Finding 2: a file that can't be copied for the extras' base fails in plain words.
+
+def copy_to_staging_fails(monkeypatch):
+    real = run_actions.shutil.copy2
+
+    def copy2(src, dst, *args, **kw):
+        if ".gamechooser-staging" in str(dst):
+            raise OSError(28, "No space left on device")
+        return real(src, dst, *args, **kw)
+    monkeypatch.setattr(run_actions.shutil, "copy2", copy2)
+
+
+def test_extras_whose_installed_files_cant_be_copied_fail_plainly(tmp_path, monkeypatch):
+    eng, target = run_game_with_music(tmp_path)
+    before, files = record(eng), tree(target)
+    copy_to_staging_fails(monkeypatch)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "extras", extras=("lc-music",))
+    assert ei.value.message == messages.EXTRAS_FILES_NOT_COPIED.format(title="Light Cars")
+    assert tree(target) == files and record(eng) == before
+
+
+def test_a_run_update_whose_installed_files_cant_be_copied_fails_plainly(tmp_path, monkeypatch):
+    eng, target = run_game_with_music(tmp_path)
+    run(eng, "extras", extras=("lc-music",))
+    music_v2(eng, target)
+    copy_to_staging_fails(monkeypatch)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "update")
+    assert ei.value.message == messages.EXTRAS_FILES_NOT_COPIED.format(title="Light Cars")
+    assert set(record(eng).extras) == {"lc-music"}
+
+
+# R27: a fresh install into a folder that needs administrator permission skips its required extra, plainly.
+
+def test_a_fresh_install_into_a_folder_needing_admin_records_its_required_extra_as_not_added(tmp_path, monkeypatch):
+    routes = {}
+    e, x = run_game_with_patch(routes)
+    folder = tmp_path / "Program Files" / "Light Cars"
+    keys = FakeUninstallKeys()
+    place = writes(folder, {"lc.exe": b"exe"})
+
+    def on_start(exe, args, elevated):
+        place(exe, args, elevated)
+        keys.add("Light Cars_is1", {"DisplayName": "Light Cars", "InstallLocation": str(folder)})
+    eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=on_start, uninstall_reader=keys)
+    unwritable(monkeypatch, folder)
+    r = install(eng)
+    rec = record(eng)
+    assert rec.tracked and rec.extras == {} and not (folder / "patch.dat").exists()
+    assert (folder / "lc.exe").read_bytes() == b"exe" and r.game["installed_extras"] == []
+    assert messages.EXTRAS_SKIPPED_NEEDS_ADMIN.format(title="Light Cars", path=folder, extras="Patch") in r.notes
+    assert messages.EXTRAS_REQUIRED_MISSING.format(title="Light Cars", extras="Patch") in r.notes
+    assert eng.ctx.registry.get("HKCU", r"Software\LightCars", "Patch")[0] is False
+
+
+# R28: a path the older version recorded too is never removed by Undo, whatever it holds now.
+
+def test_undo_keeps_a_path_the_older_version_also_had_and_records_what_it_holds(tmp_path, monkeypatch):
+    eng, routes, target = installed_run_game(tmp_path)
+    publish_v2(eng, routes, setup=SETUP_V2)
+    eng.ctx.elevator.on_start = writes(target, {"lc.exe": b"exe v2", "sfx/a.wav": b"a, v2"})
+    run(eng, "update")
+    eng.ctx.elevator.on_start = writes(target, {"lc.exe": b"exe v1", "cfg.ini": b"volume=5"})  # skips sfx/a.wav
+    settle(monkeypatch)
+    run(eng, "undo")
+    assert (target / "sfx" / "a.wav").read_bytes() == b"a, v2"
+    assert record(eng).files["sfx/a.wav"].sha256 == sha(b"a, v2")
+
+
+# R29 (a): a fresh install is never an undo point, even when its extras made a backup.
+
+def test_a_fresh_install_whose_extras_made_a_backup_has_no_undo_point(tmp_path, monkeypatch):
+    routes = {}
+    e, x = run_game_with_patch(routes)
+    target = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, {"lc.exe": b"exe"}))
+    real = run_actions.copy_installed_files
+
+    def game_wrote_a_file_meanwhile(rec, game_dir, *args):
+        put(game_dir, "patch.dat", b"the game's own patch.dat")
+        return real(rec, game_dir, *args)
+    monkeypatch.setattr(run_actions, "copy_installed_files", game_wrote_a_file_meanwhile)
+    r = install(eng)
+    assert r.backups == 1 and record(eng).previous is None
+    assert (target / "Game Chooser backup 2026-11-04" / "patch.dat").read_bytes() == b"the game's own patch.dat"
+
+
+# R29 (b): a newer file Undo couldn't remove gets a plain note, and stays recorded.
+
+def test_undo_says_so_when_a_newer_file_cant_be_removed(tmp_path, monkeypatch):
+    eng, routes, target = updated_run_game(tmp_path)
+    eng.ctx.elevator.on_start = writes(target, V1)
+    settle(monkeypatch)
+    real_unlink = Path.unlink
+
+    def unlink(self, *args, **kw):
+        if self.name == "v2.txt":
+            raise PermissionError(13, "The file is in use")
+        return real_unlink(self, *args, **kw)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    r = run(eng, "undo")
+    assert messages.UNDO_FILES_NOT_REMOVED.format(title="Light Cars") in r.notes
+    assert (target / "v2.txt").exists() and "v2.txt" in record(eng).files
+
+
+# R29 (c): the folder-needs-administrator refusal reads right for any change.
+
+def test_extras_on_a_folder_needing_admin_refuse_with_words_that_fit_any_change(tmp_path, monkeypatch):
+    eng, routes, folder = installed_outside(tmp_path)
+    unwritable(monkeypatch, folder)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "extras", extras=("lc-music",))
+    assert ei.value.message == messages.FOLDER_NEEDS_ADMIN.format(title="Light Cars", path=folder)
+    assert "update" not in messages.FOLDER_NEEDS_ADMIN.lower()

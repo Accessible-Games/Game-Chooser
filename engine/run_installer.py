@@ -759,12 +759,14 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     replaces them without a copy. `previous` is the record's undo point afterwards (KEEP_UNDO_POINT
     leaves it as it is); it is saved with the installer's files, before the system steps run.
     Applied steps in `spare_steps` (the extras' steps, for extras the caller applies next) aren't
-    undone. The record's extras are emptied: the caller records the extras it applies.
+    undone. The record's extras are left as they are: the caller applies and records them next, so
+    if that fails, a retry still knows which extras the game has.
 
     For Undo, `undo_of` is the undo point being undone. A file the newer version recorded that this
-    run didn't claim, and that is unchanged, is removed, unless the older version recorded it too
-    with the same contents (an installer skipping a file it found in place). The older version's
-    vendor uninstaller comes back unless this run registered one.
+    run didn't claim, and that is unchanged, is removed, unless the older version recorded that path
+    too (an installer skipping a file it found in place): then it is kept, recorded as it is. A file
+    that can't be removed stays recorded, and a note says so. The older version's vendor uninstaller
+    comes back unless this run registered one.
     Returns the saved record and notes for the player.
     """
     title = item.title
@@ -821,6 +823,7 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     files = _recorded(game_dir, claimed, item.catalog_id)
     on_disk = hash_tree(game_dir)
     older = (undo_of or {}).get("files") or {}
+    not_removed = []
     for key, old in record.files.items():
         # A shipped file that wasn't the player's is the installer's now, even one it rewrote
         # keeping its old dates. The player's files aren't recorded: they stay theirs.
@@ -828,13 +831,17 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
             continue
         rel, sha = on_disk[key]
         if undo_of is not None and sha == old.sha256:
-            had = older.get(key) or {}
-            if had.get("sha256") == sha:
-                files[key] = RecordedFile(had.get("path") or rel, sha, had.get("owner") or old.owner)
+            if key in older:  # the older version had this path too: never removed, recorded as it is
+                files[key] = RecordedFile(rel, sha, older[key].get("owner") or old.owner)
                 continue
-            if _remove_unchanged(game_dir, rel, sha):
-                continue  # the newer version's, unchanged: Undo removes it, as an update would
+            try:
+                if _remove_unchanged(game_dir, rel, sha):
+                    continue  # the newer version's, unchanged: Undo removes it, as an update would
+            except OSError:
+                not_removed.append(rel)
         files[key] = old if sha == old.sha256 else RecordedFile(rel, sha, item.catalog_id)
+    if not_removed:
+        notes.append(messages.UNDO_FILES_NOT_REMOVED.format(title=title))
 
     exe = (find_launch_exe(game_dir, item.launch_hint, _only(ctx.exclude, game_dir, files))
            or find_launch_exe(game_dir, record.launch_path, _only(ctx.exclude, game_dir, files)))
@@ -842,7 +849,6 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     record.source = item.source
     record.method = "run"
     record.tracked = True
-    record.extras = {}
     if exe is not None:
         record.launch_path = exe.relative_to(game_dir).as_posix()
     new_entries = new_uninstall_entries(keys_before, snapshot_uninstall_keys(ctx.uninstall_reader))
@@ -861,14 +867,15 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
 
 
 def _remove_unchanged(game_dir: Path, rel: str, sha: str) -> bool:
-    """Delete the game's file at `rel` if it still has contents `sha`. True if it is gone."""
+    """Delete the game's file at `rel` if it still has contents `sha`. True if it is gone; False if it
+    isn't a plain file with those contents any more. Raises OSError if it couldn't be deleted."""
     try:
         path, linked = _resolve_game_path(game_dir, rel)
-        if linked or not path.is_file() or hash_file(path) != sha:
-            return False
-        path.unlink()
-    except (UnsafePath, OSError):
+    except UnsafePath:
         return False
+    if linked or not path.is_file() or hash_file(path) != sha:
+        return False
+    path.unlink()
     _prune_empty_dirs(path.parent, game_dir)
     return True
 

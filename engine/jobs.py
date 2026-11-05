@@ -413,25 +413,47 @@ class InstallEngine:
 
         They are all its extras now, so files an earlier extra shipped that none of them ships are
         removed if unchanged. `recorded` gives the exact sources they were fetched by (Repair, Undo);
-        otherwise they are recorded as the catalog's. An untracked folder, or one outside the libraries
-        that needs administrator permission, gets no extras, and a note says so. Returns notes for the
-        player and the number of backups made.
+        otherwise they are recorded as the catalog's. They are recorded before they are applied, so if
+        applying them fails, a retried Update or Repair still applies them. `prior` is the undo point
+        backups are kept in if there is none yet; None (a fresh install) makes none.
+
+        An untracked folder, or one outside the libraries that needs administrator permission, gets no
+        extras: they are recorded as not added, and a note names them (and says which the game needs).
+        Returns notes for the player and the number of backups made.
         """
-        title = _title(entry)
         if not unpacked and all(f.owner == rec.catalog_id for f in rec.files.values()):
+            if rec.extras:
+                rec.extras = {}
+                self.ctx.records.save(rec)
             return [], 0
-        if not rec.tracked:
-            return ([messages.EXTRAS_SKIPPED_UNTRACKED.format(title=title)] if unpacked else []), 0
         game_dir = record_folder(rec, self.ctx.libraries)
+        if not rec.tracked:
+            return self._extras_skipped(entry, rec, unpacked, messages.EXTRAS_SKIPPED_UNTRACKED), 0
         if not rec.library_name and not _can_write(game_dir):
-            return [messages.EXTRAS_SKIPPED_NEEDS_ADMIN.format(title=title, path=game_dir)], 0
-        tree = run_actions.copy_installed_files(rec, game_dir, staging / "game" / game_dir.name)
-        fetched, result, notes = self._apply_extras(entry, rec, game_dir, tree, unpacked,
-                                                    prior or _snapshot(rec), cancel, every=True)
+            return self._extras_skipped(entry, rec, unpacked, messages.EXTRAS_SKIPPED_NEEDS_ADMIN, path=game_dir), 0
         rec.extras = {x["id"]: (recorded or {}).get(x["id"]) or _installed_source(x, f, self.ctx.platform)
-                      for x, f in fetched}
+                      for x, f, _ in unpacked}
+        self.ctx.records.save(rec)
+        tree = run_actions.copy_installed_files(rec, game_dir, staging / "game" / game_dir.name, _title(entry))
+        fetched, result, notes = self._apply_extras(entry, rec, game_dir, tree, unpacked, prior, cancel, every=True)
         self.ctx.records.save(rec)
         return [*dict.fromkeys(f.note for _, f in fetched if f.note), *notes], len(result.backups)
+
+    def _extras_skipped(self, entry: dict, rec: InstallRecord, unpacked: list[tuple[dict, Fetched, Path]],
+                        text: str, **values) -> list[str]:
+        """Record that the extras weren't added, and say so: which ones, and which of them the game needs."""
+        rec.extras = {}
+        self.ctx.records.save(rec)
+        if not unpacked:
+            return []
+        title = _title(entry)
+        needed = {x.entry["id"] for x in extras_of(entry, self.ctx.entries, self.ctx.platform) if x.required}
+        skipped = [x.get("title") or x["id"] for x, _, _ in unpacked]
+        required = [x.get("title") or x["id"] for x, _, _ in unpacked if x["id"] in needed]
+        notes = [text.format(title=title, extras=messages.names(skipped), **values)]
+        if required:
+            notes.append(messages.EXTRAS_REQUIRED_MISSING.format(title=title, extras=messages.names(required)))
+        return notes
 
     def _fetch_and_unpack(self, item: dict, dest: Path, work_dir: Path, fetch: Fetch,
                           progress, cancel) -> tuple[Fetched, Path]:
@@ -851,7 +873,7 @@ class InstallEngine:
         prior = _snapshot(rec)
         with self._workspace(self._staging_root(rec, game_dir), game_id) as (staging, work):
             if self._recorded_runs_installer(game_id, rec.source):
-                tree = run_actions.copy_installed_files(rec, game_dir, staging / "game" / game_dir.name)
+                tree = run_actions.copy_installed_files(rec, game_dir, staging / "game" / game_dir.name, title)
             else:
                 try:
                     tree = self._stage_recorded(entry, rec.source, base_extras, game_dir.name, staging, work,
@@ -871,7 +893,7 @@ class InstallEngine:
         return JobResult("extras", game_id, title, _game_dict(entry, rec), notes, backups=len(result.backups))
 
     def _apply_extras(self, entry: dict, rec: InstallRecord, game_dir: Path, tree: Path,
-                      unpacked: list[tuple[dict, Fetched, Path]], prior: dict, cancel, every: bool = False
+                      unpacked: list[tuple[dict, Fetched, Path]], prior: dict | None, cancel, every: bool = False
                       ) -> tuple[list[tuple[dict, Fetched]], ApplyResult, list[str]]:
         """Merge unpacked extras over `tree` (the installed version) and change only their files in
         `game_dir`: the files they wrote and the installed files their steps removed. With `every`, they
@@ -1080,9 +1102,10 @@ def _snapshot(rec: InstallRecord) -> dict:
     return snapshot
 
 
-def _keep_backups(rec: InstallRecord, backups: list[dict], prior: dict) -> None:
-    """Keep backups in `record.previous`, so Undo can put the player's copies back."""
-    if not backups:
+def _keep_backups(rec: InstallRecord, backups: list[dict], prior: dict | None) -> None:
+    """Keep backups in `record.previous`, so Undo can put the player's copies back. With no undo point
+    yet, `prior` becomes one; None (a fresh install) makes none, and the backups just stay in the folder."""
+    if not backups or (rec.previous is None and prior is None):
         return
     if rec.previous is not None:
         rec.previous = {**rec.previous, "backups": [*(rec.previous.get("backups") or []), *backups]}

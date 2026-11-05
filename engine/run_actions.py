@@ -92,24 +92,28 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
                           backups=backups)
 
 
-def copy_installed_files(rec: InstallRecord, game_dir: Path, tree: Path) -> Path:
+def copy_installed_files(rec: InstallRecord, game_dir: Path, tree: Path, title: str) -> Path:
     """Copy into `tree` each recorded file the game's folder still holds exactly as installed.
 
-    For an installer that must run, this is the installed version Extras... adds to: it can't be
-    rebuilt in staging. Files the player changed or removed are left out, so an extra's file step
-    that needs one stops with plain words instead of reading the player's copy.
+    For an installer that must run, this is the installed version its extras are added to: it can't
+    be rebuilt in staging. Files the player changed or removed are left out, so an extra's file step
+    that needs one stops with plain words instead of reading the player's copy. A file that can't be
+    read or copied (locked, or the drive is full) stops it with plain words too; only staging changed.
     """
-    tree.mkdir(parents=True)
-    for recorded in rec.files.values():
-        try:
-            path, linked = _resolve_game_path(game_dir, recorded.path)
-        except UnsafePath:
-            continue
-        if linked or not path.is_file() or hash_file(path) != recorded.sha256:
-            continue
-        copy = tree / recorded.path
-        copy.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(path, copy)
+    try:
+        tree.mkdir(parents=True)
+        for recorded in rec.files.values():
+            try:
+                path, linked = _resolve_game_path(game_dir, recorded.path)
+            except UnsafePath:
+                continue
+            if linked or not path.is_file() or hash_file(path) != recorded.sha256:
+                continue
+            copy = tree / recorded.path
+            copy.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(path, copy)
+    except OSError as e:
+        raise InstallFailed(messages.EXTRAS_FILES_NOT_COPIED.format(title=title)) from e
     return tree
 
 

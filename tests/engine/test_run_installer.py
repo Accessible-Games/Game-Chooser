@@ -514,7 +514,8 @@ def test_an_untracked_run_install_skips_its_extras_and_says_so(tmp_path, monkeyp
     r = install(eng)
     rec = eng.ctx.records.load("lightcars")
     assert rec.tracked is False and rec.extras == {} and not (chosen / "patch.dat").exists()
-    assert messages.EXTRAS_SKIPPED_UNTRACKED.format(title="Light Cars") in r.notes
+    assert messages.EXTRAS_SKIPPED_UNTRACKED.format(title="Light Cars", extras="Patch") in r.notes
+    assert messages.EXTRAS_REQUIRED_MISSING.format(title="Light Cars", extras="Patch") in r.notes
 
 
 def test_run_mode_extra_is_refused_plainly(tmp_path):
