@@ -1,0 +1,11 @@
+{
+  "id": "test-extra",
+  "kind": "extra",
+  "title": "Test Extra Level",
+  "developer": ["Game Chooser Tests"],
+  "version": "1.0",
+  "install_into": "test-game-extras",
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}
+  ]
+}

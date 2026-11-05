@@ -1,0 +1,15 @@
+{
+  "id": "test-game",
+  "kind": "game",
+  "title": "Test Game",
+  "developer": ["Game Chooser Tests"],
+  "genres": ["Test"],
+  "year": 2026,
+  "version": "1.0",
+  "description": "A tiny batch-file game for trying installs, updates, undo and uninstall. Version 2 changes a data file and the settings file and adds a level. The player's Saves folder is kept.",
+  "launch": {"windows": {"path": "game.bat"}},
+  "persist": ["Saves/"],
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "id": "test-game-none",
+  "kind": "game",
+  "title": "Test Game Single Exe",
+  "developer": ["Game Chooser Tests"],
+  "genres": ["Test"],
+  "year": 2026,
+  "version": "1.0",
+  "description": "A single program file with no archive (install method none). TinyGame.exe is a copy of where.exe made when the fixtures are built.",
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "none"}}
+  ]
+}

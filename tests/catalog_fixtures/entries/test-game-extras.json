@@ -1,0 +1,16 @@
+{
+  "id": "test-game-extras",
+  "kind": "game",
+  "title": "Test Game With Extra",
+  "developer": ["Game Chooser Tests"],
+  "genres": ["Test"],
+  "year": 2026,
+  "version": "1.0",
+  "description": "A game with a required extra, which installs into the game's folder.",
+  "launch": {"windows": {"path": "game.bat"}},
+  "persist": ["Saves/"],
+  "extras": [{"id": "test-extra", "required": true}],
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "id": "test-game-no-path",
+  "kind": "game",
+  "title": "Test Game Without Launch Path",
+  "developer": ["Game Chooser Tests"],
+  "genres": ["Test"],
+  "year": 2026,
+  "version": "1.0",
+  "description": "Ships game.bat in its top folder and launcher/start.bat, with no launch path in the catalog at first, so the app guesses game.bat. Run the server with --add-launch-path to publish launcher/start.bat as its launch path.",
+  "persist": ["Saves/"],
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}
+  ]
+}

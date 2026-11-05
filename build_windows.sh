@@ -83,6 +83,7 @@ uv run python -m nuitka \
     --windows-console-mode=disable \
     --enable-plugin=implicit-imports \
     --follow-imports \
+    --include-package=engine \
     --output-dir=build \
     game-chooser.py
 

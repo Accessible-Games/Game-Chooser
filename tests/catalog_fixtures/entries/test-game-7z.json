@@ -1,0 +1,15 @@
+{
+  "id": "test-game-7z",
+  "kind": "game",
+  "title": "Test Game Password 7z",
+  "developer": ["Game Chooser Tests"],
+  "genres": ["Test"],
+  "year": 2026,
+  "version": "1.0",
+  "description": "A game packed in a password-protected 7z archive.",
+  "launch": {"windows": {"path": "game.bat"}},
+  "persist": ["Saves/"],
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "7z", "password": "test-password"}}
+  ]
+}
