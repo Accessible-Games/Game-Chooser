@@ -32,111 +32,12 @@ if resource_finder_path.exists() and str(resource_finder_path) not in sys.path:
     sys.path.insert(0, str(resource_finder_path))
 
 import wx
-import json
 import os
 import platform
 import threading
 from models import Game
 from validation_service import ValidationService
 from smart_list import SmartList, Column
-
-
-class ScanProgressDialog(wx.Dialog):
-    """Dialog showing scanning progress with cancel button"""
-    
-    def __init__(self, parent):
-        super().__init__(parent, title="Scanning for Games",
-                        style=wx.CAPTION | wx.CLOSE_BOX | wx.SYSTEM_MENU)
-        
-        self.cancelled = False
-        self.current_library = ""
-        self.libraries_processed = 0
-        self.total_libraries = 0
-        self.games_found = 0
-        
-        self.init_ui()
-        self.CenterOnParent()
-        
-    def init_ui(self):
-        """Initialize the dialog UI"""
-        panel = wx.Panel(self)
-        main_sizer = wx.BoxSizer(wx.VERTICAL)
-        
-        # Status text
-        self.status_text = wx.StaticText(panel, label="Scanning for games...")
-        main_sizer.Add(self.status_text, 0, wx.ALL | wx.EXPAND, 10)
-        
-        # Current library text
-        self.library_text = wx.StaticText(panel, label="")
-        main_sizer.Add(self.library_text, 0, wx.LEFT | wx.RIGHT | wx.EXPAND, 10)
-        
-        # Progress bar
-        self.progress_bar = wx.Gauge(panel, range=100)
-        main_sizer.Add(self.progress_bar, 0, wx.ALL | wx.EXPAND, 10)
-        
-        # Games found counter
-        self.games_text = wx.StaticText(panel, label="Games found: 0")
-        main_sizer.Add(self.games_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
-        
-        # Cancel button
-        cancel_btn = wx.Button(panel, wx.ID_CANCEL, "Cancel")
-        cancel_btn.Bind(wx.EVT_BUTTON, self.on_cancel)
-        main_sizer.Add(cancel_btn, 0, wx.ALIGN_CENTER | wx.ALL, 10)
-        
-        panel.SetSizer(main_sizer)
-        
-        # Size the dialog
-        main_sizer.Fit(panel)
-        self.SetClientSize(panel.GetSize())
-        self.SetMinSize((300, -1))
-        
-    def on_cancel(self, event):
-        """Handle cancel button click"""
-        self.cancelled = True
-        self.status_text.SetLabel("Cancelling scan...")
-        
-    def update_progress(self, library_name, progress, games_found):
-        """Update the progress display"""
-        if self.cancelled:
-            return
-            
-        # Use CallAfter to ensure UI updates happen on main thread
-        wx.CallAfter(self._update_progress_ui, library_name, progress, games_found)
-    
-    def _update_progress_ui(self, library_name, progress, games_found):
-        """Update progress UI on main thread"""
-        if library_name != self.current_library:
-            self.current_library = library_name
-            self.library_text.SetLabel(f"Scanning: {library_name}")
-            
-        self.progress_bar.SetValue(int(progress))
-        self.games_found = games_found
-        self.games_text.SetLabel(f"Games found: {games_found}")
-        
-    def set_library_count(self, total):
-        """Set total number of libraries to process"""
-        self.total_libraries = total
-        if total > 0:
-            self.status_text.SetLabel("Scanning for games...")
-    
-    def finish_scan(self, games_found, exceptions_added):
-        """Called when scan is complete"""
-        wx.CallAfter(self._finish_scan_ui, games_found, exceptions_added)
-        
-    def _finish_scan_ui(self, games_found, exceptions_added):
-        """Finish scan UI on main thread"""
-        if self.cancelled:
-            self.status_text.SetLabel("Scan cancelled")
-        else:
-            self.status_text.SetLabel(f"Scan complete! Found {games_found} games")
-            if exceptions_added > 0:
-                self.games_text.SetLabel(f"Games found: {games_found} (+{exceptions_added} exceptions added)")
-        
-        self.progress_bar.SetValue(100)
-        
-        # Auto-close after 1 second if not cancelled
-        if not self.cancelled:
-            wx.CallLater(1000, self.EndModal, wx.ID_OK)
 
 
 class FirstTimeSetupDialog(wx.Dialog):
@@ -148,7 +49,6 @@ class FirstTimeSetupDialog(wx.Dialog):
 
         self.library_manager = library_manager
         self.parent_frame = parent
-        self.reminder_shown = False
         self.initial_library_count = len(library_manager.config["libraries"])
 
         self.init_ui()
@@ -188,23 +88,6 @@ class FirstTimeSetupDialog(wx.Dialog):
         main_sizer.Fit(panel)
         self.SetClientSize(panel.GetSize())
 
-    def check_and_show_reminder(self):
-        """Check if reminder should be shown after successful addition"""
-        if self.reminder_shown:
-            return
-
-        # Check if user has added anything
-        has_libraries = len(self.library_manager.config["libraries"]) > 0
-        has_games = len(self.library_manager.games) > 0
-
-        if has_libraries or has_games:
-            wx.MessageBox(
-                "You can add folders that should be excluded from a game library, "
-                "as well as manage other preferences, by clicking the button here or pressing "
-                "\"Ctrl+,\" at any time.",
-                "Friendly Reminder", wx.OK | wx.ICON_INFORMATION)
-            self.reminder_shown = True
-
     def on_add_library(self, event):
         """Open directory picker to add library"""
         dlg = wx.DirDialog(self, "Choose Game Library Directory")
@@ -217,7 +100,6 @@ class FirstTimeSetupDialog(wx.Dialog):
                 "path": path
             })
             self.library_manager.save_config()
-            self.check_and_show_reminder()
         dlg.Destroy()
 
     def on_add_game(self, event):
@@ -226,14 +108,12 @@ class FirstTimeSetupDialog(wx.Dialog):
         if dlg.ShowModal() == wx.ID_OK:
             self.library_manager.games.append(dlg.game)
             self.library_manager.save_games()
-            self.check_and_show_reminder()
         dlg.Destroy()
 
     def on_preferences(self, event):
         """Open preferences dialog"""
         dlg = PreferencesDialog(self, self.library_manager)
-        if dlg.ShowModal() == wx.ID_OK:
-            self.check_and_show_reminder()
+        dlg.ShowModal()
         dlg.Destroy()
 
     def on_close(self, event):
@@ -609,7 +489,6 @@ class PreferencesDialog(wx.Dialog):
 
         # Create tabs
         self.create_library_paths_tab()
-        self.create_exceptions_tab()
 
         # Main sizer with buttons
         main_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -637,8 +516,6 @@ class PreferencesDialog(wx.Dialog):
         ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
         apply_btn.Bind(wx.EVT_BUTTON, self.on_apply)
         
-        # Store original config for cancel
-        self.original_config = json.loads(json.dumps(library_manager.config))
     
     def create_library_paths_tab(self):
         """Create library paths tab"""
@@ -687,55 +564,6 @@ class PreferencesDialog(wx.Dialog):
         add_lib_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
         remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
 
-    def create_exceptions_tab(self):
-        """Create exceptions tab"""
-        tab_panel = wx.Panel(self.notebook)
-        tab_sizer = wx.BoxSizer(wx.VERTICAL)
-
-        # Exceptions section
-        exc_label = wx.StaticText(tab_panel, label="Exceptions:")
-        tab_sizer.Add(exc_label, 0, wx.ALL, 5)
-
-        exc_container = wx.Panel(tab_panel)
-        exc_sizer = wx.BoxSizer(wx.HORIZONTAL)
-
-        self.exc_list = SmartList(parent=exc_container, style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        self.exc_list.SetLabel("Exceptions")
-        self.exc_list.set_columns([
-            Column(title="Path", model_field=lambda exc: exc, width=500)
-        ])
-
-        # Populate exceptions list
-        self.exc_list.add_items(self.library_manager.config["exceptions"])
-
-        exc_sizer.Add(self.exc_list.control.control, 1, wx.EXPAND | wx.RIGHT, 5)
-
-        # Exception buttons
-        exc_btn_panel = wx.Panel(exc_container)
-        exc_btn_sizer = wx.BoxSizer(wx.VERTICAL)
-
-        add_exc_btn = wx.Button(exc_btn_panel, label="Add")
-        add_folder_btn = wx.Button(exc_btn_panel, label="Add Folder")
-        remove_exc_btn = wx.Button(exc_btn_panel, label="Remove")
-
-        exc_btn_sizer.Add(add_exc_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
-        exc_btn_sizer.Add(add_folder_btn, 0, wx.EXPAND | wx.BOTTOM, 5)
-        exc_btn_sizer.Add(remove_exc_btn, 0, wx.EXPAND)
-
-        exc_btn_panel.SetSizer(exc_btn_sizer)
-        exc_sizer.Add(exc_btn_panel, 0, wx.ALIGN_TOP)
-
-        exc_container.SetSizer(exc_sizer)
-        tab_sizer.Add(exc_container, 1, wx.EXPAND | wx.ALL, 5)
-
-        tab_panel.SetSizer(tab_sizer)
-        self.notebook.AddPage(tab_panel, "Exceptions")
-
-        # Bind events
-        add_exc_btn.Bind(wx.EVT_BUTTON, self.on_add_exception)
-        add_folder_btn.Bind(wx.EVT_BUTTON, self.on_add_folder_exception)
-        remove_exc_btn.Bind(wx.EVT_BUTTON, self.on_remove_exception)
-    
     def on_add_library(self, event):
         """Add a new library path"""
         dlg = wx.DirDialog(self, "Choose Game Library Directory")
@@ -762,154 +590,11 @@ class PreferencesDialog(wx.Dialog):
             self.library_manager.config["libraries"].remove(selected_item)
             # Remove from list
             self.lib_list.delete_item(selected_item)
-    
-    def on_add_exception(self, event):
-        """Add a new file exception"""
-        # Determine file filter based on platform
-        system = platform.system()
-        if system == "Windows":
-            wildcard = "Executable files (*.exe;*.bat)|*.exe;*.bat|All files (*.*)|*.*"
-        else:
-            wildcard = "All files (*.*)|*.*"
 
-        dlg = wx.FileDialog(self, "Select File to Exclude from Scanning",
-                           wildcard=wildcard,
-                           style=wx.FD_OPEN | wx.FD_FILE_MUST_EXIST)
-        if dlg.ShowModal() == wx.ID_OK:
-            file_path = dlg.GetPath()
-            if file_path:
-                # Convert to relative path if within a library
-                relative_path = self._make_relative_to_library(file_path)
-                if relative_path:
-                    self.exc_list.add_item(relative_path)
-                    self.library_manager.config["exceptions"].append(relative_path)
-                else:
-                    wx.MessageBox("Selected file is not within any configured library path.",
-                                "Invalid File", wx.OK | wx.ICON_WARNING)
-        dlg.Destroy()
-
-    def on_add_folder_exception(self, event):
-        """Add a new folder exception"""
-        dlg = wx.DirDialog(self, "Choose Folder to Exclude from Scanning")
-        if dlg.ShowModal() == wx.ID_OK:
-            folder_path = dlg.GetPath()
-            if folder_path:
-                # Convert to relative path if within a library
-                relative_path = self._make_relative_to_library(folder_path)
-                if relative_path:
-                    # Add trailing slash to indicate this is a folder exception
-                    folder_exception = relative_path.rstrip('/') + '/'
-                    self.exc_list.add_item(folder_exception)
-                    self.library_manager.config["exceptions"].append(folder_exception)
-                else:
-                    wx.MessageBox("Selected folder is not within any configured library path.",
-                                "Invalid Folder", wx.OK | wx.ICON_WARNING)
-        dlg.Destroy()
-
-    def _make_relative_to_library(self, folder_path):
-        """Convert absolute folder path to library-relative path"""
-        import os
-        from pathlib import Path
-
-        folder_path = Path(folder_path)
-
-        # Check if folder is within any configured library
-        for lib in self.library_manager.config["libraries"]:
-            lib_path = Path(lib["path"])
-            try:
-                # Check if folder_path is within lib_path
-                rel_path = folder_path.relative_to(lib_path)
-                # Return the relative path with forward slashes
-                return str(rel_path).replace(os.sep, '/')
-            except ValueError:
-                # folder_path is not within this library
-                continue
-
-        return None
-
-    def on_remove_exception(self, event):
-        """Remove selected exception"""
-        selected_item = self.exc_list.get_selected_item()
-        if selected_item:
-            self.library_manager.config["exceptions"].remove(selected_item)
-            self.exc_list.delete_item(selected_item)
-    
     def on_apply(self, event):
-        """Apply changes and rescan if needed"""
-        old_libs = self.original_config["libraries"]
-        new_libs = self.library_manager.config["libraries"]
-
-        # Check if libraries changed
-        libs_changed = json.dumps(old_libs) != json.dumps(new_libs)
-
-        # Check if exceptions changed
-        old_exceptions = self.original_config.get("exceptions", [])
-        new_exceptions = self.library_manager.config.get("exceptions", [])
-        exceptions_changed = old_exceptions != new_exceptions
-
+        """Save the config"""
         self.library_manager.save_config()
 
-        if libs_changed and self.library_manager.config["libraries"]:
-            # Determine which libraries are completely new
-            old_lib_names = set(lib["name"] for lib in old_libs)
-            new_lib_names = set(lib["name"] for lib in new_libs)
-
-            # Find new libraries that need full scan
-            new_libraries_added = new_lib_names - old_lib_names
-
-            # Ask user if they want to scan now
-            response = wx.MessageBox(
-                "Library configuration has changed. Would you like to scan for games now?\n\n"
-                "You can also scan later using Refresh (F5).",
-                "Scan Libraries?",
-                wx.YES_NO | wx.ICON_QUESTION
-            )
-
-            if response != wx.YES:
-                # User declined - just save and return
-                return
-
-            try:
-                # Use unified scanning - method will handle new libraries intelligently
-                result = self.library_manager.scan_with_dialog(
-                    self.GetParent(),
-                    new_libraries_added if new_libraries_added else None
-                )
-                
-                # If scan was cancelled, just continue without showing dialogs
-                if result is None:
-                    return
-                
-                exc_count, removed_libraries = result
-                
-                # Check for removed libraries first
-                if removed_libraries:
-                    lib_paths = "\n".join([f"• {lib['name']}: {lib['path']}" for lib in removed_libraries])
-                    message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}"
-                    wx.MessageBox(message, "Missing Library Paths Removed", wx.OK | wx.ICON_WARNING)
-                    # Refresh the libraries list in the dialog
-                    self.lib_list.clear()
-                    self.lib_list.add_items(self.library_manager.config["libraries"])
-                elif exc_count > 0:
-                    if wx.MessageBox(f"Added {exc_count} executables to exceptions. Open preferences?",
-                                    "Exceptions Added", 
-                                    wx.YES_NO | wx.ICON_QUESTION) == wx.YES:
-                        # Already in preferences, just refresh the exceptions list
-                        self.exc_list.clear()
-                        self.exc_list.add_items(self.library_manager.config["exceptions"])
-            except PermissionError as e:
-                wx.MessageBox(str(e), "Permission Denied", wx.OK | wx.ICON_ERROR)
-        elif exceptions_changed:
-            # Only exceptions changed, not libraries - run cleanConfigs directly
-            self.library_manager.cleanConfigs()
-
-            # Refresh the exceptions list to show cleaned exceptions
-            self.exc_list.clear()
-            self.exc_list.add_items(self.library_manager.config["exceptions"])
-
-        # Update original config
-        self.original_config = json.loads(json.dumps(self.library_manager.config))
-    
     def on_ok(self, event):
         """Save and close"""
         self.on_apply(event)
@@ -917,11 +602,7 @@ class PreferencesDialog(wx.Dialog):
 
 
 class DeleteGameDialog(wx.Dialog):
-    """Custom dialog for game deletion with exception option"""
-
-    # Return codes for different choices
-    ID_DELETE_ONLY = wx.ID_HIGHEST + 1
-    ID_DELETE_AND_EXCEPTION = wx.ID_HIGHEST + 2
+    """Confirmation dialog for game deletion"""
 
     def __init__(self, parent, game_title):
         super().__init__(parent, title="Confirm Delete",
@@ -939,28 +620,19 @@ class DeleteGameDialog(wx.Dialog):
         message = wx.StaticText(self, label=f"Delete '{self.game_title}' from library?")
         sizer.Add(message, 0, wx.ALL | wx.CENTER, 15)
 
-        # Explanation
-        explanation = wx.StaticText(self,
-            label="Adding to exceptions prevents re-discovery in future scans.")
-        explanation.SetFont(explanation.GetFont().Smaller())
-        sizer.Add(explanation, 0, wx.LEFT | wx.RIGHT | wx.CENTER, 15)
-
         # Buttons
         button_sizer = wx.BoxSizer(wx.HORIZONTAL)
 
         yes_btn = wx.Button(self, wx.ID_YES, "Yes")
-        yes_exception_btn = wx.Button(self, self.ID_DELETE_AND_EXCEPTION, "Yes and add to exceptions")
         no_btn = wx.Button(self, wx.ID_NO, "No")
 
         button_sizer.Add(yes_btn, 0, wx.ALL, 5)
-        button_sizer.Add(yes_exception_btn, 0, wx.ALL, 5)
         button_sizer.Add(no_btn, 0, wx.ALL, 5)
 
         sizer.Add(button_sizer, 0, wx.ALL | wx.CENTER, 10)
 
         # Bind events
         self.Bind(wx.EVT_BUTTON, self.on_yes, yes_btn)
-        self.Bind(wx.EVT_BUTTON, self.on_yes_exception, yes_exception_btn)
         self.Bind(wx.EVT_BUTTON, self.on_no, no_btn)
 
         self.SetSizer(sizer)
@@ -969,10 +641,6 @@ class DeleteGameDialog(wx.Dialog):
     def on_yes(self, event):
         """Handle Yes button"""
         self.EndModal(wx.ID_YES)
-
-    def on_yes_exception(self, event):
-        """Handle Yes and add to exceptions button"""
-        self.EndModal(self.ID_DELETE_AND_EXCEPTION)
 
     def on_no(self, event):
         """Handle No button"""

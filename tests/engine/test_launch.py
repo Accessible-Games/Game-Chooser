@@ -114,15 +114,3 @@ def test_select_best_executable_rules():
     assert select_best_executable([Path("q.exe"), Path("Dir.exe")], "dir") == Path("Dir.exe")
     assert select_best_executable([Path("q.exe"), Path("r.exe")], "dir") == Path("q.exe")
     assert select_best_executable([], "dir") is None
-
-
-def test_library_manager_still_uses_same_rules():
-    from library_manager import GameLibraryManager
-    mgr = GameLibraryManager.__new__(GameLibraryManager)  # no real config/games.json
-    exes = [(Path("g/zzz.exe"), "g/zzz.exe"), (Path("g/Launch.exe"), "g/Launch.exe"),
-            (Path("g/Play.exe"), "g/Play.exe")]
-    assert mgr._select_best_executable(exes, "g") == Path("g/Launch.exe")
-    exes = [(Path("g/a.exe"), "x"), (Path("g/Doom Eternal.exe"), "y")]
-    assert mgr._select_best_executable(exes, "Doom Eternal") == Path("g/Doom Eternal.exe")
-    assert mgr._select_best_executable(exes, "other") == Path("g/a.exe")
-    assert mgr._select_best_executable([], "x") is None

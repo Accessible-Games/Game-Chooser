@@ -15,12 +15,11 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import re
-import fnmatch
 from pathlib import Path
 
 
 class ExceptionManager:
-    """Manages auto-exception patterns and user exceptions for game scanning."""
+    """Manages auto-exception patterns for non-game executables."""
 
     # Simplified auto-exception keywords - only relevant for Windows/Mac games
     # Keywords match anywhere in the filename (substring matching, not word boundaries)
@@ -204,37 +203,5 @@ class ExceptionManager:
                 return False
             # Otherwise exclude batch file
             return True
-
-        return False
-
-    def is_user_exception(self, rel_path, exceptions_list):
-        """
-        Check if a path matches user-defined exceptions.
-
-        Args:
-            rel_path: Library-relative path to check
-            exceptions_list: List of user exception patterns
-
-        Returns:
-            bool: True if path matches user exceptions
-        """
-        rel_str = str(rel_path).replace('\\', '/')
-
-        for exception in exceptions_list:
-            exception = exception.strip().replace('\\', '/')
-
-            # Handle folder exceptions (ending with /)
-            if exception.endswith('/'):
-                # For folder exceptions, check if the path starts with the folder path
-                folder_pattern = exception.rstrip('/')
-                if rel_str.startswith(folder_pattern + '/') or rel_str == folder_pattern:
-                    return True
-            # Handle exact matches
-            elif rel_str == exception:
-                return True
-            # Handle wildcard patterns
-            elif '*' in exception:
-                if fnmatch.fnmatch(rel_str, exception):
-                    return True
 
         return False

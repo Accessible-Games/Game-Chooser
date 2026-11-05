@@ -1,11 +1,24 @@
 import re
 from pathlib import Path
 
-ENGINE_DIR = Path(__file__).resolve().parent.parent.parent / "engine"
+REPO_DIR = Path(__file__).resolve().parent.parent.parent
+ENGINE_DIR = REPO_DIR / "engine"
+
+# Top-level modules that must stay wx-free; append as they are added.
+WX_FREE_MODULES = ["library_manager.py"]
+
+_WX_IMPORT = re.compile(r"^\s*(import wx|from wx)", re.M)
 
 
 def test_engine_never_imports_wx():
     files = list(ENGINE_DIR.rglob("*.py"))
     assert files
     for py in files:
-        assert not re.search(r"^\s*(import wx|from wx)", py.read_text(encoding="utf-8"), re.M), py
+        assert not _WX_IMPORT.search(py.read_text(encoding="utf-8")), py
+
+
+def test_wx_free_modules_never_import_wx():
+    for name in WX_FREE_MODULES:
+        path = REPO_DIR / name
+        assert path.exists(), path
+        assert not _WX_IMPORT.search(path.read_text(encoding="utf-8")), path

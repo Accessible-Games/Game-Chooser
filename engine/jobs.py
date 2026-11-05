@@ -97,7 +97,7 @@ class JobResult:
     kept_player_files: int = 0
 
 
-def _scanner_exclude() -> Callable[[Path], bool]:
+def _default_exclude() -> Callable[[Path], bool]:
     return ExceptionManager().should_auto_exclude
 
 
@@ -117,7 +117,7 @@ class EngineContext:
     today: Callable[[], date] = date.today
     installer_ui: InstallerUI | None = None
     recycle: Callable[[list[Path]], None] = send_to_recycle_bin
-    exclude: Callable[[Path], bool] = field(default_factory=_scanner_exclude)
+    exclude: Callable[[Path], bool] = field(default_factory=_default_exclude)
     # How a started installer is watched (a job object, or the handle when elevated).
     process_watch: Callable[[object, bool], ProcessWatch] = watch_process
     # Reads one Uninstall key location (hive, key, view) -> {subkey: values}; read-only.

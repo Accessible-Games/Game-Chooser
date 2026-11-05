@@ -1,6 +1,7 @@
 """Finding the executable to launch after an install.
 
-`select_best_executable` holds the preference rules shared with the library scanner.
+`select_best_executable` holds temporary fallback preference rules, used until the catalog records
+launch paths.
 """
 import os
 from collections.abc import Callable

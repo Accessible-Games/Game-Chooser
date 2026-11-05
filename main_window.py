@@ -217,7 +217,7 @@ class MainFrame(wx.Frame):
         add_game_item = file_menu.Append(wx.ID_ANY, "&Add Game\tCtrl+N")
         self.Bind(wx.EVT_MENU, self.on_add_game, add_game_item)
 
-        refresh_item = file_menu.Append(wx.ID_ANY, "&Refresh Library\tF5")
+        refresh_item = file_menu.Append(wx.ID_ANY, "&Refresh\tF5")
         self.Bind(wx.EVT_MENU, self.on_refresh, refresh_item)
 
         file_menu.AppendSeparator()
@@ -315,42 +315,15 @@ class MainFrame(wx.Frame):
         """Check if first run and show setup dialog"""
         if self.library_manager.is_first_run:
             dlg = FirstTimeSetupDialog(self, self.library_manager)
-            result = dlg.ShowModal()
+            dlg.ShowModal()
             dlg.Destroy()
-
-            # If libraries were added, prompt user to scan
-            if result == wx.ID_OK and self.library_manager.config["libraries"]:
-                response = wx.MessageBox(
-                    "Would you like to scan your libraries for games now?\n\n"
-                    "You can also scan later using Refresh (F5).",
-                    "Scan Libraries?",
-                    wx.YES_NO | wx.ICON_QUESTION
-                )
-
-                if response == wx.YES:
-                    try:
-                        scan_result = self.library_manager.scan_with_dialog(self)
-
-                        # If scan wasn't cancelled, refresh UI
-                        if scan_result is not None:
-                            exceptions_count, removed_libraries = scan_result
-
-                            # Handle removed libraries
-                            if removed_libraries:
-                                lib_paths = "\n".join([f"• {lib['name']}: {lib['path']}" for lib in removed_libraries])
-                                message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}\n\nWould you like to update your library settings?"
-                                if wx.MessageBox(message, "Missing Library Paths Removed",
-                                                wx.YES_NO | wx.ICON_WARNING) == wx.YES:
-                                    self.on_preferences(None)
-                    except PermissionError as e:
-                        wx.MessageBox(str(e), "Permission Denied", wx.OK | wx.ICON_ERROR)
 
             # Refresh UI in case they added stuff
             self.refresh_game_list()
             self.build_tree(self.current_tree_filters, force_rebuild=True)
             self.build_libraries_menu()
 
-        # Always continue to main window (no forced scanning)
+        # Always continue to main window
         self.initializing = False
         self.game_list.SetFocus()
     
@@ -753,21 +726,10 @@ class MainFrame(wx.Frame):
                 if dlg.ShowModal() == wx.ID_OK:
                     new_path = dlg.GetPath()
 
-                    # Validate path is in a library
-                    valid = False
-                    for lib in self.library_manager.config["libraries"]:
-                        if new_path.startswith(lib["path"]):
-                            # Update game path
-                            rel_path = Path(new_path).relative_to(Path(lib["path"]).parent)
-                            game.launch_path = str(rel_path).replace(os.sep, '/')
-                            self.library_manager.save_games()
-                            valid = True
-                            break
-
-                    if not valid:
-                        wx.MessageBox("Selected file is not in a configured game library.",
-                                    "Invalid Location", wx.OK | wx.ICON_ERROR)
-                        return
+                    # Any path on disk will do; it is no longer tied to a library
+                    game.launch_path = new_path
+                    game.library_name = ""
+                    self.library_manager.save_games()
                 dlg.Destroy()
                 return
 
@@ -879,20 +841,6 @@ class MainFrame(wx.Frame):
             dlg.Destroy()
 
         if result == wx.ID_YES:
-            # Delete without adding to exceptions
-            self.library_manager.games.remove(game)
-            self.library_manager.save_games()
-            self.refresh_game_list()
-
-            # Select previous item to stay in same area of list
-            new_index = max(0, current_index - 1) if current_index > 0 else 0
-            if new_index < len(self.filtered_games):
-                self.game_list.Select(new_index)
-                self.game_list.Focus(new_index)
-
-        elif result == DeleteGameDialog.ID_DELETE_AND_EXCEPTION:
-            # Delete and add to exceptions
-            self.library_manager.add_to_exceptions(game)
             self.library_manager.games.remove(game)
             self.library_manager.save_games()
             self.refresh_game_list()
@@ -1030,7 +978,7 @@ class MainFrame(wx.Frame):
         self.dialog_active = True
         try:
             dlg.ShowModal()
-            # Refresh even on Cancel: Apply may already have saved and scanned changes.
+            # Refresh even on Cancel: Apply may already have saved changes.
             # Deferred to avoid blocking the dialog close.
             wx.CallAfter(self.refresh_ui_after_preferences)
         finally:
@@ -1044,37 +992,11 @@ class MainFrame(wx.Frame):
         self.build_libraries_menu()
     
     def on_refresh(self, event):
-        """Refresh/rescan libraries"""
-        # Guard: do nothing if no libraries configured
-        if not self.library_manager.config["libraries"]:
-            return
+        """Rebuild the game list and tree"""
+        self.refresh_game_list()
+        self.build_tree(force_rebuild=True)
+        self.build_libraries_menu()
 
-        try:
-            result = self.library_manager.scan_with_dialog(self)
-
-            # If scan was cancelled, just refresh the UI and continue without showing dialogs
-            if result is None:
-                self.refresh_game_list()
-                self.build_tree(force_rebuild=True)
-                self.build_libraries_menu()
-                return
-
-            exceptions_count, removed_libraries = result
-            self.refresh_game_list()
-            self.build_tree(force_rebuild=True)
-            self.build_libraries_menu()
-            
-            # Check for removed libraries first
-            if removed_libraries:
-                lib_paths = "\n".join([f"• {lib['name']}: {lib['path']}" for lib in removed_libraries])
-                message = f"The following library paths were not found and have been removed from your configuration:\n\n{lib_paths}\n\nWould you like to update your library settings?"
-                if wx.MessageBox(message, "Missing Library Paths Removed", 
-                                wx.YES_NO | wx.ICON_WARNING) == wx.YES:
-                    self.on_preferences(None)
-        
-        except PermissionError as e:
-            wx.MessageBox(str(e), "Permission Denied", wx.OK | wx.ICON_ERROR)
-    
     def on_exit(self, event):
         """Exit application"""
         self.Close()

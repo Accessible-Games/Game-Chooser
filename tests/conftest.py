@@ -39,3 +39,42 @@ def make_zip(tmp_path):
         return path
 
     return _make
+
+
+@pytest.fixture
+def isolated_manager_factory(tmp_path, monkeypatch):
+    """Build GameLibraryManagers against tmp APPDATA and sys.argv[0].
+
+    Callable many times against the same files (a restart). Seed games.json or
+    config.json with the ``games`` / ``config`` args (raw JSON values, written
+    before construction), or write the files in ``factory.app_dir`` /
+    ``factory.config_dir`` yourself.
+    """
+    import json
+
+    appdata = tmp_path / "appdata"
+    app_dir = tmp_path / "app"
+    appdata.mkdir()
+    app_dir.mkdir()
+    monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setattr(sys, "argv", [str(app_dir / "game-chooser.py")])
+
+    def factory(games=None, config=None):
+        from library_manager import GameLibraryManager
+
+        config_dir = appdata / "GameChooser"
+        config_dir.mkdir(exist_ok=True)
+        if games is not None:
+            (app_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
+        if config is not None:
+            (config_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
+        return GameLibraryManager()
+
+    factory.app_dir = app_dir
+    factory.config_dir = appdata / "GameChooser"
+    return factory
+
+
+@pytest.fixture
+def isolated_manager(isolated_manager_factory):
+    return isolated_manager_factory()
