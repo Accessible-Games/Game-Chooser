@@ -19,6 +19,8 @@ NO_SOURCE = "{title} couldn't be downloaded. {reasons}"
 INSTALLED = "{title} is installed"
 FAILED = "{title} couldn't be installed"
 UNINSTALLED = "{title} is uninstalled"
+UNEXPECTED_ERROR = ("Something went wrong installing {title}. Try again, and if it keeps happening, "
+                    "the details are in the install log.")
 NEEDS_SHARED_COMPONENT = ("{title} needs {component}, which needs administrator permission. Turn on \"Register shared "
                           "components system-wide\" in Preferences, Installing, to install it.")
 
