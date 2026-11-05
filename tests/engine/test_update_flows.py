@@ -746,3 +746,58 @@ def test_path_conflict_refuses_before_undoing_dropped_steps(tmp_path):
     assert ei.value.message == messages.UPDATE_PATH_CONFLICT.format(path="sounds/b.wav", kind="folder")
     assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Mode") == (True, "old", "REG_SZ")
     assert record(eng) == before
+
+
+# ---- fix round 2 ---------------------------------------------------------------
+
+
+def test_repair_names_the_extra_whose_download_changed(tmp_path):
+    eng, game = install_v1(tmp_path)
+    music_url = record(eng).extras["pawprints-music"].url
+    eng.ctx.fetcher.routes[music_url] = b"a different file"
+    (game / "music" / "theme.ogg").unlink()
+    before = snapshot(game)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "repair")
+    assert ei.value.message == messages.REPAIR_EXTRA_CHANGED.format(extra="Pawprints Music", title="Pawprints")
+    assert snapshot(game) == before
+
+
+def test_repair_offline_says_try_again_later(tmp_path):
+    eng, game = install_v1(tmp_path)
+    eng.ctx.fetcher.routes.clear()                        # every address unreachable
+    (game / "pawprints.exe").unlink()
+    before = snapshot(game)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "repair")
+    assert ei.value.message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
+    assert snapshot(game) == before
+
+
+def test_repair_when_the_games_download_changed_and_the_mirror_is_unreachable(tmp_path):
+    eng, game = install_v1(tmp_path, url=DEV_URL)
+    eng.ctx.fetcher.routes[DEV_URL] = zip_bytes(V2)       # changed; the mirror never had it
+    (game / "pawprints.exe").unlink()
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "repair")
+    assert ei.value.message == messages.REPAIR_FILE_CHANGED.format(title="Pawprints")
+
+
+def test_undo_offline_says_try_again_later_and_stays_available(tmp_path):
+    eng, game = install_v1(tmp_path)
+    publish(eng, V2)
+    run(eng, "update")
+    eng.ctx.fetcher.routes.clear()
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "undo")
+    assert ei.value.message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
+    rec = record(eng)
+    assert rec.previous_unavailable is None and rec.previous is not None
+
+
+def test_adding_extras_offline_says_try_again_later(tmp_path):
+    eng, game = install_v1(tmp_path, optional=())
+    eng.ctx.fetcher.routes.clear()
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "extras", extras=("pawprints-voices",))
+    assert ei.value.message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")

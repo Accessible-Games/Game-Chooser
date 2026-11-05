@@ -167,7 +167,19 @@ def test_fetch_exact_rejects_other_hashes(tmp_path):
     with pytest.raises(NoVerifiedSource) as ei:
         fetch_exact([DEV, mirror()], "f" * 64, tmp_path, ff, lambda p: None, lambda: False)
     assert len(ei.value.reasons) == 2
+    assert ei.value.downloaded                  # files arrived; they just didn't match
     assert files(tmp_path) == []
+
+
+def test_fetch_exact_says_when_nothing_downloaded(tmp_path):
+    with pytest.raises(NoVerifiedSource) as ei:
+        fetch_exact([DEV, mirror()], "f" * 64, tmp_path, FakeFetcher({}), lambda p: None, lambda: False)
+    assert not ei.value.downloaded
+    with pytest.raises(NoVerifiedSource) as ei:   # one unreachable, one changed
+        fetch_exact([DEV, mirror()], "f" * 64, tmp_path / "b", FakeFetcher({mirror(): BAD}), lambda p: None,
+                    lambda: False)
+    assert ei.value.downloaded
+    assert not NoVerifiedSource(["x"]).downloaded  # existing callers' shape still works
 
 
 def test_fetch_exact_accepts_matching_hash(tmp_path):

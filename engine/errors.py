@@ -18,9 +18,16 @@ class DownloadError(EngineError):
 
 
 class NoVerifiedSource(EngineError):
-    def __init__(self, reasons: list[str]):
+    """No source gave a file that verified.
+
+    `downloaded` is True when at least one file did download but didn't match; False means every
+    attempt failed to download at all (unreachable or blocked), which may only be for now.
+    """
+
+    def __init__(self, reasons: list[str], downloaded: bool = False):
         super().__init__("; ".join(reasons))
         self.reasons = reasons
+        self.downloaded = downloaded
 
 
 class ExtractError(EngineError):

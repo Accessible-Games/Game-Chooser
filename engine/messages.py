@@ -10,6 +10,9 @@ FOLDER_EXISTS = 'A folder named "{folder}" is already in {library}. Game Chooser
 DEVELOPER_CHANGED_VERIFIED = "The developer has published a different file; installed the catalog's verified copy."
 DEVELOPER_CHANGED_UNVERIFIED = "The developer has changed this file since the catalog checked it."
 REPAIR_FILE_CHANGED = "{title}'s download has changed since it was installed, so Repair can't restore it. Use Update instead."
+REPAIR_EXTRA_CHANGED = ("The download for {extra} has changed since it was added to {title}, so Repair can't "
+                        "restore it. Use Update instead.")
+DOWNLOAD_UNREACHABLE = "{title}'s download couldn't be reached right now. Check your connection and try again later."
 UNDO_UNAVAILABLE = "The previous version of {title} is no longer available to download."
 ELEVATION_DECLINED = "Administrator permission was declined, so {what} wasn't installed."
 NO_SOURCE = "{title} couldn't be downloaded. {reasons}"

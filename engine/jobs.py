@@ -311,7 +311,11 @@ class InstallEngine:
                 if spec is None:
                     raise _NoUnpackSpec(item["id"])
             urls = _exact_urls(recorded, platform_sources(catalog_item, ctx.platform) if catalog_item else [])
-            fetched = fetch_exact(urls, recorded.sha256, work_dir, ctx.fetcher, progress, cancel)
+            try:
+                fetched = fetch_exact(urls, recorded.sha256, work_dir, ctx.fetcher, progress, cancel)
+            except NoVerifiedSource as e:
+                e.item = item  # which file failed: the game's own, or an extra's
+                raise
             fetched.source = {**spec, **fetched.source}
             return fetched
         return fetch
@@ -581,7 +585,7 @@ class InstallEngine:
                 staged = self._stage_recorded(entry, rec.source, rec.extras, game_dir.name, staging, work,
                                               progress, cancel)
             except NoVerifiedSource as e:
-                raise InstallFailed(messages.REPAIR_FILE_CHANGED.format(title=title)) from e
+                raise InstallFailed(_repair_failure_text(e, game_id, title)) from e
             except _NoUnpackSpec as e:
                 raise InstallFailed(messages.REPAIR_NOT_POSSIBLE.format(title=title)) from e
             _check(cancel)
@@ -614,7 +618,13 @@ class InstallEngine:
             try:
                 staged = self._stage_recorded(entry, source, extra_sources, game_dir.name, staging, work,
                                               progress, cancel)
-            except (NoVerifiedSource, _NoUnpackSpec) as e:
+            except NoVerifiedSource as e:
+                if not e.downloaded:  # Nothing could be reached: maybe only for now, so Undo stays offered.
+                    raise InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title)) from e
+                rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
+                ctx.records.save(rec)
+                raise InstallFailed(rec.previous_unavailable) from e
+            except _NoUnpackSpec as e:
                 rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
                 ctx.records.save(rec)
                 raise InstallFailed(rec.previous_unavailable) from e
@@ -681,7 +691,10 @@ class InstallEngine:
             try:
                 base = self._stage_recorded(entry, rec.source, base_extras, game_dir.name, staging, work,
                                             progress, cancel)
-            except (NoVerifiedSource, _NoUnpackSpec) as e:
+            except NoVerifiedSource as e:
+                text = (messages.EXTRAS_NEED_UPDATE if e.downloaded else messages.DOWNLOAD_UNREACHABLE)
+                raise InstallFailed(text.format(title=title)) from e
+            except _NoUnpackSpec as e:
                 raise InstallFailed(messages.EXTRAS_NEED_UPDATE.format(title=title)) from e
             before = set(hash_tree(base.tree))
             owners, fetched = self._merge_extras(base.tree, chosen, staging, work,
@@ -895,6 +908,16 @@ def _holds(game_dir: Path, rel: str, files: dict[str, RecordedFile]) -> bool:
         return new is not None and not linked and path.is_file() and hash_file(path) == new.sha256
     except (UnsafePath, OSError):
         return False
+
+
+def _repair_failure_text(e: NoVerifiedSource, game_id: str, title: str) -> str:
+    """Why Repair couldn't get an installed file back: not reachable now, or changed (naming an extra)."""
+    if not e.downloaded:
+        return messages.DOWNLOAD_UNREACHABLE.format(title=title)
+    item = getattr(e, "item", None) or {"id": game_id}
+    if item["id"] != game_id:
+        return messages.REPAIR_EXTRA_CHANGED.format(extra=item.get("title") or item["id"], title=title)
+    return messages.REPAIR_FILE_CHANGED.format(title=title)
 
 
 def _failure_text(e: Exception, title: str) -> str:

@@ -56,6 +56,7 @@ def _matches(source: dict, actual_sha: str, actual_size: int) -> bool:
 def _walk(sources: list[dict], work_dir: Path, fetcher, progress, cancel, *, keep_changed_developer: bool) -> Fetched:
     work_dir = Path(work_dir)
     reasons: list[str] = []
+    downloaded = False  # a file arrived but didn't match
     candidate: Fetched | None = None
     made: list[Path] = []  # attempt folders still on disk
 
@@ -88,6 +89,7 @@ def _walk(sources: list[dict], work_dir: Path, fetcher, progress, cancel, *, kee
                 drop(folder)
                 continue
             progress(Progress("verifying"))
+            downloaded = True
             actual_sha = hash_file(dest)
             actual_size = dest.stat().st_size
             if _matches(source, actual_sha, actual_size):
@@ -104,7 +106,7 @@ def _walk(sources: list[dict], work_dir: Path, fetcher, progress, cancel, *, kee
         if candidate is not None:
             made.remove(candidate.path.parent)
             return candidate
-        raise NoVerifiedSource(reasons)
+        raise NoVerifiedSource(reasons, downloaded)
     finally:
         for folder in list(made):
             shutil.rmtree(folder, ignore_errors=True)
