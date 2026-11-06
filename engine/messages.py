@@ -284,6 +284,11 @@ INSTALLER_TARGET = "When the installer asks where to install, use: {path}\n\nThe
 INSTALLER_TARGET_NO_CLIPBOARD = "When the installer asks where to install, use: {path}"
 LOCATE_FOLDER = "Locate where {title} was installed"
 QUIT_WHILE_BUSY = "{title} is still installing. Cancel it and quit?"
+QUIT_WHILE_UPDATING = "{title} is still being updated. Cancel it and quit?"
+QUIT_WHILE_UNINSTALLING = "{title} is still being uninstalled. Cancel it and quit?"
+QUIT_WHILE_REPAIRING = "{title} is still being repaired. Cancel it and quit?"
+QUIT_WHILE_UNDOING = "{title} is still being restored to the previous version. Cancel it and quit?"
+QUIT_WHILE_ADDING_EXTRAS = "{title}'s extras are still installing. Cancel them and quit?"
 QUIT_WHILE_BUSY_TITLE = "Quit Game Chooser"
 JOB_ALREADY_RUNNING = "{title} is already installing. Its progress is shown below the games list."
 JOB_ALREADY_WAITING = "{title} is already waiting to install. It starts when the install before it finishes."
@@ -321,6 +326,13 @@ def finished_text(action: str, title: str, notes=(), backups: int = 0) -> str:
     return " ".join([_sentence(text), *(_sentence(n) for n in notes)])
 
 
+def quit_while_busy_text(action: str, title: str) -> str:
+    """The question when the player quits while a job runs, by the job's action (QUIT_WHILE_BUSY for an install)."""
+    return {"update": QUIT_WHILE_UPDATING, "uninstall": QUIT_WHILE_UNINSTALLING, "repair": QUIT_WHILE_REPAIRING,
+            "undo": QUIT_WHILE_UNDOING, "extras": QUIT_WHILE_ADDING_EXTRAS}.get(action, QUIT_WHILE_BUSY).format(
+        title=title)
+
+
 def failed_text(action: str, title: str) -> str:
     """The notification for a failed job, by its action."""
     return {"update": FAILED_UPDATE, "uninstall": FAILED_UNINSTALL, "repair": FAILED_REPAIR, "undo": FAILED_UNDO,
@@ -349,6 +361,8 @@ LIBRARY_NOT_REMOVED = ("Game Chooser couldn't finish removing that library, beca
 LIBRARY_ROW_GONE = ("{title}'s library is no longer in Preferences, so Game Chooser can't find it. Delete it and add "
                     "it again with Add Game.")
 FORGET_FAILED = "Game Chooser couldn't remove {title} from the list. Try again."
+WEB_GAME_NOT_ADDED = ("Game Chooser couldn't add {title} to your games list, because the list couldn't be saved. "
+                      "Try again.")
 COUNTING_FILES = "Checking {title}'s files"
 COUNTING_LIBRARY_FILES = "Checking the files of the games in {label}"
 FORGET_GAME_CONFIRM = ("Remove {title} from the list? Game Chooser didn't keep track of its files, so they stay "

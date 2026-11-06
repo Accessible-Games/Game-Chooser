@@ -1828,30 +1828,41 @@ class MainFrame(wx.Frame):
         """Handle window close. While a job runs, ask first; quitting cancels it and waits for it to stop."""
         queue = self.service.queue
         job = queue.current()
-        if job is not None and event.CanVeto() and not self.confirm_quit_while_busy(job.title):
+        if job is not None and event.CanVeto() and not self.confirm_quit_while_busy(job.title, job.request.action):
             event.Veto()
             return
         self._quitting = True
-        # A prompt the worker is blocked on answers "cancelled" first, so nothing can wait on this window
-        self.installer_ui.release_all()
-        queue.cancel_all()
-        self.save_state()
-        if queue.busy():
-            self.Hide()  # the window goes at once; the cancelled job gets a moment to stop and tidy up
-        if not queue.shutdown(QUIT_WAIT_SECONDS):
-            log.warning("The install queue didn't stop within %s seconds", QUIT_WAIT_SECONDS)
-        self._apply_outcomes_on_quit()  # a job that ended meanwhile (an uninstall often ignores the cancel)
-        self.library_manager.save_games()
-        self.library_manager.save_config()
-        self.Destroy()
-        # A notification shown as a balloon (no toasts) keeps a hidden window, and so the app, alive for a while
-        app = wx.GetApp()
-        if app is not None:
-            app.ExitMainLoop()
+        try:
+            # A prompt the worker is blocked on answers "cancelled" first, so nothing can wait on this window
+            self.installer_ui.release_all()
+            queue.cancel_all()
+            self._quit_step("save the window state", self.save_state)
+            if queue.busy():
+                self.Hide()  # the window goes at once; the cancelled job gets a moment to stop and tidy up
+            if not queue.shutdown(QUIT_WAIT_SECONDS):
+                log.warning("The install queue didn't stop within %s seconds", QUIT_WAIT_SECONDS)
+            # a job that ended meanwhile (an uninstall often ignores the cancel)
+            self._quit_step("apply the last job results", self._apply_outcomes_on_quit)
+            self._quit_step("save games.json", self.library_manager.save_games)
+            self._quit_step("save config.json", self.library_manager.save_config)
+        finally:
+            # Always: the window may already be hidden, and an error must never leave an invisible process
+            self.Destroy()
+            # A notification shown as a balloon (no toasts) keeps a hidden window, and so the app, alive for a while
+            app = wx.GetApp()
+            if app is not None:
+                app.ExitMainLoop()
 
-    def confirm_quit_while_busy(self, title):
-        """"<title> is still installing. Cancel it and quit?" True for Yes."""
+    def _quit_step(self, what, fn):
+        """One step of quitting: a failure is logged and the rest of the quit goes on"""
+        try:
+            fn()
+        except Exception:
+            log.exception("Couldn't %s while quitting", what)
+
+    def confirm_quit_while_busy(self, title, action="install"):
+        """"<title> is still installing. Cancel it and quit?" (worded by the job's action). True for Yes."""
         with self.modal_dialog():
-            answer = wx.MessageBox(messages.QUIT_WHILE_BUSY.format(title=title), messages.QUIT_WHILE_BUSY_TITLE,
+            answer = wx.MessageBox(messages.quit_while_busy_text(action, title), messages.QUIT_WHILE_BUSY_TITLE,
                                    wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
         return answer == wx.YES

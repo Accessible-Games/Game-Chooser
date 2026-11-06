@@ -638,3 +638,44 @@ def test_remove_library_finishes_a_failed_uninstall(rig, monkeypatch):
         rig.service.apply_result(rig.listener.result_for(job))
     assert rig.manager.library_by_id(lib["id"]) is None and rig.manager.games == []
     assert not (rig.tmp_path / "Games" / "Entombed").exists()
+
+
+def test_finish_removal_turns_a_record_delete_failure_into_a_library_error(rig, monkeypatch):
+    lib = _two_installed(rig)
+    (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")  # kept, so its record stays
+    rig.service.queue.hold.update({"entombed", "pawprints"})
+    jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
+    rig.service.queue.hold.clear()
+    for job in jobs:  # the uninstalls run now
+        rig.service.queue.waiting.remove(job)
+        engine = rig.service._new_engine()
+        result = engine.run(job.request, lambda p: None, lambda: False)
+        rig.listener.job_finished(job, result)
+    real_delete = rig.manager.records.delete
+
+    def locked(catalog_id):
+        raise PermissionError("locked")
+    monkeypatch.setattr(rig.manager.records, "delete", locked)
+    rig.service.apply_result(rig.listener.result_for(jobs[0]))
+    rig.service.apply_result(rig.listener.result_for(jobs[1]))  # the last one: the sweep fails, the library stays
+    assert rig.manager.library_by_id(lib["id"]) is not None and rig.manager.records.exists("entombed")
+    with pytest.raises(LibraryError) as ei:
+        rig.service.remove_library(lib["id"], delete_player_data=False)  # still locked: plain words, no OSError
+    assert str(ei.value) == messages.LIBRARY_NOT_REMOVED
+    monkeypatch.setattr(rig.manager.records, "delete", real_delete)
+    assert rig.service.remove_library(lib["id"], delete_player_data=False) == []  # a retry finishes it
+    assert rig.manager.library_by_id(lib["id"]) is None and not rig.manager.records.exists("entombed")
+
+
+def test_finish_removal_keeps_going_when_games_json_cannot_be_saved(rig, monkeypatch):
+    lib = _two_installed(rig)
+    _untrack(rig, "entombed")
+    _untrack(rig, "pawprints")
+
+    def full_disk():
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(rig.manager, "save_games", full_disk)
+    assert rig.service.remove_library(lib["id"], delete_player_data=False) == []
+    assert rig.manager.library_by_id(lib["id"]) is None
+    assert sorted((g.title, g.catalog_id, g.library_id) for g in rig.manager.games) == \
+        [("Entombed", "", ""), ("Pawprints", "", "")]

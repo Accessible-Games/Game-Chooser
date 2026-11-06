@@ -450,7 +450,16 @@ class CatalogPanel(wx.Panel):
         sources = platform_sources(row.entry, current_platform())
         fields = game_fields(row.entry, current_platform())
         fields.update(platforms=["Web"], launch_path=sources[0].get("url", ""), library_id="", catalog_id=row.id)
-        self.service.manager.add_catalog_game(fields)
+        manager = self.service.manager
+        before = list(manager.games)
+        try:
+            manager.add_catalog_game(fields)
+        except OSError as e:  # games.json couldn't be saved: nothing changes (the file on disk is whole)
+            log.warning("Couldn't add the web game %s: %s", row.id, e)
+            manager.games = before
+            self._tell(messages.WEB_GAME_NOT_ADDED.format(title=fields["title"] or row.title), wx.ICON_ERROR)
+            self._focus_row(row)
+            return
         self.frame.refresh_game_list()
         self.refresh_rows()
         self.frame.refresh_statuses()

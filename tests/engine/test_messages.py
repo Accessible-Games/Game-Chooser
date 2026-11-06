@@ -60,3 +60,14 @@ def test_failed_text_per_action():
     assert failed_text("repair", "Entombed") == "Entombed couldn't be repaired"
     assert failed_text("undo", "Entombed") == "Entombed couldn't be restored to the previous version"
     assert failed_text("extras", "Entombed") == "Entombed's extras couldn't be installed"
+
+
+def test_quit_while_busy_text_per_action():
+    from engine.messages import quit_while_busy_text
+    assert quit_while_busy_text("install", "Entombed") == "Entombed is still installing. Cancel it and quit?"
+    assert quit_while_busy_text("update", "Entombed") == "Entombed is still being updated. Cancel it and quit?"
+    assert quit_while_busy_text("uninstall", "Entombed") == "Entombed is still being uninstalled. Cancel it and quit?"
+    assert quit_while_busy_text("repair", "Entombed") == "Entombed is still being repaired. Cancel it and quit?"
+    assert quit_while_busy_text("undo", "Entombed") == \
+        "Entombed is still being restored to the previous version. Cancel it and quit?"
+    assert quit_while_busy_text("extras", "Entombed") == "Entombed's extras are still installing. Cancel them and quit?"

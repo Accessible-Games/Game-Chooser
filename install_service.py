@@ -311,7 +311,9 @@ class InstallService:
     def _finish_removal(self, library_id: str) -> None:
         """The library goes: the games it still holds that can't be uninstalled become games added by hand (their
         records deleted first, their files untouched), the records of its uninstalled games are deleted, and the
-        library leaves the config. Raises LibraryError (the library then stays) if a record can't be deleted."""
+        library leaves the config. Raises LibraryError (the library then stays) if a record can't be deleted; a
+        retry finishes the job. A games.json or config.json that can't be saved keeps the change in memory, to be
+        written with the next save (as elsewhere), so no OSError escapes."""
         self.pending_removal.discard(library_id)
         self._removal_waits.pop(library_id, None)
         tracked, kept = self.library_games(library_id)
@@ -327,8 +329,18 @@ class InstallService:
         for game in kept:
             self.manager.unlink_catalog_game(game)
         if kept:
-            self.manager.save_games()
-        for cid, rec in self.manager.records.game_records().items():
-            if rec.uninstalled and rec.library_id == library_id:
-                self.manager.records.delete(cid)
-        self.manager.remove_library(library_id)
+            try:
+                self.manager.save_games()
+            except OSError as e:
+                log.warning("Couldn't save games.json while removing library %s: %s", library_id, e)
+        try:
+            for cid, rec in self.manager.records.game_records().items():
+                if rec.uninstalled and rec.library_id == library_id:
+                    self.manager.records.delete(cid)
+        except OSError as e:
+            log.warning("Couldn't delete an uninstalled game's record while removing library %s: %s", library_id, e)
+            raise LibraryError(messages.LIBRARY_NOT_REMOVED) from e
+        try:
+            self.manager.remove_library(library_id)
+        except OSError as e:  # gone from the config in memory; written with the next save
+            log.warning("Couldn't save config.json after removing library %s: %s", library_id, e)

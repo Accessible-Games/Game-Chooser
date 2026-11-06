@@ -66,8 +66,11 @@ Sources: `tests/catalog_fixtures/entries/*.json` and `tests/catalog_fixtures/gam
   `serve_test_catalog.py`; **smart_list/**, **resource_finder/** - submodules; **bin/** - bundled tools (git-ignored)
 
 ### Where data lives
-- `games.json` - next to the app (the `sys.argv[0]` directory); git-ignored. A damaged file sets
-  `games_load_failed` and is not written over at startup.
+- `games.json` - next to the app (the `sys.argv[0]` directory); git-ignored. It and `config.json` are written
+  atomically (temp file, then `os.replace`). A file that can't be read is copied to `<name>.bad` (or
+  `<name>.<YYYYMMDD-HHMMSS>.bad` when an earlier copy exists; no copy is ever overwritten) before anything can
+  write over it, and the player is told once after startup (`manager.load_problems`). Until the copy exists,
+  saves raise OSError and write nothing (see Configuration).
 - Config dir: Windows `%APPDATA%\GameChooser\`, macOS `~/Library/Application Support/GameChooser/` (other systems
   use the macOS path). It holds:
   - `config.json`
@@ -96,7 +99,10 @@ desktop games, or an `http...` URL for web games.
 - A library whose folder is unreachable (unplugged drive) shows Status "Library not found"; launching explains it.
 - No migration (alpha). Old-config handling is only in `load_config`: it drops the old `exceptions` key and the
   library `name`, and assigns an id to a library without one (saved once, so it stays stable).
-- `reconcile_catalog_records()` runs at startup to keep games.json and the install records in step.
+- `reconcile_catalog_records()` runs at startup to keep games.json and the install records (games' only) in step:
+  a record with no game gets one; a game whose record is gone (or unsafe id) becomes a game added by hand; a game
+  whose uninstall stopped partway stays linked; one whose uninstall finished but never reached games.json leaves
+  the list (the record stays).
 
 ### Main window (`MainFrame`)
 A `wx.Notebook` with two pages (`TABS = ("library", "catalog")`; `active_tab()`):
@@ -136,7 +142,10 @@ A `wx.Notebook` with two pages (`TABS = ("library", "catalog")`; `active_tab()`)
   runs; Cancel cancels the job. It never takes focus.
 - **Library catalog actions** (`library_actions.py`): context menu for catalog games (Update, Undo, Extras,
   Repair, Uninstall, plus links). Delete on a tracked catalog install is **Uninstall** (`delete_kind`: "uninstall";
-  "forget" for an untracked install, files untouched; else "delete"). Removing a library with installs is
+  "forget" for an untracked install, files untouched; else "delete"). An uninstall that stopped partway (record
+  `uninstalled` with files left or a vendor uninstaller still to run: `is_uninstall_unfinished`) still offers
+  Uninstall, and Delete opens it. Shared runtimes' records (kind "runtime") are never Library games: plan-2 code
+  reads records through `RecordStore.game_records` / `load_game` / `delete_game`. Removing a library with installs is
   **Remove library**. **Edit is only for games added by hand** (`is_editable`: no `catalog_id`, no `library_id`).
 - **Preferences** (`PreferencesDialog`): tabs Library Paths and Installing (`install_prefs.py`: catalog address,
   "register shared components"). An invalid address saves nothing; a changed address refetches the catalog on close.
@@ -237,8 +246,10 @@ call it.**
   as `Platform/Windows`), `tree_filters` (subset of platform/genre/developer/year), `last_tab`
   ("library" or "catalog"), `catalog_last_selected`, `catalog_last_search`, `catalog_tree_selections`;
   `hidden_libraries` is added on first use.
-- A missing or corrupt config falls back to defaults; missing keys (also inside `SavedState` and `install`) are
-  filled in.
+- A missing config starts from defaults (first run); missing keys (also inside `SavedState` and `install`) are
+  filled in. A config that can't be read (bad JSON or the wrong shape) is copied to `config.json.bad` first,
+  the app runs on defaults, and the player is told once to add their libraries again in Preferences. The same
+  rule covers `games.json` (`games_load_failed` is set; the list starts empty).
 
 ### Accessibility and focus
 - Screen reader announcement needs the sequence `Select()`, `Focus()`, `SetFocus()` (`focus_active_list`).
@@ -249,8 +260,8 @@ call it.**
 - `on_filter_complete()` fills the list, restores the selection by title and manages focus. The progress area and
   background refreshes never move focus. The description is a read-only multi-line field so a screen reader reads
   it line by line.
-- Library search: 0.5 s delay, case-insensitive substring over title and developer; a search containing
-  "unknown" matches nothing.
+- Library search: filters on every keystroke (no delay), case-insensitive substring over title and developer; a
+  search containing "unknown" matches nothing.
 
 ### Threading
 UI thread for all wx work and every change to games, records and libraries. Background threads: `FilterWorker`,
