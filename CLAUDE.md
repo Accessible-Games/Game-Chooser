@@ -248,7 +248,8 @@ call it.**
   `hidden_libraries` is added on first use.
 - A missing config starts from defaults (first run); missing keys (also inside `SavedState` and `install`) are
   filled in. A config that can't be read (bad JSON or the wrong shape) is copied to `config.json.bad` first,
-  the app runs on defaults, and the player is told once to add their libraries again in Preferences. The same
+  the app runs on defaults, and the player is told once where the copy is. Re-adding a library mints a new id, so
+  installed games stay "Library not found" until the copy is restored by hand. The same
   rule covers `games.json` (`games_load_failed` is set; the list starts empty).
 
 ### Accessibility and focus
