@@ -311,6 +311,12 @@ def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Pat
     Raises Cancelled (with `tree_done`) once a cancelled program has stopped, or _StillRunning if it
     won't stop.
     """
+    if cancel():
+        # Cancelled before it started (the player told where it goes cancelled, or the app quit and released
+        # that prompt): it never runs. Nothing of it can be running, so set-aside files go back as usual.
+        error = Cancelled()
+        error.tree_done = True
+        raise error
     ui = ctx.installer_ui
     process, elevated = _start(ctx, exe, args, elevated, cwd, title)
     try:

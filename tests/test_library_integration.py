@@ -256,3 +256,39 @@ def test_reconcile_treats_an_unsafe_catalog_id_as_no_record(isolated_manager_fac
     m = isolated_manager_factory(games=games, config=config)  # no crash at startup
     assert [(g.title, g.catalog_id, g.library_id) for g in m.games] == [("Odd", "", ""), ("Web", "a/b", "")]
     assert m.records.load_game("a/b") is None
+
+
+def _catalog_row():
+    return [{"title": "Entombed", "launch_path": "Entombed/e.exe", "library_id": "main", "catalog_id": "entombed",
+             "installed_source": {"url": "u", "sha256": "s", "size": 1}, "installed_extras": []}]
+
+
+def test_reconcile_keeps_a_game_whose_uninstall_stopped_partway(isolated_manager_factory, tmp_path):
+    from engine.records import RecordedFile
+    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
+    isolated_manager_factory(config=config)
+    left = _record(uninstalled=True, files={"e.exe": RecordedFile("e.exe", "a" * 64, "entombed")})
+    vendor = _record("pawprints", folder="Pawprints", uninstalled=True, vendor_uninstaller='"C:/u.exe" /S')
+    _seed_records(isolated_manager_factory, left, vendor)
+    rows = _catalog_row() + [{**_catalog_row()[0], "title": "Pawprints", "launch_path": "Pawprints/p.exe",
+                              "catalog_id": "pawprints"}]
+    m = isolated_manager_factory(games=rows)
+    assert [(g.catalog_id, g.library_id, g.launch_path) for g in m.games] == [
+        ("entombed", "main", "Entombed/e.exe"), ("pawprints", "main", "Pawprints/p.exe")]  # still uninstallable
+    assert _games_json(isolated_manager_factory) == rows  # nothing changed, nothing written
+
+
+def test_reconcile_finishes_an_uninstall_whose_result_was_not_applied(isolated_manager_factory, tmp_path):
+    """The uninstall finished (nothing of the install is left) but the app quit before it reached games.json:
+    the game leaves the list (an uninstall the player confirmed); its record, which keeps the player's files'
+    folder known, stays."""
+    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
+    isolated_manager_factory(config=config)
+    done = _record(uninstalled=True, files={})
+    _seed_records(isolated_manager_factory, done)
+    hand = {"title": "Hand", "launch_path": "C:/Games/hand.exe", "library_id": ""}
+    m = isolated_manager_factory(games=_catalog_row() + [hand])
+    assert [(g.title, g.catalog_id) for g in m.games] == [("Hand", "")]
+    assert [g["title"] for g in _games_json(isolated_manager_factory)] == ["Hand"]
+    assert m.records.load("entombed") == done
+    assert [g.title for g in isolated_manager_factory().games] == ["Hand"]  # and it doesn't come back

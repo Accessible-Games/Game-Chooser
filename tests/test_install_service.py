@@ -590,3 +590,51 @@ def test_runtime_records_are_never_offered_forgotten_or_deleted(rig):
     assert rig.service.remove_library(lib["id"], delete_player_data=False) == []
     assert rig.manager.records.load("dx8vb") == runtime and rig.manager.library_by_id(lib["id"]) is None
     assert rig.service.record_for(Game(title="Odd", launch_path="https://example.com/", catalog_id="a/b")) is None
+
+
+def _fail_uninstall_partway(rig, monkeypatch, catalog_id="entombed"):
+    """Uninstall while the game runs: its exe can't be removed."""
+    from pathlib import Path
+    locked = rig.tmp_path / "Games" / "Entombed" / "entombed.exe"
+    real_unlink = Path.unlink
+
+    def unlink(self, missing_ok=False):
+        if self == locked:
+            raise PermissionError(13, "in use", str(self))
+        return real_unlink(self, missing_ok=missing_ok)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    job = rig.service.submit("uninstall", catalog_id)
+    assert job.state == "failed"
+    rig.service.job_failed(job)
+    monkeypatch.setattr(Path, "unlink", real_unlink)
+    return locked
+
+
+def test_a_failed_uninstall_stays_uninstallable_and_finishes(rig, monkeypatch, isolated_manager_factory):
+    from library_actions import UNINSTALL, catalog_menu_items, delete_kind
+    lib = _two_installed(rig)
+    (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")
+    locked = _fail_uninstall_partway(rig, monkeypatch)
+    game = rig.manager.catalog_game("entombed")
+    rec = rig.service.record_for(game)
+    assert game is not None and rec.uninstalled and locked.exists()
+    assert delete_kind(game, rec) == "uninstall"
+    assert UNINSTALL in [i.action for i in catalog_menu_items(game, rec, rig.service.entry_for(game), False, False)]
+    assert rig.service.player_files("entombed") == 1  # the save is still counted for the Uninstall checkbox
+    assert rig.service.library_games(lib["id"])[0] == [game, rig.manager.catalog_game("pawprints")]
+    restarted = isolated_manager_factory()  # at the next start it is still a catalog game in its library
+    assert (restarted.catalog_game("entombed").library_id) == lib["id"]
+    rig.run("uninstall", "entombed")  # the game was closed: uninstalling again finishes it
+    assert rig.manager.catalog_game("entombed") is None and not locked.exists()
+    assert (rig.tmp_path / "Games" / "Entombed" / "save.dat").read_bytes() == b"mine"
+
+
+def test_remove_library_finishes_a_failed_uninstall(rig, monkeypatch):
+    lib = _two_installed(rig)
+    _fail_uninstall_partway(rig, monkeypatch)
+    jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
+    assert sorted(j.request.catalog_id for j in jobs) == ["entombed", "pawprints"]
+    for job in jobs:
+        rig.service.apply_result(rig.listener.result_for(job))
+    assert rig.manager.library_by_id(lib["id"]) is None and rig.manager.games == []
+    assert not (rig.tmp_path / "Games" / "Entombed").exists()

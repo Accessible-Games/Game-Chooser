@@ -836,3 +836,28 @@ def test_old_records_without_the_field_load_as_guessed(tmp_path):
     data.pop("launch_from_catalog")
     path.write_text(json.dumps(data), encoding="utf-8")
     assert record(eng).launch_from_catalog is False
+
+
+def test_a_failed_uninstall_can_be_finished_by_uninstalling_again(tmp_path, monkeypatch):
+    """The game was running, so a file couldn't be removed: the record keeps what is left, marked uninstalled,
+    and a second uninstall finishes the job without touching the player's files."""
+    eng, game = install_v1(tmp_path)
+    locked = game / "pawprints.exe"
+    real_unlink = Path.unlink
+
+    def unlink(self, missing_ok=False):
+        if self == locked:
+            raise PermissionError(13, "The process cannot access the file", str(self))
+        return real_unlink(self, missing_ok=missing_ok)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "uninstall")
+    assert ei.value.message == messages.UNINSTALL_FAILED.format(title="Pawprints")
+    rec = record(eng)
+    assert rec.uninstalled and "pawprints.exe" in rec.files and locked.exists()
+    monkeypatch.setattr(Path, "unlink", real_unlink)  # the game was closed
+    r = run(eng, "uninstall")
+    assert r.action == "uninstall" and not locked.exists()
+    rec = record(eng)
+    assert rec.uninstalled and rec.files == {}
+    assert snapshot(game) == {**PLAYER_FILES, "pawprints.ini": EDITED_INI, "bass.dll": SELF_UPDATED_DLL}

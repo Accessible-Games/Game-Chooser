@@ -44,7 +44,7 @@ from engine.registry import RegistryAccess
 from engine.runtimes import WindowsSecurity, default_runtimes_root
 from engine.safety import count_player_files
 from engine.status import game_status
-from library_actions import is_tracked
+from library_actions import is_uninstall_unfinished, is_uninstallable
 from library_manager import LibraryError
 
 log = logging.getLogger(__name__)
@@ -213,7 +213,7 @@ class InstallService:
         """How many files in an installed game's folder are the player's (saves, settings), for the Uninstall and
         Remove-library checkboxes; 0 when that can't be told. Reads and hashes the folder's files."""
         rec = self.manager.records.load_game(catalog_id)
-        if rec is None or rec.uninstalled:
+        if rec is None or (rec.uninstalled and not is_uninstall_unfinished(rec)):
             return 0
         folder = record_folder(rec, self.manager.config["libraries"])
         if folder is None or not folder.is_dir():
@@ -275,12 +275,12 @@ class InstallService:
         return self.manager.add_library(str(folder))
 
     def library_games(self, library_id: str) -> tuple[list, list]:
-        """A library's catalog games, split: (tracked, kept). Tracked ones are uninstalled before the library is
-        removed. The others (untracked, or with no readable record) can't be uninstalled; they are kept in the
+        """A library's catalog games, split: (tracked, kept). Tracked ones (and ones whose uninstall stopped partway)
+        are uninstalled before the library is removed. The others (untracked, or with no readable record) can't be uninstalled; they are kept in the
         list as games added by hand when the library goes."""
         tracked, kept = [], []
         for game in self.manager.catalog_games_in(library_id):
-            if is_tracked(self.manager.records.load_game(game.catalog_id)):
+            if is_uninstallable(self.manager.records.load_game(game.catalog_id)):
                 tracked.append(game)
             elif not _is_web(game):
                 kept.append(game)

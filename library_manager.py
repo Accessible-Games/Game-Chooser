@@ -33,6 +33,7 @@ from engine.folders import library_label
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex
 from engine.jobs import game_fields_for
 from engine.records import RecordStore
+from library_actions import is_uninstall_unfinished
 from models import Game
 from path_manager import PathManager
 
@@ -291,17 +292,29 @@ class GameLibraryManager:
         A record with no game gets one, using the cached catalog index only (never the network); a game
         whose record is gone becomes a game added by hand and is kept. Only games' records count: a shared
         runtime's record (kind "runtime") is never a game.
+
+        An uninstalled record: if the uninstall stopped partway (installed files left, or the game's own
+        uninstaller still to run), the game stays as it is, so Uninstall can finish it. If it finished but its
+        result never reached games.json (the app quit first), the game leaves the list now: an uninstall the
+        player confirmed. Its record stays as it is (it keeps the folder of the player's files known).
         """
         records = self.records.game_records()
         changed = False
+        finished = []
         for game in self.games:
             if not game.catalog_id or game.launch_path.startswith("http"):
                 continue  # web games have no install record by design
             rec = records.get(game.catalog_id)
-            gone = rec.uninstalled if rec else not self._record_unreadable(game.catalog_id)
-            if gone:  # an unreadable record file is not a gone one: leave that game alone
-                self.unlink_catalog_game(game)
-                changed = True
+            if rec is None:
+                if not self._record_unreadable(game.catalog_id):  # an unreadable one may still be the game's
+                    self.unlink_catalog_game(game)
+                    changed = True
+            elif rec.uninstalled and not is_uninstall_unfinished(rec):
+                finished.append(game)
+        if finished:
+            log.info("Uninstalls finished before the app quit: %s", ", ".join(g.catalog_id for g in finished))
+            self.games = [g for g in self.games if not any(g is f for f in finished)]
+            changed = True
         missing = [r for r in records.values() if not r.uninstalled and self.catalog_game(r.catalog_id) is None]
         if missing:
             entries = self._cached_entries()

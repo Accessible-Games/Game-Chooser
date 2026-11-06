@@ -40,6 +40,18 @@ def is_tracked(record) -> bool:
     return is_game_record(record) and not record.uninstalled and record.tracked
 
 
+def is_uninstall_unfinished(record) -> bool:
+    """An uninstall that stopped partway (the game was running, say): some files Game Chooser installed are still
+    there, or the game's own uninstaller still has to run. Uninstalling again finishes it; nothing else applies."""
+    return (is_game_record(record) and record.uninstalled and getattr(record, "tracked", True)
+            and bool(getattr(record, "files", None) or getattr(record, "vendor_uninstaller", None)))
+
+
+def is_uninstallable(record) -> bool:
+    """Uninstall (and Delete, as Uninstall) works on it: a tracked install, or one whose uninstall is unfinished."""
+    return is_tracked(record) or is_uninstall_unfinished(record)
+
+
 def undo_item(record) -> MenuItem:
     """Enabled when there is a previous version; says why when it can no longer be downloaded."""
     if record.previous_unavailable:
@@ -55,11 +67,14 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
     A game added by hand gets nothing. A catalog web game gets its links. An untracked install gets one disabled
     item saying its update has to be installed by hand (only while an update is available), plus its homepage.
     A tracked install gets Update (when one is available), Undo last update, Extras…, Repair, Uninstall and its
-    links; while the game is no longer in the catalog, only Uninstall.
+    links; while the game is no longer in the catalog, only Uninstall. One whose uninstall stopped partway gets
+    Uninstall (to finish it) and its links.
     """
     if not game.catalog_id:
         return []
     links = [MenuItem(LINK, label, url=url) for label, url in link_items(entry)]
+    if not is_web(game) and is_uninstall_unfinished(record):
+        return [MenuItem(UNINSTALL, messages.MENU_UNINSTALL)] + links
     if is_web(game) or not is_game_record(record) or record.uninstalled:
         return links
     if not record.tracked:
@@ -76,12 +91,12 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
 
 
 def delete_kind(game, record) -> str:
-    """What Delete does with a game: "uninstall" (a tracked catalog install: the Uninstall dialog), "forget" (an
-    untracked one: remove it from the list and forget its record, files untouched) or "delete" (anything else: the
-    usual confirmation, then it leaves the list)."""
+    """What Delete does with a game: "uninstall" (a tracked catalog install, or one whose uninstall stopped partway:
+    the Uninstall dialog), "forget" (an untracked one: remove it from the list and forget its record, files
+    untouched) or "delete" (anything else: the usual confirmation, then it leaves the list)."""
     if not game.catalog_id or is_web(game):
         return "delete"
-    if is_tracked(record):
+    if is_uninstallable(record):
         return "uninstall"
     if is_game_record(record) and not record.uninstalled:
         return "forget"

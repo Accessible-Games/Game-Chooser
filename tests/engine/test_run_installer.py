@@ -1396,3 +1396,74 @@ def test_game_fields_for_outside_libraries():
     game = game_fields_for(entry, rec, "windows")
     assert game["library_id"] == "" and Path(game["launch_path"]) == elsewhere / "lc.exe"
     assert Path(game["launch_path"]).is_absolute() and "library_name" not in game and "manual" not in game.values()
+
+
+# ---- a cancel at the "where to install" prompt (quitting releases it) -----------------------------------------
+
+
+class CancellingUI(FakeInstallerUI):
+    """The player is told where to install, and the job is cancelled meanwhile (or the app quits and releases the
+    prompt, which returns at once)."""
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled = False
+
+    def announce_target(self, title, target):
+        super().announce_target(title, target)
+        self.cancelled = True
+
+    def cancel(self):
+        return self.cancelled
+
+
+def test_cancel_at_the_announce_never_starts_the_installer(tmp_path):
+    routes = {}
+    ui = CancellingUI()
+    eng, lib = setup_engine(tmp_path, [run_game(routes)], routes, ui=ui)  # interactive: the target is announced
+    with pytest.raises(Cancelled):
+        install(eng, cancel=ui.cancel)
+    assert ui.events == ["announce"] and eng.ctx.elevator.calls == []
+    assert eng.ctx.records.load("lightcars") is None and not (lib / "Light Cars").exists()
+
+
+def test_cancel_at_the_announce_of_an_update_puts_the_players_files_back(tmp_path):
+    eng, routes, target = installed_run_game(tmp_path)
+    publish_v2(eng, routes, type="other")  # interactive
+    ui = CancellingUI()
+    eng.ctx.installer_ui = ui
+    before = tree(target)
+    starts = len(eng.ctx.elevator.calls)
+    with pytest.raises(Cancelled):
+        eng.run(InstallRequest("update", "lightcars"), quiet, ui.cancel)
+    assert ui.events == ["announce"] and len(eng.ctx.elevator.calls) == starts
+    assert tree(target) == before and eng.ctx.records.load("lightcars").source.version == "1.0"
+    run_installer.require_no_setaside(eng.ctx, "lightcars", "Light Cars")  # no copies left set aside
+
+
+def test_run_and_wait_checks_the_cancel_before_starting(tmp_path):
+    eng, lib = setup_engine(tmp_path, [], {})
+    with pytest.raises(Cancelled) as ei:
+        run_installer._run_and_wait(eng.ctx, "Light Cars", "setup.exe", "", False, None, quiet, lambda: True)
+    assert ei.value.tree_done and eng.ctx.elevator.calls == []
+
+
+def test_a_failed_vendor_uninstall_can_be_finished_by_uninstalling_again(tmp_path):
+    from engine.errors import ElevationDeclined
+    eng, routes, target = installed_run_game(tmp_path, vendor=True)
+    elevator = eng.ctx.elevator
+
+    def declined(exe, args, elevated):
+        raise ElevationDeclined("The administrator prompt was declined.")
+    elevator.on_start = declined
+    with pytest.raises(InstallFailed):
+        eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.uninstalled and rec.vendor_uninstaller and "unins000.exe" in rec.files
+    assert tree(target)["cfg.ini"] == b"volume=9 mine" and tree(target)["saves/slot1.sav"] == b"save"
+    elevator.on_start = None  # accepted this time
+    eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert elevator.calls[-1][0] == str(target / "unins000.exe")
+    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.uninstalled and rec.files == {} and rec.vendor_uninstaller is None

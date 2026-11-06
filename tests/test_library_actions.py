@@ -2,8 +2,9 @@ from types import SimpleNamespace
 
 from engine import messages
 from library_actions import (EXTRAS, LINK, REPAIR, UNDO, UNINSTALL, UPDATE, catalog_menu_items, delete_kind,
-                             is_editable, launch_problem, library_row_name, remove_library_checkbox_label,
-                             remove_library_text, undo_item, uninstall_checkbox_label)
+                             is_editable, is_tracked, is_uninstall_unfinished, is_uninstallable, launch_problem,
+                             library_row_name, remove_library_checkbox_label, remove_library_text, undo_item,
+                             uninstall_checkbox_label)
 from models import Game
 
 LINKS = {"homepage": "https://example.com/", "purchase": "https://example.com/buy"}
@@ -131,3 +132,25 @@ def test_launch_problem_copy():
 def test_library_row_name():
     assert library_row_name("Games", False) == "Games"
     assert library_row_name("Games", True) == "Games (being removed)"
+
+
+def test_an_unfinished_uninstall_can_be_finished():
+    """An uninstall that stopped partway (a file was locked) is offered again, from the menu and from Delete; a
+    finished one (nothing left of the install) is not."""
+    left_files = record(uninstalled=True, files={"entombed.exe": object()}, vendor_uninstaller=None)
+    left_vendor = record(uninstalled=True, files={}, vendor_uninstaller='"C:/G/unins000.exe" /SILENT')
+    finished = record(uninstalled=True, files={}, vendor_uninstaller=None)
+    for unfinished in (left_files, left_vendor):
+        assert is_uninstall_unfinished(unfinished) and is_uninstallable(unfinished) and not is_tracked(unfinished)
+        assert summary(catalog_menu_items(catalog_game(), unfinished, entry(), True, True)) == [
+            (UNINSTALL, "Uninstall", True), (LINK, "Open homepage", True), (LINK, "Open purchase page", True)]
+        assert summary(catalog_menu_items(catalog_game(), unfinished, None, False, False)) == [
+            (UNINSTALL, "Uninstall", True)]
+        assert delete_kind(catalog_game(), unfinished) == "uninstall"
+        assert launch_problem(catalog_game(), True, unfinished, entry()) == "catalog"  # no Repair
+    assert not is_uninstall_unfinished(finished) and not is_uninstallable(finished)
+    assert delete_kind(catalog_game(), finished) == "delete"
+    assert summary(catalog_menu_items(catalog_game(), finished, entry(), False, False)) == [
+        (LINK, "Open homepage", True), (LINK, "Open purchase page", True)]
+    runtime = record(kind="runtime", uninstalled=True, files={"x.dll": object()}, vendor_uninstaller=None)
+    assert not is_uninstallable(runtime) and delete_kind(catalog_game(), runtime) == "delete"
