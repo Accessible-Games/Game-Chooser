@@ -172,3 +172,117 @@ def test_failed_upgrade_save_keeps_loaded_config(isolated_manager_factory, tmp_p
     assert attempts, "the upgrade save was never attempted"
     assert len(m.config["libraries"]) == 1 and len(m.config["libraries"][0]["id"]) == 12
     assert m.config["libraries"][0]["path"] == old["libraries"][0]["path"]
+
+
+# ---- a damaged games.json or config.json is copied, never lost ------------------------------------------------
+
+TRUNCATED_GAMES = b'[{"title": "Hand added", "launch_path": "C:/Games/hand.exe", "libr'
+TRUNCATED_CONFIG = b'{"libraries": [{"id": "abc123abc123", "path": "D:/Games"}], "SavedSt'
+
+
+def test_truncated_games_json_is_copied_and_the_app_keeps_working(isolated_manager_factory):
+    from models import Game
+    games = isolated_manager_factory.app_dir / "games.json"
+    games.write_bytes(TRUNCATED_GAMES)
+    m = isolated_manager_factory()
+    bad = games.with_name("games.json.bad")
+    assert m.games == [] and m.games_load_failed
+    assert bad.read_bytes() == TRUNCATED_GAMES
+    assert games.read_bytes() == TRUNCATED_GAMES  # nothing changed, so nothing was written yet
+    assert m.load_problems == [messages.GAMES_FILE_DAMAGED.format(path=bad)]
+    m.games.append(Game(title="New", launch_path="C:/Games/new.exe"))
+    m.save_games()  # normal saves work once the copy is kept
+    assert [g["title"] for g in json.loads(games.read_text(encoding="utf-8"))] == ["New"]
+    assert bad.read_bytes() == TRUNCATED_GAMES
+    restarted = isolated_manager_factory()
+    assert [g.title for g in restarted.games] == ["New"] and restarted.load_problems == []
+
+
+def test_truncated_config_json_is_copied_and_the_app_keeps_working(isolated_manager_factory, tmp_path):
+    config = isolated_manager_factory.config_dir / "config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_bytes(TRUNCATED_CONFIG)
+    m = isolated_manager_factory()
+    bad = config.with_name("config.json.bad")
+    assert m.config["libraries"] == [] and not m.is_first_run
+    assert bad.read_bytes() == TRUNCATED_CONFIG and config.read_bytes() == TRUNCATED_CONFIG
+    assert m.load_problems == [messages.CONFIG_FILE_DAMAGED.format(path=bad)]
+    lib = m.add_library(_folder(tmp_path, "Games"))  # saves the config: allowed now
+    assert json.loads(config.read_text(encoding="utf-8"))["libraries"] == [lib]
+    assert bad.read_bytes() == TRUNCATED_CONFIG
+    assert isolated_manager_factory().config["libraries"] == [lib]
+
+
+def test_wrong_shape_config_is_treated_as_damaged(isolated_manager_factory):
+    config = isolated_manager_factory.config_dir / "config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    config.write_text('{"libraries": ["D:/Games"]}', encoding="utf-8")  # valid JSON, a library that isn't an object
+    m = isolated_manager_factory()
+    assert m.config["libraries"] == []
+    assert config.with_name("config.json.bad").read_text(encoding="utf-8") == '{"libraries": ["D:/Games"]}'
+
+
+def test_an_earlier_bad_copy_is_never_overwritten(isolated_manager_factory):
+    games = isolated_manager_factory.app_dir / "games.json"
+    first = games.with_name("games.json.bad")
+    first.write_bytes(b"an earlier damaged list")
+    games.write_bytes(TRUNCATED_GAMES)
+    m = isolated_manager_factory()
+    assert first.read_bytes() == b"an earlier damaged list"
+    copies = [p for p in games.parent.glob("games.json.*.bad")]
+    assert len(copies) == 1 and copies[0].read_bytes() == TRUNCATED_GAMES
+    assert m.load_problems == [messages.GAMES_FILE_DAMAGED.format(path=copies[0])]
+
+
+def test_damaged_file_is_never_saved_over_while_no_copy_can_be_kept(isolated_manager_factory, monkeypatch):
+    import library_manager
+    from models import Game
+    games = isolated_manager_factory.app_dir / "games.json"
+    config = isolated_manager_factory.config_dir / "config.json"
+    config.parent.mkdir(parents=True, exist_ok=True)
+    games.write_bytes(TRUNCATED_GAMES)
+    config.write_bytes(TRUNCATED_CONFIG)
+    real_copy = library_manager.keep_damaged_copy
+
+    def no_copy(path):
+        raise PermissionError("read-only folder")
+    monkeypatch.setattr(library_manager, "keep_damaged_copy", no_copy)
+    m = isolated_manager_factory()
+    assert m.load_problems == [messages.CONFIG_FILE_DAMAGED_NOT_COPIED.format(path=config),
+                               messages.GAMES_FILE_DAMAGED_NOT_COPIED.format(path=games)]
+    m.games.append(Game(title="New", launch_path="C:/Games/new.exe"))
+    with pytest.raises(OSError):
+        m.save_games()
+    with pytest.raises(OSError):
+        m.save_config()
+    assert games.read_bytes() == TRUNCATED_GAMES and config.read_bytes() == TRUNCATED_CONFIG
+    monkeypatch.setattr(library_manager, "keep_damaged_copy", real_copy)  # the folder is writable again
+    m.save_games()
+    m.save_config()
+    assert games.with_name("games.json.bad").read_bytes() == TRUNCATED_GAMES
+    assert config.with_name("config.json.bad").read_bytes() == TRUNCATED_CONFIG
+    assert [g["title"] for g in json.loads(games.read_text(encoding="utf-8"))] == ["New"]
+
+
+def test_a_failed_write_leaves_the_old_file_whole(isolated_manager_factory, monkeypatch):
+    import library_manager
+    from models import Game
+    m = isolated_manager_factory()
+    m.games.append(Game(title="Kept", launch_path="C:/Games/kept.exe"))
+    m.save_games()
+    m.save_config()
+    games_before, config_before = m.games_file.read_bytes(), m.config_file.read_bytes()
+    real_dump = json.dump
+
+    def half_then_full_disk(data, f, **kw):
+        f.write('[{"title": "Ha')
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(library_manager.json, "dump", half_then_full_disk)
+    m.games.append(Game(title="Lost", launch_path="C:/Games/lost.exe"))
+    with pytest.raises(OSError):
+        m.save_games()
+    with pytest.raises(OSError):
+        m.save_config()
+    monkeypatch.setattr(library_manager.json, "dump", real_dump)
+    assert m.games_file.read_bytes() == games_before and m.config_file.read_bytes() == config_before
+    assert not list(m.games_file.parent.glob("*.tmp")) and not list(m.config_file.parent.glob("*.tmp"))

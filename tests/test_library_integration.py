@@ -1,5 +1,6 @@
 import json
 
+from engine import messages
 from engine.index import DEFAULT_CATALOG_URL
 from engine.records import InstalledSource, InstallRecord, RecordStore
 from models import Game
@@ -170,14 +171,29 @@ def test_failing_games_save_during_construction_leaves_manager_usable(isolated_m
     assert m.catalog_game("entombed") is not None
 
 
-def test_corrupt_games_json_is_not_overwritten_by_reconcile(isolated_manager_factory, tmp_path):
+def test_corrupt_games_json_is_copied_before_reconcile_writes(isolated_manager_factory, tmp_path, monkeypatch):
+    """A damaged games.json is copied to games.json.bad before anything writes over it; then reconcile's save
+    is allowed (the copy holds the player's games), so the app keeps working."""
+    import library_manager
     isolated_manager_factory(config={"libraries": [{"id": "main", "path": str(tmp_path)}]})
     _seed_records(isolated_manager_factory, _record())
     path = isolated_manager_factory.app_dir / "games.json"
-    path.write_bytes(b'[{"title": "Hand added", ')
+    bad = path.with_name("games.json.bad")
+    damaged = b'[{"title": "Hand added", '
+    path.write_bytes(damaged)
+    real_write = library_manager._write_json_atomic
+    order = []
+
+    def watched(target, data):
+        order.append((target.name, bad.exists()))
+        return real_write(target, data)
+    monkeypatch.setattr(library_manager, "_write_json_atomic", watched)
     m = isolated_manager_factory()
-    assert path.read_bytes() == b'[{"title": "Hand added", '
-    assert m.catalog_game("entombed") is not None  # still usable in memory
+    assert ("games.json", True) in order and ("games.json", False) not in order
+    assert bad.read_bytes() == damaged
+    assert m.catalog_game("entombed") is not None
+    assert [g["catalog_id"] for g in _games_json(m)] == ["entombed"]  # written once the copy existed
+    assert m.games_load_failed and m.load_problems == [messages.GAMES_FILE_DAMAGED.format(path=bad)]
 
 
 def test_unreadable_record_keeps_the_games_catalog_link(isolated_manager_factory, tmp_path):

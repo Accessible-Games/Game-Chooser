@@ -174,7 +174,11 @@ class MainFrame(wx.Frame):
         
         # Initial library check
         self.check_libraries()
-        
+
+        # A games.json or config.json that couldn't be read: say so once, after the window is up
+        if self.library_manager.load_problems:
+            wx.CallAfter(self.run_when_no_dialog, self._tell_load_problems)
+
         # Update title
         self.update_title()
 
@@ -1457,6 +1461,13 @@ class MainFrame(wx.Frame):
     def _tell(self, text, caption, icon=wx.ICON_ERROR):
         with self.modal_dialog():
             wx.MessageBox(text, caption, wx.OK | icon, self)
+
+    def _tell_load_problems(self):
+        """Once, after startup: games.json or config.json couldn't be read (and where the copy of it was kept)"""
+        problems, self.library_manager.load_problems = self.library_manager.load_problems, []
+        if problems and self and not self._quitting:
+            self._tell("\n\n".join(problems), messages.FILE_DAMAGED_TITLE, wx.ICON_WARNING)
+            self.focus_active_list()
 
     def _library_unreachable(self, game):
         """Say so and return True when the game's library folder can't be reached (a drive that isn't connected)"""

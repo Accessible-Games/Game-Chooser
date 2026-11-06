@@ -25,6 +25,7 @@ import os
 import sys
 import platform
 import secrets
+import time
 from pathlib import Path
 
 from engine import messages
@@ -36,8 +37,63 @@ from models import Game
 from path_manager import PathManager
 
 
+log = logging.getLogger(__name__)
+
+# What a games.json or config.json that can't be read raises: unreadable, not JSON (or not UTF-8), or JSON of the
+# wrong shape (a list where an object belongs, a library that isn't an object, a game row Game can't take).
+_LOAD_ERRORS = (OSError, ValueError, TypeError, KeyError, AttributeError)
+
+
 class LibraryError(Exception):
     """A library change that can't be made; the message is plain words for the player."""
+
+
+def _write_json_atomic(path, data):
+    """Write JSON to a temporary file beside `path`, then replace `path` with it in one step, so a crash or a full
+    disk mid-write leaves the old file whole (as RecordStore.save does). OSError if it can't be written."""
+    path = Path(path)
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        _remove_quietly(tmp)
+        raise
+
+
+def keep_damaged_copy(path):
+    """Copy a file that couldn't be read beside it, before anything can write over it; returns the copy's path.
+
+    The rule: the first copy is `<name>.bad`; when that is taken (an earlier damaged file, kept), it is
+    `<name>.<YYYYMMDD-HHMMSS>.bad` (then `-2`, `-3`, ...). An existing copy is never overwritten. The copy is
+    read back and compared. OSError if no copy could be made."""
+    path = Path(path)
+    data = path.read_bytes()
+    stamp = time.strftime("%Y%m%d-%H%M%S")
+    names = [f"{path.name}.bad", f"{path.name}.{stamp}.bad", *(f"{path.name}.{stamp}-{n}.bad" for n in range(2, 100))]
+    for name in names:
+        copy = path.with_name(name)
+        try:
+            with open(copy, "xb") as f:  # exclusive: never over an earlier copy
+                f.write(data)
+        except FileExistsError:
+            continue
+        except OSError:
+            _remove_quietly(copy)  # only a partial copy of ours can be there
+            raise
+        if copy.read_bytes() != data:
+            _remove_quietly(copy)
+            raise OSError(f"The copy of {path} differs from it: {copy}")
+        return copy
+    raise OSError(f"No free name for a copy of {path}")
+
+
+def _remove_quietly(path):
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError:
+        pass
 
 
 def _norm(path):
@@ -62,6 +118,10 @@ class GameLibraryManager:
         self.config_file = self.get_config_path()
         self.is_first_run = not self.config_file.exists()
         self.path_manager = PathManager()
+        # Files that couldn't be read whose damaged copy isn't kept yet: nothing writes over them until it is
+        self._uncopied_damage = set()
+        self._damage_copies = {}  # damaged file -> the copy kept of it
+        self.load_problems = []  # plain words for the player, shown once after startup (then cleared by the UI)
         self.load_config()
         self.load_games()
         self.config_dir = self.config_file.parent
@@ -113,7 +173,7 @@ class GameLibraryManager:
         upgraded = False
         if self.config_file.exists():
             try:
-                with open(self.config_file, 'r') as f:
+                with open(self.config_file, 'r', encoding="utf-8") as f:
                     loaded = json.load(f)
                     # Merge with defaults to ensure all keys exist
                     for key in default_config:
@@ -132,9 +192,11 @@ class GameLibraryManager:
                             lib["id"] = secrets.token_hex(6)
                             upgraded = True
                     self.config = loaded
-            except:
+            except _LOAD_ERRORS as e:
+                log.warning("config.json couldn't be read, so the default settings are used: %s", e)
                 self.config = default_config
                 upgraded = False
+                self._damaged(self.config_file, messages.CONFIG_FILE_DAMAGED, messages.CONFIG_FILE_DAMAGED_NOT_COPIED)
             if upgraded:
                 try:
                     self.save_config()
@@ -146,28 +208,52 @@ class GameLibraryManager:
             self.save_config()
     
     def save_config(self):
-        """Save configuration to JSON file"""
-        with open(self.config_file, 'w') as f:
-            json.dump(self.config, f, indent=2)
+        """Save configuration to JSON file (atomically). OSError if it can't be saved."""
+        self._before_writing(self.config_file)
+        _write_json_atomic(self.config_file, self.config)
 
     def load_games(self):
         """Load games from JSON file"""
         self.games_load_failed = False
         if self.games_file.exists():
             try:
-                with open(self.games_file, 'r') as f:
+                with open(self.games_file, 'r', encoding="utf-8") as f:
                     data = json.load(f)
                     self.games = [Game.from_dict(g) for g in data]
-            except:
+            except _LOAD_ERRORS as e:
+                log.warning("games.json couldn't be read, so the games list starts empty: %s", e)
                 self.games = []
-                self.games_load_failed = True  # a damaged games.json must not be written over at startup
+                self.games_load_failed = True
+                self._damaged(self.games_file, messages.GAMES_FILE_DAMAGED, messages.GAMES_FILE_DAMAGED_NOT_COPIED)
         else:
             self.games = []
-    
+
     def save_games(self):
-        """Save games to JSON file"""
-        with open(self.games_file, 'w') as f:
-            json.dump([g.to_dict() for g in self.games], f, indent=2)
+        """Save games to JSON file (atomically). OSError if it can't be saved."""
+        self._before_writing(self.games_file)
+        _write_json_atomic(self.games_file, [g.to_dict() for g in self.games])
+
+    def _damaged(self, path, copied_text, not_copied_text):
+        """A file couldn't be read: keep a copy of it before anything can write over it, and tell the player once.
+        If the copy can't be made now, nothing saves over the file until it can (_before_writing)."""
+        self._uncopied_damage.add(path)
+        try:
+            self._before_writing(path)
+        except OSError as e:
+            log.warning("Couldn't keep a copy of the damaged %s, so it won't be saved over: %s", path, e)
+            self.load_problems.append(not_copied_text.format(path=path))
+        else:
+            self.load_problems.append(copied_text.format(path=self._damage_copies.get(path, path)))
+
+    def _before_writing(self, path):
+        """Keep the copy of a damaged file before its first save; OSError (nothing written) if it can't be kept."""
+        if path not in self._uncopied_damage:
+            return
+        if path.exists():
+            copy = keep_damaged_copy(path)
+            log.warning("The damaged %s was copied to %s", path, copy)
+            self._damage_copies[path] = copy
+        self._uncopied_damage.discard(path)
 
     def catalog_game(self, catalog_id):
         """The game installed from this catalog entry, or None"""
@@ -223,7 +309,7 @@ class GameLibraryManager:
                 entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id, "title": rec.catalog_id}
                 self.games.append(Game.from_dict(game_fields_for(entry, rec)))
             changed = True
-        if changed and not self.games_load_failed:
+        if changed:  # a damaged games.json is copied first, or not written over (save_games)
             try:
                 self.save_games()
             except OSError as e:

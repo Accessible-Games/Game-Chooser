@@ -364,6 +364,17 @@ GAME_BUSY = "Game Chooser is still working on {title}. Wait for it to finish, th
 ACTION_NOT_STARTED = "Game Chooser couldn't start that for {title}. Try again."
 INSTALL_PROBLEM_NAME = "Install problem"
 
+# games.json or config.json couldn't be read at startup (told once, after the window opens)
+FILE_DAMAGED_TITLE = "Game Chooser"
+GAMES_FILE_DAMAGED = ("Game Chooser couldn't read your games list, so it started with an empty one. A copy of the "
+                      "damaged list was kept here: {path}")
+GAMES_FILE_DAMAGED_NOT_COPIED = ("Game Chooser couldn't read your games list, so it started with an empty one. It "
+                                 "won't save the list until it can keep a copy of the damaged one: {path}")
+CONFIG_FILE_DAMAGED = ("Game Chooser couldn't read its settings, so it started with the default ones. Add your "
+                       "libraries again in Preferences. A copy of the damaged settings was kept here: {path}")
+CONFIG_FILE_DAMAGED_NOT_COPIED = ("Game Chooser couldn't read its settings, so it started with the default ones. "
+                                  "It won't save settings until it can keep a copy of the damaged ones: {path}")
+
 # Preferences, Installing tab
 PREFS_INSTALLING_TAB = "Installing"
 PREFS_REGISTER_SHARED = "Register shared components system-wide (needs administrator permission)"
