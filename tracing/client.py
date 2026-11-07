@@ -86,7 +86,9 @@ class TraceClient:
         recorder_state = status.get("state") if status else None
         if recorder_state == "failed":
             self._set_off(messages.RECORDER_FAILED.format(error=status.get("error")))
-        elif process is not None and recorder_state != "done" and process.wait(0) is not None:
+        elif recorder_state not in (None, "starting", "capturing"):
+            self._set_off(messages.RECORDER_GONE)
+        elif process is not None and process.wait(0) is not None:
             self._set_off(messages.RECORDER_GONE)
         elif recorder_state == "capturing":
             with self._lock:

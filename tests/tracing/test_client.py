@@ -141,3 +141,17 @@ def test_recorder_arguments(tmp_path):
     client.start()
     assert calls == [["--trace-recorder", str(client._run.path), "--app-pid", "42",
                       "--procmon", str(tmp_path / "Procmon64.exe")]]
+
+
+def test_recorder_leaving_capturing_is_off(tmp_path):
+    for later in ("stopping", "splitting", "done", "bogus"):
+        (tmp_path / later).mkdir()
+        client, proc, _ = make(tmp_path / later)
+        client.start()
+        status(client, "capturing")
+        assert client.poll().phase == "on"
+        status(client, later)
+        if later == "done":
+            proc.code = 0
+        state = client.poll()
+        assert state.phase == "off" and state.reason == messages.RECORDER_GONE
