@@ -125,7 +125,9 @@ class MainFrame(wx.Frame):
     
     def __init__(self):
         super().__init__(None, title="Game Chooser (0)")
-        
+        self.launch_observer = None  # optional: before_launch(game) -> token or None (cancel), launched(...)
+        self.title_note = ""  # text shown after "Game Chooser" in the title
+
         self.library_manager = GameLibraryManager()
         # Windows toast notifications; False in a development run, where notify() falls back to a balloon
         try:
@@ -1267,6 +1269,12 @@ class MainFrame(wx.Frame):
                     dlg.Destroy()
                 return
 
+            token = None
+            if self.launch_observer is not None:
+                token = self.launch_observer.before_launch(game)
+                if token is None:
+                    return
+
             # Launch the game
             try:
                 game_dir = str(Path(full_path).parent)
@@ -1276,7 +1284,9 @@ class MainFrame(wx.Frame):
                     subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
                 else:
                     # Regular executable
-                    subprocess.Popen([full_path], cwd=game_dir)
+                    proc = subprocess.Popen([full_path], cwd=game_dir)
+                    if self.launch_observer is not None:
+                        self.launch_observer.launched(token, game, proc, full_path, game_dir)
 
                 # Minimize window
                 self.Iconize(True)
@@ -1744,7 +1754,7 @@ class MainFrame(wx.Frame):
     def update_title(self):
         """Update window title with game count"""
         count = len(self.library_manager.games)
-        self.SetTitle(f"Game Chooser ({count})")
+        self.SetTitle(f"Game Chooser{self.title_note} ({count})")
     
     def load_saved_state(self):
         """Load saved window state"""
