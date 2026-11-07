@@ -1,6 +1,9 @@
+import pytest
+
+import tracing.runfiles as runfiles
 from tracing.clock import TICKS_PER_SECOND
 from tracing.model import SessionInfo
-from tracing.runfiles import RunDir, STATES, leftover_runs, new_run
+from tracing.runfiles import RunDir, STATES, leftover_runs, new_run, replace_with_retry
 
 S = TICKS_PER_SECOND
 FT = 133_000_000_000_000_000
@@ -64,3 +67,62 @@ def test_leftover_runs(tmp_path):
     found = leftover_runs(tmp_path, lambda pid: pid == 22)
     assert sorted(r.path for r in found) == sorted([dead.path, nostatus.path])
     assert leftover_runs(tmp_path / "missing", lambda pid: False) == []
+
+
+class FlakyReplace:
+    def __init__(self, failures):
+        self.failures, self.calls = failures, 0
+
+    def __call__(self, src, dst):
+        self.calls += 1
+        if self.calls <= self.failures:
+            raise PermissionError("held by a reader")
+        runfiles.os.replace(src, dst)
+
+
+def test_replace_retries_a_held_file(tmp_path):
+    src, dst = tmp_path / "a.tmp", tmp_path / "a"
+    src.write_text("new", encoding="utf-8")
+    dst.write_text("old", encoding="utf-8")
+    replace, sleeps = FlakyReplace(2), []
+    replace_with_retry(src, dst, replace=replace, sleep=sleeps.append)
+    assert dst.read_text(encoding="utf-8") == "new" and not src.exists()
+    assert replace.calls == 3 and sleeps == [0.015, 0.015]
+
+
+def test_replace_gives_up_after_ten_tries(tmp_path):
+    src, dst = tmp_path / "a.tmp", tmp_path / "a"
+    src.write_text("new", encoding="utf-8")
+    replace, sleeps = FlakyReplace(100), []
+    with pytest.raises(PermissionError):
+        replace_with_retry(src, dst, replace=replace, sleep=sleeps.append)
+    assert replace.calls == 10 and len(sleeps) == 9
+
+
+def test_status_write_retries_through_the_helper(tmp_path, monkeypatch):
+    real, calls = runfiles.os.replace, []
+
+    def flaky(a, b):
+        calls.append(a)
+        if len(calls) <= 2:
+            raise PermissionError("held by a reader")
+        real(a, b)
+
+    monkeypatch.setattr(runfiles.time, "sleep", lambda s: None)
+    monkeypatch.setattr(runfiles.os, "replace", flaky)
+    RunDir(tmp_path).write_status("capturing")
+    assert len(calls) == 3
+    assert RunDir(tmp_path).read_status()["state"] == "capturing"
+    assert [p.name for p in tmp_path.iterdir()] == ["status.json"]
+
+
+def test_status_write_that_keeps_failing_raises_and_leaves_no_temp(tmp_path, monkeypatch):
+    monkeypatch.setattr(runfiles.time, "sleep", lambda s: None)
+
+    def held(a, b):
+        raise PermissionError("held")
+
+    monkeypatch.setattr(runfiles.os, "replace", held)
+    with pytest.raises(PermissionError):
+        RunDir(tmp_path).write_status("capturing")
+    assert list(tmp_path.iterdir()) == []

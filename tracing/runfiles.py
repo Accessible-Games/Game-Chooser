@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import re
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -16,10 +17,33 @@ STATES = ("starting", "capturing", "failed", "stopping", "splitting", "done")
 _CAPTURE_RE = re.compile(r"^capture(?:-(\d+))?\.pml$")
 
 
+REPLACE_TRIES = 10
+REPLACE_DELAY = 0.015
+
+
+def replace_with_retry(src: Path, dst: Path, *, replace: Callable | None = None,
+                       sleep: Callable[[float], None] | None = None) -> None:
+    """os.replace, tried again while Windows says the target is held (a reader or antivirus has it open)."""
+    replace = replace or os.replace
+    sleep = sleep or time.sleep
+    for attempt in range(1, REPLACE_TRIES + 1):
+        try:
+            replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == REPLACE_TRIES:
+                raise
+            sleep(REPLACE_DELAY)
+
+
 def _atomic_write(path: Path, text: str) -> None:
     temp = path.with_name(path.name + ".tmp")
     temp.write_text(text, encoding="utf-8")
-    os.replace(temp, path)
+    try:
+        replace_with_retry(temp, path)
+    except BaseException:
+        temp.unlink(missing_ok=True)
+        raise
 
 
 class RunDir:
