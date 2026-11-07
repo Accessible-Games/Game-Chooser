@@ -44,6 +44,14 @@ def test_folder_name_uses_catalog_id_or_title_and_never_collides(tmp_path):
     assert session_folder_name(untitled.info).startswith("Alien-Outback-Deluxe-")
 
 
+def test_folder_name_sanitizes_the_catalog_id(tmp_path):
+    stamp = filetime_to_local_stamp(make_result().info.launch_before)
+    assert session_folder_name(make_result(catalog_id=r"..\..\x").info) == f"x-{stamp}"
+    assert session_folder_name(make_result(catalog_id="a/b").info) == f"a-b-{stamp}"
+    folder = write_session(make_result(catalog_id=r"..\..\x"), tmp_path)
+    assert folder.parent == tmp_path
+
+
 def test_session_json_fields(tmp_path):
     folder = write_session(make_result(problem="p"), tmp_path)
     data = json.loads((folder / "session.json").read_text(encoding="utf-8"))

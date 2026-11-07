@@ -24,4 +24,4 @@ LAUNCH_STARTING = "Tracing is still starting, so {title} would not be recorded. 
 LAUNCH_OFF = "Tracing is off, so {title} would not be recorded. Launch it anyway, untraced?"
 HOTKEY_FAILED = ("The mark key, Ctrl+Alt+Shift+M, couldn't be set up; another program may be using it. "
                  "Games are still recorded, but marks can't be added.")
-LAUNCH_RECORD_FAILED = "Tracing couldn't record the launch of {title} ({error}). The game is running untraced."
+LAUNCH_RECORD_FAILED = "Tracing couldn't record the launch of {title} ({error}), so it runs untraced."

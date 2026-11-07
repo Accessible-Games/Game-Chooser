@@ -89,13 +89,14 @@ def _merge_writes(lines: list[dict]) -> list[dict]:
     return merged
 
 
-def _process_lines(tree: dict[tuple[int, int], ProcInfo], zero: int, end: int | None) -> list[dict]:
+def _process_lines(tree: dict[tuple[int, int], ProcInfo], zero: int) -> list[dict]:
+    """A process_start line for every process, and a process_exit line for every one whose exit is in the capture."""
     lines = []
     for proc in tree.values():
         lines.append({"t": _t(proc.start, zero), "op": "process_start", "pid": proc.pid,
                       "parent_pid": proc.parent_pid, "process": _name(proc.image_path),
                       "image_path": proc.image_path, "command_line": proc.command_line})
-        if end is not None and proc.end is not None:
+        if proc.end is not None:
             lines.append({"t": _t(proc.end, zero), "op": "process_exit", "pid": proc.pid,
                           "process": _name(proc.image_path)})
     return lines
@@ -134,7 +135,7 @@ def split_run(processes: list[ProcInfo], events: Iterable[RawEvent],
         if result.root is None:
             continue
         zero = result.time_zero
-        lines = result.lines + _process_lines(result.tree, zero, result.end)
+        lines = result.lines + _process_lines(result.tree, zero)
         lines += [{"t": _t(m, zero), "op": "mark", "n": n} for n, m in enumerate(result.info.marks, 1)]
         lines.sort(key=lambda line: (line["t"], _ORDER.get(line["op"], 1)))
         result.lines = _merge_writes(lines)

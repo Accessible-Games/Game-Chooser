@@ -110,7 +110,8 @@ def test_session_end_and_still_running():
     assert sorted(x["pid"] for x in exits) == [100, 200]
     [r] = run([], procs=[root, proc(200, 100, 11 * S)])
     assert r.end is None and r.still_running is True
-    assert not [x for x in r.lines if x["op"] == "process_exit"]
+    # a process that exited has its exit line even while another one of the session is still running
+    assert [x["pid"] for x in r.lines if x["op"] == "process_exit"] == [100]
 
 
 def test_process_start_lines():

@@ -24,7 +24,9 @@ def safe_name(title: str) -> str:
 
 
 def session_folder_name(info: SessionInfo) -> str:
-    return f"{info.game['catalog_id'] or safe_name(info.game['title'])}-{filetime_to_local_stamp(info.launch_before)}"
+    catalog_id = info.game["catalog_id"]
+    name = safe_name(catalog_id) if catalog_id else safe_name(info.game["title"])
+    return f"{name}-{filetime_to_local_stamp(info.launch_before)}"
 
 
 def _t(time: int, zero: int) -> float:
