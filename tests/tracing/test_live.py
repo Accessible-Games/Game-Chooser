@@ -68,6 +68,17 @@ def test_orphan_under_game_folder_counts():
     assert early.running() == set()
 
 
+def test_child_of_reused_root_pid_counts_only_under_game_folder():
+    t = tree()
+    t.update([LiveProc(10, 1, 100, None)])
+    t.update([LiveProc(10, 1, 500, r"C:\Other\x.exe"), LiveProc(61, 10, 300, r"C:\Games\Foo\game.exe")])
+    assert t.running() == {"s1"}
+    out = tree()
+    out.update([LiveProc(10, 1, 100, None)])
+    out.update([LiveProc(10, 1, 500, r"C:\Other\x.exe"), LiveProc(61, 10, 300, r"C:\Games\Other\game.exe")])
+    assert out.running() == set()
+
+
 def test_ended_session_not_running():
     t = tree()
     t.add_session("never", 77, None, None, 100)

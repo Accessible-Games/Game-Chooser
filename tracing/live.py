@@ -57,14 +57,15 @@ class _Session:
     def _qualifies(self, p, member_pids, alive_start):
         if p.pid == self.root_pid:
             return self.root_start is None or p.start == self.root_start
-        parents = member_pids.get(p.ppid)
-        if parents:
-            current = alive_start.get(p.ppid)
-            for start in parents:
-                # a live process with this pid but another start is a reused pid, not our member
-                if start <= p.start and (current is None or current == start):
-                    return True
-        elif p.ppid not in alive_start:
+        parents = member_pids.get(p.ppid, [])
+        current = alive_start.get(p.ppid)
+        for start in parents:
+            # a live process with this pid but another start is a reused pid, not our member
+            if start <= p.start and (current is None or current == start):
+                return True
+        # the parent is gone when its pid is free, or a known member's pid was taken by another process
+        gone = current is None or (bool(parents) and current not in parents)
+        if gone:
             return p.start >= self.started_at and self._inside_game_dir(p.image_path)
         return False
 
