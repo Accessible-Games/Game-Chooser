@@ -23,3 +23,7 @@ bin/
 
 # Built test catalog (scripts/serve_test_catalog.py)
 tests/catalog_fixtures/_build/
+
+# Save tracing (build-time variant)
+traces/
+tracing-tools/
