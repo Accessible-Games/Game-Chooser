@@ -65,3 +65,35 @@ def test_cli_import_is_light():
     code = ("import sys, tracing.cli; bad = [m for m in ('procmon_parser', 'wx', 'win32api') if m in sys.modules]; "
             "sys.exit(1 if bad else 0)")
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
+
+
+def _failed_status(run):
+    status = run.read_status()
+    assert status["state"] == "failed"
+    assert status["error"].startswith("The recorder hit an unexpected error")
+    assert run.log_path.exists()
+
+
+def test_recorder_bad_app_pid_records_failure(tmp_path):
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    code = cli.run_command(["--trace-recorder", str(run.path), "--app-pid", "abc", "--procmon", "p"], False)
+    assert code not in (0, None)
+    _failed_status(run)
+
+
+def test_recorder_build_failure_records_failure(tmp_path, monkeypatch):
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+
+    def boom(exe):
+        raise RuntimeError("no parser")
+
+    monkeypatch.setattr("tracing.procmon.WindowsProcmon", boom)
+    code = cli.run_command(["--trace-recorder", str(run.path), "--app-pid", "1", "--procmon", "p"], False)
+    assert code not in (0, None)
+    _failed_status(run)
+
+
+def test_recorder_missing_args_records_failure(tmp_path):
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    assert cli.run_command(["--trace-recorder", str(run.path)], False) == 2
+    _failed_status(run)

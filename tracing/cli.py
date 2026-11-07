@@ -8,7 +8,7 @@ import shutil
 import time
 from pathlib import Path
 
-from tracing import paths
+from tracing import messages, paths
 from tracing.runfiles import RunDir, leftover_runs
 from tracing.splitrun import split_run_dir
 
@@ -41,8 +41,17 @@ def attach_app(frame, compiled: bool, argv: list[str]):
     return attach(frame, compiled, argv)
 
 
+class _ArgError(Exception):
+    pass
+
+
+class _Parser(argparse.ArgumentParser):
+    def error(self, message):
+        raise _ArgError(message)
+
+
 def _parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="game-chooser", allow_abbrev=False, add_help=False)
+    parser = _Parser(prog="game-chooser", allow_abbrev=False, add_help=False)
     parser.add_argument("--trace-recorder", metavar="RUN")
     parser.add_argument("--app-pid", type=int)
     parser.add_argument("--procmon")
@@ -57,13 +66,47 @@ def run_command(argv: list[str], compiled: bool) -> int | None:
     """Run the tracing command in argv and return its exit code; None when argv holds none."""
     if not any(arg.split("=", 1)[0] in COMMANDS for arg in argv):
         return None
-    args, _unknown = _parser().parse_known_args(argv)
+    try:
+        args, _unknown = _parser().parse_known_args(argv)
+    except _ArgError as error:
+        return _recorder_failed_early(argv, error) if "--trace-recorder" in argv else _usage(error)
     if args.trace_recorder is not None:
         return _recorder(args, compiled)
     if args.trace_split is not None:
         return _split(args, compiled)
     return _run_probe(Path(args.trace_probe), paths.procmon_exe(compiled),
                       Path(args.workload) if args.workload else DEFAULT_WORKLOAD)
+
+
+def _usage(error) -> int:
+    print(f"Bad command line: {error}")
+    return 2
+
+
+def _recorder_failed_early(argv: list[str], error) -> int:
+    """The recorder's arguments did not parse: record the failure in the run folder if its path is readable."""
+    index = argv.index("--trace-recorder")
+    if index + 1 >= len(argv) or argv[index + 1].startswith("--"):
+        return _usage(error)
+    return _record_early_failure(Path(argv[index + 1]), error)
+
+
+def _record_early_failure(run_path: Path, error) -> int:
+    """Best effort, never raises: status.json says failed and recorder.log holds the traceback."""
+    import traceback
+    run = RunDir(run_path)
+    text = "".join(traceback.format_exception(error)) if isinstance(error, BaseException) else str(error)
+    try:
+        run.write_status("failed", error=messages.RECORDER_ERROR.format(error=error))
+    except Exception:
+        pass
+    try:
+        with open(run.log_path, "a", encoding="utf-8") as log:
+            log.write(text + "\n")
+    except Exception:
+        pass
+    print(f"The recorder could not start: {error}")
+    return 2
 
 
 def _split(args, compiled: bool) -> int:
@@ -133,17 +176,23 @@ def _app_alive_check(pid: int):
 
 
 def _recorder(args, compiled: bool) -> int:
+    if args.app_pid is None or not args.procmon:
+        return _record_early_failure(Path(args.trace_recorder), "--trace-recorder needs --app-pid and --procmon.")
+    try:
+        recorder = _build_recorder(args)
+    except Exception as error:
+        return _record_early_failure(Path(args.trace_recorder), error)
+    return recorder.run()
+
+
+def _build_recorder(args) -> "Recorder":
     from tracing.live import windows_snapshot
     from tracing.pml import read_capture
     from tracing.procmon import WindowsProcmon
     from tracing.recorder import Recorder
-    if args.app_pid is None or not args.procmon:
-        print("--trace-recorder needs --app-pid and --procmon.")
-        return 2
     run = RunDir(Path(args.trace_recorder))
     traces_dir = run.path.parent.parent
-    recorder = Recorder(
+    return Recorder(
         run, _app_alive_check(args.app_pid), WindowsProcmon(Path(args.procmon)), windows_snapshot,
         lambda r: split_run_dir(r, traces_dir, read_capture), lambda: leftover_runs(traces_dir, _is_alive),
         lambda: shutil.disk_usage(run.path).free, time.monotonic, time.sleep)
-    return recorder.run()
