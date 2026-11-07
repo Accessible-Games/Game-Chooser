@@ -1,4 +1,5 @@
 from io import BytesIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -6,7 +7,7 @@ from procmon_parser import stream_logs_detail_format as detail_format
 from procmon_parser.consts import FilesystemSetInformationOperation, ProcessOperation, RegistryOperation
 
 from tracing.model import ProcInfo, RawEvent
-from tracing.pml import capture_raw_details, to_proc, to_raw
+from tracing.pml import capture_raw_details, prefer_ended, read_capture, to_proc, to_raw
 
 
 def _process(**kw):
@@ -80,3 +81,44 @@ def test_raw_capture_keeps_an_existing_handler(restore_handlers):
     assert event.details["Delete"] == "True"  # procmon-parser's own decoder still ran
     assert event.details["_raw"]["io"] == b"\x01\x00\x00\x00rest".hex()
     assert io.tell() == 4  # where procmon-parser's decoder leaves it
+
+
+def _info(end, start=1000):
+    return ProcInfo(pid=10, parent_pid=4, start=start, end=end, image_path="g.exe", command_line="g.exe",
+                    virtualized=False, is_64bit=True)
+
+
+def test_prefer_ended_keeps_the_entry_with_the_latest_end():
+    running, ended, later = _info(None), _info(2000), _info(3000)
+    assert prefer_ended(running, ended) is ended
+    assert prefer_ended(ended, running) is ended
+    assert prefer_ended(ended, later) is later and prefer_ended(later, ended) is later
+    assert prefer_ended(running, _info(None)) is running
+
+
+def test_read_capture_merges_a_process_across_rolled_over_files(tmp_path, monkeypatch):
+    import procmon_parser
+    per_file = {
+        "capture.pml": [_process(end_time=0), _process(pid=20, end_time=0)],
+        "capture-1.pml": [_process(end_time=5000), _process(pid=20, end_time=0)],
+        "capture-2.pml": [_process(end_time=0)],
+    }
+
+    class FakeReader:
+        def __init__(self, f, should_get_stacktrace):
+            self.name = Path(f.name).name
+
+        def processes(self):
+            return per_file[self.name]
+
+        def __iter__(self):
+            return iter([])
+
+    monkeypatch.setattr(procmon_parser, "ProcmonLogsReader", FakeReader)
+    files = []
+    for name in per_file:
+        (tmp_path / name).write_bytes(b"x")
+        files.append(tmp_path / name)
+    processes, events = read_capture(files)
+    ends = {p.pid: p.end for p in processes}
+    assert ends == {10: 5000, 20: None} and list(events) == []

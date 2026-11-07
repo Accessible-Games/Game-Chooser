@@ -130,3 +130,9 @@ def test_status_write_that_keeps_failing_raises_and_leaves_no_temp(tmp_path, mon
     with pytest.raises(PermissionError):
         RunDir(tmp_path).write_status("capturing")
     assert list(tmp_path.iterdir()) == []
+
+
+def test_capture_files_ignore_case(tmp_path):
+    for name in ("Capture.PML", "CAPTURE-1.pml", "capture-2.Pml", "capture-x.pml", "notes.pml"):
+        (tmp_path / name).write_bytes(b"x")
+    assert [p.name for p in RunDir(tmp_path).capture_files()] == ["Capture.PML", "CAPTURE-1.pml", "capture-2.Pml"]

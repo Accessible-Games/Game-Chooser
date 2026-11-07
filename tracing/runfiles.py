@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 STATES = ("starting", "capturing", "failed", "stopping", "splitting", "done")
 
-_CAPTURE_RE = re.compile(r"^capture(?:-(\d+))?\.pml$")
+_CAPTURE_RE = re.compile(r"^capture(?:-(\d+))?\.pml$", re.IGNORECASE)
 
 
 REPLACE_TRIES = 10
@@ -76,9 +76,13 @@ class RunDir:
 
     def capture_files(self) -> list[Path]:
         found = []
-        for item in self.path.glob("capture*.pml"):
+        try:
+            items = list(self.path.iterdir())
+        except OSError:
+            return []
+        for item in items:
             match = _CAPTURE_RE.match(item.name)
-            if match:
+            if match and item.is_file():
                 found.append((int(match.group(1) or 0), item))
         return [item for _, item in sorted(found)]
 

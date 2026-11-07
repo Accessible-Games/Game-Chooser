@@ -27,8 +27,19 @@ def to_raw(event) -> RawEvent:
                     details=event.details or {})
 
 
+def prefer_ended(existing: ProcInfo, new: ProcInfo) -> ProcInfo:
+    """Of two entries for one process (from files Process Monitor rolled over to), the one that saw it end.
+
+    An earlier file lists a process as still running; only the file holding its exit has the end time.
+    When both have one, the later end wins; when neither does, the first entry stays.
+    """
+    if new.end is not None and (existing.end is None or new.end > existing.end):
+        return new
+    return existing
+
+
 def read_capture(paths: list[Path]) -> tuple[list[ProcInfo], Iterator[RawEvent]]:
-    """Every process across the files (de-duplicated by key) and their events, file after file.
+    """Every process across the files (de-duplicated by key, see prefer_ended) and their events, file after file.
 
     The events are read lazily; each file stays open only while its events are being read.
     """
@@ -38,7 +49,8 @@ def read_capture(paths: list[Path]) -> tuple[list[ProcInfo], Iterator[RawEvent]]
         with open(path, "rb") as f:
             for process in ProcmonLogsReader(f, should_get_stacktrace=False).processes():
                 info = to_proc(process)
-                processes.setdefault(info.key, info)
+                existing = processes.get(info.key)
+                processes[info.key] = info if existing is None else prefer_ended(existing, info)
 
     def events_of(path: Path) -> Iterator[RawEvent]:
         with open(path, "rb") as f:
@@ -51,7 +63,8 @@ def read_capture(paths: list[Path]) -> tuple[list[ProcInfo], Iterator[RawEvent]]
 def install_detail_handlers() -> None:
     """Decoders for the details procmon-parser leaves out (rename targets, SetDispositionInformationEx).
 
-    A placeholder until the probe's findings show the byte layouts (Task 8).
+    A placeholder until the probe's findings show the byte layouts (Task 8). It must be idempotent and must chain any
+    handler already registered for an operation (such as the probe's `_raw` wrappers) rather than replace it.
     """
 
 
