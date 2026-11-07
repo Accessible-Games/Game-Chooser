@@ -50,6 +50,20 @@ def test_find_root_prefers_exact_start_then_window():
     assert ROOT_SLACK == 2 * S
 
 
+def test_find_root_falls_back_to_the_window_when_the_start_is_off():
+    inside = p(100, 1, 10 * S + S // 2)
+    assert find_root([inside], session(root_start=10 * S + S // 2 + 3)) is inside
+    assert find_root([p(100, 1, 0)], session(root_start=3)) is None  # off and outside the window
+
+
+def test_find_root_window_prefers_the_start_closest_to_root_start():
+    near_launch = p(100, 1, 10 * S)
+    near_start = p(100, 1, 11 * S + S // 2)
+    procs = [near_launch, near_start]
+    assert find_root(procs, session(root_start=11 * S + S // 2 + 5)) is near_start
+    assert find_root(procs, session()) is near_launch
+
+
 def test_find_root_none_when_absent():
     assert find_root([p(5, 1, 10 * S)], session()) is None
 

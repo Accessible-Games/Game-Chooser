@@ -46,6 +46,21 @@ def test_summarize_without_the_workload_root():
     report = probe.summarize([explorer], iter([_event(explorer, "WriteFile", "x")]), session)
     assert report["op_counts"] == {"WriteFile": 1}
     assert report["processes"] == [] and report["events"] == []
+    assert report["root_start_pml"] is None
+
+
+def test_summarize_reports_the_pml_root_start_found_by_window():
+    cmd = _proc(200, 100, 5000, "cmd.exe")
+    session = SessionInfo("probe", 200, 5003, 4990, 5010, {}, {}, ())  # the live start is a few ticks off
+    report = probe.summarize([cmd], iter([]), session)
+    assert report["root_start_pml"] == 5000 and [p["pid"] for p in report["processes"]] == [200]
+
+
+def test_root_start_report():
+    assert probe.root_start_report(5003, 5000) == {
+        "root_start_live": 5003, "root_start_pml": 5000, "root_start_delta_ticks": -3}
+    assert probe.root_start_report(None, 5000)["root_start_delta_ticks"] is None
+    assert probe.root_start_report(5003, None)["root_start_delta_ticks"] is None
 
 
 def test_relaunch_commands(tmp_path):

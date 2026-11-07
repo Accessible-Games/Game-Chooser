@@ -11,7 +11,6 @@ Needs administrator rights: unelevated, it starts itself again elevated (a UAC p
 """
 import argparse
 import json
-import re
 import subprocess
 import sys
 import time
@@ -23,9 +22,11 @@ from pathlib import Path
 from tracing import paths
 from tracing.attribution import find_root, session_tree
 from tracing.clock import now_filetime
+from tracing.live import process_start_time
 from tracing.model import ProcInfo, RawEvent, SessionInfo
 from tracing.pml import capture_raw_details, read_capture
 from tracing.procmon import WindowsProcmon, write_filter_config
+from tracing.runfiles import RunDir
 
 RAW_OPERATIONS = ("SetRenameInformationFile", "SetRenameInformationEx", "SetRenameInformationExBypassAccessCheck",
                   "SetDispositionInformationEx")
@@ -52,11 +53,7 @@ def cli_relaunch(compiled: bool, out_dir: Path, workload: Path) -> Relaunch:
 
 def capture_files(out_dir: Path) -> list[Path]:
     """capture.pml, then the files Process Monitor rolled over to (capture-1.pml, ...), in order."""
-    def order(path: Path) -> int:
-        match = re.fullmatch(r"capture-(\d+)", path.stem)
-        return int(match.group(1)) if match else 0
-    found = [p for p in out_dir.glob("capture*.pml") if p.stem == "capture" or re.fullmatch(r"capture-\d+", p.stem)]
-    return sorted(found, key=order)
+    return RunDir(out_dir).capture_files()
 
 
 def summarize(processes: list[ProcInfo], events: Iterator[RawEvent], session: SessionInfo) -> dict:
@@ -70,7 +67,14 @@ def summarize(processes: list[ProcInfo], events: Iterator[RawEvent], session: Se
         if event.proc_key in tree:
             kept.append({"operation": event.operation, "path": event.path, "result": event.result,
                          "details": event.details})
-    return {"op_counts": dict(counts), "processes": [_proc_json(p) for p in tree.values()], "events": kept}
+    return {"op_counts": dict(counts), "processes": [_proc_json(p) for p in tree.values()], "events": kept,
+            "root_start_pml": root.start if root is not None else None}
+
+
+def root_start_report(live: int | None, pml: int | None) -> dict:
+    """The root's start read live right after Popen, the start in the PML, and pml - live in ticks."""
+    delta = pml - live if live is not None and pml is not None else None
+    return {"root_start_live": live, "root_start_pml": pml, "root_start_delta_ticks": delta}
 
 
 def _proc_json(proc: ProcInfo) -> dict:
@@ -145,6 +149,7 @@ def _capture_and_read(out_dir: Path, procmon: Path, workload: Path, control: Win
     before = now_filetime()
     process = subprocess.Popen([str(workload)], cwd=workload.parent)
     after = now_filetime()
+    root_start = process_start_time(process.pid)  # as the client reads it after a game's Popen
     workload_exit = process.wait()
     time.sleep(AFTER_WORKLOAD_SECONDS)
     stopped = control.stop(STOP_TIMEOUT)
@@ -155,7 +160,7 @@ def _capture_and_read(out_dir: Path, procmon: Path, workload: Path, control: Win
     capture_raw_details(RAW_OPERATIONS)
     files = capture_files(out_dir)
     processes, events = read_capture(files)
-    session = SessionInfo("probe", process.pid, None, before, after, {"workload": str(workload)}, {}, ())
+    session = SessionInfo("probe", process.pid, root_start, before, after, {"workload": str(workload)}, {}, ())
     summary = summarize(processes, events, session)
     size = sum(p.stat().st_size for p in files)
     return {
@@ -167,6 +172,7 @@ def _capture_and_read(out_dir: Path, procmon: Path, workload: Path, control: Win
         "workload": {"path": str(workload), "pid": process.pid, "exit_code": workload_exit,
                      "launch_before": before, "launch_after": after},
         **summary,
+        **root_start_report(root_start, summary["root_start_pml"]),
     }
 
 
