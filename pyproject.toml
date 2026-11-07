@@ -16,6 +16,12 @@ dependencies = [
 dev = [
     "pytest>=9.2.0",
 ]
+tracing = [
+    "procmon-parser==0.4.0",
+]
+
+[tool.uv]
+default-groups = ["dev", "tracing"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

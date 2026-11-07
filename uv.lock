@@ -12,6 +12,15 @@ wheels = [
 ]
 
 [[package]]
+name = "construct"
+version = "2.10.70"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/02/77/8c84b98eca70d245a2a956452f21d57930d22ab88cbeed9290ca630cf03f/construct-2.10.70.tar.gz", hash = "sha256:4d2472f9684731e58cc9c56c463be63baa1447d674e0d66aeb5627b22f512c29", size = 86337, upload-time = "2023-11-29T08:44:49.545Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b2/fb/08b3f4bf05da99aba8ffea52a558758def16e8516bc75ca94ff73587e7d3/construct-2.10.70-py3-none-any.whl", hash = "sha256:c80be81ef595a1a821ec69dc16099550ed22197615f4320b57cc9ce2a672cb30", size = 63020, upload-time = "2023-11-29T08:44:46.876Z" },
+]
+
+[[package]]
 name = "frozendict"
 version = "2.4.6"
 source = { registry = "https://pypi.org/simple" }
@@ -38,6 +47,9 @@ dependencies = [
 dev = [
     { name = "pytest" },
 ]
+tracing = [
+    { name = "procmon-parser" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -50,6 +62,7 @@ requires-dist = [
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.2.0" }]
+tracing = [{ name = "procmon-parser", specifier = "==0.4.0" }]
 
 [[package]]
 name = "iniconfig"
@@ -98,6 +111,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/bf/db/7fc19e6f2dc92a966727031389fc2e08b558f0f25eb7403c1119ad4713cd/pluggy-1.7.0.tar.gz", hash = "sha256:d1eaa46ebb595891b860ab086b4d09c8588af65ebd4361b8e8f4bb8920b90ba8", size = 123304, upload-time = "2026-10-15T09:50:58.343Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/40/9e/2b38731e0fc536806f16490e1a12d7f0dc2a1235aa8cc07bcc75416a7daa/pluggy-1.7.0-py3-none-any.whl", hash = "sha256:7dd7b0d8832ba3cb632c306926ded123429211b83641b35dc5c41ad2d34f9bec", size = 27082, upload-time = "2026-10-15T09:50:56.808Z" },
+]
+
+[[package]]
+name = "procmon-parser"
+version = "0.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "construct" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/5b/be/7ccd8ac25d0638e158ffc9f4c411c14213a0cb274ef937ee5062a58db15b/procmon_parser-0.4.0.tar.gz", hash = "sha256:337ea48b9033adb83ec1e9d69f5caa0b6aca73dc0e4a934f9b0e616e2bf59c55", size = 54215, upload-time = "2026-09-03T23:48:50.679Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/64/9a/5b5e9612fd49b7c967a34bca4fb099de980424f0f7e39d4b19452baf060c/procmon_parser-0.4.0-py3-none-any.whl", hash = "sha256:5b1c522386f9208cd8d40577c5c90ac1c7a7568262ae89615d0ffe9d35613e1f", size = 38962, upload-time = "2026-09-03T23:48:49.273Z" },
 ]
 
 [[package]]
