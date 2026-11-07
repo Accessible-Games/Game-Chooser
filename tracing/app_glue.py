@@ -71,6 +71,8 @@ class TracingGlue:
     def __init__(self, frame, client: TraceClient):
         self._frame = frame
         self._client = client
+        self._frame_id = frame.GetId()
+        self._hwnd = frame.GetHandle()
         self._phase = "starting"
         self._told_off = False
 
@@ -103,12 +105,12 @@ class TracingGlue:
         try:
             state = self._client.poll()
             self._apply_state(state)
-            if state.phase == "on":
-                return ("traced", now_filetime())
-            text = messages.LAUNCH_STARTING if state.phase == "starting" else messages.LAUNCH_OFF
         except Exception:
             log.exception("Checking tracing before a launch failed")
-            text = messages.LAUNCH_OFF
+            state = self._client.state  # the last known state, not an assumed off
+        if state.phase == "on":
+            return ("traced", now_filetime())
+        text = messages.LAUNCH_STARTING if state.phase == "starting" else messages.LAUNCH_OFF
         with self._frame.modal_dialog():
             answer = wx.MessageBox(text.format(title=game.title), messages.DIALOG_CAPTION,
                                    wx.YES_NO | wx.ICON_QUESTION, self._frame)
@@ -180,16 +182,22 @@ class TracingGlue:
     # --- teardown and messages ---
 
     def _on_destroy(self, event) -> None:
+        """When the frame is destroyed: stop polling and give the mark key back.
+
+        By the time this event arrives the frame's Python wrapper already counts as deleted (GetEventObject() is a
+        new proxy and frame.UnregisterHotKey raises RuntimeError), so the frame is recognised by id and the key is
+        unregistered through user32 with the window handle saved at attach; the window itself still exists."""
         event.Skip()
-        if event.GetEventObject() is not self._frame:
-            return  # a child window's destroy event
+        if event.GetId() != self._frame_id:
+            return  # not the frame
         self._timer.Stop()
         if self._hotkey:
+            self._hotkey = False
             try:
-                self._frame.UnregisterHotKey(HOTKEY_ID)
+                import ctypes
+                ctypes.windll.user32.UnregisterHotKey(ctypes.c_void_p(self._hwnd), HOTKEY_ID)
             except Exception:
                 log.debug("Unregistering the mark key failed", exc_info=True)
-            self._hotkey = False
 
     def _tell(self, text: str) -> None:
         """Show text once no modal dialog is open; posted, so it never opens a dialog inside the caller."""
