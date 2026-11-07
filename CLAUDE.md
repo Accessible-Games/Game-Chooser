@@ -28,6 +28,8 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 - Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, install
   choices, install prefs, install service, library actions, library integration, library manager, wx bridge,
   catalog fixtures).
+- `tests/tracing/test_*.py` (one per `tracing/` module, no wx, admin rights, Process Monitor or network) and
+  `tests/test_check_no_tracing.py` (the build check) cover the tracing build.
 - Mock minimal structures, test edge cases (empty/None, mixed states), keep logic out of the UI layer.
 
 ### Local test catalog
@@ -273,6 +275,46 @@ Modal-safety sections.
 - Paths use forward slashes internally and are library-relative; `path_manager` converts.
 - Executable detection: Windows `.exe`/`.bat`; macOS `.app` and executable files; Linux executable files. Installs
   are Windows-focused (registry, UAC, `bin/*.exe`).
+
+## Tracing build (`tracing/`)
+A build-time variant for the catalog admin: it records every file and registry write the launched games make, with
+Process Monitor, and splits the capture into one folder per play session. Normal builds contain none of it.
+Log format: `tracing/LOG-FORMAT.md`. Build: see Build and Distribution.
+
+- **Rule:** nothing outside `tracing/` imports it; the one exception is `game-chooser.py`, inside
+  `try/except ImportError`. `procmon_parser` is imported only inside `tracing/`, lazily, inside functions. Only
+  `app_glue.py` imports wx. The game launch is unchanged: `MainFrame` calls `frame.launch_observer` around its
+  `Popen`, and shows `frame.title_note` in the title. The normal build is checked by `scripts/check_no_tracing.py`
+  (fails the build on any tracing module or `tracing`/`procmon`/`traces` file).
+- **Commands** (`game-chooser.py`, through `tracing/cli.py`): `--tracing` (turn tracing on from source; a compiled
+  tracing build is always on), `--trace-recorder RUN --app-pid N --procmon EXE` (the elevated recorder, started by
+  the app), `--trace-split [RUN...]` (split leftover runs after a crash; prints "No runs to split." when there are none),
+  `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds), `--traces-dir PATH`
+  (use another traces folder). Exit codes: 0 done, 1 a split problem, 2 bad command line.
+- **Where logs go:** `traces/` beside the exe (from source: beside `game-chooser.py`; git-ignored). One folder per
+  play session, `<catalog id or title>-<YYYYMMDD-HHMMSS>`, holding `session.json` and `events.jsonl`. The recorder's
+  working files live in `traces/_runs/<YYYYMMDD-HHMMSS>-<pid>/`: `status.json`, `sessions/<id>.json`, `filter.pmc`,
+  `capture.pml` (and `capture-N.pml`; removed after a good split), `recorder.log`, `split.json`.
+- **Title:** `Game Chooser (tracing starting)`, `(tracing)` or `(tracing off)`. When off, a dialog says why and
+  games launch untraced after the player confirms.
+- **Mark key:** Ctrl+Alt+Shift+M adds a numbered mark to every running traced game. Windows OK beep = mark recorded;
+  error beep = no game being traced.
+- **Modules** (line counts approximate):
+  - `cli.py` (200) - commands, `--traces-dir`, `tracing_wanted`, `attach_app`
+  - `app_glue.py` (225) - the only wx module: starts the recorder (one UAC prompt), title, launch observer, mark key
+  - `messages.py` (30) - every UI and recorder message
+  - `client.py` (130) - app side: starts the recorder, writes session files, records launches and marks
+  - `recorder.py` (150) - elevated side: drives Process Monitor for the whole run, then splits
+  - `procmon.py` (120) - Process Monitor's filter file, start, ready check, stop
+  - `pml.py` (90) - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`)
+  - `live.py` (170) - live process snapshot (Windows) used for roots and the running tree
+  - `runfiles.py` (115) - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` (50) - split a run folder
+  - `split.py` (140) - attribute events to sessions and merge writes; `attribution.py` (55) - the process tree
+  - `kinds.py` (50) - event to write kind; `virtualstore.py` (20) - the VirtualStore path
+  - `output.py` (85) - writes `session.json` and `events.jsonl`; `model.py` (60), `clock.py` (30), `paths.py` (40)
+  - `probe.py` (205) - the `--trace-probe` command
+  - `check_trace_test.py` (80) - `python -m tracing.check_trace_test <session folder>` checks a session of the
+    trace test game (`tests/catalog_fixtures/games/trace-test`)
 
 ## Build and Distribution
 
