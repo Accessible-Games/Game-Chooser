@@ -20,19 +20,36 @@ Game Chooser - A desktop application for organizing and launching games
 Entry point for the application
 """
 
-import wx
-from main_window import MainFrame
+import sys
 
 
-class GameChooserApp(wx.App):
-    """Main application class"""
-    
-    def OnInit(self):
-        frame = MainFrame()
-        frame.Show()
-        return True
+def main():
+    compiled = "__compiled__" in globals()
+    try:
+        import tracing.cli as tracing_cli
+    except ImportError:
+        tracing_cli = None
+    if tracing_cli is not None:
+        code = tracing_cli.run_command(sys.argv[1:], compiled)
+        if code is not None:
+            sys.exit(code)
+
+    import wx
+    from main_window import MainFrame
+
+    class GameChooserApp(wx.App):
+        """Main application class"""
+
+        def OnInit(self):
+            frame = MainFrame()
+            frame.Show()
+            if tracing_cli is not None and tracing_cli.tracing_wanted(sys.argv[1:], compiled):
+                tracing_cli.attach_app(frame, compiled, sys.argv[1:])
+            return True
+
+    app = GameChooserApp()
+    app.MainLoop()
 
 
 if __name__ == "__main__":
-    app = GameChooserApp()
-    app.MainLoop()
+    main()
