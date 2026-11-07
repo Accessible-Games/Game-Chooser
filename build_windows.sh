@@ -111,6 +111,9 @@ fi
 export PYTHONPATH="smart_list;resource_finder"
 export WSLENV="${WSLENV:+$WSLENV:}PYTHONPATH"
 
+# A report left from an earlier build must never be what the check reads.
+rm -f "$REPORT"
+
 # Run Nuitka to build the executable (nuitka isn't a project dependency; uv supplies it for this run)
 uv run --with nuitka python -m nuitka \
     --standalone \
@@ -134,7 +137,9 @@ if [ $? -eq 0 ]; then
         echo "$TRACING_WARNING" > "$DIST/TRACING-BUILD.txt"
     else
         uv run python scripts/check_no_tracing.py "$REPORT" "$DIST" || {
-            echo "The normal build contains tracing code; it must not be distributed."
+            echo "The normal build failed the tracing check (see above); it must not be distributed."
+            rm -rf "$DIST"
+            echo "Removed $DIST so it can't be distributed by mistake."
             exit 1
         }
     fi

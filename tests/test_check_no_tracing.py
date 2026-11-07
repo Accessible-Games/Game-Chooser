@@ -63,3 +63,25 @@ def test_real_report_passes():
     dist = ROOT / "build" / "game-chooser.dist"
     files = [p.relative_to(dist).as_posix() for p in dist.rglob("*")] if dist.is_dir() else []
     assert check_no_tracing.find_tracing(path.read_text(encoding="utf-8"), files) == []
+
+
+NO_MODULES = "The compilation report lists no modules; its format may have changed, so the build can't be checked."
+
+
+def test_empty_report_fails():
+    assert check_no_tracing.find_tracing("", CLEAN_FILES) == [NO_MODULES]
+    assert check_no_tracing.find_tracing(report(), CLEAN_FILES) == [NO_MODULES]
+
+
+def test_garbled_report_fails():
+    garbled = '<nuitka-compilation-report><mod name="engine.jobs"/>\x00\x01 garbage'
+    assert check_no_tracing.find_tracing(garbled, CLEAN_FILES) == [NO_MODULES]
+
+
+def test_main_fails_on_a_report_without_modules(tmp_path, capsys):
+    xml = tmp_path / "report.xml"
+    xml.write_text("<nuitka-compilation-report/>", encoding="utf-8")
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    assert check_no_tracing.main(["check", str(xml), str(dist)]) == 1
+    assert NO_MODULES in capsys.readouterr().out
