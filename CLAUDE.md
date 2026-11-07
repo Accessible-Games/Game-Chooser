@@ -284,5 +284,11 @@ when missing, builds a standalone folder `build/game-chooser.dist/` (`--include-
 (with `bin/licenses/`) and `THIRD_PARTY.md` next to the exe. `./build_windows.sh --ship-only DIST` only ships the
 tools into an existing build folder. Distribute the whole `game-chooser.dist` folder.
 
+The normal build leaves out `tracing/` and `procmon_parser` (`--nofollow-import-to`), and afterwards runs
+`scripts/check_no_tracing.py build/compilation-report.xml build/game-chooser.dist`, which fails the build if any
+tracing module or `tracing`/`procmon`/`traces` file got in. `./build_windows.sh --tracing` builds the tracing
+variant into `build/tracing/` instead (with Process Monitor in `procmon/` and a `TRACING-BUILD.txt` warning); it
+is for the catalog admin's test machines only and is never distributed.
+
 ### License
 GNU GPLv3 - see LICENSE.txt

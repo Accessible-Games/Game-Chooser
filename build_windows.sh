@@ -6,6 +6,11 @@
 # scripts/fetch_tools.py; bin/ is not committed). engine/extract.py looks for them in the bin/ folder beside
 # the executable, so this script ships bin/ (with the tools' licenses) and THIRD_PARTY.md next to it.
 # Without them every zip, 7z, cab, Inno and NSIS install would fail.
+#
+# `bash build_windows.sh --tracing` builds the tracing variant into build/tracing/ instead: it adds the tracing/
+# and procmon_parser packages, ships Process Monitor (fetched by scripts/fetch_procmon.py) in procmon/, and writes
+# TRACING-BUILD.txt. It is for the catalog admin's test machines only; never distribute it. The normal build
+# leaves tracing out and then runs scripts/check_no_tracing.py, which fails the build if any tracing code got in.
 
 set -u
 
@@ -67,14 +72,35 @@ if [ "${1:-}" = "--ship-only" ]; then
     exit 0
 fi
 
-echo "Building Game Chooser for Windows..."
+TRACING=0
+if [ "${1:-}" = "--tracing" ]; then
+    TRACING=1
+fi
+
+if [ "$TRACING" -eq 1 ]; then
+    OUT=build/tracing
+    TRACING_FLAGS=(--include-package=tracing --include-package=procmon_parser)
+    echo "Building the TRACING build of Game Chooser for Windows..."
+else
+    OUT=build
+    TRACING_FLAGS=(--nofollow-import-to=tracing --nofollow-import-to=procmon_parser)
+    echo "Building Game Chooser for Windows..."
+fi
+DIST="$OUT/game-chooser.dist"
+REPORT="$OUT/compilation-report.xml"
+TRACING_WARNING="This is the tracing build of Game Chooser. It records every file and registry write made by the games it launches. Never give it to anyone; it is for the catalog admin's test machines only."
 
 fetch_tools_if_missing || exit 1
 
+if [ "$TRACING" -eq 1 ] && [ ! -f tracing-tools/procmon/Procmon64.exe ]; then
+    echo "Process Monitor missing from tracing-tools/procmon/; fetching it..."
+    uv run python scripts/fetch_procmon.py || exit 1
+fi
+
 # Clean the previous build (only Nuitka's own folders: build/ may hold other things)
-if [ -d "build/game-chooser.dist" ] || [ -d "build/game-chooser.build" ]; then
+if [ -d "$DIST" ] || [ -d "$OUT/game-chooser.build" ]; then
     echo "Cleaning previous build..."
-    rm -rf build/game-chooser.dist build/game-chooser.build
+    rm -rf "$DIST" "$OUT/game-chooser.build"
 fi
 
 # smart_list and resource_finder are submodules whose packages sit one folder down (smart_list/smart_list/,
@@ -91,21 +117,36 @@ uv run --with nuitka python -m nuitka \
     --windows-console-mode=disable \
     --follow-imports \
     --include-package=engine \
+    "${TRACING_FLAGS[@]}" \
     --include-module=resource_finder \
-    --report=build/compilation-report.xml \
+    --report="$REPORT" \
     --include-data-files=smart_list/smart_list/iat_hook32.dll=iat_hook32.dll \
     --include-data-files=smart_list/smart_list/iat_hook64.dll=iat_hook64.dll \
     --assume-yes-for-downloads \
-    --output-dir=build \
+    --output-dir="$OUT" \
     game-chooser.py
 
 if [ $? -eq 0 ]; then
-    ship_tools build/game-chooser.dist || exit 1
+    ship_tools "$DIST" || exit 1
+    if [ "$TRACING" -eq 1 ]; then
+        mkdir -p "$DIST/procmon"
+        cp tracing-tools/procmon/Procmon64.exe tracing-tools/procmon/Eula.txt "$DIST/procmon/" || exit 1
+        echo "$TRACING_WARNING" > "$DIST/TRACING-BUILD.txt"
+    else
+        uv run python scripts/check_no_tracing.py "$REPORT" "$DIST" || {
+            echo "The normal build contains tracing code; it must not be distributed."
+            exit 1
+        }
+    fi
     echo ""
     echo "Build completed successfully!"
-    echo "Executable location: build/game-chooser.dist/game-chooser.exe"
+    echo "Executable location: $DIST/game-chooser.exe"
     echo ""
-    echo "To distribute, copy the entire 'build/game-chooser.dist' folder (it includes bin/ and THIRD_PARTY.md)"
+    if [ "$TRACING" -eq 1 ]; then
+        echo "$TRACING_WARNING"
+    else
+        echo "To distribute, copy the entire '$DIST' folder (it includes bin/ and THIRD_PARTY.md)"
+    fi
 else
     echo ""
     echo "Build failed! Check the output above for errors."
