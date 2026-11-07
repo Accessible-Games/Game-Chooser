@@ -41,7 +41,7 @@ class SessionInfo:
     launch_before: int
     launch_after: int
     game: dict  # title, catalog_id, library_id, launch_path, exe, game_dir
-    env: dict  # windows, local_appdata, user_profile, app_exe, app_exe_mtime, compiled
+    env: dict  # windows, local_appdata, user_profile, app_exe, app_exe_mtime, app_build, compiled
     marks: tuple[int, ...]
 
     def to_json(self) -> dict:

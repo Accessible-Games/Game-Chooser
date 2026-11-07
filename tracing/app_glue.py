@@ -47,6 +47,21 @@ def _mtime_iso(path: str) -> str | None:
         return None
 
 
+def _app_build(compiled: bool) -> str | None:
+    """From source, the repo's short commit (git rev-parse --short HEAD); None when compiled (app_exe_mtime
+    identifies the build) or when git fails. Never raises."""
+    if compiled:
+        return None
+    try:
+        result = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=paths.REPO_DIR, capture_output=True,
+                                text=True, timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    except Exception:
+        log.debug("git rev-parse failed", exc_info=True)
+        return None
+    build = result.stdout.strip() if result.returncode == 0 else ""
+    return build or None
+
+
 def _env(compiled: bool) -> dict:
     app_exe = _app_exe(compiled)
     return {
@@ -55,6 +70,7 @@ def _env(compiled: bool) -> dict:
         "user_profile": os.environ.get("USERPROFILE", ""),
         "app_exe": app_exe,
         "app_exe_mtime": _mtime_iso(app_exe),
+        "app_build": _app_build(compiled),
         "compiled": compiled,
     }
 
@@ -101,19 +117,39 @@ class TracingGlue:
     # --- the launch observer ---
 
     def before_launch(self, game):
-        """("traced", before) when tracing is on; otherwise ask, and ("untraced", None) or None (don't launch)."""
+        """("traced", before) when tracing is on; otherwise ask, and ("untraced", None) or None (don't launch).
+
+        Never raises into launch_game: if anything here fails, the game launches untraced."""
+        try:
+            return self._before_launch(game)
+        except Exception:
+            log.exception("Checking tracing before a launch failed; launching untraced")
+            return ("untraced", None)
+
+    def _before_launch(self, game):
         try:
             state = self._client.poll()
+        except Exception:
+            log.exception("Polling the recorder before a launch failed")
+            state = self._client.state  # the last known state, not an assumed off
+        # Turned off just now (by this poll): the question carries the reason, so it isn't told again afterwards.
+        just_off = state.phase == "off" and self._phase != "off"
+        if just_off:
+            self._told_off = True
+        try:
             self._apply_state(state)
         except Exception:
-            log.exception("Checking tracing before a launch failed")
-            state = self._client.state  # the last known state, not an assumed off
+            log.exception("Updating tracing's state before a launch failed")
         if state.phase == "on":
             return ("traced", now_filetime())
-        text = messages.LAUNCH_STARTING if state.phase == "starting" else messages.LAUNCH_OFF
+        if state.phase == "starting":
+            text = messages.LAUNCH_STARTING.format(title=game.title)
+        else:
+            text = messages.LAUNCH_OFF.format(title=game.title)
+            if just_off:
+                text = (state.reason or messages.RECORDER_GONE) + " " + text
         with self._frame.modal_dialog():
-            answer = wx.MessageBox(text.format(title=game.title), messages.DIALOG_CAPTION,
-                                   wx.YES_NO | wx.ICON_QUESTION, self._frame)
+            answer = wx.MessageBox(text, messages.DIALOG_CAPTION, wx.YES_NO | wx.ICON_QUESTION, self._frame)
         return ("untraced", None) if answer == wx.YES else None
 
     def launched(self, token, game, proc, full_path, game_dir) -> None:
