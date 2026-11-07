@@ -74,7 +74,7 @@ class WindowsProcmon:
 
     def wait_ready(self, timeout: float) -> bool:
         try:
-            result = subprocess.run([str(self.exe), "/WaitForIdle"], timeout=timeout)
+            result = subprocess.run([str(self.exe), "/AcceptEula", "/Quiet", "/WaitForIdle"], timeout=timeout)
         except subprocess.TimeoutExpired:
             return False
         return result.returncode == 0 and self._backing is not None and self._backing.exists()
@@ -85,7 +85,7 @@ class WindowsProcmon:
     def stop(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         try:
-            subprocess.run([str(self.exe), "/Terminate"], timeout=timeout)
+            subprocess.run([str(self.exe), "/AcceptEula", "/Quiet", "/Terminate"], timeout=timeout)
         except subprocess.TimeoutExpired:
             pass
         if self._process is None:

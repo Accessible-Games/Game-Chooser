@@ -61,3 +61,23 @@ def test_job_ends_the_process_when_closed():
     finally:
         if process.poll() is None:
             process.kill()
+
+
+def test_helper_runs_accept_the_eula_quietly(tmp_path, monkeypatch):
+    import tracing.procmon as procmon_module
+    from tracing.procmon import WindowsProcmon
+    calls = []
+
+    def fake_run(argv, timeout=None):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(procmon_module.subprocess, "run", fake_run)
+    exe = tmp_path / "Procmon64.exe"
+    control = WindowsProcmon(exe)
+    control._backing = tmp_path / "capture.pml"
+    control._backing.write_bytes(b"")
+    assert control.wait_ready(5)
+    assert control.stop(5)
+    assert calls == [[str(exe), "/AcceptEula", "/Quiet", "/WaitForIdle"],
+                     [str(exe), "/AcceptEula", "/Quiet", "/Terminate"]]
