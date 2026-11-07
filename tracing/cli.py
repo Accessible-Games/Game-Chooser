@@ -117,6 +117,9 @@ def _split(args, compiled: bool) -> int:
         print("No runs to split.")
     failed = False
     for run in runs:
+        if run.is_split() and not run.capture_files():
+            print(f"{run.path}: already split, nothing to do")
+            continue
         try:
             result = split_run_dir(run, traces_dir, read_capture)
         except Exception as error:

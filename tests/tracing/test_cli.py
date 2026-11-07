@@ -97,3 +97,25 @@ def test_recorder_missing_args_records_failure(tmp_path):
     run = new_run(tmp_path, 133_000_000_000_000_000, 5)
     assert cli.run_command(["--trace-recorder", str(run.path)], False) == 2
     _failed_status(run)
+
+
+def test_split_named_run_already_split_does_nothing(tmp_path, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(cli, "split_run_dir", lambda run, d, r: calls.append(run.path) or SplitResult([], []))
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    run.split_path.write_text("{}", encoding="utf-8")
+    assert cli.run_command(["--trace-split", str(run.path), "--traces-dir", str(tmp_path)], False) == 0
+    assert calls == []
+    assert f"{run.path}: already split, nothing to do" in capsys.readouterr().out
+
+
+def test_split_named_run_with_a_kept_capture_splits_again(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(cli, "split_run_dir", lambda run, d, r: calls.append(run.path) or SplitResult([], []))
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    run.split_path.write_text("{}", encoding="utf-8")
+    run.capture_path.write_bytes(b"pml")
+    assert cli.run_command(["--trace-split", str(run.path), "--traces-dir", str(tmp_path)], False) == 0
+    assert calls == [run.path]
+    assert cli.run_command(["--trace-split", "--traces-dir", str(tmp_path)], False) == 0
+    assert calls == [run.path]  # leftover runs still skip a run that has split.json

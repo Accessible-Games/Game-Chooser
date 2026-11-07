@@ -102,13 +102,19 @@ class RunDir:
         _atomic_write(self.sessions_dir / f"{info.session_id}.json", json.dumps(info.to_json()))
 
     def read_sessions(self) -> list[SessionInfo]:
-        sessions = []
+        return self.read_sessions_and_problems()[0]
+
+    def read_sessions_and_problems(self) -> tuple[list[SessionInfo], list[str]]:
+        """The readable sessions in launch order, and one problem per session file that couldn't be read."""
+        sessions, problems = [], []
         for item in sorted(self.sessions_dir.glob("*.json")):
             try:
                 sessions.append(SessionInfo.from_json(json.loads(item.read_text(encoding="utf-8"))))
             except (OSError, ValueError, KeyError, TypeError) as exc:
                 log.warning("Skipping unreadable session file %s: %s", item, exc)
-        return sorted(sessions, key=lambda s: s.launch_before)
+                problems.append(f"{item.name}: the session file couldn't be read ({exc}), so that session is "
+                                "missing.")
+        return sorted(sessions, key=lambda s: s.launch_before), problems
 
     def is_split(self) -> bool:
         return self.split_path.exists()
