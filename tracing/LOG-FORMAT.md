@@ -124,7 +124,9 @@ These are `KNOWN_LIMITS` in `tracing/output.py`, word for word:
 - Work a game hands to a process outside its own process tree (a COM server started by Windows, a service, the browser) is not attributed to the session.
 - Writes made through memory-mapped files can be flushed by the System process and then are not attributed to the session.
 
-A note on games that leave a process behind: after Game Chooser quits, the recorder keeps capturing while the
+## Orphans the recorder waits for
+
+A note on games that leave a process behind (not one of the known limits above): after Game Chooser quits, the recorder keeps capturing while the
 session's processes run. That includes an orphan: a process whose parent is gone, started after the launch, whose
 program is inside the game's folder. Waiting for it does not make its writes part of the session: a process is
 attributed only when its chain of parents, as the capture records them, reaches the game's first process.
