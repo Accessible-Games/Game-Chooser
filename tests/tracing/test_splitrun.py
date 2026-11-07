@@ -1,8 +1,10 @@
+import dataclasses
 import json
 
 import pytest
 
 from tests.tracing.test_split import CHILD, CHOOSER, ROOT, SEVENZ, ev, info
+import tracing.splitrun as splitrun_module
 from tracing.runfiles import new_run
 from tracing.splitrun import SplitResult, split_run_dir
 
@@ -68,3 +70,27 @@ def test_no_sessions_just_finishes(tmp_path):
     assert result.folders == [] and result.problems == []
     assert json.loads(run.split_path.read_text(encoding="utf-8")) == {"folders": [], "problems": []}
     assert not run.capture_path.exists()
+
+
+def test_failed_write_removes_this_calls_folders_and_retry_has_no_suffix(tmp_path, monkeypatch):
+    run = make_run(tmp_path)
+    first = info()
+    second = dataclasses.replace(first, session_id="t", game={**first.game, "catalog_id": "other"})
+    run.write_session(second)
+    real = splitrun_module.write_session
+    calls = []
+
+    def flaky(result, traces_dir):
+        calls.append(result.info.session_id)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        return real(result, traces_dir)
+
+    monkeypatch.setattr(splitrun_module, "write_session", flaky)
+    with pytest.raises(OSError):
+        split_run_dir(run, tmp_path, fake_read)
+    assert [p.name for p in tmp_path.iterdir()] == ["_runs"]
+    assert run.capture_path.exists() and run.config_path.exists() and not run.split_path.exists()
+    monkeypatch.setattr(splitrun_module, "write_session", real)
+    result = split_run_dir(run, tmp_path, fake_read)
+    assert sorted(f.name for f in result.folders) == ["c-stamp", "other-stamp"]

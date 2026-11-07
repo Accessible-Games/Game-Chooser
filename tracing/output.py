@@ -1,6 +1,7 @@
 """Writes one session's folder: session.json and events.jsonl."""
 import json
 import re
+import shutil
 from pathlib import Path
 
 from tracing.clock import TICKS_PER_SECOND, filetime_to_iso, filetime_to_local_stamp
@@ -54,6 +55,16 @@ def _session_json(result: SessionResult) -> dict:
     }
 
 
+def _dumps(value, **kwargs) -> str:
+    """Raw UTF-8 text where possible; \\udXXX escapes when a path holds an unpaired surrogate."""
+    text = json.dumps(value, ensure_ascii=False, **kwargs)
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        text = json.dumps(value, ensure_ascii=True, **kwargs)
+    return text
+
+
 def write_session(result: SessionResult, traces_dir: Path) -> Path:
     base = session_folder_name(result.info)
     folder = Path(traces_dir) / base
@@ -62,9 +73,12 @@ def write_session(result: SessionResult, traces_dir: Path) -> Path:
         folder = Path(traces_dir) / f"{base}-{number}"
         number += 1
     folder.mkdir(parents=True)
-    (folder / "session.json").write_text(json.dumps(_session_json(result), indent=2, ensure_ascii=False),
-                                         encoding="utf-8")
-    with open(folder / "events.jsonl", "w", encoding="utf-8", newline="\n") as out:
-        for line in result.lines:
-            out.write(json.dumps(line, ensure_ascii=False) + "\n")
+    try:
+        (folder / "session.json").write_text(_dumps(_session_json(result), indent=2), encoding="utf-8")
+        with open(folder / "events.jsonl", "w", encoding="utf-8", newline="\n") as out:
+            for line in result.lines:
+                out.write(_dumps(line) + "\n")
+    except BaseException:
+        shutil.rmtree(folder, ignore_errors=True)
+        raise
     return folder

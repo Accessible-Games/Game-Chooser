@@ -83,3 +83,18 @@ def test_unicode_paths_and_binary_values_round_trip(tmp_path):
     assert "\u00eb".encode("utf-8") in raw and b"\\u00eb" not in raw
     [line] = [json.loads(x) for x in raw.decode("utf-8").splitlines()]
     assert line["path"] == path and line["value_data"] == "00ff"
+
+
+def test_lone_surrogate_path_round_trips_and_other_lines_stay_raw(tmp_path):
+    bad = "C:\\Spiel\\\ud800.dat"
+    good = "C:\\Users\\Zo\u00eb\\save.dat"
+    lines = [{"t": 1.0, "op": "file_write", "pid": 100, "path": bad},
+             {"t": 2.0, "op": "file_write", "pid": 100, "path": good}]
+    result = make_result(lines=lines)
+    result.info.game["title"] = "Zo\u00eb \ud800"
+    folder = write_session(result, tmp_path)
+    first, second = (folder / "events.jsonl").read_bytes().decode("utf-8").splitlines()
+    assert json.loads(first)["path"] == bad and "\\ud800" in first
+    assert json.loads(second)["path"] == good and "\u00eb" in second
+    data = json.loads((folder / "session.json").read_text(encoding="utf-8"))
+    assert data["game"]["title"] == "Zo\u00eb \ud800"
