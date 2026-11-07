@@ -2,8 +2,8 @@
 
 Everything that touches the system is injected so the lifecycle is unit-tested without admin rights.
 """
+import logging
 import os
-from datetime import datetime
 from typing import Callable
 
 from tracing import messages
@@ -11,6 +11,8 @@ from tracing.live import LiveProc, LiveTree
 from tracing.procmon import ProcmonControl, write_filter_config
 from tracing.runfiles import RunDir
 from tracing.splitrun import SplitResult
+
+log = logging.getLogger("tracing.recorder")
 
 POLL_SECONDS = 0.5
 STOP_GRACE_SECONDS = 10.0
@@ -37,13 +39,7 @@ class Recorder:
         self.tree = LiveTree()
         self._added: set[str] = set()
         self._failed = False
-
-    def _log(self, text: str) -> None:
-        try:
-            with open(self.run_dir.log_path, "a", encoding="utf-8") as handle:
-                handle.write(f"{datetime.now().isoformat(timespec='seconds')} {text}\n")
-        except OSError:
-            pass
+        self._errors: list[str] = []
 
     def _status(self, state: str, **kwargs) -> None:
         if self._failed:
@@ -51,15 +47,16 @@ class Recorder:
         try:
             self.run_dir.write_status(state, **kwargs)
         except OSError as exc:
-            self._log(f"could not write status {state}: {exc}")
+            log.warning("could not write status %s: %s", state, exc)
 
     def _failure(self, message: str) -> None:
-        self._log(f"failed: {message}")
-        try:
-            self.run_dir.write_status("failed", error=message)
-        except OSError as exc:
-            self._log(f"could not write failed status: {exc}")
+        log.error("failed: %s", message)
+        self._errors.append(message)
         self._failed = True
+        try:
+            self.run_dir.write_status("failed", error=" ".join(self._errors))
+        except OSError as exc:
+            log.warning("could not write failed status: %s", exc)
 
     def _update_tree(self) -> None:
         try:
@@ -70,47 +67,65 @@ class Recorder:
                                           info.game.get("game_dir"), info.launch_before)
             self.tree.update(self.snapshot())
         except Exception as exc:  # keep the last membership; never crash the recorder
-            self._log(f"live tree update failed: {exc!r}")
+            log.warning("live tree update failed: %r", exc)
 
     def run(self) -> int:
+        logger = logging.getLogger("tracing")
+        handler = None
+        try:
+            handler = logging.FileHandler(self.run_dir.log_path, encoding="utf-8")
+            handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            logger.addHandler(handler)
+        except OSError:
+            handler = None
+        try:
+            return self._run()
+        finally:
+            if handler is not None:
+                logger.removeHandler(handler)
+                handler.close()
+
+    def _run(self) -> int:
         run = self.run_dir
         self._status("starting", recorder_pid=os.getpid())
         try:
             write_filter_config(run.config_path)
             self.procmon.start(run.capture_path, run.config_path)
-            ready = self.procmon.wait_ready(READY_TIMEOUT)
+            if not self.procmon.wait_ready(READY_TIMEOUT):
+                self._failure(messages.PROCMON_NOT_READY)
+            else:
+                self._status("capturing")
+                self._loop()
         except Exception as exc:
-            self._log(f"procmon start failed: {exc!r}")
-            ready = False
-        if not ready:
-            self._failure(messages.PROCMON_NOT_READY)
-        else:
-            self._status("capturing")
-            self._loop()
+            log.exception("recorder error")
+            self._failure(messages.RECORDER_ERROR.format(error=exc))
         self._status("stopping")
         try:
-            self.procmon.stop(STOP_TIMEOUT)
+            if not self.procmon.stop(STOP_TIMEOUT):
+                self._failure(messages.PROCMON_STOP_SLOW)
         except Exception as exc:
-            self._log(f"procmon stop failed: {exc!r}")
-        if run.capture_files():
-            self._status("splitting")
-            try:
-                self.split(run)
-            except Exception as exc:
-                self._failure(messages.SPLIT_FAILED.format(error=exc))
+            log.exception("procmon stop failed")
+            self._failure(messages.RECORDER_ERROR.format(error=exc))
         try:
+            if run.capture_files():
+                self._status("splitting")
+                try:
+                    self.split(run)
+                except Exception as exc:
+                    log.exception("split failed")
+                    self._failure(messages.SPLIT_FAILED.format(error=exc))
             for other in self.leftovers():
                 try:
                     self.split(other)
-                except Exception as exc:
-                    self._log(f"leftover split failed for {other.path}: {exc!r}")
-        except Exception as exc:
-            self._log(f"listing leftovers failed: {exc!r}")
+                except Exception:
+                    log.exception("leftover split failed for %s", other.path)
+        except Exception:
+            log.exception("finishing failed")
         self._status("done")
         return 1 if self._failed else 0
 
     def _loop(self) -> None:
-        last_disk = self.clock()
+        last_disk = None
         empty_since = None
         while True:
             self._update_tree()
@@ -118,7 +133,7 @@ class Recorder:
                 self._failure(messages.PROCMON_STOPPED)
                 return
             now = self.clock()
-            if now - last_disk >= DISK_CHECK_SECONDS:
+            if last_disk is None or now - last_disk >= DISK_CHECK_SECONDS:
                 last_disk = now
                 if self.free_bytes() < MIN_FREE_BYTES:
                     self._failure(messages.DISK_LOW)

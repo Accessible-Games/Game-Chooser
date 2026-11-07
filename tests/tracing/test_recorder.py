@@ -1,4 +1,5 @@
 from tracing import messages, recorder
+import logging
 from tracing.live import LiveProc
 from tracing.model import SessionInfo
 from tracing.runfiles import RunDir
@@ -18,6 +19,8 @@ class Clock:
 
 
 class FakeProcmon:
+    stop_result = True
+
     def __init__(self, clock, ready=True, dies_at=None, run_dir=None):
         self.clock, self.ready, self.dies_at, self.run_dir = clock, ready, dies_at, run_dir
         self.calls = []
@@ -39,7 +42,7 @@ class FakeProcmon:
         self.stopped_at = self.clock.t
         if self.run_dir is not None:
             (self.run_dir.path / "capture.pml").write_bytes(b"x")
-        return True
+        return self.stop_result
 
 
 def session(sid="s1", pid=100, start=1000):
@@ -175,3 +178,64 @@ def test_sessions_added_once(tmp_path):
     rec.tree.add_session = lambda *a: (added.append(a), orig(*a))[1]
     rec.run()
     assert added == [("s1", 100, 1000, "C:/g", 500)]
+
+
+def _raiser():
+    raise OSError("disk gone")
+
+
+def _check_recorder_error(tmp_path, **kwargs):
+    rec, run, pm, states, splits, _ = make(tmp_path, app_until=1000.0, **kwargs)
+    assert rec.run() == 1
+    st = run.read_status()
+    assert st["state"] == "failed"
+    assert st["error"] == messages.RECORDER_ERROR.format(error="disk gone")
+    assert "stop" in pm.calls and len(splits) == 1
+    assert "disk gone" in run.log_path.read_text(encoding="utf-8")
+
+
+def test_free_bytes_raising_still_stops_and_splits(tmp_path):
+    _check_recorder_error(tmp_path, free=_raiser)
+
+
+def test_app_alive_raising_still_stops_and_splits(tmp_path):
+    rec, run, pm, states, splits, clock = make(tmp_path)
+    rec.app_alive = _raiser
+    assert rec.run() == 1
+    st = run.read_status()
+    assert st["error"] == messages.RECORDER_ERROR.format(error="disk gone")
+    assert "stop" in pm.calls and len(splits) == 1
+
+
+def test_corrupt_session_warning_reaches_recorder_log(tmp_path):
+    rec, run, *_ = make(tmp_path)
+    (run.path / "sessions" / "bad.json").write_text("{nope", encoding="utf-8")
+    before = list(logging.getLogger("tracing").handlers)
+    assert rec.run() == 0
+    assert "bad.json" in run.log_path.read_text(encoding="utf-8")
+    assert logging.getLogger("tracing").handlers == before
+
+
+def test_slow_stop_is_reported_and_split_still_runs(tmp_path):
+    rec, run, pm, states, splits, _ = make(tmp_path)
+    pm.stop_result = False
+    assert rec.run() == 1
+    st = run.read_status()
+    assert st["state"] == "failed" and st["error"] == messages.PROCMON_STOP_SLOW
+    assert len(splits) == 1
+
+
+def test_several_failures_are_joined_first_first(tmp_path):
+    def split(r):
+        raise RuntimeError("boom")
+
+    rec, run, pm, states, splits, _ = make(tmp_path, app_until=1000.0, free=lambda: GIB, split=split)
+    assert rec.run() == 1
+    assert run.read_status()["error"] == (
+        messages.DISK_LOW + " " + messages.SPLIT_FAILED.format(error="boom"))
+
+
+def test_disk_checked_on_first_poll(tmp_path):
+    rec, run, pm, states, splits, clock = make(tmp_path, app_until=1000.0, free=lambda: GIB)
+    rec.run()
+    assert clock.t == 0.0
