@@ -49,7 +49,7 @@ def test_index_loads_and_every_entry_is_readable(tmp_path):
     assert {"test-game", "test-game-no-path", "test-game-extras", "test-extra"} <= set(state.entries)
     assert all(is_readable(e) for e in state.entries.values())
     visible = {e["id"] for e in visible_games(state.entries, current_platform())}
-    assert {"test-game", "test-game-no-path", "test-game-extras"} <= visible
+    assert {"test-game", "test-game-no-path", "test-game-extras", "trace-test"} <= visible
     assert "test-extra" not in visible  # an extra is not a game
 
 

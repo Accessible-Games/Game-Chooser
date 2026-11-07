@@ -89,6 +89,7 @@ def build_catalog(out_dir: Path = DEFAULT_BUILD_DIR, port: int = DEFAULT_PORT, v
         "test-game": (f"test-game-v{version}.zip", lambda p: _zip_dir(GAMES_DIR / "test-game" / f"v{version}", p)),
         "test-game-no-path": ("test-game-no-path.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-no-path", p)),
         "test-game-extras": ("test-game-extras.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-extras", p)),
+        "trace-test": ("trace-test.zip", lambda p: _zip_dir(GAMES_DIR / "trace-test", p)),
         "test-extra": ("test-extra.zip", lambda p: _zip_dir(GAMES_DIR / "test-extra", p)),
     }
     if seven_zip is not None:
