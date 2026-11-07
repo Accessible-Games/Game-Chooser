@@ -64,7 +64,8 @@ class _Session:
             if start <= p.start and (current is None or current == start):
                 return True
         # the parent is gone when its pid is free, or a known member's pid was taken by another process
-        gone = current is None or (bool(parents) and current not in parents)
+        # (a live process that started after the child cannot be its real parent either)
+        gone = current is None or current > p.start or (bool(parents) and current not in parents)
         if gone:
             return p.start >= self.started_at and self._inside_game_dir(p.image_path)
         return False
