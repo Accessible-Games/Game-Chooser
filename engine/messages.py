@@ -28,6 +28,16 @@ FILE_VANISHED = "A file for {title} disappeared while Game Chooser was working o
 FILE_ERROR = "Game Chooser couldn't read or write {path} for {title}. ({detail})"
 NEEDS_SHARED_COMPONENT = ("{title} needs {component}, which needs administrator permission. Turn on \"Register shared "
                           "components system-wide\" in Preferences, Installing, to install it.")
+# A runtime's DLL and OCX files are copied beside the game's program (engine.runtimes); these say when they weren't.
+RUNTIME_FILES_NOT_COPIED = ("Game Chooser didn't copy {component}'s files beside {title}, because it couldn't be sure "
+                            "they are the files it installed. If {title} doesn't start, that may be why.")
+RUNTIME_FILES_NO_PROGRAM = ("Game Chooser couldn't tell which program starts {title}, so it didn't copy "
+                            "{component}'s files beside it. If {title} doesn't start, that may be why.")
+RUNTIME_FILES_UNTRACKED = ("Game Chooser couldn't tell which files {title}'s installer added, so it didn't copy "
+                           "{component}'s files into its folder. If {title} doesn't start, that may be why.")
+RUNTIME_FILES_NEED_ADMIN = ("{title}'s folder {path} can only be changed with administrator permission, so Game "
+                            "Chooser didn't copy {component}'s files into it. If {title} doesn't start, that may be "
+                            "why.")
 
 
 # The install confirmation dialog (engine.plan).

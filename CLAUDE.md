@@ -204,7 +204,11 @@ in place).
 - **extract.py** - unpacks with the bundled tools; **run_installer.py** / **run_actions.py** /
   **installer_watch.py** - installers that run.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain,
-  marker `.gamechooser-runtime.json`), or private COM copies (`comfree.py`); **steps.py**, **registry.py**,
+  marker `.gamechooser-runtime.json`), or private COM copies (`comfree.py`). By default every runtime the game
+  depends on that has a folder (not an installer that runs) also gets its `.dll`/`.ocx` files copied beside the
+  game's launch exe (layout kept; the game's own file of that name wins; hash-checked from a trusted folder or the
+  private staging copy; recorded with owner `runtime:<id>`, ids in the record's `runtime_copies`), so a game that
+  loads a runtime DLL by name finds it; **steps.py**, **registry.py**,
   **elevation.py** - catalog steps and the one program that runs elevated.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan, and target-folder naming (`<library>/<Title>`).

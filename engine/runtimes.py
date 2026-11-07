@@ -40,6 +40,17 @@ is installed without it and a note says it needs that runtime. Runtimes with nei
 installed machine-wide (the preference covers COM components only), and one with an HKLM registry
 step still gets the prompt for it. The game's record lists the runtimes made private
 (`private_runtimes`); Repair and Undo make copies of those again, and of no other.
+
+Either way, every runtime in the game's dependency closure that has a folder of its own (anything but an
+installer that runs) also gets its DLL and OCX files copied beside the game's launch exe, keeping their layout,
+whether it was installed now or already there: an old game that loads a runtime DLL by name (dx8vb.dll) finds it
+there however it is started. They are copied from the runtime's private copy in staging, or from its shared
+folder, only when marker_present trusts it, and each copy must hash to what was installed: the marker's file
+list, this account's runtime record, or, for another account's sealed folder, the file as it is there (only an
+administrator can have put it there). A file the game already has at that name is kept. The copies are recorded
+as the runtime's (runtime_owner), so uninstall removes them where unchanged and extras never claim them, and the
+record lists the runtimes copied (`runtime_copies`) for Repair and Undo; Update works them out again. Where a
+copy can't be made, a note says so and the game is installed all the same.
 """
 
 import json
@@ -860,6 +871,7 @@ class PrivateCopy:
     dlls: list[str]     # its COM servers (the `register` steps' paths), relative to its own folder
     usable: bool = True
     root: Path | None = None  # where it was unpacked in staging
+    hashes: dict[str, tuple[str, str]] = field(default_factory=dict)  # hash_tree(root), taken once it was unpacked
 
 
 def stage_private(ctx, runtimes: list[dict], tree: Path, staging: Path, work: Path, fetch,
@@ -899,6 +911,7 @@ def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
             root = ctx.extractor.extract(fetched.path, unpacked, install, cancel)
             steps = list(fetched.source.get("steps") or [])
             run_file_steps(steps, root)
+            hashes = hash_tree(root)
         except (ExtractError, StepError) as e:
             raise InstallFailed(str(e)) from e
         except (ValueError, OSError) as e:
@@ -907,7 +920,7 @@ def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
             _clear(work_dir)
         _check(cancel)
         copies.append(PrivateCopy(runtime, [], [], [s.get("path") for s in steps if s.get("action") == "register"],
-                                  root=root))
+                                  root=root, hashes=hashes))
     return copies
 
 
@@ -1048,18 +1061,23 @@ def private_after_installer(ctx, rec: InstallRecord, game_dir: Path, copies: lis
 
 def _remove_recorded_private(rec: InstallRecord, game_dir: Path) -> None:
     for key, recorded in list(rec.files.items()):
-        if not is_runtime_owner(recorded.owner):
-            continue
-        try:
-            path, linked = _resolve_game_path(game_dir, recorded.path)
-            if not linked and path.is_file() and hash_file(path) == recorded.sha256:
-                path.unlink()
-                _prune_empty_dirs(path.parent, game_dir)
-        except UnsafePath:
-            pass
-        except OSError:
-            continue  # still there (in use?): it stays recorded
-        rec.files.pop(key)
+        if is_runtime_owner(recorded.owner):
+            _drop_recorded(rec, key, game_dir)
+
+
+def _drop_recorded(rec: InstallRecord, key: str, game_dir: Path) -> None:
+    """Remove a recorded file where it is unchanged (a changed one is the player's now) and stop recording it."""
+    recorded = rec.files[key]
+    try:
+        path, linked = _resolve_game_path(game_dir, recorded.path)
+        if not linked and path.is_file() and hash_file(path) == recorded.sha256:
+            path.unlink()
+            _prune_empty_dirs(path.parent, game_dir)
+    except UnsafePath:
+        pass
+    except OSError:
+        return  # still there (in use?): it stays recorded
+    rec.files.pop(key)
 
 
 def _unlink_quietly(path: Path) -> None:
@@ -1067,3 +1085,291 @@ def _unlink_quietly(path: Path) -> None:
         path.unlink(missing_ok=True)
     except OSError:
         pass
+
+
+# ---- copies beside the game's exe ----------------------------------------------------------------------------
+
+# What a game can load by name from beside its exe. A runtime's other files (an exe, a readme, its marker) aren't
+# copied: an exe there could be taken for the game's own program, and nothing else is looked up there by name.
+LOADABLE_SUFFIXES = frozenset({".dll", ".ocx"})
+
+
+def _loadable(rel: str) -> bool:
+    return PurePosixPath(rel.replace("\\", "/")).suffix.lower() in LOADABLE_SUFFIXES
+
+
+@dataclass
+class CopySource:
+    """Where one runtime's loadable files are copied from for a game, in this job."""
+
+    runtime: dict
+    folder: Path | None = None  # None: there is nothing to copy them from (`note` says why, if it matters)
+    files: dict[str, str] = field(default_factory=dict)  # path in `folder`, forward slashes -> expected sha256
+    note: str | None = None
+
+
+def copy_sources(ctx, entry: dict, copies: list[PrivateCopy], title: str,
+                 ids: list[str] | None = None) -> list[CopySource]:
+    """For each runtime the game depends on (`ids`, the ones a rebuilt version had, else every runtime in its
+    dependency closure) that has a folder of its own, where its DLL and OCX files are copied from: its private
+    copy's unpacked files in staging, else its shared folder. A runtime that is an installer that runs has no
+    folder and gets nothing."""
+    if ids is None:
+        try:
+            wanted = dependency_order(entry, ctx.entries)
+        except InstallFailed:
+            return []  # an install or update refused this already; a rebuild just copies nothing
+    else:
+        wanted = []
+        for runtime_id in ids:
+            runtime = ctx.entries.get(runtime_id)
+            if runtime is None or runtime.get("kind") != "runtime":
+                log.info("Runtime %s isn't in the catalog any more; its files aren't copied for %s", runtime_id, title)
+                continue
+            wanted.append(runtime)
+    private = {c.runtime["id"]: c for c in copies if c.usable and c.root is not None}
+    sources = []
+    for runtime in wanted:
+        if _is_installer_runtime(runtime, ctx.platform):
+            continue
+        copy = private.get(runtime["id"])
+        if copy is not None:
+            sources.append(CopySource(runtime, copy.root, {d: s for d, s in copy.hashes.values() if _loadable(d)}))
+        else:
+            sources.append(_shared_source(ctx, runtime, title))
+    return sources
+
+
+def _shared_source(ctx, runtime: dict, title: str) -> CopySource:
+    """A runtime's shared folder, trusted the way marker_present decides, with the hash each file must have:
+    the marker's file list (a folder the player filled); for a sealed folder, whose marker holds only the
+    download's checksum, this account's runtime record, else each loadable file in it, which only an
+    administrator can have put there (see _sealed_files)."""
+    folder = Path(ctx.runtimes_root) / runtime["id"]
+    untrusted = CopySource(runtime, note=messages.RUNTIME_FILES_NOT_COPIED.format(title=title,
+                                                                                  component=_title(runtime)))
+    try:
+        if not os.path.lexists(folder):
+            return CopySource(runtime)  # present some other way (its detect hint): nothing of ours to copy
+        record = ctx.records.load(runtime["id"])
+        if record is not None and record.kind == "runtime" and record.method == "run":
+            return CopySource(runtime)  # an installer ran: its files are wherever it put them
+        if not marker_present(folder, runtime["id"], ctx.security, allow_user=not _has_elevated_steps(runtime)):
+            return untrusted
+        data = _read_marker(folder)
+        if isinstance(data, dict):
+            files = data["files"]
+        elif (record is not None and record.kind == "runtime"
+              and os.path.normcase(os.path.abspath(record.folder)) == os.path.normcase(os.path.abspath(folder))):
+            files = {f.path: f.sha256 for f in record.files.values()}
+        else:
+            files = _sealed_files(ctx, folder)
+            if files is None:
+                return untrusted
+    except (OSError, ValueError):
+        return untrusted
+    return CopySource(runtime, folder, {d: s.lower() for d, s in files.items()
+                                        if isinstance(d, str) and isinstance(s, str) and _loadable(d)})
+
+
+def _sealed_files(ctx, folder: Path) -> dict[str, str] | None:
+    """Each loadable file in a sealed runtime folder (one marker_present trusts) and its sha256, for another
+    account's install, which left no record here. Every one must be a plain file with one name, owned by
+    Administrators or SYSTEM: the elevated chain that sealed the folder copied it in and checked it against the
+    download. None if anything in the folder is a link, or a loadable file isn't so."""
+    files = {}
+    pending = [folder]
+    while pending:
+        current = pending.pop()
+        for item in os.scandir(current):
+            path = Path(item.path)
+            info = os.lstat(path)
+            if is_link(path) or getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT:
+                return None
+            if item.is_dir(follow_symlinks=False):
+                pending.append(path)
+                continue
+            rel = path.relative_to(folder).as_posix()
+            if not _loadable(rel):
+                continue
+            if (not item.is_file(follow_symlinks=False) or info.st_nlink > 1
+                    or not _owner_is(ctx.security, path, allow_user=False)):
+                return None
+            files[rel] = hash_file(path)
+    return files
+
+
+def _copy_new(src: Path, dest: Path) -> None:
+    """Copy `src` to `dest`, which mustn't exist: nothing there is ever replaced (FileExistsError)."""
+    with open(src, "rb") as source, open(dest, "xb") as copy:
+        shutil.copyfileobj(source, copy)
+
+
+def _make_folders(folder: Path, made: list[Path]) -> None:
+    missing = []
+    while not os.path.lexists(folder):
+        missing.append(folder)
+        folder = folder.parent
+    for path in reversed(missing):
+        path.mkdir()
+        made.append(path)
+
+
+def _link_on_the_way(path: Path, root: Path) -> bool:
+    """True if a folder between `root` and `path` is a link (checked lexically, as the planner does)."""
+    current = Path(path).parent
+    while current != root and root in current.parents:
+        if is_link(current):
+            return True
+        current = current.parent
+    return False
+
+
+def place_copies(sources: list[CopySource], exe_dir: Path, root: Path, title: str,
+                 ours=lambda path: None) -> tuple[dict[Path, tuple[str, str]], dict[str, str]]:
+    """Copy each source's files into `exe_dir` (inside `root`), keeping their layout, and check each copy's
+    sha256. A file already at that name is kept (the game's own), unless `ours(path)` names the runtime it
+    belongs to (a private copy, or an earlier copy): then it counts as copied. Nothing is followed through a
+    link, and nothing raises: a file that can't be copied or checked is a note for its runtime.
+
+    Returns {copy: (runtime id, sha256)} and {runtime id: note}."""
+    placed: dict[Path, tuple[str, str]] = {}
+    notes = {s.runtime["id"]: s.note for s in sources if s.note}
+    for source in sources:
+        if source.folder is None:
+            continue
+        runtime_id = source.runtime["id"]
+        note = messages.RUNTIME_FILES_NOT_COPIED.format(title=title, component=_title(source.runtime))
+        for rel, sha in sorted(source.files.items()):
+            try:
+                src, src_linked = _resolve_game_path(source.folder, rel)
+                dest, dest_linked = _resolve_game_path(exe_dir, rel)
+                if src_linked or dest_linked or _link_on_the_way(dest, root):
+                    raise UnsafePath(rel)
+            except (UnsafePath, TypeError, ValueError, OSError):
+                notes[runtime_id] = note
+                continue
+            if dest in placed:
+                continue  # an earlier runtime's file of that name
+            if os.path.lexists(dest):
+                owner = ours(dest)
+                if owner is not None:
+                    try:
+                        placed[dest] = (owner, hash_file(dest))
+                    except OSError:
+                        pass
+                continue  # the game's own file is kept
+            made: list[Path] = []
+            try:
+                _make_folders(dest.parent, made)
+                _copy_new(src, dest)
+                if hash_file(dest) != sha:
+                    _unlink_quietly(dest)
+                    raise OSError(f"{src} isn't the file that was installed")
+            except FileExistsError:
+                continue  # appeared meanwhile: it is the game's
+            except OSError:
+                for folder in reversed(made):
+                    _prune_empty_dirs(folder, exe_dir)
+                notes[runtime_id] = note
+                continue
+            placed[dest] = (runtime_id, sha)
+    return placed, notes
+
+
+def copies_in_tree(ctx, entry: dict, tree: Path, exe: Path, copies: list[PrivateCopy], title: str,
+                   ids: list[str] | None = None, installed: tuple[InstallRecord, Path] | None = None
+                   ) -> tuple[dict[str, str], list[str], list[str]]:
+    """Once a staged game's exe is known (and its private copies are beside it): copy its runtimes' DLL and OCX
+    files beside the exe in `tree`. A private copy's file already there counts as the copy.
+
+    `installed` (the record and folder of the version being replaced) keeps, for a runtime there is nothing to
+    copy from this time (no shared folder, or one that can't be trusted), the copies that version recorded,
+    where they are unchanged: a Repair or Update never removes a working copy because its source is gone.
+
+    Returns the owners to record (norm_key in `tree` -> runtime_owner(id)), the notes, and the runtime ids (for
+    the record's `runtime_copies`)."""
+    sources = copy_sources(ctx, entry, copies, title, ids)
+    private = {os.path.normcase(str(p)): c.runtime["id"] for c in copies for p in c.files}
+    placed, notes = place_copies(sources, exe.parent, tree, title, lambda p: private.get(os.path.normcase(str(p))))
+    if installed is not None:
+        rec, game_dir = installed
+        for source in sources:
+            runtime_id = source.runtime["id"]
+            if source.folder is None or runtime_id in notes:
+                if _keep_recorded(rec, game_dir, tree, runtime_id, placed) and source.folder is None:
+                    notes.pop(runtime_id, None)
+    owners = {norm_key(dest.relative_to(tree).as_posix()): runtime_owner(runtime_id)
+              for dest, (runtime_id, _) in placed.items()}
+    return owners, list(notes.values()), [s.runtime["id"] for s in sources]
+
+
+def _keep_recorded(rec: InstallRecord, game_dir: Path, tree: Path, runtime_id: str,
+                   placed: dict[Path, tuple[str, str]]) -> bool:
+    """Copy into `tree` the runtime's recorded copies that `game_dir` still holds unchanged, where `tree` has
+    nothing at that name. True if any was kept."""
+    kept = False
+    for recorded in rec.files.values():
+        if recorded.owner != runtime_owner(runtime_id):
+            continue
+        try:
+            path, linked = _resolve_game_path(game_dir, recorded.path)
+            dest, dest_linked = _resolve_game_path(tree, recorded.path)
+            if (linked or dest_linked or os.path.lexists(dest) or not path.is_file()
+                    or hash_file(path) != recorded.sha256):
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            _copy_new(path, dest)
+            if hash_file(dest) != recorded.sha256:
+                _unlink_quietly(dest)
+                continue
+        except (UnsafePath, TypeError, ValueError, OSError):
+            continue
+        placed[dest] = (runtime_id, recorded.sha256)
+        kept = True
+    return kept
+
+
+def copies_after_installer(ctx, entry: dict, rec: InstallRecord, game_dir: Path, copies: list[PrivateCopy],
+                           title: str, ids: list[str] | None = None) -> list[str]:
+    """For a tracked game whose installer has run: copy its runtimes' DLL and OCX files beside its launch exe in
+    `game_dir`, record them with their runtime as owner, and save the record. Returns the notes.
+
+    A copy already recorded and unchanged stays; a recorded copy no runtime copies any more is removed where
+    unchanged (a changed one is the player's now), except a private copy's, and a runtime's that has nothing
+    to copy from this time. With no launch exe recorded, nothing is copied and the notes say so."""
+    sources = copy_sources(ctx, entry, copies, title, ids)
+    rec.runtime_copies = [s.runtime["id"] for s in sources]
+    if not rec.launch_path:
+        ctx.records.save(rec)
+        return [messages.RUNTIME_FILES_NO_PROGRAM.format(title=title, component=_title(s.runtime))
+                for s in sources if s.files or s.note]
+    recorded = {key: f for key, f in rec.files.items() if is_runtime_owner(f.owner)}
+
+    def ours(path: Path) -> str | None:
+        f = recorded.get(norm_key(path.relative_to(game_dir).as_posix()))
+        try:
+            return f.owner[len(RUNTIME_OWNER_PREFIX):] if f is not None and hash_file(path) == f.sha256 else None
+        except OSError:
+            return None
+
+    placed, notes = place_copies(sources, (game_dir / rec.launch_path).parent, game_dir, title, ours)
+    keep = {norm_key(dest.relative_to(game_dir).as_posix()) for dest in placed}
+    held = {s.runtime["id"] for s in sources if s.folder is None or s.runtime["id"] in notes}
+    held |= set(rec.private_runtimes or [])
+    for key, f in recorded.items():
+        if key not in keep and f.owner[len(RUNTIME_OWNER_PREFIX):] not in held:
+            _drop_recorded(rec, key, game_dir)
+    for dest, (runtime_id, sha) in placed.items():
+        rel = dest.relative_to(game_dir).as_posix()
+        rec.files[norm_key(rel)] = RecordedFile(rel, sha, runtime_owner(runtime_id))
+    ctx.records.save(rec)
+    return list(notes.values())
+
+
+def copies_skipped_notes(ctx, entry: dict, copies: list[PrivateCopy], title: str, text: str, **values) -> list[str]:
+    """The notes for a game whose folder gets no copies (untracked, or needing administrator permission): one
+    for each runtime that has files to copy, except those its private copies already have a note for."""
+    private = {c.runtime["id"] for c in copies}
+    return [text.format(title=title, component=_title(s.runtime), **values)
+            for s in copy_sources(ctx, entry, [], title) if (s.files or s.note) and s.runtime["id"] not in private]

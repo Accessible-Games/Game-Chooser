@@ -21,14 +21,15 @@ log = logging.getLogger(__name__)
 class RecordedFile:
     path: str
     sha256: str
-    owner: str  # the catalog id that shipped it (the game or an extra), or runtime_owner(id)
+    owner: str  # the catalog id that shipped it (the game or an extra), or runtime_owner(id) for a runtime's copy
 
 
 RUNTIME_OWNER_PREFIX = "runtime:"
 
 
 def runtime_owner(runtime_id: str) -> str:
-    """The owner recorded for a file a runtime's private copy put in a game's folder (not the installer's)."""
+    """The owner recorded for a file a runtime put in a game's folder (a private copy, or a copy beside its exe),
+    not the game's or its installer's."""
     return RUNTIME_OWNER_PREFIX + runtime_id
 
 
@@ -74,6 +75,9 @@ class InstallRecord:
     private_runtimes: list[str] | None = None
     # True when launch_path is the catalog's launch path for the entry, False when the engine guessed it.
     launch_from_catalog: bool = False
+    # Runtime ids whose DLL and OCX files the install copies beside the launch exe (engine.runtimes), whether or
+    # not each copy could be made; Repair and Undo copy those again. None in older records.
+    runtime_copies: list[str] | None = None
 
 
 def record_folder(record: InstallRecord, libraries: list[dict]) -> Path | None:
