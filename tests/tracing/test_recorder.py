@@ -3,6 +3,7 @@ import logging
 from tracing.live import LiveProc
 from tracing.model import SessionInfo
 from tracing.runfiles import RunDir
+from tracing.splitrun import SplitResult
 
 GIB = 1024**3
 
@@ -70,7 +71,8 @@ def make(tmp_path, *, app_until=0.0, game_until=None, ready=True, dies_at=None, 
     def do_split(r):
         splits.append(r)
         if split:
-            split(r)
+            return split(r)
+        return SplitResult([], [])
 
     def snap():
         if game_until is not None and clock.t < game_until:
@@ -239,3 +241,29 @@ def test_disk_checked_on_first_poll(tmp_path):
     rec, run, pm, states, splits, clock = make(tmp_path, app_until=1000.0, free=lambda: GIB)
     rec.run()
     assert clock.t == 0.0
+
+
+def test_split_problems_reach_the_recorder_log(tmp_path):
+    other = RunDir(tmp_path / "other")
+
+    def split(r):
+        if r is other:
+            return SplitResult([], ["s002-9: leftover trouble"], True)
+        return SplitResult([], ["s001-5: this run's trouble"], True)
+
+    rec, run, *_ = make(tmp_path, split=split, leftovers=lambda: [other])
+    assert rec.run() == 0
+    text = run.log_path.read_text(encoding="utf-8")
+    assert "s001-5: this run's trouble" in text and "s002-9: leftover trouble" in text
+    assert str(other.path) in text
+
+
+def test_snapshot_failure_warning_is_rate_limited(tmp_path):
+    def bad():
+        raise OSError("nope")
+
+    rec, run, pm, states, splits, clock = make(tmp_path, app_until=130.0, snapshot=bad)
+    assert rec.run() == 0
+    lines = [x for x in run.log_path.read_text(encoding="utf-8").splitlines() if "live tree update failed" in x]
+    assert len(lines) == 3  # the first at 0 s, then at 60 s and 120 s with how many there were since
+    assert "nope" in lines[0] and "119 more times" in lines[1] and "119 more times" in lines[2]

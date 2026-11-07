@@ -20,6 +20,7 @@ READY_TIMEOUT = 60.0
 STOP_TIMEOUT = 300.0
 DISK_CHECK_SECONDS = 30.0
 MIN_FREE_BYTES = 2 * 1024**3
+SNAPSHOT_WARNING_SECONDS = 60.0
 
 
 class Recorder:
@@ -40,6 +41,8 @@ class Recorder:
         self._added: set[str] = set()
         self._failed = False
         self._errors: list[str] = []
+        self._snapshot_warned_at: float | None = None
+        self._snapshot_unlogged = 0
 
     def _status(self, state: str, **kwargs) -> None:
         if self._failed:
@@ -59,15 +62,41 @@ class Recorder:
             log.warning("could not write failed status: %s", exc)
 
     def _update_tree(self) -> None:
+        # Either step failing keeps the last membership; neither may crash the recorder.
         try:
             for info in self.run_dir.read_sessions():
                 if info.session_id not in self._added:
                     self._added.add(info.session_id)
                     self.tree.add_session(info.session_id, info.root_pid, info.root_start,
                                           info.game.get("game_dir"), info.launch_before)
+        except Exception as exc:
+            log.warning("live tree update failed reading the session files: %r", exc)
+        try:
             self.tree.update(self.snapshot())
-        except Exception as exc:  # keep the last membership; never crash the recorder
+        except Exception as exc:
+            self._snapshot_failed(exc)
+
+    def _snapshot_failed(self, exc: Exception) -> None:
+        """Log the first failure, then at most once per SNAPSHOT_WARNING_SECONDS with how many weren't logged."""
+        now = self.clock()
+        if self._snapshot_warned_at is None:
             log.warning("live tree update failed: %r", exc)
+        elif now - self._snapshot_warned_at >= SNAPSHOT_WARNING_SECONDS:
+            log.warning("live tree update failed: %r (and %d more times since the last warning)", exc,
+                        self._snapshot_unlogged)
+        else:
+            self._snapshot_unlogged += 1
+            return
+        self._snapshot_warned_at = now
+        self._snapshot_unlogged = 0
+
+    def _split(self, run: RunDir) -> None:
+        """Split one run and write its problems to the log; raises what the split raises."""
+        result = self.split(run)
+        for problem in getattr(result, "problems", None) or []:
+            log.warning("split problem in %s: %s", run.path, problem)
+        if getattr(result, "capture_kept", False):
+            log.warning("the capture in %s was kept so it can be split again with --trace-split", run.path)
 
     def run(self) -> int:
         logger = logging.getLogger("tracing")
@@ -110,13 +139,13 @@ class Recorder:
             if run.capture_files():
                 self._status("splitting")
                 try:
-                    self.split(run)
+                    self._split(run)
                 except Exception as exc:
                     log.exception("split failed")
                     self._failure(messages.SPLIT_FAILED.format(error=exc))
             for other in self.leftovers():
                 try:
-                    self.split(other)
+                    self._split(other)
                 except Exception:
                     log.exception("leftover split failed for %s", other.path)
         except Exception:
