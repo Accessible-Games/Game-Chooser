@@ -71,19 +71,31 @@ echo "Building Game Chooser for Windows..."
 
 fetch_tools_if_missing || exit 1
 
-# Clean previous build if it exists
-if [ -d "build" ]; then
+# Clean the previous build (only Nuitka's own folders: build/ may hold other things)
+if [ -d "build/game-chooser.dist" ] || [ -d "build/game-chooser.build" ]; then
     echo "Cleaning previous build..."
-    rm -rf build
+    rm -rf build/game-chooser.dist build/game-chooser.build
 fi
 
-# Run Nuitka to build the executable
-uv run python -m nuitka \
+# smart_list and resource_finder are submodules whose packages sit one folder down (smart_list/smart_list/,
+# resource_finder/resource_finder.py). game_list.py and dialogs.py put those folders on sys.path at run time, which
+# Nuitka never sees, so it would compile the outer folder as an empty namespace package and the exe would fail to
+# start ("cannot import name 'VirtualSmartList'"). Put them on the path for the build, and include them by name.
+# WSLENV passes PYTHONPATH through to uv.exe when this runs from WSL.
+export PYTHONPATH="smart_list;resource_finder"
+export WSLENV="${WSLENV:+$WSLENV:}PYTHONPATH"
+
+# Run Nuitka to build the executable (nuitka isn't a project dependency; uv supplies it for this run)
+uv run --with nuitka python -m nuitka \
     --standalone \
     --windows-console-mode=disable \
-    --enable-plugin=implicit-imports \
     --follow-imports \
     --include-package=engine \
+    --include-module=resource_finder \
+    --report=build/compilation-report.xml \
+    --include-data-files=smart_list/smart_list/iat_hook32.dll=iat_hook32.dll \
+    --include-data-files=smart_list/smart_list/iat_hook64.dll=iat_hook64.dll \
+    --assume-yes-for-downloads \
     --output-dir=build \
     game-chooser.py
 
