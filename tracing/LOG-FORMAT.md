@@ -1,7 +1,8 @@
 # Tracing log format
 
-One folder per play session under `traces/` beside the exe: `<catalog id or safe title>-<YYYYMMDD-HHMMSS>` (local
-time of the launch). If the name exists, `-2`, `-3` and so on are added. Each folder holds `session.json` and
+One folder per play session under `traces/` beside the exe: `<catalog id or title>-<YYYYMMDD-HHMMSS>` (local
+time of the launch; the id or title is made safe for a folder name: anything but letters, digits, `.`, `_` and `-`
+becomes `-`). If the name exists, `-2`, `-3` and so on are added. Each folder holds `session.json` and
 `events.jsonl`. Both are UTF-8. `session.json` has `"format": 1`.
 
 A play session is one launch of a game: the launched process and every process it starts, followed through parent
@@ -17,16 +18,23 @@ Every time comes from Process Monitor's clock: FILETIME, 100 ns ticks since 1601
 Time zero is the start of the game's first process (`time_zero_source` is `"process_start"`). When that process isn't
 in the capture, `time_zero_source` is `"launch_call"` (the moment Game Chooser called launch) and `problem` says so.
 
+The game's first process is found in the capture by its pid and the start time Game Chooser read right after
+launching it. If no process has exactly that start time, it is the process with that pid that started within 2 s
+of the launch call, the one whose start is closest to the start time read (or to the launch call when none was
+read).
+
 ## session.json
 
 - `format`: 1.
 - `session_id`: id of this launch.
 - `game`: `title`, `catalog_id` (null for a game added by hand), `library_id`, `launch_path`, `exe` (full path
   launched), `game_dir` (its working folder).
-- `env`: `windows` (platform text), `local_appdata`, `user_profile`, `app_exe`, `app_exe_mtime`, `compiled`.
+- `env`: `windows` (platform text), `local_appdata`, `user_profile`, `app_exe`, `app_exe_mtime`, `app_build`,
+  `compiled`. `app_build` is the short git commit of the source Game Chooser ran from (`git rev-parse --short
+  HEAD`), or null when git couldn't say; a compiled build has null there, and `app_exe_mtime` identifies it.
 - `start`: time zero as UTC text. `end`: when the last process exited, or null.
 - `still_running_at_capture_end`: true when some process was still running when the capture ended (then `end` is
-  null and there are no `process_exit` lines).
+  null; the processes that did exit still have their `process_exit` lines).
 - `time_zero_source`: see Times. `root_pid`: pid of the game's first process.
 - `processes`: one object per process in the session: `pid`, `parent_pid`, `image_path`, `command_line`, `start`,
   `end` (null when still running), `start_t`, `end_t`, `virtualized` (UAC virtualization on for this process),
@@ -44,7 +52,8 @@ Every line has `t` (number) and `op` (string).
 ### Lines that are not writes
 
 - `process_start`: `pid`, `parent_pid`, `process` (file name), `image_path`, `command_line`.
-- `process_exit`: `pid`, `process`. Written only when every process in the session exited.
+- `process_exit`: `pid`, `process`. Written for every process whose exit is in the capture, even while other
+  processes of the session are still running.
 - `mark`: `n` (the mark's number, as in `session.json`).
 
 ### Write lines
@@ -114,3 +123,19 @@ These are `KNOWN_LIMITS` in `tracing/output.py`, word for word:
 
 - Work a game hands to a process outside its own process tree (a COM server started by Windows, a service, the browser) is not attributed to the session.
 - Writes made through memory-mapped files can be flushed by the System process and then are not attributed to the session.
+
+A note on games that leave a process behind: after Game Chooser quits, the recorder keeps capturing while the
+session's processes run. That includes an orphan: a process whose parent is gone, started after the launch, whose
+program is inside the game's folder. Waiting for it does not make its writes part of the session: a process is
+attributed only when its chain of parents, as the capture records them, reaches the game's first process.
+
+## The run folder's split.json
+
+The recorder's working files are in `traces/_runs/<YYYYMMDD-HHMMSS>-<pid>/`. After the capture is split, that
+folder holds `split.json`: `folders` (the session folders written), `problems` (one sentence per session that
+couldn't be recovered: a session with a `problem`, or a session file under `sessions/` that couldn't be read) and
+`capture_kept`. When there are no problems, `capture_kept` is false and the capture files (`capture.pml`,
+`capture-N.pml`) and `filter.pmc` are removed. When there is any problem, `capture_kept` is true and they stay, so
+`--trace-split <run folder>` can split them again (the new session folders get the usual `-2` suffixes). A run with
+`split.json` and no capture files left is already done: `--trace-split <run folder>` says so and does nothing.
+`--trace-split` without a folder splits only runs that have no `split.json` yet.
