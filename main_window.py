@@ -354,6 +354,8 @@ class MainFrame(wx.Frame):
         launch_menu = wx.Menu()
         random_game_item = launch_menu.Append(wx.ID_ANY, "&Random Game\tCtrl+R")
         self.Bind(wx.EVT_MENU, self.on_random_game, random_game_item)
+        random_install_item = launch_menu.Append(wx.ID_ANY, "Random Game to &Install\tCtrl+Shift+R")
+        self.Bind(wx.EVT_MENU, self.on_random_install, random_install_item)
         menu_bar.Append(launch_menu, "&Launch")
 
         self.SetMenuBar(menu_bar)
@@ -386,6 +388,11 @@ class MainFrame(wx.Frame):
         random_game_id = wx.NewIdRef()
         accel_entries.append((wx.ACCEL_CTRL, ord('R'), random_game_id))
         self.Bind(wx.EVT_MENU, self.on_random_game, id=random_game_id)
+
+        # Ctrl+Shift+R for a random game to install from the catalog
+        random_install_id = wx.NewIdRef()
+        accel_entries.append((wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord('R'), random_install_id))
+        self.Bind(wx.EVT_MENU, self.on_random_install, id=random_install_id)
 
         # Ctrl+E for Edit Game, also while the menu item is disabled for a catalog game: it then says why
         edit_game_id = wx.NewIdRef()
@@ -1355,6 +1362,12 @@ class MainFrame(wx.Frame):
 
             if response == wx.YES:
                 self.launch_game(random_game)
+
+    def on_random_install(self, event):
+        """Pick a random game to install from the Catalog tab's filtered list (switching to that tab first)"""
+        if self.active_tab() != "catalog":
+            self.notebook.SetSelection(TABS.index("catalog"))  # on_tab_changed refreshes the catalog rows
+        self.catalog_panel.on_random_install()
 
     def on_edit_game(self, event):
         """Edit selected game"""

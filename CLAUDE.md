@@ -236,6 +236,9 @@ call it.**
 ### Keyboard Shortcuts
 - **F5**: Library: rebuild list, tree and menu and recheck Status. Catalog: check for catalog updates.
 - **Ctrl+R**: random game from the active tab's filtered list (asks before launching).
+- **Ctrl+Shift+R** (Launch > Random Game to Install): random game from the Catalog tab's filtered list that
+  installs (`catalog_view.install_candidates`: not installed, not a web game, no job queued or running); switches to
+  the Catalog tab first, asks, then opens the install confirmation as the Install button does.
 - **Del**: Library only (Uninstall for a tracked catalog install, forget for an untracked one, else delete).
 - **Ctrl+E**: Library only; refuses catalog games and says why (its accelerator stays enabled for that, while the
   Edit menu item is disabled). Edit and Delete menu items are disabled on the Catalog tab.

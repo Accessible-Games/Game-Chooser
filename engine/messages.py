@@ -251,6 +251,7 @@ CATALOG_NEWER_APP_NEEDED = "A newer version of Game Chooser is needed to see the
 CATALOG_LOAD_FAILED = "Couldn't load the catalog. Check your internet connection, then choose Retry."
 CATALOG_RANDOM_PROMPT = "Your game for today is...\n\n{title}\n\n{verb} now?"
 CATALOG_NO_GAMES = "No games available to choose from."
+CATALOG_NO_GAMES_TO_INSTALL = "No games to install in the list as shown."
 CATALOG_NOT_IN_LIBRARY = "{title} is installed, but Game Chooser can't find it in your Library."
 
 ADDED = "{title} is added"

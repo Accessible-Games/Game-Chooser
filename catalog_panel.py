@@ -31,7 +31,7 @@ import game_list  # noqa: F401  (puts the smart_list submodule on sys.path)
 from smart_list import Column, VirtualSmartList
 
 from catalog_view import (FLAG_LABELS, action_kind, action_label, action_verb, build_rows, description_text,
-                          filter_rows, link_items, tree_categories)
+                          filter_rows, install_candidates, link_items, tree_categories)
 from description_field import DescriptionField
 from engine import messages
 from engine.entries import current_platform, game_fields, platform_sources
@@ -488,6 +488,25 @@ class CatalogPanel(wx.Panel):
             if response == wx.YES:
                 self._select_row(row)
                 self.on_action()
+
+    def on_random_install(self):
+        """Ctrl+Shift+R: pick a random game to install from the list as shown (filters applied), leaving out
+        installed games, web games and games already queued, and offer to install it"""
+        busy = {r.id for r in self._displayed if self.service.queue.job_for(r.id) is not None}
+        candidates = install_candidates(self._displayed, busy)
+        if not candidates:
+            with self.frame.modal_dialog():
+                wx.MessageBox(messages.CATALOG_NO_GAMES_TO_INSTALL, "No Games", wx.OK | wx.ICON_INFORMATION)
+            return
+        row = random.choice(candidates)
+        # The row is held across the prompt, so no index refresh may replace it meanwhile
+        with self.frame.modal_dialog():
+            response = wx.MessageBox(
+                messages.CATALOG_RANDOM_PROMPT.format(title=row.title, verb="Install"),
+                "Random Game to Install", wx.YES_NO | wx.ICON_QUESTION)
+            if response == wx.YES:
+                self._select_row(row)
+                self._confirm_install(row)
 
     def on_list_key(self, event):
         key = event.GetKeyCode()
