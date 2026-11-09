@@ -14,6 +14,46 @@ from .safety import _resolve_game_path, is_link
 MAX_DEPTH = 10
 _EXE_SUFFIXES = (".exe", ".bat")
 
+ERROR_ELEVATION_REQUIRED = 740
+_SE_ERR_ACCESSDENIED = 5  # ShellExecuteW's answer when the player declines the administrator prompt
+
+
+class LaunchCancelled(Exception):
+    """The player declined the administrator prompt for a game that needs it."""
+
+
+def _shell_open(path: str, cwd: str) -> None:
+    """Start `path` the way Explorer does, so Windows shows its administrator prompt (UAC) when the program asks
+    for one. Raises LaunchCancelled if the player declines, OSError if it can't start."""
+    import ctypes
+    shell_execute = ctypes.windll.shell32.ShellExecuteW
+    shell_execute.restype = ctypes.c_ssize_t
+    result = shell_execute(None, "open", path, None, cwd, 1)  # SW_SHOWNORMAL
+    if result == _SE_ERR_ACCESSDENIED:
+        raise LaunchCancelled()
+    if result <= 32:
+        raise OSError(f"Windows couldn't start {path} (error {result})")
+
+
+def start_program(path: str, cwd: str, popen: Callable | None = None,
+                  shell_open: Callable[[str, str], None] | None = None) -> None:
+    """Start a game's program with its folder as the working directory.
+
+    A program marked "run as administrator" (an installer can set that flag on the games it installs) can't be
+    started directly: Windows answers ERROR_ELEVATION_REQUIRED. Such a program is started through the shell
+    instead, which shows the administrator prompt as Explorer does. Raises LaunchCancelled if the player
+    declines it, OSError if the program can't be started.
+    """
+    if popen is None:
+        import subprocess
+        popen = subprocess.Popen
+    try:
+        popen([path], cwd=cwd)
+    except OSError as e:
+        if getattr(e, "winerror", None) != ERROR_ELEVATION_REQUIRED:
+            raise
+        (shell_open or _shell_open)(path, cwd)
+
 
 def select_best_executable(exe_paths: list[Path], directory_name: str) -> Path | None:
     """Pick the best executable: game/launch/play, then one named like the folder, then the first."""

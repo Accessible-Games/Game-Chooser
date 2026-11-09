@@ -36,6 +36,7 @@ from library_manager import GameLibraryManager
 from install_service import InstallService
 from catalog_view import description_text, initial_tab
 from engine.folders import library_label
+from engine.launch import LaunchCancelled, start_program
 from game_list import GameListCtrl
 from catalog_panel import CatalogPanel
 from description_field import DescriptionField
@@ -1282,12 +1283,14 @@ class MainFrame(wx.Frame):
                     # macOS .app bundle
                     subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
                 else:
-                    # Regular executable
-                    subprocess.Popen([full_path], cwd=game_dir)
+                    # Regular executable (one marked "run as administrator" goes through Windows' prompt)
+                    start_program(full_path, game_dir)
 
                 # Minimize window
                 self.Iconize(True)
 
+            except LaunchCancelled:
+                pass  # the player declined the administrator prompt: nothing started, nothing to say
             except Exception as e:
                 wx.MessageBox(f"Failed to launch game: {e}",
                             "Launch Error", wx.OK | wx.ICON_ERROR)
