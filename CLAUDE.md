@@ -63,7 +63,8 @@ Sources: `tests/catalog_fixtures/entries/*.json` and `tests/catalog_fixtures/gam
   and title/URL/path/year validation used by `GameDialog`
 - **exception_manager.py** (207) - filename filter used only by the temporary launch fallback (see Install Engine)
 - **engine/** (26 modules, ~9,600 lines) - the install engine; **scripts/** - `fetch_tools.py`,
-  `serve_test_catalog.py`; **smart_list/**, **resource_finder/** - submodules; **bin/** - bundled tools (git-ignored)
+  `serve_test_catalog.py`; **bin/** - bundled tools (git-ignored). `smart_list` (pinned in `[tool.uv.sources]`)
+  and its dependency `resource_finder` are uv git dependencies, not on PyPI
 
 ### Where data lives
 - `games.json` - next to the app (the `sys.argv[0]` directory); git-ignored. It and `config.json` are written

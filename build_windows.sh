@@ -77,13 +77,14 @@ if [ -d "build/game-chooser.dist" ] || [ -d "build/game-chooser.build" ]; then
     rm -rf build/game-chooser.dist build/game-chooser.build
 fi
 
-# smart_list and resource_finder are submodules whose packages sit one folder down (smart_list/smart_list/,
-# resource_finder/resource_finder.py). game_list.py and dialogs.py put those folders on sys.path at run time, which
-# Nuitka never sees, so it would compile the outer folder as an empty namespace package and the exe would fail to
-# start ("cannot import name 'VirtualSmartList'"). Put them on the path for the build, and include them by name.
-# WSLENV passes PYTHONPATH through to uv.exe when this runs from WSL.
-export PYTHONPATH="smart_list;resource_finder"
-export WSLENV="${WSLENV:+$WSLENV:}PYTHONPATH"
+# smart_list (and resource_finder, which it imports) are uv git dependencies installed in the project's .venv.
+# smart_list loads iat_hook32.dll / iat_hook64.dll through resource_finder, which looks beside the exe, so copy
+# them there from the installed package. tr drops the CR that uv.exe prints when this runs from WSL.
+SMART_LIST_DIR="$(uv run python -c "import os, smart_list; print(os.path.dirname(smart_list.__file__))" | tr -d '\r')"
+if [ -z "$SMART_LIST_DIR" ]; then
+    echo "Could not find the installed smart_list package. Run 'uv sync' first."
+    exit 1
+fi
 
 # Run Nuitka to build the executable (nuitka isn't a project dependency; uv supplies it for this run)
 uv run --with nuitka python -m nuitka \
@@ -93,8 +94,8 @@ uv run --with nuitka python -m nuitka \
     --include-package=engine \
     --include-module=resource_finder \
     --report=build/compilation-report.xml \
-    --include-data-files=smart_list/smart_list/iat_hook32.dll=iat_hook32.dll \
-    --include-data-files=smart_list/smart_list/iat_hook64.dll=iat_hook64.dll \
+    --include-data-files="$SMART_LIST_DIR/iat_hook32.dll=iat_hook32.dll" \
+    --include-data-files="$SMART_LIST_DIR/iat_hook64.dll=iat_hook64.dll" \
     --assume-yes-for-downloads \
     --output-dir=build \
     game-chooser.py

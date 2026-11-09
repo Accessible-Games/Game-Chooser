@@ -31,6 +31,7 @@ dependencies = [
     { name = "platform-utils" },
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "six" },
+    { name = "smart-list" },
     { name = "wxpython" },
 ]
 
@@ -45,6 +46,7 @@ requires-dist = [
     { name = "platform-utils", specifier = ">=1.6.0" },
     { name = "pywin32", marker = "sys_platform == 'win32'", specifier = ">=311" },
     { name = "six", specifier = ">=1.17.0" },
+    { name = "smart-list", git = "https://github.com/accessibleapps/smart_list?rev=2a110818a311a248295c3bfdc91a95ed1caac4c0" },
     { name = "wxpython", specifier = "==4.2.3" },
 ]
 
@@ -139,12 +141,31 @@ wheels = [
 ]
 
 [[package]]
+name = "resource-finder"
+version = "0.1"
+source = { git = "https://github.com/accessibleapps/resource_finder.git#363aa8b7d47bc36bbafe374e37ed30b5ae55e06a" }
+dependencies = [
+    { name = "six" },
+]
+
+[[package]]
 name = "six"
 version = "1.17.0"
 source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/94/e7/b2c673351809dca68a0e064b6af791aa332cf192da575fd474ed7d6f16a2/six-1.17.0.tar.gz", hash = "sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81", size = 34031, upload-time = "2024-12-04T17:35:28.174Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b7/ce/149a00dd41f10bc29e5921b496af8b574d8413afcd5e30dfa0ed46c2cc5e/six-1.17.0-py2.py3-none-any.whl", hash = "sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274", size = 11050, upload-time = "2024-12-04T17:35:26.475Z" },
+]
+
+[[package]]
+name = "smart-list"
+version = "1.2.9"
+source = { git = "https://github.com/accessibleapps/smart_list?rev=2a110818a311a248295c3bfdc91a95ed1caac4c0#2a110818a311a248295c3bfdc91a95ed1caac4c0" }
+dependencies = [
+    { name = "frozendict" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
+    { name = "resource-finder" },
+    { name = "wxpython" },
 ]
 
 [[package]]

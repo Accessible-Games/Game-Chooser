@@ -19,18 +19,7 @@
 Game list control for Game Chooser application
 """
 
-import sys
-from pathlib import Path
 from typing import Callable
-
-# Add smart_list and resource_finder submodules to path
-smart_list_path = Path(__file__).parent / "smart_list"
-if smart_list_path.exists() and str(smart_list_path) not in sys.path:
-    sys.path.insert(0, str(smart_list_path))
-
-resource_finder_path = Path(__file__).parent / "resource_finder"
-if resource_finder_path.exists() and str(resource_finder_path) not in sys.path:
-    sys.path.insert(0, str(resource_finder_path))
 
 import wx
 from smart_list import VirtualSmartList, Column

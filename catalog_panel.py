@@ -27,7 +27,6 @@ import webbrowser
 
 import wx
 
-import game_list  # noqa: F401  (puts the smart_list submodule on sys.path)
 from smart_list import Column, VirtualSmartList
 
 from catalog_view import (FLAG_LABELS, action_kind, action_label, action_verb, build_rows, description_text,
