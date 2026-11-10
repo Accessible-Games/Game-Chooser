@@ -1,11 +1,16 @@
-"""Unpack downloaded archives with the bundled 7-Zip, innoextract, or Windows' msiexec."""
+"""Unpack downloaded archives with the bundled 7-Zip, innoextract, Windows' msiexec, or Python's tarfile."""
 
+import bz2  # noqa: F401  tarfile imports it lazily; imported here so the build includes it
+import gzip
 import logging
+import lzma
 import os
 import shutil
 import subprocess
 import sys
+import tarfile
 import time
+import zlib
 from pathlib import Path
 from typing import Callable
 
@@ -105,6 +110,28 @@ def run_process(argv: list[str], cancel: CancelCheck) -> int:
         raise
 
 
+def extract_tar(archive: Path, dest: Path, cancel: CancelCheck) -> None:
+    """Unpack a .tar.gz, .tar.xz or .tar.bz2 (or a plain .tar) into `dest`, one member at a time so a cancel
+    stops it. tarfile's "data" filter refuses absolute names, `..`, links leading out of `dest` and device
+    files; links of any kind are refused here too, as for every archive (see _refuse_links_leaving)."""
+    try:
+        with tarfile.open(archive, "r:*") as tar:
+            for member in tar:
+                if cancel():
+                    raise Cancelled()
+                if member.issym() or member.islnk():
+                    log.warning("tar archive has a link: %s", member.name)
+                    raise ExtractError(messages.EXTRACT_UNSAFE_LINK)
+                tar.extract(member, dest, filter="data")
+    except tarfile.FilterError as exc:
+        log.warning("tar archive refused: %s", exc)
+        raise ExtractError(messages.EXTRACT_FAILED) from exc
+    except (tarfile.TarError, gzip.BadGzipFile, zlib.error, lzma.LZMAError, EOFError) as exc:
+        # a damaged archive; other OSErrors (a full disk, say) reach the job, which words them
+        log.warning("could not unpack the tar archive: %s", exc)
+        raise ExtractError(messages.EXTRACT_FAILED) from exc
+
+
 def _refuse_links_leaving(dest: Path) -> None:
     """Archives must not leave links (symlinks or junctions) in `dest`: they could point anywhere."""
     for current, dirs, files in os.walk(dest):
@@ -152,6 +179,8 @@ class Extractor:
                 tool = "7z"
             else:
                 raise ValueError(f"Unknown installer type: {kind!r}")
+        elif method == "tar":
+            tool = "tar"
         elif method == "none":
             tool = "copy"
         else:
@@ -160,6 +189,8 @@ class Extractor:
         dest.mkdir(parents=True, exist_ok=True)
         if tool == "copy":
             shutil.copy2(archive, dest / archive.name)
+        elif tool == "tar":
+            extract_tar(archive, dest, cancel)
         elif tool == "7z":
             self._run_checked(seven_zip_command(self.tools_dir / "7z.exe", archive, dest, install.get("password")),
                               cancel)

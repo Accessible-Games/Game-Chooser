@@ -73,7 +73,7 @@ _WINERROR_LOCKED = {5, 32, 33}       # ERROR_ACCESS_DENIED, ERROR_SHARING_VIOLAT
 _WINERROR_VANISHED = {2, 3}          # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND
 
 # Install methods whose files Game Chooser unpacked and recorded itself.
-EXTRACT_METHODS = frozenset({"zip", "7z", "installer", "cab", "none"})
+EXTRACT_METHODS = frozenset({"zip", "7z", "installer", "cab", "tar", "none"})
 # Run-mode installs are recorded with method "run". When tracked, these actions work on them.
 RUN_ACTIONS = frozenset(ACTIONS)
 

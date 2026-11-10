@@ -13,7 +13,7 @@ from engine import messages
 from engine.errors import DownloadError
 
 DEFAULT_CATALOG_URL = "https://catalog.accessiblegames.net/"
-SUPPORTED_SCHEMA_VERSION = 1
+SUPPORTED_SCHEMA_VERSION = 2
 META_NAME = "index-meta.json"
 GZ_NAME = "index.json.gz"
 MAX_INDEX_BYTES = 64 * 2**20

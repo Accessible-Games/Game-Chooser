@@ -259,3 +259,77 @@ def test_dotdot_entries_do_not_escape_dest(tmp_path):
         pass  # refusing the archive is also fine; writing outside dest is not
     assert not (tmp_path / "work" / "escaped.txt").exists()
     assert not (tmp_path / "escaped.txt").exists()
+
+
+def _tar(path: Path, mode: str, members: dict[str, bytes], links: dict[str, tuple[bytes, str]] | None = None) -> Path:
+    """A tar archive of `members` (name -> bytes); `links` adds (type, target) link members."""
+    import io
+    import tarfile
+    with tarfile.open(path, mode) as tar:
+        for name, data in members.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        for name, (kind, target) in (links or {}).items():
+            info = tarfile.TarInfo(name)
+            info.type, info.linkname = kind, target
+            tar.addfile(info)
+    return path
+
+
+@pytest.mark.parametrize("suffix, mode", [(".tar.gz", "w:gz"), (".tar.xz", "w:xz"), (".tar.bz2", "w:bz2")])
+def test_tar_archives_unpack_without_a_tool(tmp_path, suffix, mode):
+    archive = _tar(tmp_path / f"game{suffix}", mode, {"Game/game.sh": b"run", "Game/data/level.dat": b"1"})
+    run = FakeRun()
+    root = _extractor(run).extract(archive, tmp_path / "o", {"method": "tar", "extract_dir": "Game"},
+                                   lambda: False)
+    assert run.calls == []
+    assert root == tmp_path / "o" / "Game"
+    assert (root / "game.sh").read_bytes() == b"run" and (root / "data" / "level.dat").read_bytes() == b"1"
+
+
+@pytest.mark.parametrize("name", ["../escape.txt", "a/../../escape.txt"])
+def test_tar_entries_never_escape_dest(tmp_path, name):
+    archive = _tar(tmp_path / "bad.tar.gz", "w:gz", {"ok.txt": b"ok", name: b"evil"})
+    with pytest.raises(ExtractError) as info:
+        _extractor(FakeRun()).extract(archive, tmp_path / "out" / "o", {"method": "tar"}, lambda: False)
+    assert str(info.value) == messages.EXTRACT_FAILED
+    assert not (tmp_path / "out" / "escape.txt").exists() and not (tmp_path / "escape.txt").exists()
+
+
+def test_tar_absolute_names_land_inside_dest(tmp_path):
+    archive = _tar(tmp_path / "abs.tar.gz", "w:gz", {"/abs-gc-test.txt": b"x"})
+    root = _extractor(FakeRun()).extract(archive, tmp_path / "o", {"method": "tar"}, lambda: False)
+    assert (root / "abs-gc-test.txt").read_bytes() == b"x"
+
+
+@pytest.mark.windows
+def test_tar_drive_letter_names_are_refused(tmp_path):
+    archive = _tar(tmp_path / "drive.tar.gz", "w:gz", {f"{tmp_path.drive}/gc-escape.txt": b"x"})
+    with pytest.raises(ExtractError):
+        _extractor(FakeRun()).extract(archive, tmp_path / "o", {"method": "tar"}, lambda: False)
+    assert not Path(f"{tmp_path.drive}/gc-escape.txt").exists()
+
+
+@pytest.mark.parametrize("kind", ["sym", "hard"])
+def test_tar_links_are_refused(tmp_path, kind):
+    import tarfile
+    link = (tarfile.SYMTYPE if kind == "sym" else tarfile.LNKTYPE, "game.sh")
+    archive = _tar(tmp_path / "links.tar.gz", "w:gz", {"game.sh": b"run"}, {"lib.so": link})
+    with pytest.raises(ExtractError) as info:
+        _extractor(FakeRun()).extract(archive, tmp_path / "o", {"method": "tar"}, lambda: False)
+    assert str(info.value) == messages.EXTRACT_UNSAFE_LINK
+
+
+def test_tar_cancel_and_damaged_archive(tmp_path):
+    archive = _tar(tmp_path / "g.tar.gz", "w:gz", {"a.txt": b"a", "b.txt": b"b"})
+    with pytest.raises(Cancelled):
+        _extractor(FakeRun()).extract(archive, tmp_path / "o", {"method": "tar"}, lambda: True)
+    damaged = tmp_path / "damaged.tar.gz"
+    damaged.write_bytes(archive.read_bytes()[:40])
+    with pytest.raises(ExtractError):
+        _extractor(FakeRun()).extract(damaged, tmp_path / "o2", {"method": "tar"}, lambda: False)
+    not_tar = tmp_path / "not.tar.gz"
+    not_tar.write_bytes(b"not an archive at all")
+    with pytest.raises(ExtractError):
+        _extractor(FakeRun()).extract(not_tar, tmp_path / "o3", {"method": "tar"}, lambda: False)

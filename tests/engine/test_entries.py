@@ -127,3 +127,7 @@ def test_mirror_helpers():
 
 def test_current_platform_is_known():
     assert current_platform() in {"windows", "macos", "linux"}
+
+
+def test_tar_method_is_readable():
+    assert visible_games({"g": entry("g", sources=[src(install={"method": "tar"})])}, "windows")

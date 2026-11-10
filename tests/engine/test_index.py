@@ -45,10 +45,19 @@ def test_entries_without_id_skipped(tmp_path):
     assert set(idx.refresh().entries) == {"a"}
 
 
+def test_version_one_and_two_indexes_both_load(tmp_path):
+    fetcher, idx = make(tmp_path)
+    publish(fetcher, BASE, [{"id": "old", "flags": ["demo"], "links": {"homepage": "https://h"}}], schema_version=1)
+    assert set(idx.refresh().entries) == {"old"}  # an app may still hold a saved version 1 index
+    publish(fetcher, BASE, [{"id": "new", "links": [{"url": "https://h"}]}], schema_version=2)
+    s = idx.refresh()
+    assert set(s.entries) == {"new"} and not s.newer_app_needed
+
+
 def test_newer_schema_keeps_cache(tmp_path):
     fetcher, idx = make(tmp_path)
     old = idx.refresh().entries
-    publish(fetcher, BASE, [{"id": "z"}], schema_version=2)
+    publish(fetcher, BASE, [{"id": "z"}], schema_version=3)
     s = idx.refresh()
     assert s.newer_app_needed and s.entries == old and s.from_cache
     assert idx.load_cached().entries == old
@@ -57,9 +66,9 @@ def test_newer_schema_keeps_cache(tmp_path):
 def test_newer_schema_in_gz_only_keeps_cache(tmp_path):
     fetcher, idx = make(tmp_path)
     old = idx.refresh().entries
-    publish(fetcher, BASE, [{"id": "z"}], schema_version=2)
+    publish(fetcher, BASE, [{"id": "z"}], schema_version=3)
     meta = json.loads(fetcher.routes[META])
-    meta["schema_version"] = 1
+    meta["schema_version"] = 2
     fetcher.routes[META] = json.dumps(meta).encode()
     s = idx.refresh()
     assert s.newer_app_needed and s.entries == old and s.from_cache

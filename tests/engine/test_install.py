@@ -617,3 +617,31 @@ def test_install_without_hint_is_guessed(tmp_path):
 def test_garbled_hint_falls_back_and_is_guessed(tmp_path):
     rec = _install_entombed(tmp_path, {"entombed.exe": b"a"}, {"windows": {"path": "nope/missing.exe"}})
     assert rec.launch_path == "entombed.exe" and rec.launch_from_catalog is False
+
+
+def _tar_gz(files: dict[str, bytes]) -> bytes:
+    import io
+    import tarfile
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def test_tar_game_installs_and_can_be_repaired_and_uninstalled(tmp_path):
+    routes = {}
+    data = _tar_gz({"Tux/tux.exe": b"exe", "Tux/data/a.dat": b"a"})
+    e = game(routes, id="tux", title="Tux", files=data, method="tar", url=f"{MIRROR}tux/tux.tar.gz",
+             install={"extract_dir": "Tux"})
+    engine, ctx, lib = setup(tmp_path, [e], routes)
+    r = engine.run(InstallRequest("install", "tux", "Games", lib), lambda p: None, never)
+    assert (lib / "Tux" / "tux.exe").read_bytes() == b"exe" and r.game["launch_path"] == "Tux/tux.exe"
+    assert ctx.records.load("tux").method == "tar"
+    (lib / "Tux" / "data" / "a.dat").unlink()
+    engine.run(InstallRequest("repair", "tux", "Games", lib), lambda p: None, never)  # a tar install is tracked
+    assert (lib / "Tux" / "data" / "a.dat").read_bytes() == b"a"
+    engine.run(InstallRequest("uninstall", "tux", "Games", lib), lambda p: None, never)
+    assert not (lib / "Tux" / "tux.exe").exists()
