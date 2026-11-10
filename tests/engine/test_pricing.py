@@ -58,12 +58,16 @@ def test_nothing_shows_without_readable_pricing():
 
 def test_description_lines_price_as_of_and_note():
     pricing = p("one-time", price=10, currency="USD", checked="2026-11-01", note="Full version adds 12 levels")
-    assert description_lines(pricing) == ["Price: Buy once, $10 (price as of 1 November 2026)",
+    assert description_lines(pricing) == ["Price: Buy once, $10. Price as of 1 November 2026",
                                           "Full version adds 12 levels"]
     # "price as of" only when an amount is shown, and only for a real date
     assert description_lines(p("free", checked="2026-11-01")) == ["Price: Free"]
     assert description_lines(p("one-time", price=10, currency="USD", checked="2026-13-01")) == \
         ["Price: Buy once, $10"]
+    assert description_lines(p("subscription", price=3, currency="USD", checked="2026-11-01")) == [
+        "Price: Subscription"]  # no period, so no amount shown
+    assert description_lines(p("pay-what-you-want", suggested=5, currency="USD", checked="2026-11-01")) == [
+        "Price: Pay what you want (suggested $5). Price as of 1 November 2026"]
     assert checked_date(p("free", checked="nope")) is None and checked_date(p("free")) is None
 
 

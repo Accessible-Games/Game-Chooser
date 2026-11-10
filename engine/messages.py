@@ -66,7 +66,7 @@ PRICE_SUGGESTED = "{text} (suggested {suggested})"
 PRICE_ONE_TIME_AMOUNT = "Buy once, {price}"
 PRICE_PERIODS = {"month": "Subscription, {price} a month", "year": "Subscription, {price} a year"}
 PRICE_NO_LONGER_SOLD = "{model} (the full version can no longer be bought)"
-PRICE_AS_OF = "{text} (price as of {date})"
+PRICE_AS_OF = "{text}. Price as of {date}"
 PRICE_HEADING = "Price: {text}"
 PRICE_CAN_PLAY_FREE = "Can be played for free"
 # The label of pricing.url, in the description and the install confirmation

@@ -94,11 +94,8 @@ def price_text(pricing: dict | None) -> str:
 
 def shows_amount(pricing: dict | None) -> bool:
     """True when price_text names an amount, so "price as of" is worth saying."""
-    pricing = _dict(pricing)
-    if not pricing or no_longer_sold(pricing) or pricing.get("model") in FREE_MODELS:
-        return False
-    return bool(_amount(pricing, "price") or (pricing.get("model") == "pay-what-you-want"
-                                              and _amount(pricing, "suggested")))
+    model = model_label(pricing)
+    return model is not None and not no_longer_sold(pricing) and price_text(pricing) != model
 
 
 def checked_date(pricing: dict | None) -> str | None:
