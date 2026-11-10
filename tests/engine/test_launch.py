@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.launch import find_launch_exe, select_best_executable
+from engine.launch import find_launch_exe, select_best_executable, launch_kind, page_address, start_game
 from engine.paths import STAGING_DIR_NAME
 from exception_manager import ExceptionManager
 
@@ -192,3 +192,66 @@ def test_start_program_passes_on_a_declined_prompt():
 
     with pytest.raises(LaunchCancelled):
         start_program("C:/Games/X/x.exe", "C:/Games/X", popen=popen, shell_open=shell_open)
+
+
+@pytest.mark.parametrize("name, kind", [
+    ("index.html", "page"), ("Start.Htm", "page"), ("INDEX.HTML", "page"),
+    ("game.exe", "program"), ("run.bat", "program"), ("play.cmd", "program"),
+    ("game.hta", "program"), ("readme.txt", "program"), ("Game.app", "program"), ("game", "program"),
+])
+def test_launch_kind(name, kind):
+    assert launch_kind(f"C:/Games/Story/{name}") == kind
+
+
+def test_page_address_escapes_the_path(tmp_path):
+    folder = tmp_path / "We don't need #1 100% é"
+    folder.mkdir()
+    page = folder / "index.html"
+    page.write_text("<p>hi</p>", encoding="utf-8")
+    address = page_address(str(page))
+    assert address.startswith("file:///")
+    assert address == page.resolve().as_uri()
+    assert " " not in address and "#" not in address
+    assert "%20" in address and "%23" in address and "%25" in address
+
+
+def test_start_game_opens_a_page_in_the_browser(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text("<p>hi</p>", encoding="utf-8")
+    opened, started = [], []
+    kind = start_game(str(page), str(tmp_path), open_page=lambda a: opened.append(a) or True,
+                      start=lambda p, c: started.append((p, c)))
+    assert kind == "page"
+    assert opened == [page.resolve().as_uri()]
+    assert started == []
+
+
+def test_start_game_starts_a_program(tmp_path):
+    exe = tmp_path / "game.exe"
+    opened, started = [], []
+    kind = start_game(str(exe), str(tmp_path), open_page=lambda a: opened.append(a) or True,
+                      start=lambda p, c: started.append((p, c)))
+    assert kind == "program"
+    assert started == [(str(exe), str(tmp_path))]
+    assert opened == []
+
+
+def test_start_game_says_when_the_browser_will_not_open(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text("<p>hi</p>", encoding="utf-8")
+    with pytest.raises(OSError, match="web browser"):
+        start_game(str(page), str(tmp_path), open_page=lambda a: False)
+
+
+def test_start_game_passes_on_a_declined_prompt(tmp_path):
+    def declined(path, cwd):
+        raise LaunchCancelled()
+    with pytest.raises(LaunchCancelled):
+        start_game(str(tmp_path / "game.exe"), str(tmp_path), start=declined)
+
+
+def test_an_hta_file_is_never_opened_as_a_page(tmp_path):
+    opened, started = [], []
+    start_game(str(tmp_path / "game.hta"), str(tmp_path), open_page=lambda a: opened.append(a) or True,
+               start=lambda p, c: started.append((p, c)))
+    assert opened == [] and len(started) == 1

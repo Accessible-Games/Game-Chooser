@@ -36,7 +36,7 @@ from library_manager import GameLibraryManager
 from install_service import InstallService
 from catalog_view import description_text, initial_tab
 from engine.folders import library_label
-from engine.launch import LaunchCancelled, start_program
+from engine.launch import LaunchCancelled, start_game
 from game_list import GameListCtrl
 from catalog_panel import CatalogPanel
 from description_field import DescriptionField
@@ -1284,7 +1284,9 @@ class MainFrame(wx.Frame):
                     subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
                 else:
                     # Regular executable (one marked "run as administrator" goes through Windows' prompt)
-                    start_program(full_path, game_dir)
+                    kind = start_game(full_path, game_dir)
+                    if kind == "page":
+                        return  # a web page opens in the browser; the window stays as it is
 
                 # Minimize window
                 self.Iconize(True)

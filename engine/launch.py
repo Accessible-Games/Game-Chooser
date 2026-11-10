@@ -1,4 +1,4 @@
-"""Finding the executable to launch after an install.
+"""Finding the executable to launch after an install, and deciding how a launch file is started.
 
 `select_best_executable` holds temporary fallback preference rules, used until the catalog records
 launch paths.
@@ -13,6 +13,7 @@ from .safety import _resolve_game_path, is_link
 
 MAX_DEPTH = 10
 _EXE_SUFFIXES = (".exe", ".bat")
+PAGE_SUFFIXES = (".html", ".htm")  # a launch file that opens in the browser; .hta is a program, never a page
 
 ERROR_ELEVATION_REQUIRED = 740
 _SE_ERR_ACCESSDENIED = 5  # ShellExecuteW's answer when the player declines the administrator prompt
@@ -53,6 +54,33 @@ def start_program(path: str, cwd: str, popen: Callable | None = None,
         if getattr(e, "winerror", None) != ERROR_ELEVATION_REQUIRED:
             raise
         (shell_open or _shell_open)(path, cwd)
+
+
+def launch_kind(path: str) -> str:
+    """"page" for a launch file that is a web page (.html, .htm), otherwise "program"."""
+    return "page" if Path(path).suffix.lower() in PAGE_SUFFIXES else "program"
+
+
+def page_address(path: str) -> str:
+    """The file: address of a page on disk, with spaces and other special characters escaped."""
+    return Path(path).resolve().as_uri()
+
+
+def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = None,
+               start: Callable[[str, str], None] | None = None) -> str:
+    """Start a game's launch file and return the kind started: a page opens in the web browser, anything else
+    runs through `start_program`. Raises OSError if the browser can't be opened; LaunchCancelled and the
+    OSError from `start` pass through."""
+    kind = launch_kind(path)
+    if kind == "page":
+        if open_page is None:
+            import webbrowser
+            open_page = webbrowser.open
+        if open_page(page_address(path)) is False:
+            raise OSError("The web browser couldn't be opened.")
+    else:
+        (start or start_program)(path, cwd)
+    return kind
 
 
 def select_best_executable(exe_paths: list[Path], directory_name: str) -> Path | None:
