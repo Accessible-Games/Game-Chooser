@@ -104,7 +104,8 @@ def runs_on(source_arch, platform: str, machine: str | None) -> bool:
     if machine == "x64":
         return source_arch == "x86" and platform != "macos"
     if machine == "arm64":
-        return (platform == "windows" and source_arch in ("x64", "x86")) or (platform == "macos" and source_arch == "x64")
+        return ((platform == "windows" and source_arch in ("x64", "x86"))
+                or (platform == "macos" and source_arch == "x64"))
     return False
 
 

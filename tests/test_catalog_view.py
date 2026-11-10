@@ -184,7 +184,8 @@ def test_link_items_in_menu_order_http_only():
 
 def test_homepage_item():
     assert homepage_item(entry_with_links) == ("Open Homepage", "https://h.example")
-    later = {"links": [{"url": "https://f.example", "label": "Forum"}, {"url": "https://h.example", "label": "homepage"}]}
+    later = {"links": [{"url": "https://f.example", "label": "Forum"},
+                       {"url": "https://h.example", "label": "homepage"}]}
     assert homepage_item(later) == ("Open homepage", "https://h.example")
     assert homepage_item({"links": [{"url": "https://f.example", "label": "Forum"}]}) == \
         ("Open Forum", "https://f.example")
