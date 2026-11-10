@@ -1,6 +1,6 @@
 #!/bin/bash
 # Build script for Game Chooser Windows executable using Nuitka
-# Run this from WSL with: bash build_windows.sh
+# Run this on Windows from Git Bash with: bash build_windows.sh
 #
 # The built app extracts downloads with the bundled tools in bin/ (7-Zip and innoextract, fetched by
 # scripts/fetch_tools.py; bin/ is not committed). engine/extract.py looks for them in the bin/ folder beside
@@ -79,7 +79,7 @@ fi
 
 # smart_list (and resource_finder, which it imports) are uv git dependencies installed in the project's .venv.
 # smart_list loads iat_hook32.dll / iat_hook64.dll through resource_finder, which looks beside the exe, so copy
-# them there from the installed package. tr drops the CR that uv.exe prints when this runs from WSL.
+# them there from the installed package. tr drops the CR that uv.exe prints.
 SMART_LIST_DIR="$(uv run python -c "import os, smart_list; print(os.path.dirname(smart_list.__file__))" | tr -d '\r')"
 if [ -z "$SMART_LIST_DIR" ]; then
     echo "Could not find the installed smart_list package. Run 'uv sync' first."

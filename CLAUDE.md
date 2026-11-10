@@ -10,7 +10,7 @@ catalog (installed into a library) or are added by hand.
 
 ```bash
 uv sync                      # install dependencies
-uv run game-chooser.py       # run the app (on WSL: uv.exe run game-chooser.py)
+uv run game-chooser.py       # run the app
 uv run pytest -q             # the whole tests/ tree: no wxPython, pywin32 or network needed
 uv run pytest -q -m tools    # only the tests that need the bundled extraction tools in bin/
 uv run python scripts/fetch_tools.py   # fetch 7z.exe, 7z.dll, innoextract.exe into bin/ (not committed)
