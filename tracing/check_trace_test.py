@@ -67,13 +67,22 @@ def check(session_dir: Path) -> list[str]:
     return problems
 
 
+def report(session_dir: Path) -> int:
+    """Print PASS or one problem per line. Exit code: 0 pass, 1 problems, 2 not a session folder."""
+    session_dir = Path(session_dir)
+    if not (session_dir / "session.json").is_file():
+        print(f"{session_dir} is not a session folder (no session.json).")
+        return 2
+    problems = check(session_dir)
+    print("\n".join(problems) if problems else "PASS")
+    return 1 if problems else 0
+
+
 def main(argv: list[str]) -> int:
     if len(argv) != 2:
         print("Usage: python -m tracing.check_trace_test <session folder>")
         return 1
-    problems = check(Path(argv[1]))
-    print("\n".join(problems) if problems else "PASS")
-    return 1 if problems else 0
+    return report(Path(argv[1]))
 
 
 if __name__ == "__main__":

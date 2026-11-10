@@ -300,7 +300,9 @@ Log format: `tracing/LOG-FORMAT.md`. Build: see Build and Distribution.
   the app), `--trace-split [RUN...]` (split leftover runs after a crash; prints "No runs to split." when there are none;
   a named RUN that has `split.json` and no capture left prints "already split, nothing to do"; a named RUN whose
   capture was kept is split again; without RUN only runs with no `split.json` are split),
-  `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds), `--traces-dir PATH`
+  `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds),
+  `--trace-check FOLDER` (the trace-test acceptance check on a session folder, for a machine with only the compiled
+  build: prints `PASS` or one problem per line; exit 0 pass, 1 problems, 2 not a session folder), `--traces-dir PATH`
   (use another traces folder). Exit codes: 0 done, 1 a split problem, 2 bad command line.
 - **Where logs go:** `traces/` beside the exe (from source: beside `game-chooser.py`; git-ignored). One folder per
   play session, `<catalog id or title>-<YYYYMMDD-HHMMSS>`, holding `session.json` and `events.jsonl`. The recorder's

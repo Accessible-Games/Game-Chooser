@@ -12,7 +12,7 @@ from tracing import messages, paths
 from tracing.runfiles import RunDir, leftover_runs
 from tracing.splitrun import split_run_dir
 
-COMMANDS = ("--trace-recorder", "--trace-split", "--trace-probe")
+COMMANDS = ("--trace-recorder", "--trace-split", "--trace-probe", "--trace-check")
 DEFAULT_WORKLOAD = paths.REPO_DIR / "tests" / "catalog_fixtures" / "games" / "trace-test" / "trace-test.bat"
 
 SYNCHRONIZE = 0x00100000
@@ -57,6 +57,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--procmon")
     parser.add_argument("--trace-split", nargs="*", metavar="RUN")
     parser.add_argument("--trace-probe", metavar="OUT")
+    parser.add_argument("--trace-check", metavar="FOLDER")
     parser.add_argument("--workload")
     parser.add_argument("--traces-dir")
     return parser
@@ -74,6 +75,8 @@ def run_command(argv: list[str], compiled: bool) -> int | None:
         return _recorder(args, compiled)
     if args.trace_split is not None:
         return _split(args, compiled)
+    if args.trace_check is not None:
+        return _trace_check(Path(args.trace_check))
     return _run_probe(Path(args.trace_probe), paths.procmon_exe(compiled),
                       Path(args.workload) if args.workload else DEFAULT_WORKLOAD)
 
@@ -132,6 +135,11 @@ def _split(args, compiled: bool) -> int:
             print(f"Problem: {problem}")
             failed = True
     return 1 if failed else 0
+
+
+def _trace_check(folder: Path) -> int:
+    from tracing.check_trace_test import report
+    return report(folder)
 
 
 def _run_probe(out_dir: Path, procmon: Path, workload: Path) -> int:

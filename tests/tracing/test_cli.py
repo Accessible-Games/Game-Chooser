@@ -119,3 +119,23 @@ def test_split_named_run_with_a_kept_capture_splits_again(tmp_path, monkeypatch)
     assert calls == [run.path]
     assert cli.run_command(["--trace-split", "--traces-dir", str(tmp_path)], False) == 0
     assert calls == [run.path]  # leftover runs still skip a run that has split.json
+
+
+def test_trace_check_passes_a_good_session(tmp_path, capsys):
+    from tests.tracing.test_check_trace_test import good_lines, session
+    folder = session(tmp_path, good_lines())
+    assert cli.run_command(["--trace-check", str(folder)], True) == 0
+    assert capsys.readouterr().out.strip() == "PASS"
+
+
+def test_trace_check_reports_problems(tmp_path, capsys):
+    from tests.tracing.test_check_trace_test import good_lines, session
+    folder = session(tmp_path, [line for line in good_lines() if line["op"] != "delete"])
+    assert cli.run_command(["--trace-check", str(folder)], True) == 1
+    assert "junk.txt" in capsys.readouterr().out
+
+
+def test_trace_check_missing_or_non_session_folder(tmp_path, capsys):
+    assert cli.run_command(["--trace-check", str(tmp_path / "nope")], True) == 2
+    assert "not a session folder" in capsys.readouterr().out
+    assert cli.run_command(["--trace-check", str(tmp_path)], True) == 2
