@@ -47,8 +47,20 @@ def included_titles(plan, entry_titles: dict[str, str]) -> list[str]:
     return titles
 
 
+def size_text(plan, chosen_extras: set[str]) -> str:
+    """The download size, plus what the game downloads itself the first time it starts (counted in the total)."""
+    size = plan.download_size(chosen_extras)
+    first_run = plan.first_run_size
+    if not first_run:
+        return messages.CONFIRM_DOWNLOAD_SIZE.format(size=messages.format_size(size))
+    if size is None:
+        return messages.CONFIRM_DOWNLOAD_SIZE_PLUS_FIRST_RUN.format(first_run=messages.format_size(first_run))
+    return messages.CONFIRM_DOWNLOAD_SIZE_FIRST_RUN.format(size=messages.format_size(size + first_run),
+                                                           first_run=messages.format_size(first_run))
+
+
 def intro_text(plan, chosen_extras: set[str], entry_titles: dict[str, str]) -> str:
-    text = messages.CONFIRM_DOWNLOAD_SIZE.format(size=messages.format_size(plan.download_size(chosen_extras)))
+    text = size_text(plan, chosen_extras)
     included = included_titles(plan, entry_titles)
     if included:
         text += ". " + messages.CONFIRM_INCLUDES.format(items=", ".join(included))
