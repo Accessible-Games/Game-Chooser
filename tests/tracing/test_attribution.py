@@ -102,3 +102,23 @@ def test_find_root_by_exe_picks_the_start_closest_to_the_launch_call():
     unknown = SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {"exe": exe}, {}, ())
     assert find_root([far, near], unknown) is near
     assert find_root([far, near], SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {}, {}, ())) is None  # no exe
+
+
+def test_find_root_by_exe_prefers_a_start_after_the_launch_call():
+    exe = r"C:\Games\X\Game.exe"
+    before_call = p(800, 1, 10 * S - S // 2, image=exe)  # closer to the call, but started before it
+    after_call = p(801, 1, 10 * S + S, image=exe)
+    later = p(802, 1, 10 * S + 2 * S, image=exe)
+    unknown = SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {"exe": exe}, {}, ())
+    assert find_root([before_call, later, after_call], unknown) is after_call
+    early = p(803, 1, 10 * S - S, image=exe)
+    assert find_root([early, before_call], unknown) is before_call  # none after: the closest in the window
+
+
+def test_find_root_by_exe_skips_excluded_processes():
+    exe = r"C:\Games\X\Game.exe"
+    taken = p(900, 1, 10 * S + 1, image=exe)
+    free = p(901, 1, 10 * S + S, image=exe)
+    unknown = SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {"exe": exe}, {}, ())
+    assert find_root([taken, free], unknown, exclude={taken.key}) is free
+    assert find_root([taken], unknown, exclude={taken.key}) is None

@@ -3,7 +3,7 @@ import ntpath
 from dataclasses import dataclass
 from typing import Iterable
 
-from tracing.attribution import find_root, session_tree
+from tracing.attribution import UNKNOWN_PID, find_root, session_tree
 from tracing.clock import TICKS_PER_SECOND
 from tracing.kinds import classify
 from tracing.model import ProcInfo, RawEvent, SessionInfo
@@ -104,13 +104,16 @@ def _process_lines(tree: dict[tuple[int, int], ProcInfo], zero: int) -> list[dic
 
 def split_run(processes: list[ProcInfo], events: Iterable[RawEvent],
               sessions: list[SessionInfo]) -> list[SessionResult]:
-    results: list[SessionResult] = []
+    results: list[SessionResult | None] = [None] * len(sessions)
     owner: dict[tuple[int, int], int] = {}
-    for index, info in enumerate(sessions):
-        root = find_root(processes, info)
+    # Sessions whose pid is known first; then those found by exe, never taking a process another session owns.
+    order = sorted(range(len(sessions)), key=lambda i: sessions[i].root_pid == UNKNOWN_PID)
+    for index in order:
+        info = sessions[index]
+        root = find_root(processes, info, exclude=owner.keys())
         if root is None:
-            results.append(SessionResult(info, None, info.launch_before, "launch_call", {}, [], None, False,
-                                         PROBLEM_NO_ROOT))
+            results[index] = SessionResult(info, None, info.launch_before, "launch_call", {}, [], None, False,
+                                           PROBLEM_NO_ROOT)
             continue
         tree = session_tree(processes, root)
         for key in tree:
@@ -118,7 +121,7 @@ def split_run(processes: list[ProcInfo], events: Iterable[RawEvent],
         ends = [q.end for q in tree.values()]
         running = any(e is None for e in ends)
         end = None if running else max(ends)
-        results.append(SessionResult(info, root, root.start, "process_start", tree, [], end, running, None))
+        results[index] = SessionResult(info, root, root.start, "process_start", tree, [], end, running, None)
 
     for event in events:
         index = owner.get(event.proc_key)

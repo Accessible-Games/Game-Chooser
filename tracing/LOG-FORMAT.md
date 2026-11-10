@@ -8,6 +8,11 @@ becomes `-`). If the name exists, `-2`, `-3` and so on are added. Each folder ho
 A play session is one launch of a game: the launched process and every process it starts, followed through parent
 links. Only events from those processes are kept.
 
+The capture never holds events of Process Monitor (`Procmon.exe`, `Procmon64.exe`), `System`, Game Chooser itself
+(`game-chooser.exe`, which is also the recorder) or its extraction tools (`7z.exe`, `innoextract.exe`): their writes
+are never a game's, and installs made during a traced run would otherwise fill the capture. A game that runs a
+program of one of those names gets no events from it.
+
 ## Times
 
 Every time comes from Process Monitor's clock: FILETIME, 100 ns ticks since 1601-01-01 UTC. In the files:
@@ -26,8 +31,10 @@ read).
 When the launch gave Game Chooser no pid (a game marked "run as administrator" is started through Windows' prompt,
 and the shell can hand back no process), the first process is found by its executable instead: the process whose
 image path is the game's `exe` (compared case-insensitively, after normalizing the path) that started from 2 s
-before the launch call to 2 s after the call returned, the one whose start is closest to the launch call. A process
-of the same exe that started outside that window is never taken.
+before the launch call to 2 s after the call returned, and that is not already part of another session (sessions
+whose pid is known are matched first). Of those, the earliest that started at or after the launch call is taken
+(the real process starts after the call, once the prompt is accepted); only when none did, the one whose start is
+closest to the call. A process of the same exe that started outside that window is never taken.
 
 ## session.json
 

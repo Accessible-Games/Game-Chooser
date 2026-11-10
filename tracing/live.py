@@ -5,8 +5,9 @@ are running). Processes are identified by (pid, start) so a reused pid is never 
 
 A session whose launch gave no process ID (root_pid 0) finds its root by executable: the first snapshot holding a
 process whose image is the game's exe and whose start lies from ROOT_SLACK before `started_at` to ROOT_SLACK after
-`launch_after` (`started_at` when not given) picks the one closest to `started_at`, and from then on that process
-is the root, as if its pid had been known.
+`launch_after` (`started_at` when not given), and that no other session holds, picks one (the earliest that started
+at or after `started_at`; failing that, the closest to it), and from then on that process is the root, as if its
+pid had been known.
 """
 import os
 import sys
@@ -44,9 +45,16 @@ class _Session:
         except ValueError:
             return False
 
-    def update(self, procs, alive_start):
+    def owned(self):
+        """The (pid, start) keys this session holds: its members, and its root once known."""
+        keys = set(self.members)
+        if self.root_pid != UNKNOWN_PID and self.root_start is not None:
+            keys.add((self.root_pid, self.root_start))
+        return keys
+
+    def update(self, procs, alive_start, exclude=frozenset()):
         if self.root_pid == UNKNOWN_PID:
-            root = find_root_by_exe(procs, self.exe, self.started_at, self.launch_after)
+            root = find_root_by_exe(procs, self.exe, self.started_at, self.launch_after, exclude)
             if root is not None:
                 self.root_pid, self.root_start = root.pid, root.start
         member_pids = {}
@@ -95,8 +103,16 @@ class LiveTree:
     def update(self, snapshot):
         procs = [p for p in snapshot if p.start is not None]
         alive_start = {p.pid: p.start for p in procs}
-        for session in self._sessions.values():
-            session.update(procs, alive_start)
+        # Sessions whose root is known first, so a session still looking for its root by exe never takes a
+        # process another session holds.
+        sessions = sorted(self._sessions.values(), key=lambda s: s.root_pid == UNKNOWN_PID)
+        for session in sessions:
+            exclude = set()
+            if session.root_pid == UNKNOWN_PID:
+                for other in self._sessions.values():
+                    if other is not session:
+                        exclude |= other.owned()
+            session.update(procs, alive_start, exclude)
 
     def running(self):
         return {sid for sid, s in self._sessions.items() if s.alive}

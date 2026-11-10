@@ -150,3 +150,28 @@ def test_unknown_pid_without_an_exe_finds_nothing():
     t.add_session("s1-0", 0, None, None, 100)
     t.update([LiveProc(0, 0, 100, None), LiveProc(60, 4, 100, EXE)])
     assert t.running() == set()
+
+
+def test_a_session_found_by_exe_never_takes_another_sessions_root():
+    s = 10_000_000  # one second in FILETIME ticks
+    t = LiveTree()
+    # B launched first through a slow administrator prompt (no pid); A launched at 12 s with its pid known
+    t.add_session("b", 0, None, None, 11 * s, exe=EXE, launch_after=15 * s)
+    t.add_session("a", 500, 12 * s, None, 12 * s)
+    t.update([LiveProc(500, 4, 12 * s, EXE)])  # only A's root so far: B must not take it
+    assert t.running() == {"a"}
+    t.update([LiveProc(500, 4, 12 * s, EXE), LiveProc(600, 4, 15 * s, EXE)])
+    assert t.running() == {"a", "b"}
+    t.update([LiveProc(600, 4, 15 * s, EXE)])
+    assert t.running() == {"b"}
+    t.update([LiveProc(500, 4, 12 * s, EXE)])
+    assert t.running() == {"a"}
+
+
+def test_root_by_exe_prefers_a_start_after_the_launch_call():
+    s = 10_000_000
+    t = LiveTree()
+    t.add_session("b", 0, None, None, 10 * s, exe=EXE, launch_after=11 * s)
+    t.update([LiveProc(700, 4, 10 * s - s // 2, EXE), LiveProc(701, 4, 10 * s + s, EXE)])
+    t.update([LiveProc(700, 4, 10 * s - s // 2, EXE)])
+    assert t.running() == set()  # the root was 701, which has exited

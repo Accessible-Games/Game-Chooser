@@ -18,11 +18,14 @@ CAPTURE_OPERATIONS = (
     "Process Create", "Process Start", "Process Exit",
 )
 
-EXCLUDED_PROCESSES = ("Procmon.exe", "Procmon64.exe", "System")
+# Game Chooser itself (the compiled exe; also the elevated recorder) and the bundled extraction tools: their writes
+# are never a game's, and installs inside a traced run would fill the capture.
+EXCLUDED_PROCESSES = ("Procmon.exe", "Procmon64.exe", "System", "game-chooser.exe", "7z.exe", "innoextract.exe")
 
 
 def filter_config(operations: Sequence[str] = CAPTURE_OPERATIONS, destructive: bool = True) -> dict:
-    """Include only `operations`, never Process Monitor's own or System's events.
+    """Include only `operations`, never the events of EXCLUDED_PROCESSES (Process Monitor, System, Game Chooser and
+    its extraction tools).
 
     With the destructive filter, events the filter drops are never written to the backing file.
     """

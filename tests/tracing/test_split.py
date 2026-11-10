@@ -135,3 +135,20 @@ def test_virtualized_process_gets_virtual_store_path():
     assert line["virtual_store_path"] == "HKCU\\Software\\Classes\\VirtualStore\\MACHINE\\SOFTWARE\\Acme\\x"
     [r] = run([ev(ROOT, 12, op="RegSetValue", path="HKLM\\SOFTWARE\\Acme\\x", Type="REG_SZ", Data="1")])
     assert "virtual_store_path" not in next(x for x in r.lines if x["op"] == "reg_set_value")
+
+
+def test_a_session_found_by_exe_never_takes_another_sessions_root():
+    exe = "C:\\Games\\X\\game.exe"
+    game = {"title": "T", "catalog_id": "c", "library_id": "l", "launch_path": "game.exe", "exe": exe,
+            "game_dir": "C:\\Games\\X"}
+    # B launched first through a slow administrator prompt (no pid; its root starts at 15 s); A launched at 12 s
+    b = SessionInfo("s001-0", 0, None, 11 * S, 15 * S, game, info().env, ())
+    a = SessionInfo("s002-500", 500, 12 * S, int(11.9 * S), int(12.1 * S), game, info().env, ())
+    a_root = proc(500, 50, 12 * S, image=exe)
+    b_root = proc(600, 50, 15 * S, image=exe)
+    a_child = proc(501, 500, 13 * S, image="C:\\Windows\\System32\\reg.exe")
+    rb, ra = split_run([CHOOSER, a_root, b_root, a_child],
+                       iter([ev(a_root, 14), ev(b_root, 16, path="C:\\g\\b.sav")]), [b, a])
+    assert ra.root is a_root and rb.root is b_root
+    assert set(ra.tree) == {a_root.key, a_child.key} and set(rb.tree) == {b_root.key}
+    assert [line["path"] for line in rb.lines if line["op"] == "file_write"] == ["C:\\g\\b.sav"]
