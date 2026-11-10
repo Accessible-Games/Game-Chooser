@@ -1352,7 +1352,7 @@ def test_preference_off_run_update_replaces_the_private_copy_and_extras_leave_it
     routes = {}
     rt = dx8vb(routes)
     x_data = zip_bytes({"tracks/extra.dat": b"x"})
-    x = {"id": "lc-tracks", "kind": "extra", "title": "Tracks", "install_into": "lightcars", "version": "1",
+    x = {"id": "lc-tracks", "kind": "extra", "title": "Tracks", "extends": ["lightcars"], "version": "1",
          "sources": [served_source(routes, f"{MIRROR}{sha(x_data)}/tracks.zip", x_data)]}
     g = run_mode_game(routes, extras=[{"id": "lc-tracks", "required": True}])
     folder = tmp_path / "Games" / "Light Cars"

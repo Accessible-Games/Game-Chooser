@@ -10,11 +10,9 @@ from pathlib import Path
 from . import messages
 from .entries import extras_of, platform_sources
 from .errors import InstallFailed
+from .pricing import install_warning, pricing_of
 from .run_installer import silent_args_for
 from .runtimes import _has_elevated_steps, _is_installer_runtime, _runs_installer, is_com_runtime, missing_runtimes
-
-_DEMO_FLAGS = ("demo", "requires-registration")
-
 
 @dataclass
 class ExtraChoice:
@@ -46,6 +44,7 @@ class InstallPlan:
     interactive: bool = False
     is_web: bool = False
     base_size: int | None = None
+    first_run_size: int = 0  # bytes the game downloads itself the first time it starts
 
     def download_size(self, chosen_extras: set[str]) -> int | None:
         """The game, its required and chosen extras, and the dependencies that install; None if any is unknown."""
@@ -63,6 +62,11 @@ def _first_source(entry: dict, platform: str | None) -> dict | None:
 def _size(entry: dict, platform: str | None) -> int | None:
     source = _first_source(entry, platform)
     return None if source is None else source.get("size")
+
+
+def _first_run_size(entry: dict, platform: str | None) -> int:
+    size = (_first_source(entry, platform) or {}).get("first_run_download_size")
+    return size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else 0
 
 
 def _title(entry: dict) -> str:
@@ -140,10 +144,14 @@ def _choose_library(plan: InstallPlan, libraries: list[dict], last_library: str 
 
 
 def _warnings(entry: dict, action: str, interactive: bool) -> list[str]:
+    """The entry's own warning (installs and updates), the price (installs only), then a guided installer."""
     warnings = []
-    if action == "install" and any(flag in (entry.get("flags") or []) for flag in _DEMO_FLAGS):
-        url = (entry.get("links") or {}).get("purchase")
-        warnings.append(messages.PLAN_DEMO_BUY.format(url=url) if url else messages.PLAN_DEMO)
+    warning = entry.get("warning")
+    if isinstance(warning, str) and warning.strip():
+        warnings.append(warning.strip())
+    price = install_warning(pricing_of(entry)) if action == "install" else None
+    if price:
+        warnings.append(price)
     if interactive:
         warnings.append(messages.PLAN_INTERACTIVE)
     return warnings
@@ -169,6 +177,8 @@ def build_install_plan(entry_id: str, entries: dict, libraries: list[dict], reco
         plan.extras = _extra_choices(entry, entries, platform, installed, optional_only=True)
         return plan
     plan.base_size = _size(entry, platform)
+    if action == "install":  # an update keeps what the game downloaded the first time
+        plan.first_run_size = _first_run_size(entry, platform)
     if plan.is_web:
         return plan
     if action == "install":

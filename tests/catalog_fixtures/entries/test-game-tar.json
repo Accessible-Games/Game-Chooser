@@ -1,0 +1,18 @@
+{
+  "id": "test-game-tar",
+  "kind": "game",
+  "title": "Test Game Tar",
+  "developer": ["Game Chooser Tests"],
+  "genres": ["Puzzle"],
+  "year": 2026,
+  "version": "1.0",
+  "description": "A game packed in a .tar.gz archive (install method tar) whose files are in a TarGame folder (extract_dir). Its source says the game downloads 50 megabytes the first time it starts, so the install confirmation counts that too.",
+  "pricing": {"model": "free"},
+  "languages": ["en", "de"],
+  "launch": {"windows": {"path": "game.bat"}},
+  "persist": ["Saves/"],
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "first_run_download_size": 52428800,
+     "install": {"method": "tar", "extract_dir": "TarGame"}}
+  ]
+}

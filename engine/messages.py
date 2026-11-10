@@ -46,9 +46,41 @@ PLAN_DEPENDENCY_SHARED_PLAIN = "Also installs: {title}"
 PLAN_DEPENDENCY_PRIVATE = "Also installs: {title} (a private copy for this game)"
 PLAN_DEPENDENCY_SKIPPED = ("Needs {title}, which isn't installed because shared components are turned off in "
                            "Preferences")
-PLAN_DEMO = "This installs a demo. Registering unlocks the full game."
-PLAN_DEMO_BUY = "This installs a demo. Registering unlocks the full game. Buy or register: {url}"
+PLAN_PRICE = "Price: {price}."
+PLAN_PRICE_LINK = "Price: {price}. {link}: {url}"
+PLAN_NO_LONGER_SOLD = "Price: {model}. The full version can no longer be bought."
 PLAN_INTERACTIVE = "You'll be guided through this game's own installer."
+
+# Pricing (engine.pricing): the Catalog's Price column and description, and the install confirmation
+PRICE_MODELS = {
+    "free": "Free",
+    "free-to-try": "Free to try",
+    "pay-what-you-want": "Pay what you want",
+    "one-time": "Buy once",
+    "subscription": "Subscription",
+    "free-with-purchases": "Free, with optional purchases",
+}
+PRICE_FREE_TO_TRY_AMOUNT = "Free to try, {price} to unlock"
+PRICE_PAY_WHAT_YOU_WANT_FROM = "Pay what you want, from {price}"
+PRICE_SUGGESTED = "{text} (suggested {suggested})"
+PRICE_ONE_TIME_AMOUNT = "Buy once, {price}"
+PRICE_PERIODS = {"month": "Subscription, {price} a month", "year": "Subscription, {price} a year"}
+PRICE_NO_LONGER_SOLD = "{model} (the full version can no longer be bought)"
+PRICE_AS_OF = "{text}. Price as of {date}"
+PRICE_HEADING = "Price: {text}"
+PRICE_CAN_PLAY_FREE = "Can be played for free"
+# The label of pricing.url, in the description and the install confirmation
+PRICE_LINKS = {
+    "free-to-try": "Buy or register",
+    "pay-what-you-want": "Pay",
+    "one-time": "Buy",
+    "subscription": "Subscribe",
+}
+PRICE_LINK_OTHER = "Store page"
+DONATE_LINK = "Support the developer"
+MENU_OPEN_LINK = "Open {label}"
+MENU_OPEN_PURCHASE = "Open purchase page"
+MENU_OPEN_DONATE = "Open donation page"
 
 
 @dataclass
@@ -254,6 +286,17 @@ CATALOG_NO_GAMES = "No games available to choose from."
 CATALOG_NO_GAMES_TO_INSTALL = "No games to install in the list as shown."
 CATALOG_NOT_IN_LIBRARY = "{title} is installed, but Game Chooser can't find it in your Library."
 
+# The Catalog tab's list, filter tree and description (catalog_view); the Library description is the same text
+CATALOG_ROW_UNSUPPORTED = "no longer supported"
+CATALOG_ROW_INSTALLED = "installed"
+CATALOG_TREE_UNSUPPORTED = "No longer supported"
+CATALOG_GENRE = "Genre: {items}"
+CATALOG_GENRES = "Genres: {items}"
+CATALOG_TAGS = "Tags: {items}"
+CATALOG_LANGUAGES = "Languages: {items}"
+CATALOG_CONTAINS = "Games included: {items}"
+CATALOG_UNSUPPORTED = "No longer supported by its developer."
+
 ADDED = "{title} is added"
 
 # The install confirmation dialog
@@ -261,6 +304,10 @@ CONFIRM_TITLE_INSTALL = "Install {title}"
 CONFIRM_TITLE_UPDATE = "Update {title}"
 CONFIRM_TITLE_EXTRAS = "Add extras to {title}"
 CONFIRM_DOWNLOAD_SIZE = "Download size: {size}"
+CONFIRM_DOWNLOAD_SIZE_FIRST_RUN = ("Download size: {size}, including {first_run} that the game downloads the first "
+                                   "time you start it")
+CONFIRM_DOWNLOAD_SIZE_PLUS_FIRST_RUN = ("Download size: unknown size, plus {first_run} that the game downloads the "
+                                        "first time you start it")
 CONFIRM_INCLUDES = "Includes: {items}"
 CONFIRM_WHERE = "Where to install"
 CONFIRM_INSTALLS_INTO = "Installs into {library}"

@@ -36,7 +36,7 @@ from library_manager import GameLibraryManager
 from install_service import InstallService
 from catalog_view import description_text, initial_tab
 from engine.folders import library_label
-from engine.launch import LaunchCancelled, start_program
+from engine.launch import LaunchCancelled, launch_kind, start_game
 from game_list import GameListCtrl
 from catalog_panel import CatalogPanel
 from description_field import DescriptionField
@@ -1277,8 +1277,10 @@ class MainFrame(wx.Frame):
                     dlg.Destroy()
                 return
 
+            # Tracing watches a program launch only; a web page is never observed
+            observe = self.launch_observer is not None and launch_kind(full_path) == "program"
             token = None
-            if self.launch_observer is not None:
+            if observe:
                 token = self.launch_observer.before_launch(game)
                 if token is None:
                     return
@@ -1292,9 +1294,11 @@ class MainFrame(wx.Frame):
                     subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
                 else:
                     # Regular executable (one marked "run as administrator" goes through Windows' prompt)
-                    pid = start_program(full_path, game_dir)
-                    if self.launch_observer is not None:
-                        self.launch_observer.launched(token, game, pid, full_path, game_dir)
+                    started = start_game(full_path, game_dir)
+                    if started.kind == "page":
+                        return  # a web page opens in the browser; the window stays as it is
+                    if observe:
+                        self.launch_observer.launched(token, game, started.pid, full_path, game_dir)
 
                 # Minimize window
                 self.Iconize(True)

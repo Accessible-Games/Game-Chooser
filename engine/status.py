@@ -13,9 +13,12 @@ LIBRARY_NOT_FOUND = "Library not found"
 def update_available(record, entry: dict | None, platform: str) -> bool:
     """Has the catalog's download for this install changed since it was installed?
 
-    Extras do not count: only the main source is compared.
+    Extras do not count: only the main source is compared. A game that updates itself (`self_updating`) never
+    has one: its catalog version and checksum follow the developer's releases, not what is on the player's disk.
     """
     if record is None or entry is None or record.uninstalled or record.kind == "runtime":
+        return False
+    if entry.get("self_updating") is True:
         return False
     sources = platform_sources(entry, platform)
     if not sources:

@@ -31,7 +31,7 @@ def game(routes, id="entombed", title="Entombed", files=None, steps=None, develo
 
 def extra(routes, id, files, steps=None, parent="entombed"):
     source = served_source(routes, f"{MIRROR}{id}/{id}.zip", zip_bytes(files), steps=steps)
-    return {"id": id, "kind": "extra", "title": id.replace("-", " ").title(), "install_into": parent,
+    return {"id": id, "kind": "extra", "title": id.replace("-", " ").title(), "extends": [parent],
             "version": "2", "sources": [source]}
 
 
@@ -617,3 +617,52 @@ def test_install_without_hint_is_guessed(tmp_path):
 def test_garbled_hint_falls_back_and_is_guessed(tmp_path):
     rec = _install_entombed(tmp_path, {"entombed.exe": b"a"}, {"windows": {"path": "nope/missing.exe"}})
     assert rec.launch_path == "entombed.exe" and rec.launch_from_catalog is False
+
+
+PAGE_FILES = {"index.html": b"<a href='page2.html'>next</a>", "page2.html": b"<a href='index.html'>back</a>"}
+
+
+def test_install_with_a_page_launch_path(tmp_path):
+    rec = _install_entombed(tmp_path, PAGE_FILES, {"windows": {"path": "index.html"}})
+    assert rec.launch_path == "index.html" and rec.launch_from_catalog is True
+    assert set(rec.files) == {"index.html", "page2.html"}
+    folder = tmp_path / "Games" / "Entombed"
+    assert (folder / "index.html").is_file() and (folder / "page2.html").is_file()
+
+
+def test_pages_alone_without_a_launch_path_fail_as_no_program(tmp_path):
+    routes = {}
+    e = game(routes, files=PAGE_FILES)
+    engine, ctx, lib = setup(tmp_path, [e], routes)
+    with pytest.raises(InstallFailed) as ei:
+        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert ei.value.message.startswith(messages.NO_EXE.format(title="Entombed"))
+    assert ctx.records.load("entombed") is None
+
+
+def _tar_gz(files: dict[str, bytes]) -> bytes:
+    import io
+    import tarfile
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, data in files.items():
+            info = tarfile.TarInfo(name)
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+    return buffer.getvalue()
+
+
+def test_tar_game_installs_and_can_be_repaired_and_uninstalled(tmp_path):
+    routes = {}
+    data = _tar_gz({"Tux/tux.exe": b"exe", "Tux/data/a.dat": b"a"})
+    e = game(routes, id="tux", title="Tux", files=data, method="tar", url=f"{MIRROR}tux/tux.tar.gz",
+             install={"extract_dir": "Tux"})
+    engine, ctx, lib = setup(tmp_path, [e], routes)
+    r = engine.run(InstallRequest("install", "tux", "Games", lib), lambda p: None, never)
+    assert (lib / "Tux" / "tux.exe").read_bytes() == b"exe" and r.game["launch_path"] == "Tux/tux.exe"
+    assert ctx.records.load("tux").method == "tar"
+    (lib / "Tux" / "data" / "a.dat").unlink()
+    engine.run(InstallRequest("repair", "tux", "Games", lib), lambda p: None, never)  # a tar install is tracked
+    assert (lib / "Tux" / "data" / "a.dat").read_bytes() == b"a"
+    engine.run(InstallRequest("uninstall", "tux", "Games", lib), lambda p: None, never)
+    assert not (lib / "Tux" / "tux.exe").exists()

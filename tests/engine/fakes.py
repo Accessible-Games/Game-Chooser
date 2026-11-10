@@ -13,7 +13,7 @@ from datetime import date
 from pathlib import Path
 
 from engine.errors import Cancelled, DownloadError
-from engine.extract import content_root
+from engine.extract import content_root, extract_tar
 from engine.http import check_url_allowed
 
 
@@ -50,7 +50,7 @@ class FakeFetcher:
             progress(len(data), len(data))
 
 
-def publish(fetcher: FakeFetcher, base_url: str, entries: list[dict], schema_version: int = 1) -> bytes:
+def publish(fetcher: FakeFetcher, base_url: str, entries: list[dict], schema_version: int = 2) -> bytes:
     """Publish index.json.gz and index-meta.json the way catalog-index does; returns the gz bytes."""
     doc = {"schema_version": schema_version, "generated_at": "2026-11-04T00:00:00Z", "entries": entries}
     gz = gzip.compress(json.dumps(doc).encode("utf-8"), mtime=0)
@@ -458,6 +458,8 @@ class ZipExtractor:
         dest.mkdir(parents=True, exist_ok=True)
         if method == "none":
             shutil.copy2(archive, dest / Path(archive).name)
+        elif method == "tar":
+            extract_tar(Path(archive), dest, cancel)
         else:
             with zipfile.ZipFile(archive) as zf:
                 zf.extractall(dest)

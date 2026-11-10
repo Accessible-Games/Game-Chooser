@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.launch import find_launch_exe, select_best_executable
+from engine.launch import find_launch_exe, select_best_executable, Started, launch_kind, page_address, start_game
 from engine.paths import STAGING_DIR_NAME
 from exception_manager import ExceptionManager
 
@@ -143,6 +143,29 @@ def test_adopt_catalog_launch(tmp_path):
     assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False
 
 
+def test_a_catalog_named_page_is_the_launch_file(tmp_path):
+    page = touch(tmp_path, "index.html")
+    touch(tmp_path, "setup.exe")
+    assert find_launch_exe(tmp_path, "index.html", EXCL) == page
+
+
+def test_a_page_is_never_guessed(tmp_path):
+    touch(tmp_path, "index.html")
+    touch(tmp_path, "story/page2.htm")
+    assert find_launch_exe(tmp_path, None, EXCL) is None
+
+
+def test_adopt_catalog_launch_takes_a_page(tmp_path):
+    from types import SimpleNamespace
+    from engine.launch import adopt_catalog_launch
+    touch(tmp_path, "index.html")
+    touch(tmp_path, "guess.exe")
+    rec = SimpleNamespace(launch_path="guess.exe", launch_from_catalog=False)
+    entry = {"launch": {"windows": {"path": "index.html"}}}
+    assert adopt_catalog_launch(rec, entry, "windows", tmp_path) is True
+    assert rec.launch_path == "index.html" and rec.launch_from_catalog is True
+
+
 # ---- start_program: an exe flagged to run as administrator (bug 19) ----------------------------------------
 
 import pytest
@@ -230,3 +253,126 @@ def test_shell_execute_info_has_the_windows_layout():
     size = ctypes.sizeof(_shell_execute_info())
     assert size == (112 if ctypes.sizeof(ctypes.c_void_p) == 8 else 60)
     assert _shell_execute_info() is _shell_execute_info()
+
+
+@pytest.mark.parametrize("name, kind", [
+    ("index.html", "page"), ("Start.Htm", "page"), ("INDEX.HTML", "page"),
+    ("game.exe", "program"), ("run.bat", "program"), ("play.cmd", "program"),
+    ("game.hta", "program"), ("readme.txt", "program"), ("Game.app", "program"), ("game", "program"),
+])
+def test_launch_kind(name, kind):
+    assert launch_kind(f"C:/Games/Story/{name}") == kind
+
+
+def _page_in(tmp_path, folder_name):
+    folder = tmp_path / folder_name
+    folder.mkdir()
+    page = folder / "index.html"
+    page.write_text("<p>hi</p>", encoding="utf-8")
+    return page
+
+
+def test_page_address_escapes_the_path(tmp_path):
+    page = _page_in(tmp_path, "We don't need #1 100% é")
+    address = page_address(str(page))
+    assert address.startswith("file:///") and not address.startswith("file:////")
+    assert "%20" in address and "%23" in address and "%25" in address
+    assert "é" in address and "%C3" not in address
+    assert " " not in address and "#" not in address
+
+
+def test_page_address_keeps_japanese_letters(tmp_path):
+    page = _page_in(tmp_path, "日本 #1")
+    address = page_address(str(page))
+    assert "日本" in address and "%E6" not in address
+    assert "%20" in address and "%23" in address
+    assert " " not in address and "#" not in address
+
+
+def test_page_address_does_not_follow_a_link(tmp_path):
+    target = tmp_path / "x.exe"
+    target.write_bytes(b"MZ")
+    link = tmp_path / "index.html"
+    try:
+        os.symlink(target, link)
+    except OSError:
+        pytest.skip("cannot create link")
+    address = page_address(str(link))
+    assert address.endswith("/index.html") and "x.exe" not in address
+
+
+@pytest.mark.skipif(os.name != "nt", reason="a UNC path is a Windows path")
+def test_page_address_of_a_network_share():
+    path = "\\\\server\\share\\Café #1\\index.html"
+    assert page_address(path) == "file://server/share/Café%20%231/index.html"
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("folder_name", ["Café review #1 100%", "日本 #1"])
+def test_page_address_round_trips_through_the_windows_shell(tmp_path, folder_name):
+    import ctypes
+    page = _page_in(tmp_path, folder_name)
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = ctypes.c_ulong(len(buffer))
+    hr = ctypes.windll.shlwapi.PathCreateFromUrlW(page_address(str(page)), buffer, ctypes.byref(size), 0)
+    assert hr == 0
+    assert Path(buffer.value) == page
+
+
+@pytest.mark.windows
+def test_page_address_of_a_network_share_round_trips_through_the_windows_shell():
+    import ctypes
+    path = "\\\\server\\share\\Café #1\\index.html"
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = ctypes.c_ulong(len(buffer))
+    hr = ctypes.windll.shlwapi.PathCreateFromUrlW(page_address(path), buffer, ctypes.byref(size), 0)
+    assert hr == 0
+    assert buffer.value == path
+
+
+def test_start_game_opens_a_page_in_the_browser(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text("<p>hi</p>", encoding="utf-8")
+    opened, started = [], []
+    kind = start_game(str(page), str(tmp_path), open_page=lambda a: opened.append(a) or True,
+                      start=lambda p, c: started.append((p, c)))
+    assert kind == Started("page", None)
+    assert opened == [page_address(str(page))]
+    assert started == []
+
+
+def test_start_game_starts_a_program(tmp_path):
+    exe = tmp_path / "game.exe"
+    opened, started = [], []
+    kind = start_game(str(exe), str(tmp_path), open_page=lambda a: opened.append(a) or True,
+                      start=lambda p, c: started.append((p, c)))
+    assert kind == Started("program", None)
+    assert started == [(str(exe), str(tmp_path))]
+    assert opened == []
+
+
+def test_start_game_says_when_the_browser_will_not_open(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text("<p>hi</p>", encoding="utf-8")
+    with pytest.raises(OSError, match="web browser"):
+        start_game(str(page), str(tmp_path), open_page=lambda a: False)
+
+
+def test_start_game_passes_on_a_declined_prompt(tmp_path):
+    def declined(path, cwd):
+        raise LaunchCancelled()
+    with pytest.raises(LaunchCancelled):
+        start_game(str(tmp_path / "game.exe"), str(tmp_path), start=declined)
+
+
+def test_an_hta_file_is_never_opened_as_a_page(tmp_path):
+    opened, started = [], []
+    start_game(str(tmp_path / "game.hta"), str(tmp_path), open_page=lambda a: opened.append(a) or True,
+               start=lambda p, c: started.append((p, c)))
+    assert opened == [] and len(started) == 1
+
+
+def test_start_game_passes_on_what_the_program_start_returned(tmp_path):
+    result = start_game(str(tmp_path / "game.exe"), str(tmp_path), start=lambda p, c: 4321)
+    assert result == Started("program", 4321)
+    assert result.kind == "program" and result.pid == 4321

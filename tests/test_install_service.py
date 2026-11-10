@@ -4,7 +4,9 @@ import tempfile
 
 import pytest
 
+import catalog_view
 import install_service
+import library_actions
 from engine import messages
 from engine.errors import InstallFailed
 from engine.index import DEFAULT_CATALOG_URL
@@ -679,3 +681,75 @@ def test_finish_removal_keeps_going_when_games_json_cannot_be_saved(rig, monkeyp
     assert rig.manager.library_by_id(lib["id"]) is None
     assert sorted((g.title, g.catalog_id, g.library_id) for g in rig.manager.games) == \
         [("Entombed", "", ""), ("Pawprints", "", "")]
+
+
+def test_catalog_genres_reach_installed_games(rig):
+    lib = rig.library()
+    entombed = game_entry(rig.routes, genres=[])
+    pawprints = game_entry(rig.routes, id="pawprints", title="Pawprints", genres=[])
+    rig.publish(entombed, pawprints)
+    rig.run("install", "entombed", library_id=lib["id"])
+    rig.run("install", "pawprints", library_id=lib["id"])
+    rig.manager.games.append(Game(title="Hand", genre="Mine", launch_path="C:/hand.exe"))
+    assert rig.manager.catalog_game("entombed").genre == ""
+    rig.service.queue.hold.add("pawprints")
+    rig.service.submit("repair", "pawprints")  # a game with a job is left to its result
+    before = rig.manager.games
+    rig.publish({**entombed, "genres": ["Puzzle", "Arcade"]}, {**pawprints, "genres": ["Card"]})
+    assert rig.manager.games is not before  # a new list, so the Library rebuilds its filter tree
+    assert rig.manager.catalog_game("entombed").genre == "Puzzle"  # the main genre
+    assert rig.manager.catalog_game("pawprints").genre == ""
+    assert [g.genre for g in rig.manager.games if g.title == "Hand"] == ["Mine"]
+    assert {g["title"]: g["genre"] for g in _games_json(rig.manager)}["Entombed"] == "Puzzle"
+    same = rig.manager.games
+    assert rig.service.refresh_catalog_genres() == 0 and rig.manager.games is same  # nothing changed, no save
+
+
+def test_an_extra_shared_by_two_games_through_the_catalog_and_library(rig):
+    """Catalog schema v2: one extra extends two games. The Catalog offers it to each game, each game's record holds
+    its own copy, and the Library's Extras item, games.json and an uninstall go by the game alone."""
+    lib = rig.library()
+    shared = {"id": "series-patch", "kind": "extra", "title": "Series Patch", "extends": ["alpha", "bravo"],
+              "version": "1",
+              "sources": [served_source(rig.routes, f"{MIRROR}series-patch/series-patch.zip",
+                                        zip_bytes({"data/bonus.dat": b"bonus"}))]}
+    alpha, bravo = (game_entry(rig.routes, id=i, title=i.title(), extras=[{"id": "series-patch", "required": False}])
+                    for i in ("alpha", "bravo"))
+    rig.publish(alpha, bravo, shared)
+
+    def rows():
+        return {r.id: r for r in catalog_view.build_rows(rig.service.visible_games(), rig.service.installed_ids())}
+
+    def extras_item(catalog_id):
+        game = rig.manager.catalog_game(catalog_id)
+        record, entry = rig.service.record_for(game), rig.service.entry_for(game)
+        items = library_actions.catalog_menu_items(game, record, entry, False,
+                                                   bool(rig.service.plan(catalog_id, "extras").extras))
+        return next(i for i in items if i.action == library_actions.EXTRAS)
+
+    assert set(rows()) == {"alpha", "bravo"}  # the extra is never a row
+    assert [x.id for x in rig.service.plan("alpha").extras] == [x.id for x in rig.service.plan("bravo").extras] \
+        == ["series-patch"]
+
+    rig.run("install", "alpha", library_id=lib["id"], extras=("series-patch",))
+    rig.run("install", "bravo", library_id=lib["id"])
+    assert rig.service.installed_ids() == {"alpha", "bravo"}
+    assert {i: r.installed for i, r in rows().items()} == {"alpha": True, "bravo": True}
+    assert rig.manager.catalog_game("alpha").installed_extras == ["series-patch"]
+    assert rig.manager.catalog_game("bravo").installed_extras == []
+    assert not extras_item("alpha").enabled and extras_item("bravo").enabled
+
+    rig.run("extras", "bravo", extras=("series-patch",))
+    assert rig.manager.catalog_game("bravo").installed_extras == ["series-patch"]
+    assert rig.manager.catalog_game("alpha").installed_extras == ["series-patch"]
+    assert not extras_item("bravo").enabled
+    assert set(rig.manager.records.game_records()) == {"alpha", "bravo"}
+
+    rig.run("uninstall", "alpha")
+    assert rig.manager.catalog_game("alpha") is None and rig.service.installed_ids() == {"bravo"}
+    assert (rig.tmp_path / "Games" / "Bravo" / "data" / "bonus.dat").read_bytes() == b"bonus"
+    assert set(rig.manager.records.load_game("bravo").extras) == {"series-patch"}
+    assert rig.manager.catalog_game("bravo").installed_extras == ["series-patch"]
+    assert [x.id for x in rig.service.plan("alpha").extras] == ["series-patch"]  # offered again on reinstall
+    rig.manager.reconcile_catalog_records()
+    assert [g.catalog_id for g in rig.manager.games if g.catalog_id] == ["bravo"]

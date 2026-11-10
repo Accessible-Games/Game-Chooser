@@ -21,9 +21,10 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 
 ### Testing Strategy
 - Logic lives in wx-free modules so it is unit-tested: `catalog_view.py`, `install_choices.py`, `install_prefs.py`,
-  `library_actions.py`, `install_service.py`, `library_manager.py`, `engine/`. UI files (`main_window.py`,
-  `dialogs.py`, `install_dialogs.py`, `catalog_panel.py`, `progress_area.py`, `description_field.py`) are not
-  unit-tested; `wx_bridge.py` takes injectable `post` functions so its threading is tested without wx.
+  `library_actions.py`, `install_service.py`, `library_manager.py`, `language_names.py`, `engine/`. UI files
+  (`main_window.py`, `dialogs.py`, `install_dialogs.py`, `catalog_panel.py`, `progress_area.py`,
+  `description_field.py`) are not unit-tested; `wx_bridge.py` takes injectable `post` functions so its threading
+  is tested without wx.
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx.
 - Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, install
   choices, install prefs, install service, library actions, library integration, library manager, wx bridge,
@@ -41,7 +42,11 @@ to that URL.
 - `--throttle KBPS` sends game files slowly (time to cancel a download)
 - `--build-only` builds the catalog and stops; `--port N` and `--build-dir` change the port and build folder
 
-Sources: `tests/catalog_fixtures/entries/*.json` and `tests/catalog_fixtures/games/`. Output goes to
+Sources: `tests/catalog_fixtures/entries/*.json` (catalog schema v2; each game's `extras` is computed from every
+entry whose `extends` list names it, as catalog-index does) and `tests/catalog_fixtures/games/`. They include a
+tar.gz game, prices, links, a warning, a first-run download size, a required extra (Test Extra Level) and an
+optional extra shared by Test Game With Extra and Test Game Tar (Test Shared Extra Level), and Test Story, a
+two-page web page game that opens in the browser (launch path `index.html`). Output goes to
 `tests/catalog_fixtures/_build/` (git-ignored). Every download address points at the local server.
 
 ## Project Structure
@@ -56,7 +61,8 @@ Sources: `tests/catalog_fixtures/entries/*.json` and `tests/catalog_fixtures/gam
 - **install_service.py** (331) - `InstallService`: catalog index + engine + queue + games/records/libraries
 - **library_actions.py** (116) - wx-free: Library tab context menu, Edit/Delete rules, Uninstall/Remove wording
 - **library_manager.py** (297) - `GameLibraryManager`: config, games.json, libraries, catalog game bookkeeping
-- **catalog_panel.py** (523) - the Catalog tab; **catalog_view.py** (220) - wx-free rows, filters, description text
+- **catalog_panel.py** (554) - the Catalog tab; **catalog_view.py** (357) - wx-free rows, filters, description text,
+  links; **language_names.py** - ISO 639-1 codes to English names (unknown codes shown as written)
 - **description_field.py** (62) - read-only multi-line description; Enter on a link line opens it
 - **progress_area.py** (143) - gauge, status line, Done and Cancel for the running job
 - **wx_bridge.py** (329) - queue listener and installer-UI bridges to the UI thread, `run_in_background`
@@ -64,7 +70,7 @@ Sources: `tests/catalog_fixtures/entries/*.json` and `tests/catalog_fixtures/gam
 - **path_manager.py** (114), **validation_service.py** (103) - library-relative path helpers, executable check,
   and title/URL/path/year validation used by `GameDialog`
 - **exception_manager.py** (207) - filename filter used only by the temporary launch fallback (see Install Engine)
-- **engine/** (26 modules, ~9,600 lines) - the install engine; **scripts/** - `fetch_tools.py`,
+- **engine/** (27 modules, ~7,900 lines) - the install engine; **scripts/** - `fetch_tools.py`,
   `serve_test_catalog.py`; **bin/** - bundled tools (git-ignored). `smart_list` (pinned in `[tool.uv.sources]`)
   and its dependency `resource_finder` are uv git dependencies, not on PyPI
 
@@ -131,12 +137,23 @@ A `wx.Notebook` with two pages (`TABS = ("library", "catalog")`; `active_tab()`)
   **Status** column, a description field (`DescriptionField`: catalog text for catalog games, empty for others), a
   filter tree (Platform/Genre/Developer/Year, multi-select OR) and View > Libraries to hide libraries.
   Status values (`engine/status.py`): `Ready`, `Update available`, `Executable not found`, `Library not found`.
+  A `self_updating` entry never shows `Update available`.
   Statuses are computed on a worker thread (`refresh_statuses`) and applied on the UI thread.
 - **Catalog tab** (`CatalogPanel`): index entries as rows (`catalog_view.build_rows`), a filter tree (platform,
-  genre, developer, year, flags, installed), search, and an action button that reads Install / Update / Add /
-  Launch per row (`catalog_view.action_kind`). Links open in the browser only when the player chooses them. The
-  panel never fetches: `MainFrame.start_index_fetch` fetches on a worker and hands the state to `_take_index`
+  genre (any of its genres), tags, price (each model plus "Can be played for free"), language, developer, year,
+  support ("No longer supported"), installed), search (title, developer and a collection's `contains` titles),
+  columns Title / Developer / Genre (the main one) / Price / Details (tags, no longer supported, installed), and an
+  action button that reads Install / Update / Add / Launch per row (`catalog_view.action_kind`). Links open in the
+  browser only when the player chooses them. The panel never fetches: `MainFrame.start_index_fetch` fetches on a worker and hands the state to `_take_index`
   through `run_when_no_dialog`. Retry and F5 fetch again.
+- **Catalog schema v2** (index `schema_version` 2; a saved v1 index still loads, and its old shapes, `flags` and
+  `links` as an object, are skipped). The description lists the entry's text, then Price (`engine/pricing.py`:
+  player wording, "price as of", `pricing.note`), genres, tags, languages, `contains`, "No longer supported", then
+  one `label: url` line per link (`catalog_view.entry_links`: `links` in order, a missing label shows the host
+  name, then `pricing.url` and `pricing.donate_url`); Enter on such a line opens it. The Library description is the
+  same text. Catalog games take the entry's main genre (`InstallService.refresh_catalog_genres` on every index
+  take). The Library context menu's link items come from `catalog_view.link_items` (an untracked install gets only
+  `homepage_item`: the link labelled Homepage, else the first link).
 - **Install confirmation** (`InstallConfirmDialog`; wording and decisions in `install_choices.py`): library
   choice (or a fixed one), optional extras, dependencies, and a blocked reason from `InstallService.blocked`.
   Returns an `InstallChoice(library_id, library_path, extras)`.
@@ -202,9 +219,13 @@ in place).
 - **jobs.py** - `InstallEngine.run(InstallRequest)` routes install/update/repair/undo/extras/uninstall; raises
   only `InstallFailed` (plain words from `messages.py`) or `Cancelled`.
 - **index.py**, **entries.py** - catalog index fetch/cache (`CatalogIndex`, `IndexState`) and entry helpers.
+  `platform_sources` skips sources whose `arch` this machine can't run (`runs_on`, `current_arch`: x86 runs on x64
+  Windows and Linux; Windows on Arm runs x64 and x86; an Apple Silicon Mac runs x64; pass `machine` in tests).
+  **pricing.py** - how `pricing` reads, the Price filter values and the install confirmation's price warning.
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
-- **extract.py** - unpacks with the bundled tools; **run_installer.py** / **run_actions.py** /
+- **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
+  refused); **run_installer.py** / **run_actions.py** /
   **installer_watch.py** - installers that run.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain,
   marker `.gamechooser-runtime.json`), or private COM copies (`comfree.py`). By default every runtime the game
@@ -213,8 +234,16 @@ in place).
   private staging copy; recorded with owner `runtime:<id>`, ids in the record's `runtime_copies`), so a game that
   loads a runtime DLL by name finds it; **steps.py**, **registry.py**,
   **elevation.py** - catalog steps and the one program that runs elevated.
+- **Extras**: an extra's `extends` is a list of one or more game ids (there is no `install_into`), and the index
+  lists it in the `extras` ({id, required}) of each of those games, so one extra id can be in several games'
+  `extras`. The app never reads `extends`: `entries.extras_of` and the install plan go by the game's own `extras`.
+  An extra installs into the folder of whichever game it is added to (a required one with each game), and each
+  game's install record holds its own copy (`InstallRecord.extras`, its files owned by the extra's id); an extra
+  never has a record of its own, so updating, repairing, undoing or uninstalling one game leaves another game's
+  copy alone (`tests/engine/test_shared_extras.py`).
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
-  confirmation plan, and target-folder naming (`<library>/<Title>`).
+  confirmation plan (the entry's `warning`, the price warning on installs, `first_run_download_size` added to the
+  size), and target-folder naming (`<library>/<Title>`).
 
 **Bundled tools requirement:** `engine/extract.py` looks for `7z.exe`, `7z.dll` and `innoextract.exe` in the
 `bin/` folder beside the executable. `scripts/fetch_tools.py` downloads them (SHA256-pinned) into `bin/` with their
@@ -224,7 +253,8 @@ licenses in `bin/licenses/`. Without `bin/`, every zip, 7z, cab, Inno and NSIS i
 named like the folder, then the first) plus `ExceptionManager.should_auto_exclude` (skips setup/uninstall-style
 exes) guess a launch exe when the catalog records no launch path. It is temporary until the catalog records
 launch paths; `adopt_catalog_launch` switches a guessed path to the catalog's once one exists. **Nothing new may
-call it.**
+call it.** `launch_kind` / `start_game` decide how a launch file starts: `.html`/`.htm` open in the browser, anything
+else runs through `start_program`; the guess above never picks a page.
 
 ## Behavior Notes
 
@@ -234,6 +264,11 @@ call it.**
 - A missing executable branches on `library_actions.launch_problem`: `unreachable` (library folder gone),
   `repair` (tracked catalog install still in the catalog), `catalog` (say so, no file picker) or `locate`
   (hand-added game: pick the file).
+- A catalog game whose launch file ends in `.html` or `.htm` opens in the default browser through
+  `engine.launch.start_game` (no minimize). It is still an ordinary install, not a web game; the catalog must name
+  the page (it is never guessed); `.hta` is not supported. On Windows the page opens through the shell, in whatever
+  program the player has for `.html`, so `launch_kind`'s suffix check is the only gate: never widen `PAGE_SUFFIXES`
+  assuming "the browser" will handle the file safely.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.
 
 ### Keyboard Shortcuts
@@ -292,7 +327,8 @@ Log format: `tracing/LOG-FORMAT.md`. Build: see Build and Distribution.
 - **Rule:** nothing outside `tracing/` imports it; the one exception is `game-chooser.py`, inside
   `try/except ImportError`. `procmon_parser` is imported only inside `tracing/`, lazily, inside functions. Only
   `app_glue.py` imports wx. The game launch is unchanged: `MainFrame` calls `frame.launch_observer` around its
-  `engine.launch.start_program` (passing on the process ID it returns), and shows `frame.title_note` in the title.
+  `engine.launch.start_game` for a program launch only (passing on `Started.pid`, the process ID `start_program`
+  returns; a web page launch is never observed), and shows `frame.title_note` in the title.
   The normal build is checked by `scripts/check_no_tracing.py` (fails the build on any tracing module or
   `tracing`/`procmon`/`traces` file, or a report with no modules).
 - **Commands** (`game-chooser.py`, through `tracing/cli.py`): `--tracing` (turn tracing on from source; a compiled

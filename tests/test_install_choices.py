@@ -53,3 +53,12 @@ def test_extra_labels_and_choice():
     assert chosen_optional(plan, {"opt": False}) == ()
     choice = build_choice(plan, LIBS[1], {"opt": True})
     assert (choice.library_id, choice.library_path, choice.extras) == ("b", Path("D:/Games"), ("opt",))
+
+
+def test_intro_counts_what_the_game_downloads_on_first_launch():
+    plan = make(extras=[], dependencies=[], first_run_size=1048576 * 500)
+    assert intro_text(plan, set(), {}) == ("Download size: 510.0 megabytes, including 500.0 megabytes that the game "
+                                           "downloads the first time you start it")
+    unknown = make(extras=[], dependencies=[], base_size=None, first_run_size=1048576 * 500)
+    assert intro_text(unknown, set(), {}) == ("Download size: unknown size, plus 500.0 megabytes that the game "
+                                              "downloads the first time you start it")

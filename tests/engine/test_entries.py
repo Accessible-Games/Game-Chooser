@@ -127,3 +127,50 @@ def test_mirror_helpers():
 
 def test_current_platform_is_known():
     assert current_platform() in {"windows", "macos", "linux"}
+
+
+def test_tar_method_is_readable():
+    assert visible_games({"g": entry("g", sources=[src(install={"method": "tar"})])}, "windows")
+
+
+@pytest.mark.parametrize("arch, platform, machine, runs", [
+    (None, "windows", "x86", True), ("universal", "macos", "x64", True), ("arm64", "web", "x64", True),
+    ("x64", "windows", "x64", True), ("x86", "windows", "x64", True), ("arm64", "windows", "x64", False),
+    ("x64", "windows", "x86", False), ("x86", "windows", "x86", True),
+    ("x64", "windows", "arm64", True), ("x86", "windows", "arm64", True), ("arm64", "windows", "arm64", True),
+    ("arm64", "macos", "x64", False), ("x64", "macos", "arm64", True), ("arm64", "macos", "arm64", True),
+    ("x86", "macos", "x64", False),
+    ("x86", "linux", "x64", True), ("x64", "linux", "arm64", False), ("arm64", "linux", "arm64", True),
+    ("x64", "windows", None, True),  # this machine's processor couldn't be told: offer everything
+    ("sparc", "windows", "x64", False), ("sparc", "windows", None, False),
+])
+def test_runs_on(arch, platform, machine, runs):
+    from engine.entries import runs_on
+    assert runs_on(arch, platform, machine) is runs
+
+
+def test_platform_sources_skip_builds_this_processor_cant_run(monkeypatch):
+    arm = src(url="https://x/arm.zip", arch="arm64")
+    intel = src(url="https://x/intel.zip", arch="x64")
+    any_cpu = src(url="https://x/any.zip")
+    e = entry("g", sources=[arm, intel, any_cpu])
+    assert platform_sources(e, "windows", "x64") == [intel, any_cpu]
+    assert platform_sources(e, "windows", "arm64") == [arm, intel, any_cpu]
+    mac = entry("m", sources=[src(platform="macos", arch="arm64")])
+    assert platform_sources(mac, "macos", "x64") == []
+    import engine.entries
+    monkeypatch.setattr(engine.entries, "current_arch", lambda: "x64")
+    assert platform_sources(e, "windows") == [intel, any_cpu]
+    assert visible_games({"m": mac}, "macos") == []  # an Apple Silicon build only: not offered to an Intel Mac
+    monkeypatch.setattr(engine.entries, "current_arch", lambda: "arm64")
+    assert [x["id"] for x in visible_games({"m": mac}, "macos")] == ["m"]
+
+
+def test_current_arch_is_known_here():
+    from engine.entries import current_arch
+    assert current_arch() in ("x64", "x86", "arm64", None)
+
+
+def test_game_fields_main_genre_is_the_first_readable_one():
+    assert game_fields(entry("g", genres=[5, " ", "Puzzle", "Card"]))["genre"] == "Puzzle"
+    assert game_fields(entry("g", genres=[]))["genre"] == ""

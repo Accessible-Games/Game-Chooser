@@ -1,0 +1,14 @@
+{
+  "id": "test-game-page",
+  "kind": "game",
+  "title": "Test Story",
+  "developer": ["Game Chooser Tests"],
+  "genres": ["Interactive fiction"],
+  "year": 2026,
+  "version": "1.0",
+  "description": "A two-page story for trying a game that opens in the web browser.",
+  "launch": {"windows": {"path": "index.html"}},
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}
+  ]
+}
