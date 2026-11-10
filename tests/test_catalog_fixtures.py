@@ -8,7 +8,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from engine.entries import current_platform, is_readable, visible_games
+from engine.entries import current_platform, extras_of, is_readable, visible_games
 from engine.errors import DownloadError
 from engine.extract import Extractor
 from engine.index import SUPPORTED_SCHEMA_VERSION, CatalogIndex
@@ -51,11 +51,13 @@ def load(tmp_path, **options):
 
 def test_index_loads_and_every_entry_is_readable(tmp_path):
     _, state = load(tmp_path)
-    assert {"test-game", "test-game-no-path", "test-game-extras", "test-extra", "test-game-tar"} <= set(state.entries)
+    assert {"test-game", "test-game-no-path", "test-game-extras", "test-extra", "test-shared-extra",
+            "test-game-tar"} <= set(state.entries)
     assert all(is_readable(e) for e in state.entries.values())
     visible = {e["id"] for e in visible_games(state.entries, current_platform())}
     assert {"test-game", "test-game-no-path", "test-game-extras"} <= visible
-    assert "test-extra" not in visible  # an extra is not a game
+    assert {"test-game-tar"} <= visible
+    assert not {"test-extra", "test-shared-extra"} & visible  # an extra is not a game
 
 
 def test_every_source_matches_its_built_file_and_points_at_the_local_server(tmp_path):
@@ -93,8 +95,13 @@ def test_published_index_is_schema_version_2(tmp_path):
         assert "flags" not in entry
         assert set(entry.get("genres", [])) <= GENRES
         assert all(isinstance(link, dict) and link["url"].startswith("https://") for link in entry.get("links", []))
-        if entry["kind"] == "extra":
-            assert entry["extends"]
+        assert "install_into" not in entry
+        if entry["kind"] == "extra":  # extends: a list of one or more game ids, no repeats
+            assert isinstance(entry["extends"], list) and entry["extends"]
+            assert len(set(entry["extends"])) == len(entry["extends"])
+            assert all(state.entries[i]["kind"] == "game" for i in entry["extends"])
+        else:
+            assert "extends" not in entry
 
 
 def test_free_to_try_game_warns_before_installing(tmp_path):
@@ -116,10 +123,29 @@ def test_tar_game_extracts_without_the_bundled_tools(tmp_path):
     assert (root / "game.bat").is_file() and (root / "data.dat").is_file()
 
 
-def test_required_extra_is_listed_on_its_game(tmp_path):
+def test_extras_are_listed_on_every_game_they_extend(tmp_path):
     _, state = load(tmp_path)
-    assert state.entries["test-game-extras"]["extras"] == [{"id": "test-extra", "required": True}]
-    assert state.entries["test-extra"]["install_into"] == state.entries["test-extra"]["extends"] == "test-game-extras"
+    assert state.entries["test-extra"]["extends"] == ["test-game-extras"]
+    assert state.entries["test-shared-extra"]["extends"] == ["test-game-extras", "test-game-tar"]
+    assert state.entries["test-game-extras"]["extras"] == [{"id": "test-extra", "required": True},
+                                                           {"id": "test-shared-extra", "required": False}]
+    assert state.entries["test-game-tar"]["extras"] == [{"id": "test-shared-extra", "required": False}]
+    assert "extras" not in state.entries["test-game"]
+    for entry in state.entries.values():  # extras is exactly the entries whose extends names the game
+        extending = sorted(e["id"] for e in state.entries.values() if entry["id"] in e.get("extends", []))
+        assert [x["id"] for x in entry.get("extras", [])] == extending
+
+
+def test_shared_extra_is_offered_to_each_of_its_games(tmp_path):
+    _, state = load(tmp_path)
+    records = RecordStore(tmp_path / "records")
+    for game_id in ("test-game-extras", "test-game-tar"):
+        assert "test-shared-extra" in [x.entry["id"] for x in extras_of(state.entries[game_id], state.entries,
+                                                                         "windows")]
+        plan = build_install_plan(game_id, state.entries, [{"id": "a", "path": str(tmp_path)}], records,
+                                  FakeRegistry(), True, None, "windows")
+        shared = [x for x in plan.extras if x.id == "test-shared-extra"]
+        assert len(shared) == 1 and not shared[0].required and shared[0].title == "Test Shared Extra Level"
 
 
 @pytest.mark.skipif(not serve.TINY_GAME_SOURCE.is_file(), reason="needs where.exe in System32")

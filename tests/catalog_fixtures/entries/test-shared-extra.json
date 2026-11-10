@@ -1,0 +1,12 @@
+{
+  "id": "test-shared-extra",
+  "kind": "extra",
+  "title": "Test Shared Extra Level",
+  "developer": ["Game Chooser Tests"],
+  "version": "1.0",
+  "description": "An optional extra of two games. Each game it is added to gets its own copy in its own folder.",
+  "extends": ["test-game-extras", "test-game-tar"],
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}
+  ]
+}

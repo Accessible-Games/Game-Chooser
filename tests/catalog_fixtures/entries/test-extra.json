@@ -4,8 +4,7 @@
   "title": "Test Extra Level",
   "developer": ["Game Chooser Tests"],
   "version": "1.0",
-  "extends": "test-game-extras",
-  "install_into": "test-game-extras",
+  "extends": ["test-game-extras"],
   "required": true,
   "sources": [
     {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}
