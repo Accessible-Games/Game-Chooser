@@ -78,6 +78,8 @@ def page_address(path: str) -> str:
     look for a different folder. The page's own name is kept (a link is not followed)."""
     posix = Path(path).absolute().as_posix()
     escaped = "".join(quote(c, safe="/:") if ord(c) < 128 else c for c in posix)
+    if posix.startswith("//"):  # a network share: file://server/share/...
+        return "file:" + escaped
     return "file:///" + escaped.lstrip("/")
 
 

@@ -263,6 +263,12 @@ def test_page_address_does_not_follow_a_link(tmp_path):
     assert address.endswith("/index.html") and "x.exe" not in address
 
 
+@pytest.mark.skipif(os.name != "nt", reason="a UNC path is a Windows path")
+def test_page_address_of_a_network_share():
+    path = "\\\\server\\share\\Café #1\\index.html"
+    assert page_address(path) == "file://server/share/Café%20%231/index.html"
+
+
 @pytest.mark.windows
 @pytest.mark.parametrize("folder_name", ["Café review #1 100%", "日本 #1"])
 def test_page_address_round_trips_through_the_windows_shell(tmp_path, folder_name):
@@ -273,6 +279,17 @@ def test_page_address_round_trips_through_the_windows_shell(tmp_path, folder_nam
     hr = ctypes.windll.shlwapi.PathCreateFromUrlW(page_address(str(page)), buffer, ctypes.byref(size), 0)
     assert hr == 0
     assert Path(buffer.value) == page
+
+
+@pytest.mark.windows
+def test_page_address_of_a_network_share_round_trips_through_the_windows_shell():
+    import ctypes
+    path = "\\\\server\\share\\Café #1\\index.html"
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = ctypes.c_ulong(len(buffer))
+    hr = ctypes.windll.shlwapi.PathCreateFromUrlW(page_address(path), buffer, ctypes.byref(size), 0)
+    assert hr == 0
+    assert buffer.value == path
 
 
 def test_start_game_opens_a_page_in_the_browser(tmp_path):
