@@ -31,7 +31,7 @@ def game(routes, id="entombed", title="Entombed", files=None, steps=None, develo
 
 def extra(routes, id, files, steps=None, parent="entombed"):
     source = served_source(routes, f"{MIRROR}{id}/{id}.zip", zip_bytes(files), steps=steps)
-    return {"id": id, "kind": "extra", "title": id.replace("-", " ").title(), "install_into": parent,
+    return {"id": id, "kind": "extra", "title": id.replace("-", " ").title(), "extends": [parent],
             "version": "2", "sources": [source]}
 
 

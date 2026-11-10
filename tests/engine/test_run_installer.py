@@ -469,7 +469,7 @@ def run_game_with_patch(routes, patch_route=True):
     source = served_source(routes, f"{MIRROR}{sha(data)}/p.zip", data, steps=[step])
     if not patch_route:
         del routes[source["url"]]
-    x = {"id": "lc-patch", "kind": "extra", "title": "Patch", "install_into": "lightcars", "version": "1",
+    x = {"id": "lc-patch", "kind": "extra", "title": "Patch", "extends": ["lightcars"], "version": "1",
          "sources": [source]}
     return e, x
 
@@ -526,7 +526,7 @@ def test_run_mode_extra_is_refused_plainly(tmp_path):
          "sources": [served_source(routes, f"{MIRROR}{sha(data)}/lc.zip", data)],
          "extras": [{"id": "lc-patch", "required": True}]}
     x = run_game(routes, id="lc-patch", title="Patch", setup=b"patch setup", installer={"type": "inno"},
-                 kind="extra", install_into="lightcars")
+                 kind="extra", extends=["lightcars"])
     eng, lib = setup_engine(tmp_path, [e, x], routes)
     with pytest.raises(InstallFailed) as ei:
         install(eng)

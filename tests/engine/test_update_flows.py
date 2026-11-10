@@ -68,7 +68,7 @@ def pawprints(routes, files, version, url=None, steps=None, install=None, **fiel
 def extra(routes, id, files, steps=None):
     data = zip_bytes(files)
     source = served_source(routes, f"{MIRROR}{sha(data)}/{id}.zip", data, steps=steps)
-    return {"id": id, "kind": "extra", "title": id.replace("-", " ").title(), "install_into": "pawprints",
+    return {"id": id, "kind": "extra", "title": id.replace("-", " ").title(), "extends": ["pawprints"],
             "version": "1", "sources": [source]}
 
 

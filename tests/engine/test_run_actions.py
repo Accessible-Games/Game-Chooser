@@ -75,7 +75,7 @@ def publish_archive(eng, routes, files):
 
 def music_extra(routes, steps=None):
     data = zip_bytes({"music/theme.ogg": b"theme"})
-    return {"id": "lc-music", "kind": "extra", "title": "Music", "install_into": "lightcars", "version": "1",
+    return {"id": "lc-music", "kind": "extra", "title": "Music", "extends": ["lightcars"], "version": "1",
             "sources": [served_source(routes, f"{MIRROR}{sha(data)}/music.zip", data, steps=steps)]}
 
 
@@ -353,7 +353,7 @@ def test_extra_with_its_own_installer_is_refused_on_a_run_record_as_on_any_game(
     routes = {}
     e = run_game(routes, installer={"type": "inno"}, extras=[{"id": "lc-patch", "required": False}])
     x = run_game(routes, id="lc-patch", title="Patch", setup=b"patch setup", installer={"type": "inno"},
-                 kind="extra", install_into="lightcars")
+                 kind="extra", extends=["lightcars"])
     target = tmp_path / "Games" / "Light Cars"
     eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, V1))
     install(eng)

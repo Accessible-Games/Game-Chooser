@@ -273,7 +273,7 @@ def test_update_adds_the_copies_of_a_new_dependency(tmp_path):
 def test_extras_never_claim_the_copy(tmp_path):
     routes = {}
     x_data = zip_bytes({"maps/extra.map": b"x"})
-    x = {"id": "ent-maps", "kind": "extra", "title": "Maps", "install_into": "entombed", "version": "1",
+    x = {"id": "ent-maps", "kind": "extra", "title": "Maps", "extends": ["entombed"], "version": "1",
          "sources": [served_source(routes, f"{MIRROR}{sha(x_data)}/maps.zip", x_data)]}
     eng, lib = setup(tmp_path, [dx8vb_entry(routes), x, game(routes, extras=[{"id": "ent-maps"}])], routes)
     run(eng, "install")
