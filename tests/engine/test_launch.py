@@ -192,3 +192,41 @@ def test_start_program_passes_on_a_declined_prompt():
 
     with pytest.raises(LaunchCancelled):
         start_program("C:/Games/X/x.exe", "C:/Games/X", popen=popen, shell_open=shell_open)
+
+
+class _Process:
+    def __init__(self, pid):
+        self.pid = pid
+
+
+def test_start_program_returns_the_process_id():
+    pid = start_program("C:/Games/X/x.exe", "C:/Games/X", popen=lambda args, cwd: _Process(4242),
+                        shell_open=lambda *a: pytest.fail("no shell needed"))
+    assert pid == 4242
+
+
+def test_start_program_returns_the_process_id_from_the_administrator_prompt():
+    def popen(args, cwd):
+        raise _os_error(740)
+
+    pid = start_program("C:/Games/X/pipe.exe", "C:/Games/X", popen=popen, shell_open=lambda path, cwd: 5151)
+    assert pid == 5151
+
+
+def test_start_program_returns_none_when_the_shell_gives_no_process():
+    def popen(args, cwd):
+        raise _os_error(740)
+
+    assert start_program("C:/Games/X/pipe.exe", "C:/Games/X", popen=popen, shell_open=lambda path, cwd: None) is None
+
+
+@pytest.mark.windows
+def test_shell_execute_info_has_the_windows_layout():
+    import ctypes
+    import sys
+    if sys.platform != "win32":
+        pytest.skip("Windows' structure layout")
+    from engine.launch import _shell_execute_info
+    size = ctypes.sizeof(_shell_execute_info())
+    assert size == (112 if ctypes.sizeof(ctypes.c_void_p) == 8 else 60)
+    assert _shell_execute_info() is _shell_execute_info()

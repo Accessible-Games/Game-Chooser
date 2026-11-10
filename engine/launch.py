@@ -3,6 +3,7 @@
 `select_best_executable` holds temporary fallback preference rules, used until the catalog records
 launch paths.
 """
+import functools
 import os
 from collections.abc import Callable
 from pathlib import Path
@@ -15,29 +16,88 @@ MAX_DEPTH = 10
 _EXE_SUFFIXES = (".exe", ".bat")
 
 ERROR_ELEVATION_REQUIRED = 740
-_SE_ERR_ACCESSDENIED = 5  # ShellExecuteW's answer when the player declines the administrator prompt
+ERROR_CANCELLED = 1223  # ShellExecuteExW's last error when the player declines the administrator prompt
+_SE_ERR_ACCESSDENIED = 5  # the shell's answer (hInstApp) when the player declines the administrator prompt
+_SEE_MASK_NOCLOSEPROCESS = 0x00000040  # hand back the started process's handle
+_SEE_MASK_FLAG_NO_UI = 0x00000400  # no error boxes from the shell (as ShellExecuteW does)
 
 
 class LaunchCancelled(Exception):
     """The player declined the administrator prompt for a game that needs it."""
 
 
-def _shell_open(path: str, cwd: str) -> None:
-    """Start `path` the way Explorer does, so Windows shows its administrator prompt (UAC) when the program asks
-    for one. Raises LaunchCancelled if the player declines, OSError if it can't start."""
+@functools.cache
+def _shell_execute_info():
+    """The SHELLEXECUTEINFOW structure (defined on first use, so importing this module needs no ctypes)."""
     import ctypes
-    shell_execute = ctypes.windll.shell32.ShellExecuteW
-    shell_execute.restype = ctypes.c_ssize_t
-    result = shell_execute(None, "open", path, None, cwd, 1)  # SW_SHOWNORMAL
-    if result == _SE_ERR_ACCESSDENIED:
-        raise LaunchCancelled()
-    if result <= 32:
-        raise OSError(f"Windows couldn't start {path} (error {result})")
+    from ctypes import wintypes
+
+    class SHELLEXECUTEINFOW(ctypes.Structure):
+        _fields_ = [
+            ("cbSize", wintypes.DWORD),
+            ("fMask", wintypes.ULONG),
+            ("hwnd", wintypes.HWND),
+            ("lpVerb", wintypes.LPCWSTR),
+            ("lpFile", wintypes.LPCWSTR),
+            ("lpParameters", wintypes.LPCWSTR),
+            ("lpDirectory", wintypes.LPCWSTR),
+            ("nShow", ctypes.c_int),
+            ("hInstApp", wintypes.HINSTANCE),
+            ("lpIDList", ctypes.c_void_p),
+            ("lpClass", wintypes.LPCWSTR),
+            ("hkeyClass", wintypes.HKEY),
+            ("dwHotKey", wintypes.DWORD),
+            ("hIcon", wintypes.HANDLE),  # a union with hMonitor
+            ("hProcess", wintypes.HANDLE),
+        ]
+    return SHELLEXECUTEINFOW
+
+
+def _shell_open(path: str, cwd: str) -> int | None:
+    """Start `path` the way Explorer does, so Windows shows its administrator prompt (UAC) when the program asks
+    for one. Returns the started process's ID, or None when the shell hands back no process. Raises
+    LaunchCancelled if the player declines, OSError if it can't start."""
+    import ctypes
+    from ctypes import wintypes
+
+    SHELLEXECUTEINFOW = _shell_execute_info()
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    shell_execute = shell32.ShellExecuteExW
+    shell_execute.argtypes = [ctypes.POINTER(SHELLEXECUTEINFOW)]
+    shell_execute.restype = wintypes.BOOL
+    kernel32.GetProcessId.argtypes = [wintypes.HANDLE]
+    kernel32.GetProcessId.restype = wintypes.DWORD
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle.restype = wintypes.BOOL
+
+    info = SHELLEXECUTEINFOW()
+    info.cbSize = ctypes.sizeof(SHELLEXECUTEINFOW)
+    info.fMask = _SEE_MASK_NOCLOSEPROCESS | _SEE_MASK_FLAG_NO_UI
+    info.hwnd = None
+    info.lpVerb = "open"
+    info.lpFile = path
+    info.lpParameters = None
+    info.lpDirectory = cwd
+    info.nShow = 1  # SW_SHOWNORMAL
+    if not shell_execute(ctypes.byref(info)):
+        error = ctypes.get_last_error()
+        code = info.hInstApp or 0
+        if error == ERROR_CANCELLED or code == _SE_ERR_ACCESSDENIED:
+            raise LaunchCancelled()
+        raise OSError(f"Windows couldn't start {path} (error {error or code})")
+    if not info.hProcess:
+        return None
+    try:
+        return kernel32.GetProcessId(info.hProcess) or None
+    finally:
+        kernel32.CloseHandle(info.hProcess)
 
 
 def start_program(path: str, cwd: str, popen: Callable | None = None,
-                  shell_open: Callable[[str, str], None] | None = None) -> None:
-    """Start a game's program with its folder as the working directory.
+                  shell_open: Callable[[str, str], int | None] | None = None) -> int | None:
+    """Start a game's program with its folder as the working directory. Returns the started process's ID, or
+    None when none can be had.
 
     A program marked "run as administrator" (an installer can set that flag on the games it installs) can't be
     started directly: Windows answers ERROR_ELEVATION_REQUIRED. Such a program is started through the shell
@@ -48,11 +108,12 @@ def start_program(path: str, cwd: str, popen: Callable | None = None,
         import subprocess
         popen = subprocess.Popen
     try:
-        popen([path], cwd=cwd)
+        process = popen([path], cwd=cwd)
     except OSError as e:
         if getattr(e, "winerror", None) != ERROR_ELEVATION_REQUIRED:
             raise
-        (shell_open or _shell_open)(path, cwd)
+        return (shell_open or _shell_open)(path, cwd)
+    return getattr(process, "pid", None)
 
 
 def select_best_executable(exe_paths: list[Path], directory_name: str) -> Path | None:
