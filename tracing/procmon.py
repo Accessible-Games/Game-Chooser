@@ -3,11 +3,16 @@
 procmon_parser, win32api and win32job are imported inside the functions that use them, so this module imports
 cleanly without them.
 """
+import logging
 import subprocess
 import time
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
+
+log = logging.getLogger(__name__)
+
+READY_RETRY_SECONDS = 0.5
 
 # Procmon's display names of the operations a capture keeps.
 CAPTURE_OPERATIONS = (
@@ -59,8 +64,11 @@ class ProcmonControl(Protocol):
 class WindowsProcmon:
     """Process Monitor run from `exe` (Procmon64.exe). Needs administrator rights."""
 
-    def __init__(self, exe: Path):
+    def __init__(self, exe: Path, clock=time.monotonic, sleep=time.sleep):
         self.exe = Path(exe)
+        self._clock = clock
+        self._sleep = sleep
+        self.not_ready_reason: str | None = None  # Plain words for the last failed readiness check.
         self._process: subprocess.Popen | None = None
         self._job = None  # Holds Process Monitor: closing it (also when this program dies) ends the capture.
         self._backing: Path | None = None
@@ -76,11 +84,45 @@ class WindowsProcmon:
             raise
 
     def wait_ready(self, timeout: float) -> bool:
-        try:
-            result = subprocess.run([str(self.exe), "/AcceptEula", "/Quiet", "/WaitForIdle"], timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return False
-        return result.returncode == 0 and self._backing is not None and self._backing.exists()
+        """Wait up to `timeout` seconds for the capture instance to be up and writing its backing file.
+
+        The /WaitForIdle helper fails when it runs before the capture instance has started, so it is retried until
+        the deadline, unless the capture process itself has exited.
+        """
+        deadline = self._clock() + timeout
+        attempt = 0
+        while True:
+            attempt += 1
+            if self._process is not None and self._process.poll() is not None:
+                return self._not_ready(f"Process Monitor exited (code {self._process.poll()})")
+            remaining = deadline - self._clock()
+            if remaining <= 0:
+                return self._not_ready(self._timeout_reason(timeout))
+            try:
+                result = subprocess.run([str(self.exe), "/AcceptEula", "/Quiet", "/WaitForIdle"],
+                                        timeout=remaining)
+            except subprocess.TimeoutExpired:
+                return self._not_ready(self._timeout_reason(timeout))
+            if result.returncode != 0:
+                reason = f"the readiness check exited with code {result.returncode} (attempt {attempt})"
+            elif self._backing is None or not self._backing.exists():
+                reason = f"the capture file wasn't created yet (attempt {attempt})"
+            else:
+                log.info("Process Monitor ready (attempt %d)", attempt)
+                self.not_ready_reason = None
+                return True
+            self.not_ready_reason = reason
+            log.info("Process Monitor not ready: %s", reason)
+            self._sleep(READY_RETRY_SECONDS)
+
+    def _timeout_reason(self, timeout: float) -> str:
+        last = f"; last check: {self.not_ready_reason}" if self.not_ready_reason else ""
+        return f"no answer within {timeout:g} s{last}"
+
+    def _not_ready(self, reason: str) -> bool:
+        self.not_ready_reason = reason
+        log.warning("Process Monitor not ready: %s", reason)
+        return False
 
     def running(self) -> bool:
         return self._process is not None and self._process.poll() is None

@@ -81,3 +81,64 @@ def test_helper_runs_accept_the_eula_quietly(tmp_path, monkeypatch):
     assert control.stop(5)
     assert calls == [[str(exe), "/AcceptEula", "/Quiet", "/WaitForIdle"],
                      [str(exe), "/AcceptEula", "/Quiet", "/Terminate"]]
+
+
+class _FakeProcess:
+    def __init__(self, exit_code=None):
+        self.exit_code = exit_code
+
+    def poll(self):
+        return self.exit_code
+
+
+def _ready_control(tmp_path, monkeypatch, codes, backing_after=0, process=None, step=0.5):
+    """A WindowsProcmon whose helper returns `codes` in turn (the last repeats); the fake clock moves on each sleep."""
+    import tracing.procmon as procmon_module
+    from tracing.procmon import WindowsProcmon
+    now = [0.0]
+    calls = []
+
+    def fake_run(argv, timeout=None):
+        calls.append(timeout)
+        if len(calls) >= backing_after:
+            backing.write_bytes(b"")
+        return subprocess.CompletedProcess(argv, codes[min(len(calls), len(codes)) - 1])
+
+    def fake_sleep(seconds):
+        now[0] += seconds
+
+    monkeypatch.setattr(procmon_module.subprocess, "run", fake_run)
+    backing = tmp_path / "capture.pml"
+    control = WindowsProcmon(tmp_path / "Procmon64.exe", clock=lambda: now[0], sleep=fake_sleep)
+    control._backing = backing
+    control._process = process
+    return control, calls
+
+
+def test_wait_ready_retries_a_failing_helper_until_it_succeeds(tmp_path, monkeypatch):
+    control, calls = _ready_control(tmp_path, monkeypatch, [3, 3, 0])
+    assert control.wait_ready(60)
+    assert len(calls) == 3
+    assert control.not_ready_reason is None
+
+
+def test_wait_ready_waits_for_the_capture_file(tmp_path, monkeypatch):
+    control, calls = _ready_control(tmp_path, monkeypatch, [0], backing_after=3)
+    # Helper succeeds each time but the file only exists from the third call on; the check precedes creation.
+    assert control.wait_ready(60)
+    assert len(calls) == 3
+
+
+def test_wait_ready_stops_at_once_when_the_capture_exits(tmp_path, monkeypatch):
+    control, calls = _ready_control(tmp_path, monkeypatch, [3], process=_FakeProcess(1))
+    assert not control.wait_ready(60)
+    assert calls == []
+    assert "exited (code 1)" in control.not_ready_reason
+
+
+def test_wait_ready_gives_up_at_the_deadline_and_says_why(tmp_path, monkeypatch):
+    control, calls = _ready_control(tmp_path, monkeypatch, [3])
+    assert not control.wait_ready(5)
+    assert len(calls) == 10
+    assert "no answer within 5 s" in control.not_ready_reason
+    assert "exited with code 3" in control.not_ready_reason

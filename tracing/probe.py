@@ -144,7 +144,8 @@ def _capture_and_read(out_dir: Path, procmon: Path, workload: Path, control: Win
     control.start(capture, config)
     started = time.monotonic()
     if not control.wait_ready(READY_TIMEOUT):
-        raise RuntimeError(f"Process Monitor was not ready within {READY_TIMEOUT} s")
+        raise RuntimeError(f"Process Monitor was not ready within {READY_TIMEOUT} s: "
+                           f"{getattr(control, 'not_ready_reason', None)}")
     time.sleep(IDLE_SECONDS)
     before = now_filetime()
     process = subprocess.Popen([str(workload)], cwd=workload.parent)

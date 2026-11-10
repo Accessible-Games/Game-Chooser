@@ -122,6 +122,7 @@ class Recorder:
             write_filter_config(run.config_path)
             self.procmon.start(run.capture_path, run.config_path)
             if not self.procmon.wait_ready(READY_TIMEOUT):
+                log.warning("Process Monitor not ready: %s", getattr(self.procmon, "not_ready_reason", None))
                 self._failure(messages.PROCMON_NOT_READY)
             else:
                 self._status("capturing")
