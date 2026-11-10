@@ -5,6 +5,7 @@ launch paths.
 """
 import os
 from collections.abc import Callable
+from typing import NamedTuple
 from pathlib import Path
 
 from .errors import UnsafePath
@@ -56,6 +57,12 @@ def start_program(path: str, cwd: str, popen: Callable | None = None,
         (shell_open or _shell_open)(path, cwd)
 
 
+class Started(NamedTuple):
+    """What `start_game` started: "page" or "program", and the program's process id when its starter gave one."""
+    kind: str
+    pid: int | None
+
+
 def launch_kind(path: str) -> str:
     """"page" for a launch file that is a web page (.html, .htm), otherwise "program"."""
     return "page" if Path(path).suffix.lower() in PAGE_SUFFIXES else "program"
@@ -67,8 +74,8 @@ def page_address(path: str) -> str:
 
 
 def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = None,
-               start: Callable[[str, str], None] | None = None) -> str:
-    """Start a game's launch file and return the kind started: a page opens in the web browser, anything else
+               start: Callable[[str, str], int | None] | None = None) -> Started:
+    """Start a game's launch file and return what it started: a page opens in the web browser, anything else
     runs through `start_program`. Raises OSError if the browser can't be opened; LaunchCancelled and the
     OSError from `start` pass through."""
     kind = launch_kind(path)
@@ -79,8 +86,8 @@ def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = 
         if open_page(page_address(path)) is False:
             raise OSError("The web browser couldn't be opened.")
     else:
-        (start or start_program)(path, cwd)
-    return kind
+        return Started(kind, (start or start_program)(path, cwd))
+    return Started(kind, None)
 
 
 def select_best_executable(exe_paths: list[Path], directory_name: str) -> Path | None:

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.launch import find_launch_exe, select_best_executable, launch_kind, page_address, start_game
+from engine.launch import find_launch_exe, select_best_executable, Started, launch_kind, page_address, start_game
 from engine.paths import STAGING_DIR_NAME
 from exception_manager import ExceptionManager
 
@@ -221,7 +221,7 @@ def test_start_game_opens_a_page_in_the_browser(tmp_path):
     opened, started = [], []
     kind = start_game(str(page), str(tmp_path), open_page=lambda a: opened.append(a) or True,
                       start=lambda p, c: started.append((p, c)))
-    assert kind == "page"
+    assert kind == Started("page", None)
     assert opened == [page.resolve().as_uri()]
     assert started == []
 
@@ -231,7 +231,7 @@ def test_start_game_starts_a_program(tmp_path):
     opened, started = [], []
     kind = start_game(str(exe), str(tmp_path), open_page=lambda a: opened.append(a) or True,
                       start=lambda p, c: started.append((p, c)))
-    assert kind == "program"
+    assert kind == Started("program", None)
     assert started == [(str(exe), str(tmp_path))]
     assert opened == []
 
@@ -255,3 +255,9 @@ def test_an_hta_file_is_never_opened_as_a_page(tmp_path):
     start_game(str(tmp_path / "game.hta"), str(tmp_path), open_page=lambda a: opened.append(a) or True,
                start=lambda p, c: started.append((p, c)))
     assert opened == [] and len(started) == 1
+
+
+def test_start_game_passes_on_what_the_program_start_returned(tmp_path):
+    result = start_game(str(tmp_path / "game.exe"), str(tmp_path), start=lambda p, c: 4321)
+    assert result == Started("program", 4321)
+    assert result.kind == "program" and result.pid == 4321

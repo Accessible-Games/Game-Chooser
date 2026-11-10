@@ -1284,8 +1284,8 @@ class MainFrame(wx.Frame):
                     subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
                 else:
                     # Regular executable (one marked "run as administrator" goes through Windows' prompt)
-                    kind = start_game(full_path, game_dir)
-                    if kind == "page":
+                    started = start_game(full_path, game_dir)
+                    if started.kind == "page":
                         return  # a web page opens in the browser; the window stays as it is
 
                 # Minimize window
