@@ -11,8 +11,8 @@ It prints "Serving test catalog at http://127.0.0.1:8765/". Point Preferences > 
 
 The entries (catalog schema v2) come from tests/catalog_fixtures/entries/*.json, the files they install from
 tests/catalog_fixtures/games/. Test Shared Extra Level is an optional extra of two games (Test Game With Extra and
-Test Game Tar), each getting its own copy. The zips, the password 7z, the tar.gz, TinyGame.exe (a copy of where.exe) and the
-index are built into tests/catalog_fixtures/_build/ (git-ignored). Only the source files are committed. Every
+Test Game Tar), each getting its own copy. The zips, the password 7z, the tar.gz, TinyGame.exe (a copy of where.exe)
+and the index are built into tests/catalog_fixtures/_build/ (git-ignored). Only the source files are committed. Every
 download address points at this server; nothing here contacts a real host. (The entries' web page links point at
 example.com and example.org, which only open when chosen.)
 """
