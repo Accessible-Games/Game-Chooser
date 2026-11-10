@@ -226,16 +226,53 @@ def test_launch_kind(name, kind):
     assert launch_kind(f"C:/Games/Story/{name}") == kind
 
 
-def test_page_address_escapes_the_path(tmp_path):
-    folder = tmp_path / "We don't need #1 100% é"
+def _page_in(tmp_path, folder_name):
+    folder = tmp_path / folder_name
     folder.mkdir()
     page = folder / "index.html"
     page.write_text("<p>hi</p>", encoding="utf-8")
+    return page
+
+
+def test_page_address_escapes_the_path(tmp_path):
+    page = _page_in(tmp_path, "We don't need #1 100% é")
     address = page_address(str(page))
-    assert address.startswith("file:///")
-    assert address == page.resolve().as_uri()
-    assert " " not in address and "#" not in address
+    assert address.startswith("file:///") and not address.startswith("file:////")
     assert "%20" in address and "%23" in address and "%25" in address
+    assert "é" in address and "%C3" not in address
+    assert " " not in address and "#" not in address
+
+
+def test_page_address_keeps_japanese_letters(tmp_path):
+    page = _page_in(tmp_path, "日本 #1")
+    address = page_address(str(page))
+    assert "日本" in address and "%E6" not in address
+    assert "%20" in address and "%23" in address
+    assert " " not in address and "#" not in address
+
+
+def test_page_address_does_not_follow_a_link(tmp_path):
+    target = tmp_path / "x.exe"
+    target.write_bytes(b"MZ")
+    link = tmp_path / "index.html"
+    try:
+        os.symlink(target, link)
+    except OSError:
+        pytest.skip("cannot create link")
+    address = page_address(str(link))
+    assert address.endswith("/index.html") and "x.exe" not in address
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("folder_name", ["Café review #1 100%", "日本 #1"])
+def test_page_address_round_trips_through_the_windows_shell(tmp_path, folder_name):
+    import ctypes
+    page = _page_in(tmp_path, folder_name)
+    buffer = ctypes.create_unicode_buffer(32768)
+    size = ctypes.c_ulong(len(buffer))
+    hr = ctypes.windll.shlwapi.PathCreateFromUrlW(page_address(str(page)), buffer, ctypes.byref(size), 0)
+    assert hr == 0
+    assert Path(buffer.value) == page
 
 
 def test_start_game_opens_a_page_in_the_browser(tmp_path):
@@ -245,7 +282,7 @@ def test_start_game_opens_a_page_in_the_browser(tmp_path):
     kind = start_game(str(page), str(tmp_path), open_page=lambda a: opened.append(a) or True,
                       start=lambda p, c: started.append((p, c)))
     assert kind == Started("page", None)
-    assert opened == [page.resolve().as_uri()]
+    assert opened == [page_address(str(page))]
     assert started == []
 
 

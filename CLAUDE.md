@@ -264,7 +264,9 @@ else runs through `start_program`; the guess above never picks a page.
   (hand-added game: pick the file).
 - A catalog game whose launch file ends in `.html` or `.htm` opens in the default browser through
   `engine.launch.start_game` (no minimize). It is still an ordinary install, not a web game; the catalog must name
-  the page (it is never guessed); `.hta` is not supported.
+  the page (it is never guessed); `.hta` is not supported. On Windows the page opens through the shell, in whatever
+  program the player has for `.html`, so `launch_kind`'s suffix check is the only gate: never widen `PAGE_SUFFIXES`
+  assuming "the browser" will handle the file safely.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.
 
 ### Keyboard Shortcuts

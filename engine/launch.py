@@ -7,6 +7,7 @@ import os
 from collections.abc import Callable
 from typing import NamedTuple
 from pathlib import Path
+from urllib.parse import quote
 
 from .errors import UnsafePath
 from .paths import is_engine_dir
@@ -14,7 +15,10 @@ from .safety import _resolve_game_path, is_link
 
 MAX_DEPTH = 10
 _EXE_SUFFIXES = (".exe", ".bat")
-PAGE_SUFFIXES = (".html", ".htm")  # a launch file that opens in the browser; .hta is a program, never a page
+# A launch file that opens in the browser; .hta is a program, never a page. On Windows `webbrowser.open` is a shell
+# open: the file opens in whatever program the player associates with .html, not necessarily a browser. So
+# `launch_kind`'s suffix check is the only gate: do not widen this on the assumption that "the browser" is safe.
+PAGE_SUFFIXES = (".html", ".htm")
 
 ERROR_ELEVATION_REQUIRED = 740
 _SE_ERR_ACCESSDENIED = 5  # ShellExecuteW's answer when the player declines the administrator prompt
@@ -69,8 +73,12 @@ def launch_kind(path: str) -> str:
 
 
 def page_address(path: str) -> str:
-    """The file: address of a page on disk, with spaces and other special characters escaped."""
-    return Path(path).resolve().as_uri()
+    """The file: address of a page on disk. ASCII characters that need it (space, #, %, ...) are escaped; other
+    letters are kept as they are, because the Windows shell reads each %XX as one code-page character and would
+    look for a different folder. The page's own name is kept (a link is not followed)."""
+    posix = Path(path).absolute().as_posix()
+    escaped = "".join(quote(c, safe="/:") if ord(c) < 128 else c for c in posix)
+    return "file:///" + escaped.lstrip("/")
 
 
 def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = None,
@@ -85,9 +93,8 @@ def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = 
             open_page = webbrowser.open
         if open_page(page_address(path)) is False:
             raise OSError("The web browser couldn't be opened.")
-    else:
-        return Started(kind, (start or start_program)(path, cwd))
-    return Started(kind, None)
+        return Started(kind, None)
+    return Started(kind, (start or start_program)(path, cwd))
 
 
 def select_best_executable(exe_paths: list[Path], directory_name: str) -> Path | None:
