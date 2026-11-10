@@ -81,7 +81,7 @@ def test_version_two_and_the_launch_path_flags(tmp_path):
 
 # The catalog schema v2 genres (docs: catalog-schema-v2 spec)
 GENRES = {"Action", "Adventure", "Arcade", "Board and dice", "Card", "Casino", "Educational", "Fighting",
-          "Interactive fiction", "Music and rhythm", "Platformer", "Puzzle", "Racing", "Role-playing", "Shooter",
+          "Incremental", "Interactive fiction", "Music and rhythm", "Platformer", "Puzzle", "Racing", "Role-playing", "Shooter",
           "Simulation", "Sports", "Strategy", "Trivia", "Word"}
 
 
