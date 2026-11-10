@@ -145,11 +145,11 @@ VirtualStore instead. `path` stays what the game asked for. `virtual_store_path`
 The field is absent when the process is not virtualized, the path is not in those places, or it is already inside
 a VirtualStore.
 
-### Rename target (current state)
+### Rename target
 
-`new_path` comes from the rename event's details. Its decoder (Task 8) is waiting for the probe on the VM
-(`--trace-probe`) to show what the real capture holds. Until then, rename lines may have `"new_path": null`, and
-then there is no `new_virtual_store_path` either. The old name in `path` is always there.
+`new_path` comes from the rename event's details, decoded from the capture's bytes (see `PROCMON-NOTES.md`).
+It is a Win32 path. It is `null` only if the record was unreadable, and then there is no `new_virtual_store_path`
+either. The old name in `path` is always there.
 
 ## Known limits
 
