@@ -3,7 +3,7 @@
   "kind": "game",
   "title": "Trace Test Game",
   "developer": ["Game Chooser Tests"],
-  "genres": ["Test"],
+  "genres": ["Arcade"],
   "year": 2026,
   "version": "1.0",
   "description": "A tiny batch-file game for the tracing build. It writes a settings file in its own saves folder, files in Roaming and Local app data and in Documents, sets and deletes registry values through reg.exe, renames a save, deletes a file, and writes a file from a child process, about a second apart.",
