@@ -169,3 +169,8 @@ def test_platform_sources_skip_builds_this_processor_cant_run(monkeypatch):
 def test_current_arch_is_known_here():
     from engine.entries import current_arch
     assert current_arch() in ("x64", "x86", "arm64", None)
+
+
+def test_game_fields_main_genre_is_the_first_readable_one():
+    assert game_fields(entry("g", genres=[5, " ", "Puzzle", "Card"]))["genre"] == "Puzzle"
+    assert game_fields(entry("g", genres=[]))["genre"] == ""

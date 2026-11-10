@@ -29,7 +29,7 @@ from pathlib import Path
 
 from engine import messages
 from engine.elevation import WindowsElevator
-from engine.entries import current_platform
+from engine.entries import current_platform, game_fields
 from engine.entries import visible_games as _visible_games
 from engine.errors import EngineError
 from engine.extract import Extractor, default_tools_dir
@@ -85,9 +85,11 @@ class InstallService:
         return self._index().refresh()
 
     def take_index(self, state: IndexState) -> IndexState:
-        """Use a fetched index, and adopt the launch paths it now names. UI thread only."""
+        """Use a fetched index, adopt the launch paths it now names and give catalog games its genres.
+        UI thread only."""
         self.index_state = state  # one assignment: a reader on the worker thread sees the old or the new
         self.adopt_launch_paths()
+        self.refresh_catalog_genres()
         return state
 
     def load_cached_index(self) -> IndexState:
@@ -111,6 +113,30 @@ class InstallService:
                 changed += self._adopt(game.catalog_id)
             except Exception:  # a malformed entry or a file error never stops the others
                 log.warning("Couldn't adopt the catalog launch path of %s", game.catalog_id, exc_info=True)
+        return changed
+
+    def refresh_catalog_genres(self) -> int:
+        """Give each catalog game the catalog's main genre (the first of its genres), so the Library's Genre column
+        and filter follow the catalog; returns how many changed. UI thread only.
+
+        Only the genre: the title is how the Library remembers its selection. A game with a queued or running job
+        is left alone (its result brings the catalog's fields), as is one the catalog no longer lists. When any
+        changed, manager.games is a new list (so the Library rebuilds its tree) and games.json is saved once."""
+        changed = 0
+        for game in self.manager.games:
+            entry = self.entries.get(game.catalog_id) if game.catalog_id else None
+            if entry is None or self.queue.job_for(game.catalog_id) is not None:
+                continue
+            genre = game_fields(entry)["genre"]
+            if genre != game.genre:
+                game.genre = genre
+                changed += 1
+        if changed:
+            self.manager.games = list(self.manager.games)
+            try:
+                self.manager.save_games()
+            except OSError as e:  # kept in memory; games.json is written with the next change
+                log.warning("Couldn't save games.json: %s", e)
         return changed
 
     def _adopt(self, catalog_id: str) -> bool:

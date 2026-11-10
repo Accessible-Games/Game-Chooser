@@ -679,3 +679,25 @@ def test_finish_removal_keeps_going_when_games_json_cannot_be_saved(rig, monkeyp
     assert rig.manager.library_by_id(lib["id"]) is None
     assert sorted((g.title, g.catalog_id, g.library_id) for g in rig.manager.games) == \
         [("Entombed", "", ""), ("Pawprints", "", "")]
+
+
+def test_catalog_genres_reach_installed_games(rig):
+    lib = rig.library()
+    entombed = game_entry(rig.routes, genres=[])
+    pawprints = game_entry(rig.routes, id="pawprints", title="Pawprints", genres=[])
+    rig.publish(entombed, pawprints)
+    rig.run("install", "entombed", library_id=lib["id"])
+    rig.run("install", "pawprints", library_id=lib["id"])
+    rig.manager.games.append(Game(title="Hand", genre="Mine", launch_path="C:/hand.exe"))
+    assert rig.manager.catalog_game("entombed").genre == ""
+    rig.service.queue.hold.add("pawprints")
+    rig.service.submit("repair", "pawprints")  # a game with a job is left to its result
+    before = rig.manager.games
+    rig.publish({**entombed, "genres": ["Puzzle", "Arcade"]}, {**pawprints, "genres": ["Card"]})
+    assert rig.manager.games is not before  # a new list, so the Library rebuilds its filter tree
+    assert rig.manager.catalog_game("entombed").genre == "Puzzle"  # the main genre
+    assert rig.manager.catalog_game("pawprints").genre == ""
+    assert [g.genre for g in rig.manager.games if g.title == "Hand"] == ["Mine"]
+    assert {g["title"]: g["genre"] for g in _games_json(rig.manager)}["Entombed"] == "Puzzle"
+    same = rig.manager.games
+    assert rig.service.refresh_catalog_genres() == 0 and rig.manager.games is same  # nothing changed, no save

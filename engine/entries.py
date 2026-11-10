@@ -231,12 +231,12 @@ def game_fields(entry: dict, platform: str | None = None) -> dict:
     an install uses); without, the entry's first source."""
     sources = platform_sources(entry, platform) if platform else _sources(entry)
     platforms = [_PLATFORM_LABELS.get(sources[0].get("platform"), "")] if sources else []
-    genres = entry.get("genres") or []
+    genres = [g for g in entry.get("genres") or [] if isinstance(g, str) and g.strip()]
     year = entry.get("year")
     return {
         "title": entry.get("title", ""),
         "developer": ", ".join(entry.get("developer") or []),
-        "genre": genres[0] if genres else "",
+        "genre": genres[0].strip() if genres else "",  # the main genre
         "year": str(year) if year is not None else "",
         "platforms": platforms,
     }
