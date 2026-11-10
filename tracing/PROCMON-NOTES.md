@@ -35,8 +35,13 @@ The decoder strips `\??\` and turns `\??\UNC\` into `\`. A non-zero RootDirector
 resolve, so the name is kept as given.
 
 `SetRenameInformationEx` and `SetRenameInformationExBypassAccessCheck` use a u32 Flags at offset 0 (ReplaceIfExists
-is bit 0x1) with the same offsets after it. No real sample of these in run 4; they are tested with synthetic bytes.
+is bit 0x1) with the same offsets after it. Confirmed by VM probe run 5 (build 2) against Process Monitor's own
+decoding: a real `SetRenameInformationEx` had Flags u32 = 5 (REPLACE_IF_EXISTS | SUPPRESS_PIN_STATE_INHERITANCE), so
+`ReplaceIfExists` is "True", and its FileName decoded to the Edge `Preferences` path. The bytes are in
+`tests/tracing/test_pml_decoders.py` (`REAL_RENAME_EX_IO`).
 
-## SetDispositionInformationEx (from the plan, not yet confirmed by a game-tree sample)
+## SetDispositionInformationEx (confirmed by VM probe run 5, build 2)
 
 A u32 Flags at the start of `io`. `FILE_DISPOSITION_DELETE` (0x1) set means `Delete` is "True", otherwise "False".
+Confirmed by VM probe run 5 (build 2) against Process Monitor's own decoding: Flags 3 (DELETE | POSIX_SEMANTICS)
+gives `Delete` "True". The bytes are in `tests/tracing/test_pml_decoders.py` (`REAL_DISPOSITION_EX_IO`).

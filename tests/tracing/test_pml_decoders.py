@@ -16,6 +16,15 @@ REAL_RENAME_IO = bytes.fromhex(
     "006300650054006500730074005c00730061007600650073005c0073006c006f00740031002e00730061007600000000002280"
     "433a5c47616d65735c5472616365546573745c73617665735c73")
 TARGET = r"C:\Games\TraceTest\saves\slot1.sav"
+# VM probe run 5 (build 2), msedge.exe: SetRenameInformationEx, first 186 bytes of `io` (see ex-bytes.md).
+REAL_RENAME_EX_IO = bytes.fromhex(
+    "05000000ff7f00000000000000000000a60000005c003f003f005c0043003a005c00550073006500720073005c00670061006d00"
+    "6500630068006f006f007300650072005c0041007000700044006100740061005c004c006f00630061006c005c004d0069006300"
+    "72006f0073006f00660074005c0045006400670065005c005500730065007200200044006100740061005c00440065006600610075"
+    "006c0074005c0050007200650066006500720065006e00630065007300")
+REAL_RENAME_EX_TARGET = r"C:\Users\gamechooser\AppData\Local\Microsoft\Edge\User Data\Default\Preferences"
+# VM probe run 5 (build 2): SetDispositionInformationEx, `io` as captured (Flags 3 = DELETE | POSIX_SEMANTICS).
+REAL_DISPOSITION_EX_IO = bytes.fromhex("03000000a91e")
 HANDLERS = detail_format.FilesystemSubOperationHandler
 
 
@@ -46,6 +55,21 @@ def test_rename_target_decoded():
     event, io = call(Op.SetRenameInformationFile, REAL_RENAME_IO)
     assert event.details["FileName"] == TARGET
     assert event.details["ReplaceIfExists"] == "True"
+    assert io.tell() == 0
+
+
+def test_rename_ex_target_decoded_from_real_bytes():
+    install_detail_handlers()
+    event, io = call(Op.SetRenameInformationEx, REAL_RENAME_EX_IO)
+    assert event.details["FileName"] == REAL_RENAME_EX_TARGET
+    assert event.details["ReplaceIfExists"] == "True"
+    assert io.tell() == 0
+
+
+def test_disposition_ex_from_real_bytes():
+    install_detail_handlers()
+    event, io = call(Op.SetDispositionInformationEx, REAL_DISPOSITION_EX_IO)
+    assert event.details["Delete"] == "True"
     assert io.tell() == 0
 
 
