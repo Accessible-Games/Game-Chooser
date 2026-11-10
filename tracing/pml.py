@@ -83,8 +83,15 @@ def event_offsets(io, total_size: int, number_of_events: int) -> array:
 
 
 def install_event_offsets() -> None:
-    """Have procmon-parser read event offsets with event_offsets, so a capture over 4 GiB reads to its end."""
+    """Have procmon-parser read event offsets with event_offsets, so a capture over 4 GiB reads to its end.
+
+    Raises when procmon-parser has no EventOffsetsArray to replace: a version that reads the offsets some other
+    way would ignore ours, and the failure past 4 GiB would come back unnoticed.
+    """
     from procmon_parser import stream_logs_format
+    if not hasattr(stream_logs_format, "EventOffsetsArray"):
+        raise RuntimeError("This procmon-parser has no EventOffsetsArray for tracing/pml.py to replace, so a "
+                           "capture over 4 GiB could not be read. Update install_event_offsets for it.")
     stream_logs_format.EventOffsetsArray = event_offsets
 
 
