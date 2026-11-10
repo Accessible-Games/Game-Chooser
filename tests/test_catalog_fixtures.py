@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import zipfile
 from urllib.parse import urlsplit
 
 import pytest
@@ -52,11 +53,11 @@ def load(tmp_path, **options):
 def test_index_loads_and_every_entry_is_readable(tmp_path):
     _, state = load(tmp_path)
     assert {"test-game", "test-game-no-path", "test-game-extras", "test-extra", "test-shared-extra",
-            "test-game-tar"} <= set(state.entries)
+            "test-game-tar", "test-game-page"} <= set(state.entries)
     assert all(is_readable(e) for e in state.entries.values())
     visible = {e["id"] for e in visible_games(state.entries, current_platform())}
     assert {"test-game", "test-game-no-path", "test-game-extras"} <= visible
-    assert {"test-game-tar"} <= visible
+    assert {"test-game-tar", "test-game-page"} <= visible
     assert not {"test-extra", "test-shared-extra"} & visible  # an extra is not a game
 
 
@@ -167,3 +168,13 @@ def test_password_7z_extracts_with_the_catalog_password(tmp_path):
     with pytest.raises(Exception):
         Extractor(serve.ROOT / "bin").extract(archive, tmp_path / "bad", {"method": "7z", "password": "nope"},
                                               lambda: False)
+
+
+def test_test_story_is_a_page_game_with_its_own_files(tmp_path):
+    from engine.launch import launch_kind
+    build, state = load(tmp_path)
+    entry = state.entries["test-game-page"]
+    assert entry["title"] == "Test Story" and launch_kind(entry["launch"]["windows"]["path"]) == "page"
+    with zipfile.ZipFile(build / "files" / "test-game-page.zip") as z:
+        assert sorted(z.namelist()) == ["index.html", "page2.html"]
+        assert b"page2.html" in z.read("index.html") and b"index.html" in z.read("page2.html")

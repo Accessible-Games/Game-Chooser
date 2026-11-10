@@ -43,7 +43,8 @@ to that URL.
 Sources: `tests/catalog_fixtures/entries/*.json` (catalog schema v2; each game's `extras` is computed from every
 entry whose `extends` list names it, as catalog-index does) and `tests/catalog_fixtures/games/`. They include a
 tar.gz game, prices, links, a warning, a first-run download size, a required extra (Test Extra Level) and an
-optional extra shared by Test Game With Extra and Test Game Tar (Test Shared Extra Level). Output goes to
+optional extra shared by Test Game With Extra and Test Game Tar (Test Shared Extra Level), and Test Story, a
+two-page web page game that opens in the browser (launch path `index.html`). Output goes to
 `tests/catalog_fixtures/_build/` (git-ignored). Every download address points at the local server.
 
 ## Project Structure
@@ -250,7 +251,8 @@ licenses in `bin/licenses/`. Without `bin/`, every zip, 7z, cab, Inno and NSIS i
 named like the folder, then the first) plus `ExceptionManager.should_auto_exclude` (skips setup/uninstall-style
 exes) guess a launch exe when the catalog records no launch path. It is temporary until the catalog records
 launch paths; `adopt_catalog_launch` switches a guessed path to the catalog's once one exists. **Nothing new may
-call it.**
+call it.** `launch_kind` / `start_game` decide how a launch file starts: `.html`/`.htm` open in the browser, anything
+else runs through `start_program`; the guess above never picks a page.
 
 ## Behavior Notes
 
@@ -260,6 +262,9 @@ call it.**
 - A missing executable branches on `library_actions.launch_problem`: `unreachable` (library folder gone),
   `repair` (tracked catalog install still in the catalog), `catalog` (say so, no file picker) or `locate`
   (hand-added game: pick the file).
+- A catalog game whose launch file ends in `.html` or `.htm` opens in the default browser through
+  `engine.launch.start_game` (no minimize). It is still an ordinary install, not a web game; the catalog must name
+  the page (it is never guessed); `.hta` is not supported.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.
 
 ### Keyboard Shortcuts

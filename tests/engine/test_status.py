@@ -143,3 +143,13 @@ def test_self_updating_game_never_reports_an_update():
     assert not update_available(record(version="1.0"), {**entry([src()], version="2.0"), "self_updating": True},
                                 "windows")
     assert update_available(rec, {**changed, "self_updating": "yes"}, "windows")  # only true counts
+
+
+def test_a_page_game_is_ready(tmp_path):
+    page = tmp_path / "index.html"
+    page.write_text("<p>hi</p>")
+    rec = record()
+    ok = entry([src(sha="a" * 64)])
+    assert game_status(str(page), False, rec, ok, "windows") == READY
+    page.unlink()
+    assert game_status(str(page), False, rec, ok, "windows") == EXE_NOT_FOUND

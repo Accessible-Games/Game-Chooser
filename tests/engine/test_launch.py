@@ -143,6 +143,29 @@ def test_adopt_catalog_launch(tmp_path):
     assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False
 
 
+def test_a_catalog_named_page_is_the_launch_file(tmp_path):
+    page = touch(tmp_path, "index.html")
+    touch(tmp_path, "setup.exe")
+    assert find_launch_exe(tmp_path, "index.html", EXCL) == page
+
+
+def test_a_page_is_never_guessed(tmp_path):
+    touch(tmp_path, "index.html")
+    touch(tmp_path, "story/page2.htm")
+    assert find_launch_exe(tmp_path, None, EXCL) is None
+
+
+def test_adopt_catalog_launch_takes_a_page(tmp_path):
+    from types import SimpleNamespace
+    from engine.launch import adopt_catalog_launch
+    touch(tmp_path, "index.html")
+    touch(tmp_path, "guess.exe")
+    rec = SimpleNamespace(launch_path="guess.exe", launch_from_catalog=False)
+    entry = {"launch": {"windows": {"path": "index.html"}}}
+    assert adopt_catalog_launch(rec, entry, "windows", tmp_path) is True
+    assert rec.launch_path == "index.html" and rec.launch_from_catalog is True
+
+
 # ---- start_program: an exe flagged to run as administrator (bug 19) ----------------------------------------
 
 import pytest
