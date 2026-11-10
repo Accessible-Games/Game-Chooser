@@ -373,7 +373,9 @@ Log format: `tracing/LOG-FORMAT.md`. Build: see Build and Distribution.
   - `client.py` (130) - app side: starts the recorder, writes session files, records launches and marks
   - `recorder.py` (175) - elevated side: drives Process Monitor for the whole run, then splits
   - `procmon.py` (120) - Process Monitor's filter file, start, ready check, stop
-  - `pml.py` (100) - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`)
+  - `pml.py` (220) - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`). `read_capture` swaps
+    in `event_offsets` for procmon-parser's event offsets reader, which drops bits 32 to 39 of each offset and so
+    cannot read a capture over 4 GiB
   - `live.py` (200) - live process snapshot (Windows) used for roots and the running tree
   - `runfiles.py` (150) - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` (70) - split a run folder
   - `split.py` (145) - attribute events to sessions and merge writes; `attribution.py` (90) - the process tree

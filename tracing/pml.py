@@ -3,6 +3,7 @@
 procmon_parser is imported inside the functions that use it, so this module imports cleanly without it.
 """
 import logging
+from array import array
 from collections.abc import Iterable, Iterator
 from itertools import chain
 from pathlib import Path
@@ -45,6 +46,7 @@ def read_capture(paths: list[Path]) -> tuple[list[ProcInfo], Iterator[RawEvent]]
     The events are read lazily; each file stays open only while its events are being read.
     """
     from procmon_parser import ProcmonLogsReader
+    install_event_offsets()
     install_detail_handlers()
     processes: dict[tuple[int, int], ProcInfo] = {}
     for path in paths:
@@ -60,6 +62,30 @@ def read_capture(paths: list[Path]) -> tuple[list[ProcInfo], Iterator[RawEvent]]
                 yield to_raw(event)
 
     return list(processes.values()), chain.from_iterable(events_of(p) for p in paths)
+
+
+_OFFSET_ENTRY = 5  # bytes an event takes in the capture's event offsets array
+
+
+def event_offsets(io, total_size: int, number_of_events: int) -> array:
+    """Where each event starts in the file, read from the capture's event offsets array.
+
+    An entry is a 40-bit little-endian file offset. procmon-parser 0.4.0 reads 32 bits and drops the fifth byte
+    as "unknown flags", so past 4 GiB its offsets wrap and it reads the file's header as an event.
+    """
+    data = io.read(total_size)
+    size = number_of_events * _OFFSET_ENTRY
+    if len(data) < size:
+        raise ValueError(f"The capture's event offsets array is short: {len(data)} bytes for "
+                         f"{number_of_events} events.")
+    return array("Q", (int.from_bytes(data[start:start + _OFFSET_ENTRY], "little")
+                       for start in range(0, size, _OFFSET_ENTRY)))
+
+
+def install_event_offsets() -> None:
+    """Have procmon-parser read event offsets with event_offsets, so a capture over 4 GiB reads to its end."""
+    from procmon_parser import stream_logs_format
+    stream_logs_format.EventOffsetsArray = event_offsets
 
 
 RENAME_OPERATIONS = ("SetRenameInformationFile", "SetRenameInformationEx", "SetRenameInformationExBypassAccessCheck")

@@ -122,3 +122,33 @@ def test_read_capture_merges_a_process_across_rolled_over_files(tmp_path, monkey
     processes, events = read_capture(files)
     ends = {p.pid: p.end for p in processes}
     assert ends == {10: 5000, 20: None} and list(events) == []
+
+
+@pytest.fixture
+def restore_event_offsets():
+    from procmon_parser import stream_logs_format
+    saved = stream_logs_format.EventOffsetsArray
+    yield stream_logs_format
+    stream_logs_format.EventOffsetsArray = saved
+
+
+def _offset_entries(offsets):
+    """The capture's event offsets array: five bytes an event, little-endian."""
+    return b"".join(offset.to_bytes(5, "little") for offset in offsets)
+
+
+def test_read_capture_reads_event_offsets_past_4_gib(restore_event_offsets):
+    """A capture over 4 GiB: the fifth byte of an entry is bits 32 to 39 of the offset, not flags to drop."""
+    wanted = [0x3A8, 0xFFFFFFF0, 0x1_0000_0010, 0x1_3E8A_1234, 0xFF_FFFF_FFFF]
+    data = _offset_entries(wanted)
+    read_capture([])  # sets procmon-parser up the way every real read does
+    offsets = restore_event_offsets.EventOffsetsArray(BytesIO(data + b"the process table"), len(data), len(wanted))
+    assert list(offsets) == wanted
+    assert offsets[2] == 0x1_0000_0010 and list(offsets[3:]) == wanted[3:]
+
+
+def test_event_offsets_refuses_a_short_array(restore_event_offsets):
+    data = _offset_entries([0x3A8, 0x1_0000_0010])
+    read_capture([])
+    with pytest.raises(ValueError, match="event offsets"):
+        restore_event_offsets.EventOffsetsArray(BytesIO(data[:-1]), len(data), 2)
