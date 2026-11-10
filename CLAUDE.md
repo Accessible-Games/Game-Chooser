@@ -320,9 +320,12 @@ Log format: `tracing/LOG-FORMAT.md`. Build: see Build and Distribution.
   else the closest to it (`attribution.find_root_by_exe`; the live tree uses the same rule). `process_exit` lines
   are written for every process whose exit is in the capture. `session.json` env carries `app_build` (short git
   commit from source, else null).
-- **Capture filter** (`procmon.EXCLUDED_PROCESSES`): no events from `Procmon.exe`, `Procmon64.exe`, `System`,
-  `game-chooser.exe` (the app and the recorder) or the extraction tools `7z.exe` and `innoextract.exe`; installs in a
-  traced run would otherwise fill the capture, and none of their writes are a game's.
+- **Capture filter** (`procmon.filter_config`; destructive, so dropped events never reach the file): drops every
+  event of `EXCLUDED_PROCESSES` (`APP_PROCESSES`: Procmon, `System`, `game-chooser.exe`, `7z.exe`, `innoextract.exe`;
+  `SYSTEM_PROCESSES`: Windows background services and tools), and with them the processes they start, so a game
+  whose own tree runs such a name loses that part; read-only opens (`READ_ONLY_ACCESS` Detail prefixes, no write or
+  delete right, so a delete-on-close open is kept), `REG_OPENED_EXISTING_KEY` and `Delete: False` events. The
+  recorder logs the active filter to `recorder.log` (`describe_filter`). Reads were never recorded.
 - **Title:** `Game Chooser (tracing starting)`, `(tracing)` or `(tracing off)`. When off, a dialog says why and
   games launch untraced after the player confirms.
 - **Mark key:** Ctrl+Alt+Shift+M adds a numbered mark to every running traced game. Windows OK beep = mark recorded;

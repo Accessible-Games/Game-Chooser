@@ -5,10 +5,11 @@ import sys
 import pytest
 
 import procmon_parser
-from procmon_parser import RuleAction, consts
+from procmon_parser import Column, RuleAction, RuleRelation, consts
 
 from tracing.kinds import classify
-from tracing.procmon import CAPTURE_OPERATIONS, EXCLUDED_PROCESSES, write_filter_config
+from tracing.procmon import (CAPTURE_OPERATIONS, EXCLUDED_PROCESSES, READ_ONLY_ACCESS, describe_filter,
+                             filter_config, write_filter_config)
 
 
 def test_filter_round_trips(tmp_path):
@@ -18,10 +19,87 @@ def test_filter_round_trips(tmp_path):
         config = procmon_parser.load_configuration(f)
     rules = config["FilterRules"]
     include = [r.value for r in rules if r.action == RuleAction.INCLUDE]
-    exclude = [r.value for r in rules if r.action == RuleAction.EXCLUDE]
+    exclude = [r.value for r in rules if r.action == RuleAction.EXCLUDE and r.column == Column.PROCESS_NAME]
     assert tuple(include) == CAPTURE_OPERATIONS
     assert tuple(exclude) == EXCLUDED_PROCESSES
     assert config["DestructiveFilter"] == 1
+
+
+def _detail_excludes(rules):
+    return [(r.relation, r.value) for r in rules if r.action == RuleAction.EXCLUDE and r.column == Column.DETAIL]
+
+
+def test_detail_excludes_round_trip(tmp_path):
+    path = tmp_path / "filter.pmc"
+    write_filter_config(path)
+    with open(path, "rb") as f:
+        config = procmon_parser.load_configuration(f)
+    got = _detail_excludes(config["FilterRules"])
+    for acc in READ_ONLY_ACCESS:
+        assert (RuleRelation.BEGINS_WITH, f"Desired Access: {acc}, Disposition: Open,") in got
+    assert (RuleRelation.CONTAINS, "Disposition: REG_OPENED_EXISTING_KEY") in got
+    assert (RuleRelation.IS, "Delete: False") in got
+    assert len(got) == len(READ_ONLY_ACCESS) + 2
+
+
+def test_system_processes_excluded_and_launchers_kept():
+    for name in ("svchost.exe", "MoUsoCoreWorker.exe", "MsMpEng.exe", "claude.exe", "nvda.exe", "Registry",
+                 "game-chooser.exe", "7z.exe"):
+        assert name in EXCLUDED_PROCESSES
+    for name in ("explorer.exe", "conhost.exe", "cmd.exe", "powershell.exe", "python.exe", "rundll32.exe"):
+        assert name not in EXCLUDED_PROCESSES
+
+
+def _dropped(detail):
+    """Whether Process Monitor would drop an event with this Detail (case-insensitive, as it matches)."""
+    d = detail.lower()
+    for relation, value in _detail_excludes(filter_config()["FilterRules"]):
+        v = value.lower()
+        if (relation == RuleRelation.BEGINS_WITH and d.startswith(v)) or                 (relation == RuleRelation.CONTAINS and v in d) or (relation == RuleRelation.IS and d == v):
+            return True
+    return False
+
+
+def test_read_only_access_strings_hold_no_write_right():
+    for acc in READ_ONLY_ACCESS:
+        assert not any(bad in acc for bad in ("Write", "Append", "Delete", "All", "Maximum")), acc
+
+
+def test_nothing_a_write_kind_needs_is_dropped():
+    for acc in READ_ONLY_ACCESS:
+        for opened in ("Opened", None):
+            details = {"Desired Access": acc, "Disposition": "Open", "Options": "Non-Directory File"}
+            if opened:
+                details["OpenResult"] = opened
+            for result in ("SUCCESS", "NAME NOT FOUND"):
+                assert classify("CreateFile", result, details) is None, (acc, result)
+    assert classify("RegCreateKey", "SUCCESS", {"Disposition": "REG_OPENED_EXISTING_KEY"}) is None
+    assert classify("SetDispositionInformationFile", "SUCCESS", {"Delete": "False"}) is None
+
+
+def test_write_opens_are_kept_by_the_filter():
+    kept = (
+        "Desired Access: Delete, Disposition: Open, Options: Non-Directory File, Delete On Close, Attributes: n/a, "
+        "ShareMode: Delete, AllocationSize: n/a, OpenResult: Opened",
+        "Desired Access: Generic Write, Read Attributes, Disposition: OverwriteIf, Options: Non-Directory File, "
+        "Attributes: N, ShareMode: None, AllocationSize: 0, OpenResult: Overwritten",
+        "Desired Access: Generic Read/Write, Disposition: Open, Options: Non-Directory File, Attributes: N, "
+        "ShareMode: Read, AllocationSize: n/a, OpenResult: Opened",
+        "Delete: True",
+        "Desired Access: Read Attributes, Disposition: Create, Options: Non-Directory File, OpenResult: Created",
+    )
+    for detail in kept:
+        assert not _dropped(detail), detail
+    assert _dropped("Desired Access: Read Attributes, Disposition: Open, Options: Non-Directory File")
+    assert _dropped("Delete: False")
+
+
+def test_describe_filter_names_everything_dropped():
+    lines = describe_filter()
+    text = " ".join(lines)
+    assert "MoUsoCoreWorker.exe" in text and "CreateFile" in text
+    assert f"Desired Access: {READ_ONLY_ACCESS[0]}, Disposition: Open," in text
+    assert "REG_OPENED_EXISTING_KEY" in text and "Delete: False" in text
 
 
 def _every_operation_name():

@@ -25,18 +25,60 @@ CAPTURE_OPERATIONS = (
 
 # Game Chooser itself (the compiled exe; also the elevated recorder) and the bundled extraction tools: their writes
 # are never a game's, and installs inside a traced run would fill the capture.
-EXCLUDED_PROCESSES = ("Procmon.exe", "Procmon64.exe", "System", "game-chooser.exe", "7z.exe", "innoextract.exe")
+APP_PROCESSES = ("Procmon.exe", "Procmon64.exe", "System", "game-chooser.exe", "7z.exe", "innoextract.exe")
+
+# Windows background activity and tools running beside a trace (Windows Update, Defender, search indexing, ...).
+# Not explorer.exe, conhost.exe, cmd.exe, powershell.exe, python.exe or rundll32.exe: games or their launchers run them.
+SYSTEM_PROCESSES = (
+    "svchost.exe", "MsMpEng.exe", "MpDefenderCoreService.exe", "NisSrv.exe", "MoUsoCoreWorker.exe", "TiWorker.exe",
+    "TrustedInstaller.exe", "SearchIndexer.exe", "SearchProtocolHost.exe", "SearchFilterHost.exe",
+    "CompatTelRunner.exe", "wuauclt.exe", "UsoClient.exe", "sppsvc.exe", "lsass.exe", "services.exe", "csrss.exe",
+    "smss.exe", "wininit.exe", "winlogon.exe", "Registry", "MemCompression", "SgrmBroker.exe",
+    "SecurityHealthService.exe", "WmiPrvSE.exe", "dllhost.exe", "taskhostw.exe", "claude.exe", "nvda.exe",
+)
+EXCLUDED_PROCESSES = APP_PROCESSES + SYSTEM_PROCESSES
+
+# Procmon's display strings for the Desired Access of a CreateFile that opens an existing file for reading only.
+# None holds Write, Append, Delete, Generic All or Maximum Allowed, so no write kind can come through one.
+READ_ONLY_ACCESS = (
+    "Read Attributes", "Generic Read", "Read Control", "Read Data/List Directory, Synchronize",
+    "Read Data/List Directory, Execute/Traverse, Synchronize", "Execute/Traverse, Synchronize",
+    "Read Data/List Directory, Execute/Traverse, Read Attributes, Synchronize", "Synchronize",
+    "Read Attributes, Synchronize", "Generic Read/Execute", "Generic Execute", "Read EA",
+    "Read Attributes, Read Control, Synchronize", "Read Control, Synchronize",
+    "Read Data/List Directory, Read Attributes, Synchronize", "Read Data/List Directory",
+)
+
+
+def _detail_excludes() -> list[tuple[str, str]]:
+    """(relation name, value) of each Detail rule that drops an event: read-only opens, opened-existing keys and
+    a disposition set to not-delete. classify keeps none of them."""
+    rules = [("BEGINS_WITH", f"Desired Access: {acc}, Disposition: Open,") for acc in READ_ONLY_ACCESS]
+    rules.append(("CONTAINS", "Disposition: REG_OPENED_EXISTING_KEY"))
+    rules.append(("IS", "Delete: False"))
+    return rules
+
+
+def describe_filter(operations: Sequence[str] = CAPTURE_OPERATIONS) -> list[str]:
+    """The active filter in readable form, one line per category, for the recorder log."""
+    return [
+        "capture filter, included operations: " + ", ".join(operations),
+        "capture filter, excluded processes: " + ", ".join(EXCLUDED_PROCESSES),
+        "capture filter, excluded Detail rules: " + "; ".join(f"{rel} {value!r}" for rel, value in _detail_excludes()),
+    ]
 
 
 def filter_config(operations: Sequence[str] = CAPTURE_OPERATIONS, destructive: bool = True) -> dict:
-    """Include only `operations`, never the events of EXCLUDED_PROCESSES (Process Monitor, System, Game Chooser and
-    its extraction tools).
+    """Include only `operations`; drop the events of EXCLUDED_PROCESSES, read-only opens, opened-existing registry
+    keys and "Delete: False" dispositions.
 
     With the destructive filter, events the filter drops are never written to the backing file.
     """
     from procmon_parser import Column, Rule, RuleAction, RuleRelation
     rules = [Rule(Column.OPERATION, RuleRelation.IS, op, RuleAction.INCLUDE) for op in operations]
     rules += [Rule(Column.PROCESS_NAME, RuleRelation.IS, name, RuleAction.EXCLUDE) for name in EXCLUDED_PROCESSES]
+    rules += [Rule(Column.DETAIL, getattr(RuleRelation, rel), value, RuleAction.EXCLUDE)
+              for rel, value in _detail_excludes()]
     return {"FilterRules": rules, "DestructiveFilter": 1 if destructive else 0}
 
 

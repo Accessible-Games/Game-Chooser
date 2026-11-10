@@ -8,10 +8,30 @@ becomes `-`). If the name exists, `-2`, `-3` and so on are added. Each folder ho
 A play session is one launch of a game: the launched process and every process it starts, followed through parent
 links. Only events from those processes are kept.
 
-The capture never holds events of Process Monitor (`Procmon.exe`, `Procmon64.exe`), `System`, Game Chooser itself
-(`game-chooser.exe`, which is also the recorder) or its extraction tools (`7z.exe`, `innoextract.exe`): their writes
-are never a game's, and installs made during a traced run would otherwise fill the capture. A game that runs a
-program of one of those names gets no events from it.
+Process Monitor drops these events while capturing (the filter is destructive: they never reach the file), and the
+recorder writes the active filter to `recorder.log`. What a trace therefore cannot hold:
+
+- Any event of these processes, and every process started under them (their process events are gone, so a game's tree
+  cannot pass through one): `Procmon.exe`, `Procmon64.exe`, `System`, `game-chooser.exe` (also the recorder), `7z.exe`,
+  `innoextract.exe`, `svchost.exe`, `MsMpEng.exe`, `MpDefenderCoreService.exe`, `NisSrv.exe`, `MoUsoCoreWorker.exe`,
+  `TiWorker.exe`, `TrustedInstaller.exe`, `SearchIndexer.exe`, `SearchProtocolHost.exe`, `SearchFilterHost.exe`,
+  `CompatTelRunner.exe`, `wuauclt.exe`, `UsoClient.exe`, `sppsvc.exe`, `lsass.exe`, `services.exe`, `csrss.exe`,
+  `smss.exe`, `wininit.exe`, `winlogon.exe`, `Registry`, `MemCompression`, `SgrmBroker.exe`,
+  `SecurityHealthService.exe`, `WmiPrvSE.exe`, `dllhost.exe`, `taskhostw.exe`, `claude.exe`, `nvda.exe`. A game whose
+  own tree runs a program of one of those names loses that part. `explorer.exe`, `conhost.exe`, `cmd.exe`,
+  `powershell.exe`, `python.exe` and `rundll32.exe` are kept because games and launchers run them.
+- A CreateFile that opens an existing file with only one of these Desired Access values and Disposition Open (no
+  write, append, delete, Generic All or Maximum Allowed right, so no write kind is lost): `Read Attributes`,
+  `Generic Read`, `Read Control`, `Read Data/List Directory, Synchronize`,
+  `Read Data/List Directory, Execute/Traverse, Synchronize`, `Execute/Traverse, Synchronize`,
+  `Read Data/List Directory, Execute/Traverse, Read Attributes, Synchronize`, `Synchronize`,
+  `Read Attributes, Synchronize`, `Generic Read/Execute`, `Generic Execute`, `Read EA`,
+  `Read Attributes, Read Control, Synchronize`, `Read Control, Synchronize`,
+  `Read Data/List Directory, Read Attributes, Synchronize`, `Read Data/List Directory`. An access string not listed
+  is kept, so a delete-on-close open (Desired Access `Delete`) is still recorded.
+- RegCreateKey events whose Detail has `Disposition: REG_OPENED_EXISTING_KEY`, and disposition events with Detail
+  `Delete: False` (neither is a write kind).
+- Reads were never recorded.
 
 ## Times
 

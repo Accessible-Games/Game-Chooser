@@ -228,6 +228,17 @@ def test_corrupt_session_warning_reaches_recorder_log(tmp_path):
     assert logging.getLogger("tracing").handlers == before
 
 
+def test_active_filter_is_logged_at_info(tmp_path):
+    rec, run, *_ = make(tmp_path)
+    logging.getLogger("tracing").setLevel(logging.NOTSET)  # the recorder must not rely on the host's level
+    assert rec.run() == 0
+    assert logging.getLogger("tracing").level == logging.NOTSET
+    text = run.log_path.read_text(encoding="utf-8")
+    assert "MoUsoCoreWorker.exe" in text
+    assert "Desired Access: Read Attributes, Disposition: Open," in text
+    assert "INFO" in text and "CreateFile" in text
+
+
 def test_slow_stop_is_reported_and_split_still_runs(tmp_path):
     rec, run, pm, states, splits, _ = make(tmp_path)
     pm.stop_result = False

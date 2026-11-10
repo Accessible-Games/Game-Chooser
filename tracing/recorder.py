@@ -8,7 +8,7 @@ from typing import Callable
 
 from tracing import messages
 from tracing.live import LiveProc, LiveTree
-from tracing.procmon import ProcmonControl, write_filter_config
+from tracing.procmon import ProcmonControl, describe_filter, write_filter_config
 from tracing.runfiles import RunDir
 from tracing.splitrun import SplitResult
 
@@ -102,6 +102,9 @@ class Recorder:
     def run(self) -> int:
         logger = logging.getLogger("tracing")
         handler = None
+        old_level = logger.level
+        if logger.getEffectiveLevel() > logging.INFO:
+            logger.setLevel(logging.INFO)
         try:
             handler = logging.FileHandler(self.run_dir.log_path, encoding="utf-8")
             handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
@@ -111,6 +114,7 @@ class Recorder:
         try:
             return self._run()
         finally:
+            logger.setLevel(old_level)
             if handler is not None:
                 logger.removeHandler(handler)
                 handler.close()
@@ -120,6 +124,8 @@ class Recorder:
         self._status("starting", recorder_pid=os.getpid())
         try:
             write_filter_config(run.config_path)
+            for line in describe_filter():
+                log.info("%s", line)
             self.procmon.start(run.capture_path, run.config_path)
             if not self.procmon.wait_ready(READY_TIMEOUT):
                 log.warning("Process Monitor not ready: %s", getattr(self.procmon, "not_ready_reason", None))
