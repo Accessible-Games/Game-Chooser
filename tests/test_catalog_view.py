@@ -1,5 +1,5 @@
 from catalog_view import (action_kind, action_label, build_rows, link_items, description_text, filter_rows, initial_tab, link_at_line,
-                          markdown_to_text, tree_categories)
+                          install_candidates, markdown_to_text, tree_categories)
 
 SRC = [{"platform": "windows", "install": {"method": "zip"}, "url": "https://x/e.zip"}]
 entombed = {"id": "entombed", "kind": "game", "title": "Entombed", "developer": ["Driftwood Entertainment"],
@@ -107,3 +107,11 @@ def test_link_items_in_menu_order_http_only():
         ("Open homepage", "https://h.example"), ("Open purchase page", "https://b.example"),
         ("Open agarchive page", "https://www.agarchive.net/pages/devs/bsc.html")]
     assert link_items(None) == [] and link_items({"links": {"homepage": "javascript:x"}}) == []
+
+
+def test_install_candidates_only_games_that_install_and_are_not_busy():
+    rows = build_rows([entombed, troopanum, WEB, minimal_entry], {"troopanum"})
+    # troopanum is installed (Launch), the web game is only added, minimal is waiting in the queue
+    assert [r.id for r in install_candidates(rows, {"minimal"}, "windows")] == ["entombed"]
+    assert [r.id for r in install_candidates(rows, set(), "windows")] == ["entombed", "minimal"]
+    assert install_candidates([], set(), "windows") == []

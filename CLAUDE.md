@@ -10,7 +10,7 @@ catalog (installed into a library) or are added by hand.
 
 ```bash
 uv sync                      # install dependencies
-uv run game-chooser.py       # run the app (on WSL: uv.exe run game-chooser.py)
+uv run game-chooser.py       # run the app
 uv run pytest -q             # the whole tests/ tree: no wxPython, pywin32 or network needed
 uv run pytest -q -m tools    # only the tests that need the bundled extraction tools in bin/
 uv run python scripts/fetch_tools.py   # fetch 7z.exe, 7z.dll, innoextract.exe into bin/ (not committed)
@@ -65,7 +65,8 @@ Sources: `tests/catalog_fixtures/entries/*.json` and `tests/catalog_fixtures/gam
   and title/URL/path/year validation used by `GameDialog`
 - **exception_manager.py** (207) - filename filter used only by the temporary launch fallback (see Install Engine)
 - **engine/** (26 modules, ~9,600 lines) - the install engine; **scripts/** - `fetch_tools.py`,
-  `serve_test_catalog.py`; **smart_list/**, **resource_finder/** - submodules; **bin/** - bundled tools (git-ignored)
+  `serve_test_catalog.py`; **bin/** - bundled tools (git-ignored). `smart_list` (pinned in `[tool.uv.sources]`)
+  and its dependency `resource_finder` are uv git dependencies, not on PyPI
 
 ### Where data lives
 - `games.json` - next to the app (the `sys.argv[0]` directory); git-ignored. It and `config.json` are written
@@ -206,7 +207,11 @@ in place).
 - **extract.py** - unpacks with the bundled tools; **run_installer.py** / **run_actions.py** /
   **installer_watch.py** - installers that run.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain,
-  marker `.gamechooser-runtime.json`), or private COM copies (`comfree.py`); **steps.py**, **registry.py**,
+  marker `.gamechooser-runtime.json`), or private COM copies (`comfree.py`). By default every runtime the game
+  depends on that has a folder (not an installer that runs) also gets its `.dll`/`.ocx` files copied beside the
+  game's launch exe (layout kept; the game's own file of that name wins; hash-checked from a trusted folder or the
+  private staging copy; recorded with owner `runtime:<id>`, ids in the record's `runtime_copies`), so a game that
+  loads a runtime DLL by name finds it; **steps.py**, **registry.py**,
   **elevation.py** - catalog steps and the one program that runs elevated.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan, and target-folder naming (`<library>/<Title>`).
@@ -234,6 +239,9 @@ call it.**
 ### Keyboard Shortcuts
 - **F5**: Library: rebuild list, tree and menu and recheck Status. Catalog: check for catalog updates.
 - **Ctrl+R**: random game from the active tab's filtered list (asks before launching).
+- **Ctrl+Shift+R** (Launch > Random Game to Install): random game from the Catalog tab's filtered list that
+  installs (`catalog_view.install_candidates`: not installed, not a web game, no job queued or running); switches to
+  the Catalog tab first, asks, then opens the install confirmation as the Install button does.
 - **Del**: Library only (Uninstall for a tracked catalog install, forget for an untracked one, else delete).
 - **Ctrl+E**: Library only; refuses catalog games and says why (its accelerator stays enabled for that, while the
   Edit menu item is disabled). Edit and Delete menu items are disabled on the Catalog tab.

@@ -141,3 +141,54 @@ def test_adopt_catalog_launch(tmp_path):
     assert adopt_catalog_launch(gone, {"launch": {"windows": {"path": "nope.exe"}}}, "windows", tmp_path) is False
     assert gone.launch_path == "old.exe" and gone.launch_from_catalog is False
     assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False
+
+
+# ---- start_program: an exe flagged to run as administrator (bug 19) ----------------------------------------
+
+import pytest
+
+from engine.launch import LaunchCancelled, start_program
+
+
+def _os_error(winerror):
+    e = OSError(13, "boom")
+    e.winerror = winerror
+    return e
+
+
+def test_start_program_runs_the_exe_in_its_folder():
+    calls = []
+    start_program("C:/Games/X/x.exe", "C:/Games/X", popen=lambda args, cwd: calls.append((args, cwd)),
+                  shell_open=lambda *a: pytest.fail("no shell needed"))
+    assert calls == [(["C:/Games/X/x.exe"], "C:/Games/X")]
+
+
+def test_start_program_asks_windows_when_the_exe_needs_elevation():
+    opened = []
+
+    def popen(args, cwd):
+        raise _os_error(740)
+
+    start_program("C:/Games/X/pipe.exe", "C:/Games/X", popen=popen,
+                  shell_open=lambda path, cwd: opened.append((path, cwd)))
+    assert opened == [("C:/Games/X/pipe.exe", "C:/Games/X")]
+
+
+def test_start_program_passes_on_other_errors():
+    def popen(args, cwd):
+        raise _os_error(2)
+
+    with pytest.raises(OSError):
+        start_program("C:/Games/X/x.exe", "C:/Games/X", popen=popen,
+                      shell_open=lambda *a: pytest.fail("only 740 goes to the shell"))
+
+
+def test_start_program_passes_on_a_declined_prompt():
+    def popen(args, cwd):
+        raise _os_error(740)
+
+    def shell_open(path, cwd):
+        raise LaunchCancelled()
+
+    with pytest.raises(LaunchCancelled):
+        start_program("C:/Games/X/x.exe", "C:/Games/X", popen=popen, shell_open=shell_open)

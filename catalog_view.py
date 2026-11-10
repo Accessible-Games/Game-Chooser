@@ -200,6 +200,12 @@ def action_label(row: CatalogRow | None, platform: str | None = None) -> str:
     return f"{action_verb(row, platform)} {row.title}"
 
 
+def install_candidates(rows: list[CatalogRow], busy_ids, platform: str | None = None) -> list[CatalogRow]:
+    """The rows a random install may pick: games that install (not installed, not web games that are only added)
+    and have no job queued or running."""
+    return [r for r in rows if r.id not in busy_ids and action_kind(r, platform) == "install"]
+
+
 def link_items(entry: dict | None) -> list[tuple[str, str]]:
     """(menu label, url) for each http(s) link the entry has, in the context menu's order."""
     links = entry.get("links") if entry else None

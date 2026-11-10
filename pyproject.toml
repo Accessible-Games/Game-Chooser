@@ -9,6 +9,7 @@ dependencies = [
     "platform-utils>=1.6.0",
     "pywin32>=311 ; sys_platform == 'win32'",
     "six>=1.17.0",
+    "smart-list",
     "wxpython==4.2.3",
 ]
 
@@ -29,3 +30,6 @@ markers = [
     "tools: needs the bundled tools in bin/ (skipped when bin/7z.exe is absent)",
     "windows: touches the real Windows registry or other Windows-only behavior",
 ]
+
+[tool.uv.sources]
+smart-list = { git = "https://github.com/accessibleapps/smart_list", rev = "2a110818a311a248295c3bfdc91a95ed1caac4c0" }

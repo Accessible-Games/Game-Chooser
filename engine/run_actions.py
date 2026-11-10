@@ -42,8 +42,9 @@ def repair(engine, entry: dict, rec: InstallRecord, game_dir: Path, progress, ca
                                              spare_steps=jobs._extra_steps(unpacked))
         extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, prior, cancel,
                                                               recorded=extra_sources)
+        copy_notes = engine._copies_after_installer(entry, record, [], record.runtime_copies)
     return jobs.JobResult("repair", game_id, title, jobs.game_fields_for(entry, record, engine.ctx.platform),
-                          [*notes, *extra_notes],
+                          [*notes, *extra_notes, *copy_notes],
                           backups=backups)
 
 
@@ -81,6 +82,7 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
                                                  spare_steps=jobs._extra_steps(unpacked), undo_of=previous)
             extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, previous,
                                                                   cancel, recorded=extra_sources)
+            extra_notes += engine._copies_after_installer(entry, record, [], jobs._previous_copies(previous, rec))
         except BaseException:
             _retarget_rewritten(ctx, rec, game_dir, untouched)
             raise
