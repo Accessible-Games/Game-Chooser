@@ -40,9 +40,10 @@ to that URL.
 - `--throttle KBPS` sends game files slowly (time to cancel a download)
 - `--build-only` builds the catalog and stops; `--port N` and `--build-dir` change the port and build folder
 
-Sources: `tests/catalog_fixtures/entries/*.json` (catalog schema v2; `extras` is computed from `extends`, as
-catalog-index does) and `tests/catalog_fixtures/games/`. They include a tar.gz game, prices, links, a warning and a
-first-run download size. Output goes to
+Sources: `tests/catalog_fixtures/entries/*.json` (catalog schema v2; each game's `extras` is computed from every
+entry whose `extends` list names it, as catalog-index does) and `tests/catalog_fixtures/games/`. They include a
+tar.gz game, prices, links, a warning, a first-run download size, a required extra (Test Extra Level) and an
+optional extra shared by Test Game With Extra and Test Game Tar (Test Shared Extra Level). Output goes to
 `tests/catalog_fixtures/_build/` (git-ignored). Every download address points at the local server.
 
 ## Project Structure
@@ -230,6 +231,13 @@ in place).
   private staging copy; recorded with owner `runtime:<id>`, ids in the record's `runtime_copies`), so a game that
   loads a runtime DLL by name finds it; **steps.py**, **registry.py**,
   **elevation.py** - catalog steps and the one program that runs elevated.
+- **Extras**: an extra's `extends` is a list of one or more game ids (there is no `install_into`), and the index
+  lists it in the `extras` ({id, required}) of each of those games, so one extra id can be in several games'
+  `extras`. The app never reads `extends`: `entries.extras_of` and the install plan go by the game's own `extras`.
+  An extra installs into the folder of whichever game it is added to (a required one with each game), and each
+  game's install record holds its own copy (`InstallRecord.extras`, its files owned by the extra's id); an extra
+  never has a record of its own, so updating, repairing, undoing or uninstalling one game leaves another game's
+  copy alone (`tests/engine/test_shared_extras.py`).
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan (the entry's `warning`, the price warning on installs, `first_run_download_size` added to the
   size), and target-folder naming (`<library>/<Title>`).
