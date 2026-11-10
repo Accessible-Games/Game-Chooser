@@ -133,3 +133,13 @@ def test_status_never_hashes_files(monkeypatch, tmp_path):
 def test_library_not_found_wins():
     from engine.status import LIBRARY_NOT_FOUND, game_status
     assert game_status("X:/nope.exe", False, None, None, "windows", library_reachable=False) == LIBRARY_NOT_FOUND
+
+
+def test_self_updating_game_never_reports_an_update():
+    rec = record(catalog_sha256="c" * 64, version="1.0")
+    changed = entry([src(sha="e" * 64)], version="2.0")
+    assert update_available(rec, changed, "windows")
+    assert not update_available(rec, {**changed, "self_updating": True}, "windows")
+    assert not update_available(record(version="1.0"), {**entry([src()], version="2.0"), "self_updating": True},
+                                "windows")
+    assert update_available(rec, {**changed, "self_updating": "yes"}, "windows")  # only true counts
