@@ -53,6 +53,10 @@ def _windows_arch() -> str | None:
         from ctypes import wintypes
         process, native = wintypes.USHORT(), wintypes.USHORT()
         kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        kernel32.GetCurrentProcess.restype = wintypes.HANDLE  # a 64-bit pseudo-handle; the default int cuts it
+        kernel32.IsWow64Process2.restype = wintypes.BOOL
+        kernel32.IsWow64Process2.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.USHORT),
+                                             ctypes.POINTER(wintypes.USHORT)]
         if kernel32.IsWow64Process2(kernel32.GetCurrentProcess(), ctypes.byref(process), ctypes.byref(native)):
             return _WINDOWS_MACHINES.get(native.value)
     except (AttributeError, OSError):  # before Windows 10 1709 there is no IsWow64Process2
