@@ -100,7 +100,7 @@ def test_published_index_is_schema_version_2(tmp_path):
             assert isinstance(entry["extends"], list) and entry["extends"]
             assert len(set(entry["extends"])) == len(entry["extends"])
             assert all(state.entries[i]["kind"] == "game" for i in entry["extends"])
-        else:
+        elif entry["kind"] != "access-mod":  # the only other kind that may set extends
             assert "extends" not in entry
 
 
