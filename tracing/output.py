@@ -49,7 +49,9 @@ def _session_json(result: SessionResult) -> dict:
         "start": filetime_to_iso(zero),
         "end": None if result.end is None else filetime_to_iso(result.end),
         "still_running_at_capture_end": result.still_running,
-        "time_zero_source": result.time_zero_source, "root_pid": info.root_pid,
+        "time_zero_source": result.time_zero_source,
+        # the root found in the capture (by exe when the launch gave no pid), else the pid recorded at launch
+        "root_pid": result.root.pid if result.root is not None else info.root_pid,
         "processes": [_process_entry(p, zero) for p in result.tree.values()],
         "marks": [{"n": n, "t": _t(m, zero), "time": filetime_to_iso(m)} for n, m in enumerate(info.marks, 1)],
         "event_count": sum(1 for line in result.lines if line["op"] not in _NON_EVENT_OPS),

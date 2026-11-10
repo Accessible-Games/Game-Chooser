@@ -2,10 +2,17 @@
 
 Used by the recorder (stop only when every session's processes have exited) and by the mark key (which sessions
 are running). Processes are identified by (pid, start) so a reused pid is never mistaken for a member.
+
+A session whose launch gave no process ID (root_pid 0) finds its root by executable: the first snapshot holding a
+process whose image is the game's exe and whose start lies from ROOT_SLACK before `started_at` to ROOT_SLACK after
+`launch_after` (`started_at` when not given) picks the one closest to `started_at`, and from then on that process
+is the root, as if its pid had been known.
 """
 import os
 import sys
 from dataclasses import dataclass
+
+from tracing.attribution import UNKNOWN_PID, find_root_by_exe
 
 
 @dataclass(frozen=True)
@@ -17,9 +24,11 @@ class LiveProc:
 
 
 class _Session:
-    def __init__(self, root_pid, root_start, game_dir, started_at):
+    def __init__(self, root_pid, root_start, game_dir, started_at, exe=None, launch_after=None):
         self.root_pid = root_pid
         self.root_start = root_start
+        self.exe = exe
+        self.launch_after = started_at if launch_after is None else launch_after
         self.game_dir = os.path.normcase(os.path.normpath(game_dir)) if game_dir else None
         self.started_at = started_at
         self.members: set[tuple[int, int]] = set()
@@ -36,6 +45,10 @@ class _Session:
             return False
 
     def update(self, procs, alive_start):
+        if self.root_pid == UNKNOWN_PID:
+            root = find_root_by_exe(procs, self.exe, self.started_at, self.launch_after)
+            if root is not None:
+                self.root_pid, self.root_start = root.pid, root.start
         member_pids = {}
         for pid, start in self.members:
             member_pids.setdefault(pid, []).append(start)
@@ -55,7 +68,7 @@ class _Session:
             self.seen = True
 
     def _qualifies(self, p, member_pids, alive_start):
-        if p.pid == self.root_pid:
+        if self.root_pid != UNKNOWN_PID and p.pid == self.root_pid:
             return self.root_start is None or p.start == self.root_start
         parents = member_pids.get(p.ppid, [])
         current = alive_start.get(p.ppid)
@@ -75,8 +88,9 @@ class LiveTree:
     def __init__(self):
         self._sessions: dict[str, _Session] = {}
 
-    def add_session(self, session_id, root_pid, root_start, game_dir, started_at):
-        self._sessions[session_id] = _Session(root_pid, root_start, game_dir, started_at)
+    def add_session(self, session_id, root_pid, root_start, game_dir, started_at, exe=None, launch_after=None):
+        """root_pid 0 means the launch gave no process ID: the root is then found by `exe` (see the module)."""
+        self._sessions[session_id] = _Session(root_pid, root_start, game_dir, started_at, exe, launch_after)
 
     def update(self, snapshot):
         procs = [p for p in snapshot if p.start is not None]

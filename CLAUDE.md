@@ -292,7 +292,7 @@ Log format: `tracing/LOG-FORMAT.md`. Build: see Build and Distribution.
 - **Rule:** nothing outside `tracing/` imports it; the one exception is `game-chooser.py`, inside
   `try/except ImportError`. `procmon_parser` is imported only inside `tracing/`, lazily, inside functions. Only
   `app_glue.py` imports wx. The game launch is unchanged: `MainFrame` calls `frame.launch_observer` around its
-  `Popen`, and shows `frame.title_note` in the title. The normal build is checked by `scripts/check_no_tracing.py`
+  `engine.launch.start_program` (passing on the process ID it returns), and shows `frame.title_note` in the title. The normal build is checked by `scripts/check_no_tracing.py`
   (fails the build on any tracing module or `tracing`/`procmon`/`traces` file, or a report with no modules).
 - **Commands** (`game-chooser.py`, through `tracing/cli.py`): `--tracing` (turn tracing on from source; a compiled
   tracing build is always on), `--trace-recorder RUN --app-pid N --procmon EXE` (the elevated recorder, started by
@@ -309,8 +309,11 @@ Log format: `tracing/LOG-FORMAT.md`. Build: see Build and Distribution.
   session has a problem or a session file can't be read. Atomic writes retry `os.replace` while Windows says the
   file is held (`runfiles.replace_with_retry`).
 - **Attribution:** a session is the launched process plus its descendants by parent links in the capture. The root
-  is matched by pid and the start time read after `Popen`; failing an exact match, by pid within 2 s of the launch
-  call, closest to that start time (`attribution.find_root`). `process_exit` lines are written for every process
+  is matched by pid and the start time read after the launch; failing an exact match, by pid within 2 s of the launch
+  call, closest to that start time (`attribution.find_root`). A launch that gave no pid (the administrator prompt's
+  shell handed back no process) is recorded with `root_pid` 0 and no start time; its root is then the process whose
+  image is the game's exe that started from 2 s before the launch call to 2 s after it returned, closest to the call
+  (`attribution.find_root_by_exe`; the live tree uses the same rule). `process_exit` lines are written for every process
   whose exit is in the capture. `session.json` env carries `app_build` (short git commit from source, else null).
 - **Title:** `Game Chooser (tracing starting)`, `(tracing)` or `(tracing off)`. When off, a dialog says why and
   games launch untraced after the player confirms.
@@ -324,9 +327,9 @@ Log format: `tracing/LOG-FORMAT.md`. Build: see Build and Distribution.
   - `recorder.py` (175) - elevated side: drives Process Monitor for the whole run, then splits
   - `procmon.py` (120) - Process Monitor's filter file, start, ready check, stop
   - `pml.py` (100) - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`)
-  - `live.py` (170) - live process snapshot (Windows) used for roots and the running tree
+  - `live.py` (185) - live process snapshot (Windows) used for roots and the running tree
   - `runfiles.py` (150) - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` (70) - split a run folder
-  - `split.py` (140) - attribute events to sessions and merge writes; `attribution.py` (55) - the process tree
+  - `split.py` (140) - attribute events to sessions and merge writes; `attribution.py` (85) - the process tree
   - `kinds.py` (50) - event to write kind; `virtualstore.py` (20) - the VirtualStore path
   - `output.py` (85) - writes `session.json` and `events.jsonl`; `model.py` (60), `clock.py` (30), `paths.py` (40)
   - `probe.py` (210) - the `--trace-probe` command

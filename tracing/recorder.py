@@ -68,7 +68,8 @@ class Recorder:
                 if info.session_id not in self._added:
                     self._added.add(info.session_id)
                     self.tree.add_session(info.session_id, info.root_pid, info.root_start,
-                                          info.game.get("game_dir"), info.launch_before)
+                                          info.game.get("game_dir"), info.launch_before,
+                                          info.game.get("exe"), info.launch_after)
         except Exception as exc:
             log.warning("live tree update failed reading the session files: %r", exc)
         try:

@@ -9,6 +9,7 @@ from typing import Callable
 
 from engine.errors import ElevationDeclined
 from tracing import messages
+from tracing.attribution import UNKNOWN_PID
 from tracing.clock import now_filetime
 from tracing.live import LiveTree, process_start_time, windows_snapshot
 from tracing.model import SessionInfo
@@ -96,18 +97,22 @@ class TraceClient:
                     self._state = TraceState("on")
         return self.state
 
-    def game_launched(self, pid: int, before: int, after: int, game: dict) -> str | None:
+    def game_launched(self, pid: int | None, before: int, after: int, game: dict) -> str | None:
+        """Record a launch. A launch that gave no process ID (pid None) is recorded with root_pid 0 and no start
+        time; its root is then found by the game's exe (`attribution.find_root_by_exe`)."""
+        root_pid = pid or UNKNOWN_PID
         with self._lock:
             if self._state.phase != "on" or self._run is None:
                 return None
             self._count += 1
-            session_id = f"s{self._count:03d}-{pid}"
+            session_id = f"s{self._count:03d}-{root_pid}"
             run = self._run
-        root_start = self._start_time_of(pid)
-        info = SessionInfo(session_id, pid, root_start, before, after, dict(game), dict(self._env), ())
+        root_start = self._start_time_of(root_pid) if root_pid != UNKNOWN_PID else None
+        info = SessionInfo(session_id, root_pid, root_start, before, after, dict(game), dict(self._env), ())
         self._sessions[session_id] = info
         run.write_session(info)
-        self._tree.add_session(session_id, pid, root_start, game.get("game_dir"), before)
+        self._tree.add_session(session_id, root_pid, root_start, game.get("game_dir"), before, game.get("exe"),
+                               after)
         return session_id
 
     def mark(self) -> list[str]:

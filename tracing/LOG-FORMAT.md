@@ -23,6 +23,12 @@ launching it. If no process has exactly that start time, it is the process with 
 of the launch call, the one whose start is closest to the start time read (or to the launch call when none was
 read).
 
+When the launch gave Game Chooser no pid (a game marked "run as administrator" is started through Windows' prompt,
+and the shell can hand back no process), the first process is found by its executable instead: the process whose
+image path is the game's `exe` (compared case-insensitively, after normalizing the path) that started from 2 s
+before the launch call to 2 s after the call returned, the one whose start is closest to the launch call. A process
+of the same exe that started outside that window is never taken.
+
 ## session.json
 
 - `format`: 1.
@@ -35,7 +41,8 @@ read).
 - `start`: time zero as UTC text. `end`: when the last process exited, or null.
 - `still_running_at_capture_end`: true when some process was still running when the capture ended (then `end` is
   null; the processes that did exit still have their `process_exit` lines).
-- `time_zero_source`: see Times. `root_pid`: pid of the game's first process.
+- `time_zero_source`: see Times. `root_pid`: pid of the game's first process (as found in the
+  capture; when it wasn't found, the pid recorded at launch, which is 0 when the launch gave no pid).
 - `processes`: one object per process in the session: `pid`, `parent_pid`, `image_path`, `command_line`, `start`,
   `end` (null when still running), `start_t`, `end_t`, `virtualized` (UAC virtualization on for this process),
   `is_64bit`.

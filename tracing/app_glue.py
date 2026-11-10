@@ -1,7 +1,7 @@
 """The tracing build's wx glue: starts the recorder, shows tracing's state in the title, records launches and marks.
 
 The only module in tracing/ that imports wx. The main window knows nothing about tracing: it calls
-`frame.launch_observer.before_launch(game)` and `.launched(...)` around its unchanged Popen, and shows
+`frame.launch_observer.before_launch(game)` and `.launched(...)` around its unchanged `start_program`, and shows
 `frame.title_note` in its title. Every message goes through `frame.run_when_no_dialog` and `frame.modal_dialog()`.
 """
 import logging
@@ -152,8 +152,10 @@ class TracingGlue:
             answer = wx.MessageBox(text, messages.DIALOG_CAPTION, wx.YES_NO | wx.ICON_QUESTION, self._frame)
         return ("untraced", None) if answer == wx.YES else None
 
-    def launched(self, token, game, proc, full_path, game_dir) -> None:
-        """Right after Popen: record the session. Never raises into launch_game."""
+    def launched(self, token, game, pid, full_path, game_dir) -> None:
+        """Right after start_program: record the session. `pid` is the started process's ID, or None when the
+        launch gave none (the session is still recorded; its root is found by exe). Never raises into
+        launch_game."""
         try:
             after = now_filetime()
             if not token or token[0] != "traced":
@@ -166,7 +168,7 @@ class TracingGlue:
                 "exe": full_path,
                 "game_dir": game_dir,
             }
-            if self._client.game_launched(proc.pid, token[1], after, info) is None:
+            if self._client.game_launched(pid, token[1], after, info) is None:
                 log.warning("Tracing went off before the launch of %s could be recorded", game.title)
         except Exception as exc:
             log.exception("Recording a launch failed")

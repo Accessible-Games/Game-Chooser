@@ -155,3 +155,21 @@ def test_recorder_leaving_capturing_is_off(tmp_path):
             proc.code = 0
         state = client.poll()
         assert state.phase == "off" and state.reason == messages.RECORDER_GONE
+
+
+def test_launch_without_a_pid_is_recorded_with_root_pid_0(tmp_path):
+    asked = []
+    procs = [LiveProc(30, 4, 5, r"C:\g\a.exe")]
+    client = TraceClient(tmp_path / "traces", tmp_path / "Procmon64.exe", lambda argv: FakeProc(),
+                         {"windows": "11"}, clock=lambda: NOW, snapshot=lambda: list(procs),
+                         start_time_of=lambda pid: asked.append(pid) or 77, app_pid=42)
+    (tmp_path / "Procmon64.exe").write_text("x")
+    client.start()
+    status(client, "capturing")
+    client.poll()
+    sid = client.game_launched(None, 1, 2, {"title": "T", "game_dir": "C:/g", "exe": "C:/g/a.exe"})
+    assert sid == "s001-0" and asked == []
+    data = json.loads((client._run.sessions_dir / f"{sid}.json").read_text())
+    assert (data["root_pid"], data["root_start"], data["launch_before"], data["launch_after"]) == (0, None, 1, 2)
+    client.poll()
+    assert client.mark() == [sid]  # the live tree found the root by exe

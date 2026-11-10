@@ -115,3 +115,38 @@ def test_windows_snapshot_sees_this_process():
     assert p.start
     assert p.image_path and p.image_path.lower().endswith("python.exe")
     assert process_start_time(os.getpid()) == p.start
+
+
+# ---- a launch that gave no process ID: the root is found by exe ------------------------------------------
+
+from tracing.attribution import ROOT_SLACK  # noqa: E402
+
+EXE = GAME_DIR + r"\foo.exe"
+
+
+def test_root_found_by_exe_when_the_pid_is_unknown():
+    t = LiveTree()
+    t.add_session("s1-0", 0, None, None, 1000, exe=EXE, launch_after=1100)  # no folder rule: only the root rule
+    t.update([LiveProc(0, 0, 900, None),  # the idle process is never the root
+              LiveProc(30, 4, 1050, r"c:/games/foo/FOO.EXE"), LiveProc(31, 30, 1060, None)])
+    assert t.running() == {"s1-0"}
+    t.update([LiveProc(31, 30, 1060, None)])
+    assert t.running() == {"s1-0"}  # the child keeps it running
+    t.update([LiveProc(40, 4, 1070, EXE)])  # once found, the root is fixed: a second copy isn't it
+    assert t.running() == set()
+
+
+def test_same_exe_outside_the_window_is_not_the_root():
+    t = LiveTree()
+    t.add_session("s1-0", 0, None, None, 10 * ROOT_SLACK, exe=EXE, launch_after=11 * ROOT_SLACK)
+    t.update([LiveProc(50, 4, 9 * ROOT_SLACK - 1, EXE), LiveProc(51, 4, 12 * ROOT_SLACK + 1, EXE)])
+    assert t.running() == set()
+    t.update([LiveProc(52, 4, 12 * ROOT_SLACK, EXE)])  # at the end of the window: a slow administrator prompt
+    assert t.running() == {"s1-0"}
+
+
+def test_unknown_pid_without_an_exe_finds_nothing():
+    t = LiveTree()
+    t.add_session("s1-0", 0, None, None, 100)
+    t.update([LiveProc(0, 0, 100, None), LiveProc(60, 4, 100, EXE)])
+    assert t.running() == set()

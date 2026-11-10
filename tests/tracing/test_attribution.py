@@ -72,3 +72,33 @@ def test_session_info_json_round_trip():
     s = session(marks=(1, 2, 3))
     back = SessionInfo.from_json(s.to_json())
     assert back == s and isinstance(back.marks, tuple)
+
+
+# ---- a launch that gave no process ID: the root is found by exe ------------------------------------------
+
+def test_find_root_by_exe_when_the_pid_is_unknown():
+    exe = r"C:\Games\X\Game.exe"
+    root = p(500, 1, 10 * S + S // 2, image=r"c:/games/x/GAME.EXE")
+    other_exe = p(501, 1, 10 * S + S // 4, image=r"C:\Games\X\setup.exe")
+    idle = p(0, 0, 10 * S, image=exe)  # pid 0 is never the root
+    unknown = SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {"exe": exe}, {}, ())
+    assert find_root([idle, other_exe, root], unknown) is root
+
+
+def test_find_root_by_exe_ignores_the_same_exe_outside_the_window():
+    exe = r"C:\Games\X\Game.exe"
+    early = p(600, 1, 10 * S - ROOT_SLACK - 1, image=exe)
+    late = p(601, 1, 11 * S + ROOT_SLACK + 1, image=exe)
+    unknown = SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {"exe": exe}, {}, ())
+    assert find_root([early, late], unknown) is None
+    inside = p(602, 1, 11 * S + ROOT_SLACK, image=exe)  # a slow administrator prompt: near launch_after
+    assert find_root([early, late, inside], unknown) is inside
+
+
+def test_find_root_by_exe_picks_the_start_closest_to_the_launch_call():
+    exe = r"C:\Games\X\Game.exe"
+    near = p(700, 1, 10 * S + 1, image=exe)
+    far = p(701, 1, 11 * S, image=exe)
+    unknown = SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {"exe": exe}, {}, ())
+    assert find_root([far, near], unknown) is near
+    assert find_root([far, near], SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {}, {}, ())) is None  # no exe
