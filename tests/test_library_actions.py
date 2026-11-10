@@ -7,7 +7,8 @@ from library_actions import (EXTRAS, LINK, REPAIR, UNDO, UNINSTALL, UPDATE, cata
                              uninstall_checkbox_label)
 from models import Game
 
-LINKS = {"homepage": "https://example.com/", "purchase": "https://example.com/buy"}
+LINKS = [{"url": "https://example.com/forum", "label": "Forum"}, {"url": "https://example.com/", "label": "Homepage"}]
+BUY = "https://example.com/buy"
 
 
 def catalog_game(**kw):
@@ -22,8 +23,11 @@ def record(**kw):
     return SimpleNamespace(**fields)
 
 
-def entry(links=LINKS):
-    return {"id": "entombed", "title": "Entombed", "links": links}
+def entry(links=LINKS, buy=BUY):
+    e = {"id": "entombed", "title": "Entombed", "links": links}
+    if buy:
+        e["pricing"] = {"model": "one-time", "url": buy}
+    return e
 
 
 def summary(items):
@@ -41,12 +45,12 @@ def test_tracked_game_items_in_order():
     assert summary(items) == [
         (UPDATE, "Update", True), (UNDO, "Undo last update", True), (EXTRAS, "Extras…", True),
         (REPAIR, "Repair", True), (UNINSTALL, "Uninstall", True),
-        (LINK, "Open homepage", True), (LINK, "Open purchase page", True)]
-    assert [i.url for i in items if i.action == LINK] == [LINKS["homepage"], LINKS["purchase"]]
+        (LINK, "Open Forum", True), (LINK, "Open Homepage", True), (LINK, "Open purchase page", True)]
+    assert [i.url for i in items if i.action == LINK] == ["https://example.com/forum", "https://example.com/", BUY]
 
 
 def test_update_only_when_available_and_extras_disabled_with_none_left():
-    items = catalog_menu_items(catalog_game(), record(), entry({}), update_available=False, extras_to_add=False)
+    items = catalog_menu_items(catalog_game(), record(), entry([], buy=None), update_available=False, extras_to_add=False)
     assert summary(items) == [(UNDO, "Undo last update", False), (EXTRAS, "Extras…", False),
                               (REPAIR, "Repair", True), (UNINSTALL, "Uninstall", True)]
 
@@ -64,15 +68,15 @@ def test_untracked_game_shows_update_by_hand_and_homepage_only():
     untracked = record(tracked=False, previous={"source": {}})
     items = catalog_menu_items(catalog_game(), untracked, entry(), update_available=True, extras_to_add=True)
     assert summary(items) == [(UPDATE, "Update available: install it by hand", False),
-                              (LINK, "Open homepage", True)]
-    no_update = catalog_menu_items(catalog_game(), untracked, entry({}), update_available=False, extras_to_add=True)
+                              (LINK, "Open Homepage", True)]  # the homepage link, not the first
+    no_update = catalog_menu_items(catalog_game(), untracked, entry([], buy=None), update_available=False, extras_to_add=True)
     assert no_update == []
 
 
 def test_web_catalog_game_gets_its_links_only():
     web = catalog_game(launch_path="https://example.com/play", library_id="")
     assert summary(catalog_menu_items(web, None, entry(), False, False)) == [
-        (LINK, "Open homepage", True), (LINK, "Open purchase page", True)]
+        (LINK, "Open Forum", True), (LINK, "Open Homepage", True), (LINK, "Open purchase page", True)]
 
 
 def test_game_that_left_the_catalog_can_only_be_uninstalled():
@@ -143,7 +147,8 @@ def test_an_unfinished_uninstall_can_be_finished():
     for unfinished in (left_files, left_vendor):
         assert is_uninstall_unfinished(unfinished) and is_uninstallable(unfinished) and not is_tracked(unfinished)
         assert summary(catalog_menu_items(catalog_game(), unfinished, entry(), True, True)) == [
-            (UNINSTALL, "Uninstall", True), (LINK, "Open homepage", True), (LINK, "Open purchase page", True)]
+            (UNINSTALL, "Uninstall", True), (LINK, "Open Forum", True), (LINK, "Open Homepage", True),
+            (LINK, "Open purchase page", True)]
         assert summary(catalog_menu_items(catalog_game(), unfinished, None, False, False)) == [
             (UNINSTALL, "Uninstall", True)]
         assert delete_kind(catalog_game(), unfinished) == "uninstall"
@@ -151,6 +156,6 @@ def test_an_unfinished_uninstall_can_be_finished():
     assert not is_uninstall_unfinished(finished) and not is_uninstallable(finished)
     assert delete_kind(catalog_game(), finished) == "delete"
     assert summary(catalog_menu_items(catalog_game(), finished, entry(), False, False)) == [
-        (LINK, "Open homepage", True), (LINK, "Open purchase page", True)]
+        (LINK, "Open Forum", True), (LINK, "Open Homepage", True), (LINK, "Open purchase page", True)]
     runtime = record(kind="runtime", uninstalled=True, files={"x.dll": object()}, vendor_uninstaller=None)
     assert not is_uninstallable(runtime) and delete_kind(catalog_game(), runtime) == "delete"

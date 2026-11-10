@@ -286,6 +286,17 @@ CATALOG_NO_GAMES = "No games available to choose from."
 CATALOG_NO_GAMES_TO_INSTALL = "No games to install in the list as shown."
 CATALOG_NOT_IN_LIBRARY = "{title} is installed, but Game Chooser can't find it in your Library."
 
+# The Catalog tab's list, filter tree and description (catalog_view); the Library description is the same text
+CATALOG_ROW_UNSUPPORTED = "no longer supported"
+CATALOG_ROW_INSTALLED = "installed"
+CATALOG_TREE_UNSUPPORTED = "No longer supported"
+CATALOG_GENRE = "Genre: {items}"
+CATALOG_GENRES = "Genres: {items}"
+CATALOG_TAGS = "Tags: {items}"
+CATALOG_LANGUAGES = "Languages: {items}"
+CATALOG_CONTAINS = "Games included: {items}"
+CATALOG_UNSUPPORTED = "No longer supported by its developer."
+
 ADDED = "{title} is added"
 
 # The install confirmation dialog

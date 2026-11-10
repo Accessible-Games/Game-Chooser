@@ -6,7 +6,7 @@ ENGINE_DIR = REPO_DIR / "engine"
 
 # Top-level modules that must stay wx-free; append as they are added.
 WX_FREE_MODULES = ["library_manager.py", "install_service.py", "catalog_view.py", "library_actions.py", "install_prefs.py",
-                   "install_choices.py"]
+                   "install_choices.py", "language_names.py"]
 
 _WX_IMPORT = re.compile(r"^\s*(import wx|from wx)", re.M)
 

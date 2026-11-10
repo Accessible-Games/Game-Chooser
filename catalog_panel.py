@@ -29,8 +29,8 @@ import wx
 
 from smart_list import Column, VirtualSmartList
 
-from catalog_view import (FLAG_LABELS, action_kind, action_label, action_verb, build_rows, description_text,
-                          filter_rows, install_candidates, link_items, tree_categories)
+from catalog_view import (action_kind, action_label, action_verb, build_rows, description_text, filter_rows,
+                          install_candidates, link_items, tree_categories, tree_values)
 from description_field import DescriptionField
 from engine import messages
 from engine.entries import current_platform, game_fields, platform_sources
@@ -44,9 +44,12 @@ log = logging.getLogger(__name__)
 TREE_CATEGORIES = [
     ("platform", "Platform"),
     ("genre", "Genre"),
+    ("tag", "Tags"),
+    ("price", "Price"),
+    ("language", "Language"),
     ("developer", "Developer"),
     ("year", "Release Year"),
-    ("flags", "Flags"),
+    ("support", "Support"),
     ("installed", "Installed"),
 ]
 
@@ -95,7 +98,9 @@ class CatalogPanel(wx.Panel):
         self.list.set_columns([
             Column(title="Title", model_field=lambda r: r.title, width=200),
             Column(title="Developer", model_field=lambda r: r.developer, width=180),
-            Column(title="Flags", model_field=lambda r: r.flags_text, width=220),
+            Column(title="Genre", model_field=lambda r: r.genre, width=120),
+            Column(title="Price", model_field=lambda r: r.price, width=200),
+            Column(title="Details", model_field=lambda r: r.details_text, width=200),
         ])
         self.list.SetLabel("Catalog games")
         self.list_ctrl.SetName("Catalog games")
@@ -244,9 +249,8 @@ class CatalogPanel(wx.Panel):
                     continue
                 node = tree.AppendItem(root, label)
                 tree.SetItemData(node, key)
-                for value in sorted(values, key=lambda v: FLAG_LABELS.get(v, v).lower() if key == "flags"
-                                    else v.lower()):
-                    child = tree.AppendItem(node, FLAG_LABELS.get(value, value) if key == "flags" else value)
+                for value in tree_values(key, values):
+                    child = tree.AppendItem(node, value)
                     tree.SetItemData(child, value)
             tree.Expand(root)  # the categories stay collapsed
         finally:

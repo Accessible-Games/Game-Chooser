@@ -1,24 +1,24 @@
 """Catalog tab helpers: turn catalog index entries into list rows, filter-tree categories and description text.
 
-Never imports wx and never fetches anything (the agarchive link is shown as text, a credit only).
+Never imports wx and never fetches anything (an agarchive link is shown like any other link, never fetched).
+Entries follow catalog schema v2; a saved version 1 index may still be shown, so old shapes (links as an object,
+flags) are skipped, never an error.
 """
 import re
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
+from engine import messages
 from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, platform_sources
-
-FLAG_LABELS = {"requires-registration": "needs registration"}
-LINK_LABELS = [
-    ("homepage", "Homepage"),
-    ("purchase", "Buy or register"),
-    ("audiogames_net", "audiogames.net page"),
-    ("agarchive", "Archived at agarchive"),
-]
+from engine.pricing import can_play_free, description_lines, donate_link, price_text, pricing_of, purchase_link
+from language_names import language_name
 
 _UNKNOWN = {"genre": "Unknown Genre", "developer": "Unknown Developer", "year": "Unknown Year"}
 _INSTALLED = "Installed"
 _NOT_INSTALLED = "Not installed"
-_CATEGORY_KEYS = ("platform", "genre", "developer", "year", "flags", "installed")
+_CATEGORY_KEYS = ("platform", "genre", "tag", "price", "language", "developer", "year", "support", "installed")
+# The Price branch: "Can be played for free" first, then the models in the spec's order
+_PRICE_ORDER = [messages.PRICE_CAN_PLAY_FREE, *messages.PRICE_MODELS.values()]
 
 
 @dataclass
@@ -30,20 +30,58 @@ class CatalogRow:
     genres: list[str]
     year: str
     platforms: list[str]
-    flags: list[str]
     installed: bool
     entry: dict
+    tags: list[str]
+    languages: list[str]  # names, such as "French"
+    contains: list[str]
+    unsupported: bool
+    price: str  # how the price reads; empty when not recorded
+    price_values: set[str]  # the Price branch values this row is under
 
     @property
-    def flags_text(self) -> str:
-        parts = [FLAG_LABELS.get(flag, flag) for flag in self.flags]
+    def genre(self) -> str:
+        """The main genre (the first), or empty."""
+        return self.genres[0] if self.genres else ""
+
+    @property
+    def details_text(self) -> str:
+        """The list's Details column: tags, then whether it is no longer supported, then whether it is installed."""
+        parts = list(self.tags)
+        if self.unsupported:
+            parts.append(messages.CATALOG_ROW_UNSUPPORTED)
         if self.installed:
-            parts.append("installed")
+            parts.append(messages.CATALOG_ROW_INSTALLED)
         return ", ".join(parts)
 
 
 def _strings(value) -> list[str]:
-    return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+    """The non-empty strings of a list, in order, each once; anything else gives []."""
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for v in value:
+        if isinstance(v, str) and v.strip() and v.strip() not in result:
+            result.append(v.strip())
+    return result
+
+
+def _languages(entry: dict) -> list[str]:
+    names: list[str] = []
+    for code in _strings(entry.get("languages")):
+        name = language_name(code)
+        if name not in names:
+            names.append(name)
+    return names
+
+
+def _price_values(pricing: dict | None) -> set[str]:
+    if pricing is None:
+        return set()  # not recorded: nothing to filter by, and no "unknown" value
+    values = {messages.PRICE_MODELS[pricing["model"]]}
+    if can_play_free(pricing):
+        values.add(messages.PRICE_CAN_PLAY_FREE)
+    return values
 
 
 def build_rows(entries: list[dict], installed_ids: set[str]) -> list[CatalogRow]:
@@ -55,6 +93,7 @@ def build_rows(entries: list[dict], installed_ids: set[str]) -> list[CatalogRow]
             label = _PLATFORM_LABELS.get(source.get("platform"))
             if label and label not in platforms:
                 platforms.append(label)
+        pricing = pricing_of(entry)
         rows.append(CatalogRow(
             id=entry.get("id", ""),
             title=fields["title"],
@@ -63,20 +102,30 @@ def build_rows(entries: list[dict], installed_ids: set[str]) -> list[CatalogRow]
             genres=_strings(entry.get("genres")),
             year=fields["year"],
             platforms=platforms,
-            flags=_strings(entry.get("flags")),
             installed=entry.get("id") in installed_ids,
             entry=entry,
+            tags=_strings(entry.get("tags")),
+            languages=_languages(entry),
+            contains=_strings(entry.get("contains")),
+            unsupported=entry.get("unsupported") is True,
+            price=price_text(pricing),
+            price_values=_price_values(pricing),
         ))
     return rows
 
 
 def _row_values(row: CatalogRow) -> dict[str, set[str]]:
+    """Each filter-tree category's values for a row. Tags, price, language and support have no "unknown" value:
+    a row that doesn't record them is simply not under them."""
     return {
         "platform": set(row.platforms),
         "genre": set(row.genres) or {_UNKNOWN["genre"]},
+        "tag": set(row.tags),
+        "price": set(row.price_values),
+        "language": set(row.languages),
         "developer": set(row.developers) or {_UNKNOWN["developer"]},
         "year": {row.year or _UNKNOWN["year"]},
-        "flags": set(row.flags),
+        "support": {messages.CATALOG_TREE_UNSUPPORTED} if row.unsupported else set(),
         "installed": {_INSTALLED if row.installed else _NOT_INSTALLED},
     }
 
@@ -89,10 +138,19 @@ def tree_categories(rows) -> dict[str, set[str]]:
     return categories
 
 
+def tree_values(key: str, values) -> list[str]:
+    """A category's values in tree order: Price's "Can be played for free" first and then the models in the
+    spec's order; every other category alphabetically."""
+    if key == "price":
+        return sorted(values, key=lambda v: (_PRICE_ORDER.index(v) if v in _PRICE_ORDER else len(_PRICE_ORDER),
+                                             v.lower()))
+    return sorted(values, key=str.lower)
+
+
 def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[CatalogRow]:
     """OR within a criterion, AND across criteria; an empty or missing criterion matches everything.
-    Search matches title and developer only, case-insensitively; a search containing "unknown" matches nothing
-    (as in the Library's FilterWorker)."""
+    Search matches the title, the developer and the titles of the games a collection contains, case-insensitively;
+    a search containing "unknown" matches nothing (as in the Library's FilterWorker)."""
     term = (search or "").strip().lower()
     if "unknown" in term:
         return []
@@ -101,7 +159,7 @@ def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[Catalo
         values = _row_values(row)
         if any(wanted and not (values[key] & wanted) for key, wanted in criteria.items() if key in values):
             continue
-        if term and not any(term in field.lower() for field in (row.title, row.developer)):
+        if term and not any(term in field.lower() for field in (row.title, row.developer, *row.contains)):
             continue
         result.append(row)
     return result
@@ -149,22 +207,89 @@ def markdown_to_text(md: str) -> str:
     return text.rstrip()
 
 
+def _http(url) -> str | None:
+    """`url` when it is an http(s) address with a host (and no spaces), else None."""
+    if not isinstance(url, str) or any(c.isspace() for c in url):
+        return None
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return None
+    return url if parts.scheme in ("http", "https") and host else None
+
+
+def _host(url: str) -> str:
+    """The site's name for a link without a label: its host name, without "www."."""
+    host = urlsplit(url).hostname or url
+    return host[4:] if host.startswith("www.") else host
+
+
+def _own_links(entry: dict) -> list[tuple[str, str]]:
+    links = entry.get("links")
+    result = []
+    for link in links if isinstance(links, list) else []:  # a version 1 links object is skipped
+        url = _http(link.get("url")) if isinstance(link, dict) else None
+        if url is None:
+            continue
+        label = link.get("label")
+        label = " ".join(label.split()) if isinstance(label, str) else ""
+        result.append((label or _host(url), url))
+    return result
+
+
+def entry_links(entry: dict | None) -> list[tuple[str, str]]:
+    """(label, url) for each web page the entry names, in order: its links as listed (a missing label shows the
+    site's host name), then where to pay or register (pricing.url) and where to support the developer
+    (pricing.donate_url). Only http(s) addresses, each once."""
+    if not isinstance(entry, dict):
+        return []
+    pricing = pricing_of(entry)
+    result = _own_links(entry) + [link for link in (purchase_link(pricing), donate_link(pricing)) if link]
+    seen: set[str] = set()
+    unique = []
+    for label, url in result:
+        if url not in seen:
+            seen.add(url)
+            unique.append((label, url))
+    return unique
+
+
+def _details_lines(entry: dict) -> list[str]:
+    """Price (and its note), genres, tags, languages, the games a collection contains, and whether it is still
+    supported."""
+    lines = description_lines(pricing_of(entry))
+    genres = _strings(entry.get("genres"))
+    if genres:
+        text = messages.CATALOG_GENRE if len(genres) == 1 else messages.CATALOG_GENRES
+        lines.append(text.format(items=", ".join(genres)))
+    for values, text in ((_strings(entry.get("tags")), messages.CATALOG_TAGS),
+                         (_languages(entry), messages.CATALOG_LANGUAGES),
+                         (_strings(entry.get("contains")), messages.CATALOG_CONTAINS)):
+        if values:
+            lines.append(text.format(items=", ".join(values)))
+    if entry.get("unsupported") is True:
+        lines.append(messages.CATALOG_UNSUPPORTED)
+    return lines
+
+
 def description_text(entry: dict | None) -> str:
+    """The description field: the entry's description, then its details, then one line per web page
+    ("label: url", so Enter on the line opens it)."""
     if not entry:
         return ""
     description = entry.get("description")
     body = markdown_to_text(description) if isinstance(description, str) else ""
-    links = entry.get("links")
-    links = links if isinstance(links, dict) else {}
-    lines = [f"{label}: {links[key]}" for key, label in LINK_LABELS
-             if isinstance(links.get(key), str) and links[key]]
-    return "\n\n".join(part for part in (body, "\n".join(lines)) if part)
+    details = "\n".join(_details_lines(entry))
+    links = "\n".join(f"{label}: {url}" for label, url in entry_links(entry))
+    return "\n\n".join(part for part in (body, details, links) if part)
 
 
-_LINK_LINE = re.compile(r"^(?:%s): (https?://\S+)$" % "|".join(re.escape(label) for _, label in LINK_LABELS))
+_LINK_LINE = re.compile(r"^.+?: (https?://\S+)$")
 
 
 def link_at_line(line: str) -> str | None:
+    """The address on a "label: url" line, or None."""
     match = _LINK_LINE.match(line.strip())
     return match.group(1) if match else None
 
@@ -207,20 +332,26 @@ def install_candidates(rows: list[CatalogRow], busy_ids, platform: str | None = 
 
 
 def link_items(entry: dict | None) -> list[tuple[str, str]]:
-    """(menu label, url) for each http(s) link the entry has, in the context menu's order."""
-    links = entry.get("links") if entry else None
-    links = links if isinstance(links, dict) else {}
-    result = []
-    for key, label in _LINK_MENU:
-        url = links.get(key)
-        if isinstance(url, str) and url.startswith(("http://", "https://")):
-            result.append((label, url))
-    return result
+    """(menu label, url) for each of the entry's web pages, in entry_links order: "Open <label>" for its links,
+    "Open purchase page" for pricing.url and "Open donation page" for pricing.donate_url."""
+    if not isinstance(entry, dict):
+        return []
+    pricing = pricing_of(entry)
+    own = {url for _, url in _own_links(entry)}
+    special = {}
+    for link, label in ((donate_link(pricing), messages.MENU_OPEN_DONATE),
+                        (purchase_link(pricing), messages.MENU_OPEN_PURCHASE)):
+        if link and link[1] not in own:
+            special[link[1]] = label
+    return [(special.get(url) or messages.MENU_OPEN_LINK.format(label=label), url)
+            for label, url in entry_links(entry)]
 
 
-_LINK_MENU = [
-    ("homepage", "Open homepage"),
-    ("purchase", "Open purchase page"),
-    ("audiogames_net", "Open audiogames.net page"),
-    ("agarchive", "Open agarchive page"),
-]
+def homepage_item(entry: dict | None) -> tuple[str, str] | None:
+    """The menu item for the game's homepage: its link labelled "Homepage" (any case), else its first link.
+    The pricing pages don't count."""
+    own = _own_links(entry) if isinstance(entry, dict) else []
+    if not own:
+        return None
+    label, url = next(((label, url) for label, url in own if label.lower() == "homepage"), own[0])
+    return messages.MENU_OPEN_LINK.format(label=label), url

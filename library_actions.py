@@ -4,7 +4,7 @@ Remove-library wording. No wx here, so it is unit-tested; main_window and the di
 
 from dataclasses import dataclass
 
-from catalog_view import link_items
+from catalog_view import homepage_item, link_items
 from engine import messages
 
 # Context menu actions for catalog-installed games, in menu order after "Delete"
@@ -65,7 +65,8 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
     """The items that follow "Delete" in the Library context menu.
 
     A game added by hand gets nothing. A catalog web game gets its links. An untracked install gets one disabled
-    item saying its update has to be installed by hand (only while an update is available), plus its homepage.
+    item saying its update has to be installed by hand (only while an update is available), plus its homepage
+    (catalog_view.homepage_item).
     A tracked install gets Update (when one is available), Undo last update, Extras…, Repair, Uninstall and its
     links; while the game is no longer in the catalog, only Uninstall. One whose uninstall stopped partway gets
     Uninstall (to finish it) and its links.
@@ -79,7 +80,8 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
         return links
     if not record.tracked:
         items = [MenuItem(UPDATE, messages.MENU_UPDATE_BY_HAND, enabled=False)] if update_available else []
-        return items + [link for link in links if link.label == "Open homepage"]
+        homepage = homepage_item(entry)
+        return items + ([MenuItem(LINK, homepage[0], url=homepage[1])] if homepage else [])
     if entry is None:  # left the catalog: it can still be uninstalled, nothing else
         return [MenuItem(UNINSTALL, messages.MENU_UNINSTALL)]
     items = [MenuItem(UPDATE, messages.MENU_UPDATE)] if update_available else []
