@@ -1,6 +1,8 @@
 """The test catalog that scripts/serve_test_catalog.py builds: the app accepts its published index."""
+import gzip
 import hashlib
 import importlib.util
+import json
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -9,7 +11,10 @@ import pytest
 from engine.entries import current_platform, is_readable, visible_games
 from engine.errors import DownloadError
 from engine.extract import Extractor
-from engine.index import CatalogIndex
+from engine.index import SUPPORTED_SCHEMA_VERSION, CatalogIndex
+from engine.plan import build_install_plan
+from engine.records import RecordStore
+from tests.engine.fakes import FakeRegistry
 
 ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("serve_test_catalog", ROOT / "scripts" / "serve_test_catalog.py")
@@ -46,7 +51,7 @@ def load(tmp_path, **options):
 
 def test_index_loads_and_every_entry_is_readable(tmp_path):
     _, state = load(tmp_path)
-    assert {"test-game", "test-game-no-path", "test-game-extras", "test-extra"} <= set(state.entries)
+    assert {"test-game", "test-game-no-path", "test-game-extras", "test-extra", "test-game-tar"} <= set(state.entries)
     assert all(is_readable(e) for e in state.entries.values())
     visible = {e["id"] for e in visible_games(state.entries, current_platform())}
     assert {"test-game", "test-game-no-path", "test-game-extras"} <= visible
@@ -72,10 +77,49 @@ def test_version_two_and_the_launch_path_flags(tmp_path):
     assert v2.entries["test-game-no-path"]["launch"] == {"windows": {"path": "launcher/start.bat"}}
 
 
+# The catalog schema v2 genres (docs: catalog-schema-v2 spec)
+GENRES = {"Action", "Adventure", "Arcade", "Board and dice", "Card", "Casino", "Educational", "Fighting",
+          "Interactive fiction", "Music and rhythm", "Platformer", "Puzzle", "Racing", "Role-playing", "Shooter",
+          "Simulation", "Sports", "Strategy", "Trivia", "Word"}
+
+
+def test_published_index_is_schema_version_2(tmp_path):
+    build, state = load(tmp_path)
+    doc = json.loads(gzip.decompress((build / "index.json.gz").read_bytes()))
+    meta = json.loads((build / "index-meta.json").read_text(encoding="utf-8"))
+    assert doc["schema_version"] == meta["schema_version"] == SUPPORTED_SCHEMA_VERSION == 2
+    assert [e["id"] for e in doc["entries"]] == sorted(e["id"] for e in doc["entries"])
+    for entry in state.entries.values():
+        assert "flags" not in entry
+        assert set(entry.get("genres", [])) <= GENRES
+        assert all(isinstance(link, dict) and link["url"].startswith("https://") for link in entry.get("links", []))
+        if entry["kind"] == "extra":
+            assert entry["extends"]
+
+
+def test_free_to_try_game_warns_before_installing(tmp_path):
+    _, state = load(tmp_path)
+    plan = build_install_plan("test-game-no-path", state.entries, [{"id": "a", "path": str(tmp_path)}],
+                              RecordStore(tmp_path / "records"), FakeRegistry(), True, None, "windows")
+    assert plan.warnings == ["This is a test warning, shown before installing.",
+                             "Price: Free to try, $5 to unlock. Buy or register: https://example.com/register"]
+    tar = build_install_plan("test-game-tar", state.entries, [], RecordStore(tmp_path / "records"), FakeRegistry(),
+                             True, None, "windows")
+    assert tar.first_run_size == 50 * 2**20 and tar.warnings == []
+
+
+def test_tar_game_extracts_without_the_bundled_tools(tmp_path):
+    build, state = load(tmp_path)
+    install = state.entries["test-game-tar"]["sources"][0]["install"]
+    root = Extractor(tmp_path / "no-tools").extract(build / "files" / "test-game-tar.tar.gz", tmp_path / "out",
+                                                     install, lambda: False)
+    assert (root / "game.bat").is_file() and (root / "data.dat").is_file()
+
+
 def test_required_extra_is_listed_on_its_game(tmp_path):
     _, state = load(tmp_path)
     assert state.entries["test-game-extras"]["extras"] == [{"id": "test-extra", "required": True}]
-    assert state.entries["test-extra"]["install_into"] == "test-game-extras"
+    assert state.entries["test-extra"]["install_into"] == state.entries["test-extra"]["extends"] == "test-game-extras"
 
 
 @pytest.mark.skipif(not serve.TINY_GAME_SOURCE.is_file(), reason="needs where.exe in System32")

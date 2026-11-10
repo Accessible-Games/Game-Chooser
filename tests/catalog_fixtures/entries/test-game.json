@@ -3,10 +3,15 @@
   "kind": "game",
   "title": "Test Game",
   "developer": ["Game Chooser Tests"],
-  "genres": ["Test"],
+  "genres": ["Arcade"],
   "year": 2026,
   "version": "1.0",
   "description": "A tiny batch-file game for trying installs, updates, undo and uninstall. Version 2 changes a data file and the settings file and adds a level. The player's Saves folder is kept.",
+  "tags": ["Multiplayer"],
+  "links": [
+    {"url": "https://example.com/test-game", "label": "Homepage"},
+    {"url": "https://www.example.org/forum/test-game"}
+  ],
   "launch": {"windows": {"path": "game.bat"}},
   "persist": ["Saves/"],
   "sources": [

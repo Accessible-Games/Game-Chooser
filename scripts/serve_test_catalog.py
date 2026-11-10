@@ -9,10 +9,11 @@ It prints "Serving test catalog at http://127.0.0.1:8765/". Point Preferences > 
   --port N             listen on another port (the default is 8765)
   --build-only         build the catalog and stop, without serving
 
-The entries come from tests/catalog_fixtures/entries/*.json, the files they install from
-tests/catalog_fixtures/games/. The zips, the password 7z, TinyGame.exe (a copy of where.exe) and the index are
-built into tests/catalog_fixtures/_build/ (git-ignored). Only the source files are committed. Every download
-address points at this server; nothing here contacts a real host.
+The entries (catalog schema v2) come from tests/catalog_fixtures/entries/*.json, the files they install from
+tests/catalog_fixtures/games/. The zips, the password 7z, the tar.gz, TinyGame.exe (a copy of where.exe) and the
+index are built into tests/catalog_fixtures/_build/ (git-ignored). Only the source files are committed. Every
+download address points at this server; nothing here contacts a real host. (The entries' web page links point at
+example.com and example.org, which only open when chosen.)
 """
 
 import argparse
@@ -22,6 +23,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import zipfile
@@ -40,6 +42,7 @@ TINY_GAME_SOURCE = Path(r"C:\Windows\System32\where.exe")
 SEVEN_ZIP_PASSWORD = "test-password"
 _ZIP_TIME = (2026, 1, 1, 0, 0, 0)
 _LAUNCHER = "launcher/start.bat"
+SCHEMA_VERSION = 2
 
 
 def base_url(port: int = DEFAULT_PORT) -> str:
@@ -52,6 +55,25 @@ def _zip_dir(source: Path, out: Path) -> None:
             info = zipfile.ZipInfo(path.relative_to(source).as_posix(), _ZIP_TIME)
             info.compress_type = zipfile.ZIP_DEFLATED
             z.writestr(info, path.read_bytes())
+
+
+def _tar_gz_dir(source: Path, out: Path) -> None:
+    """A .tar.gz of `source`'s contents (its top folder included), with fixed times so it builds the same."""
+    def fixed(info: tarfile.TarInfo) -> tarfile.TarInfo:
+        info.mtime, info.uid, info.gid, info.uname, info.gname = 1767225600, 0, 0, "", ""
+        return info
+
+    with tarfile.open(out, "w:gz") as tar:
+        for path in sorted(p for p in source.rglob("*") if p.is_file()):
+            tar.add(path, arcname=path.relative_to(source.parent).as_posix(), filter=fixed)
+
+
+def _add_extras(entries: list[dict]) -> None:
+    """Each entry's `extras`, as catalog-index computes them: every entry whose `extends` names it, by id."""
+    for entry in entries:
+        extras = sorted((e["id"], bool(e.get("required"))) for e in entries if e.get("extends") == entry["id"])
+        if extras:
+            entry["extras"] = [{"id": i, "required": required} for i, required in extras]
 
 
 def _seven_zip_dir(source: Path, out: Path, seven_zip: Path, password: str) -> None:
@@ -90,6 +112,7 @@ def build_catalog(out_dir: Path = DEFAULT_BUILD_DIR, port: int = DEFAULT_PORT, v
         "test-game-no-path": ("test-game-no-path.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-no-path", p)),
         "test-game-extras": ("test-game-extras.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-extras", p)),
         "test-extra": ("test-extra.zip", lambda p: _zip_dir(GAMES_DIR / "test-extra", p)),
+        "test-game-tar": ("test-game-tar.tar.gz", lambda p: _tar_gz_dir(GAMES_DIR / "test-game-tar" / "TarGame", p)),
     }
     if seven_zip is not None:
         builds["test-game-7z"] = ("test-game-7z.7z", lambda p: _seven_zip_dir(
@@ -111,12 +134,14 @@ def build_catalog(out_dir: Path = DEFAULT_BUILD_DIR, port: int = DEFAULT_PORT, v
         if entry["id"] == "test-game-no-path" and add_launch_path:
             entry["launch"] = {"windows": {"path": _LAUNCHER}}
         entries.append(entry)
+    entries.sort(key=lambda e: e["id"])
+    _add_extras(entries)
 
-    doc = {"schema_version": 1, "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    doc = {"schema_version": SCHEMA_VERSION, "generated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
            "entries": entries}
     gz = gzip.compress(json.dumps(doc, indent=1).encode("utf-8"), mtime=0)
     (out_dir / "index.json.gz").write_bytes(gz)
-    meta = {"schema_version": 1, "generated_at": doc["generated_at"], "entry_count": len(entries),
+    meta = {"schema_version": SCHEMA_VERSION, "generated_at": doc["generated_at"], "entry_count": len(entries),
             "sha256": hashlib.sha256(gz).hexdigest(), "index_url": "index.json.gz"}
     (out_dir / "index-meta.json").write_text(json.dumps(meta), encoding="utf-8")
     return doc
