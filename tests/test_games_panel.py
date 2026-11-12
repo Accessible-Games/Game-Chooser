@@ -472,6 +472,65 @@ def test_two_games_with_one_launch_path_are_two_rows_that_stay_apart(make_view):
     assert view.selected_row().game is games[1] and view.action_btn.GetLabel() == "Launch Second"
 
 
+def twins():
+    """Alpha and Mike Twin share a launch path (Locate has no duplicate check); Alpha comes first in games.json"""
+    return [Game(title="Alpha", launch_path="C:/games/same.exe"), Game(title="Bravo", launch_path="C:/games/b.exe"),
+            Game(title="Charlie", launch_path="C:/games/c.exe"),
+            Game(title="Mike Twin", launch_path="C:/games/same.exe")]
+
+
+def test_deleting_the_first_of_two_games_with_one_launch_path_leaves_the_selection_on_its_row(make_view):
+    """The other one takes over the deleted game's row id; the selection must not jump to it"""
+    games = twins()
+    view = make_view(idle_label="Launch")
+    view.set_rows(library_rows(games, lambda game: None))
+    player_selects(view, 0)
+    del games[0]  # Del on Alpha
+    view.set_rows(library_rows(games, lambda game: None))
+    assert titles(view) == ["Bravo", "Charlie", "Mike Twin"]
+    assert (selected(view), focused(view), view.action_btn.GetLabel()) == (0, 0, "Launch Bravo")
+    assert saved(view)["last_selected"] == "C:/games/b.exe"
+
+
+def test_a_game_given_another_launch_path_stays_selected_and_is_the_one_the_next_start_selects(make_view):
+    """Ctrl+E or Locate on the first of two games with one launch path: its row id changes and the other game
+    takes the old one over. Enter must still launch the edited game, now and after a restart."""
+    games = twins()
+    view = make_view(idle_label="Launch")
+    view.set_rows(library_rows(games, lambda game: None))
+    player_selects(view, 0)
+    games[0].launch_path = "C:/games/moved.exe"
+    view.set_rows(library_rows(games, lambda game: None))
+    assert view.selected_row().game is games[0] and view.action_btn.GetLabel() == "Launch Alpha"
+    assert (selected(view), focused(view)) == (0, 0) and saved(view)["last_selected"] == "C:/games/moved.exe"
+    restarted = make_view({"last_selected": saved(view)["last_selected"]}, idle_label="Launch")
+    restarted.set_rows(library_rows(games, lambda game: None))
+    assert restarted.selected_row().game is games[0]
+    # the same when the game is not the first with that path: only its own id changes
+    games[3].launch_path = "C:/games/twin.exe"
+    player_selects(view, 3)
+    view.set_rows(library_rows(games, lambda game: None))
+    assert view.selected_row().game is games[3] and saved(view)["last_selected"] == "C:/games/twin.exe"
+
+
+def test_a_selected_catalog_game_whose_object_was_replaced_stays_selected(make_view):
+    """What a finished job and an index take do to a catalog game in the Library: a new Game, the same catalog id"""
+    games = [Game(title="Hand", launch_path="C:/games/hand.exe"),
+             Game(title="Alpha", launch_path="Alpha/alpha.exe", library_id="lib", catalog_id="alpha"),
+             Game(title="Zed", launch_path="C:/games/zed.exe")]
+    view = make_view(idle_label="Launch")
+    view.set_rows(library_rows(games, lambda game: None))
+    player_selects(view, 1)
+    player_selects(view, 0)  # Alpha
+    games[1] = Game.from_dict({**games[1].to_dict(), "title": "Omega"})  # replaced, and renamed by the catalog
+    view.set_rows(library_rows(games, lambda game: None))
+    assert view.selected_row().game is games[1] and view.action_btn.GetLabel() == "Launch Omega"
+    assert saved(view)["last_selected"] == "alpha"
+    del games[1]  # uninstalled: the row number
+    view.set_rows(library_rows(games, lambda game: None))
+    assert (selected(view), view.action_btn.GetLabel()) == (1, "Launch Zed")
+
+
 def test_a_background_refill_scrolls_only_to_a_selected_row_that_was_in_view(make_view):
     """A finished job or a Status result must not scroll the list away from where the player scrolled it. The
     list is never shown here, so what it has in view is given by hand."""

@@ -123,8 +123,10 @@ def library_rows(games, entry_for) -> list[CatalogRow]:
 
     The id is the catalog id, else the launch path: it stays the same when the Game object is replaced. Two
     games can share a launch path (Locate has no duplicate check, games.json can be edited by hand); a repeat
-    then gets its number among them added, so every row has an id of its own. The values are the game's own
-    (games.json): one genre, the developer text as one value, even when it names several people."""
+    then gets its number among them added, so every row has an id of its own. That number follows the games'
+    order: when the first of them is deleted or gets another path, its id passes to the next one, so the selected
+    game is looked for by its object first (`pick_index`). The values are the game's own (games.json): one genre,
+    the developer text as one value, even when it names several people."""
     rows, used = [], set()
     for game in games:
         base = row_id = game.catalog_id or game.launch_path
@@ -200,14 +202,28 @@ def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[Catalo
     return result
 
 
-def pick_index(rows, wanted_id, fallback: int) -> int:
+def pick_index(rows, wanted_id, fallback: int, wanted_game=None) -> int:
     """The row to select in a list that was just refilled: the wanted game's; when that game is not listed, row
-    number `fallback`, clamped to the list; -1 for an empty list."""
+    number `fallback`, clamped to the list; -1 for an empty list.
+
+    `wanted_game` is the Game of the row that was selected (a Library row; a Catalog row has none, and at the
+    first fill there is no row). The row that holds that same object is the game, whatever its id is now: a new
+    launch path changes the id of a game added by hand, and the old id may then be another game's (two games
+    with one launch path). A game added by hand is never another object, so when no row holds it, it is gone and
+    its id is not asked. A catalog game's object is replaced by a finished job or an index take: its catalog id
+    finds it then. `wanted_id` alone decides for a Catalog row and at the first fill."""
     if not rows:
         return -1
-    for index, row in enumerate(rows):
-        if row.id == wanted_id:
-            return index
+    by_id = True
+    if wanted_game is not None:
+        for index, row in enumerate(rows):
+            if row.game is wanted_game:
+                return index
+        by_id = bool(wanted_game.catalog_id)
+    if by_id:
+        for index, row in enumerate(rows):
+            if row.id == wanted_id:
+                return index
     return min(max(fallback, 0), len(rows) - 1)
 
 

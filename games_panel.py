@@ -23,6 +23,8 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
 - After every refill or sort the action label and the description are set directly, never left to a selection
   event: wx fires none when the selected row number stays the same and another game moves into it.
 - Every programmatic select also sets the list's focused item, so the arrow keys start from the selected game.
+- The selected game stays selected through every refill. A Library row is found again by its Game object (its
+  id, the launch path, can change or pass to another game), a Catalog row by its id (`catalog_view.pick_index`).
 - Every change to the games comes in through `set_rows`, which also brings the tree up to date: it is rebuilt
   only when what it shows changed, and a rebuild keeps the player's tree selections, the open categories and
   the tree's focused item.
@@ -343,9 +345,10 @@ class GamesPanel(wx.Panel):
         self._fill(by_player=True)
 
     def _fill(self, by_player: bool):
-        """Filter and sort the rows into the list and select the game that was selected (at startup, the one
-        remembered from the last run). The action label and the description are set here, never left to a
-        selection event: wx fires none when the selected row number stays the same and another game moves into it.
+        """Filter and sort the rows into the list and select the game that was selected (`pick_index` finds it; at
+        startup, the one remembered from the last run). The action label and the description are set here, never
+        left to a selection event: wx fires none when the selected row number stays the same and another game
+        moves into it.
 
         `by_player`: the player changed a filter or the sort order. Then a selected game that is no longer listed
         gives way to the first row, and the selected row is brought into view. Otherwise (the games changed, or a
@@ -364,7 +367,7 @@ class GamesPanel(wx.Panel):
         try:
             self.displayed = rows
             self.list.update_count(len(rows))
-            index = pick_index(rows, wanted, 0 if by_player else old_index)
+            index = pick_index(rows, wanted, 0 if by_player else old_index, old.game if old is not None else None)
             if index >= 0:
                 self._select(index, scroll)
             if rows and not self.list.control.use_dataview:  # a DataViewCtrl (macOS) redraws on the new count
@@ -372,7 +375,8 @@ class GamesPanel(wx.Panel):
         finally:
             self._populating = False
         if not by_player and old is not None and index >= 0 and rows[index].id != wanted:
-            # The selected game is gone, so the one now in its row is what the next start selects
+            # The selected row has another id now: the game got one (a new launch path), or it is gone and
+            # another game is in its row. Either way that id is what the next start selects.
             self._saved()[self._key("last_selected")] = rows[index].id
         self._show_selection()
 

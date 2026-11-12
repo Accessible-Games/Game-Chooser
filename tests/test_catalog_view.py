@@ -210,6 +210,36 @@ def test_pick_index_finds_the_wanted_game_else_the_clamped_fallback_row():
     assert pick_index([], "troopanum", 3) == -1  # an empty list selects nothing
 
 
+def test_pick_index_looks_for_the_selected_library_game_itself_before_its_id():
+    """The id of a game added by hand is its launch path, which Ctrl+E and Locate change and which another game
+    can share: then the id passes to that other game. The Game object is the game."""
+    same = "C:/games/same.exe"
+    first, other = Game(title="Alpha", launch_path=same), Game(title="Bravo", launch_path="C:/games/bravo.exe")
+    twin = Game(title="Mike Twin", launch_path=same)
+    installed = Game(title="Entombed", launch_path="Entombed/e.exe", library_id="lib", catalog_id="entombed")
+
+    def rows_of(*games):
+        return library_rows(list(games), lambda game: None)
+
+    assert [r.id for r in rows_of(first, other, twin, installed)][0] == same
+    # The first of the two is deleted: the twin has its id now, and must not be taken for it. A game added by
+    # hand that no row holds is gone, so the row number decides.
+    left = rows_of(other, twin, installed)
+    assert left[1].id == same
+    assert pick_index(left, same, 0, first) == 0 and pick_index(left, same, 2, first) == 2
+    # It gets another launch path instead: found by the object, under its new id
+    first.launch_path = "C:/games/moved.exe"
+    moved = rows_of(first, other, twin, installed)
+    assert (moved[0].id, moved[2].id) == ("C:/games/moved.exe", same) and pick_index(moved, same, 3, first) == 0
+    # A catalog game's object is replaced by a finished job or an index take: then its id finds it
+    replaced = Game.from_dict(installed.to_dict())
+    assert pick_index(rows_of(first, other, twin, replaced), "entombed", 0, installed) == 3
+    assert pick_index(rows_of(first, other, twin, installed), "entombed", 0, installed) == 3  # or it is still there
+    assert pick_index(rows_of(first, other, twin), "entombed", 1, installed) == 1  # uninstalled: the row number
+    # With no game (a Catalog row, the first fill) the id is all there is
+    assert pick_index(moved, same, 0) == 2 and pick_index(moved, same, 0, None) == 2
+
+
 def _library():
     by_hand = Game(title="Alpha", genre="Action", developer="Ann Dev, Bob Dev", year="2001",
                    platforms=["Windows", "macOS"], launch_path="C:/games/alpha.exe")

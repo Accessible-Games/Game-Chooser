@@ -64,18 +64,25 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
 - A list is refilled in three ways only: `set_rows` (the games changed), `refill()` (what the rows show changed:
   the Status column) and `apply_filters()` (the player changed the search, the tree, View > Libraries, View >
   Filter Tree or the sort order).
+- The selected game stays selected through every refill; `catalog_view.pick_index` finds its row. A Library row
+  is found by its `Game` object, so a rename or a new launch path (Ctrl+E, Locate) keeps it selected. A game
+  added by hand is never another object: when no row holds it, it is gone. A catalog game's object is replaced by
+  a finished job or an index take, and its catalog id finds it then. A Catalog row, and the remembered row at the
+  first fill, are found by the row id.
+- A row's id is the catalog id, else the launch path. `library_rows` numbers a launch path that repeats, in the
+  games' order, so two rows never share an id; but such an id passes to the other game when the first is deleted
+  or gets another path, which is why the object is looked for first.
 - `set_rows` and `refill` are background refreshes. They never scroll the list away from where the player
   scrolled it: the selected row is brought into view only when it was in view before. A selected game that is no
   longer listed (Delete, an uninstall, a game that left the catalog) leaves the selection on its row number,
-  clamped to the list, and that row becomes the remembered one.
+  clamped to the list.
 - After `apply_filters` the selected row is brought into view, and a selected game the filter leaves out gives
-  way to the first row. `catalog_view.pick_index` picks the row in both cases.
-- A row is known by its id: the catalog id, else the launch path. `library_rows` numbers a launch path that
-  repeats, so two games never share an id.
+  way to the first row.
 - `set_rows` also syncs the tree. It is rebuilt only when what it shows changed, and a rebuild keeps the
   player's tree selections, the open categories and the tree's focused item.
-- The remembered game (`last_selected`, what the next start selects) changes only when the player moves the
-  selection, or when the selected game left the list.
+- The remembered game (`last_selected`, a row id: what the next start selects) changes only when the player
+  moves the selection, or when a background refresh leaves the selected row with another id: the game got a new
+  launch path, or it left the list and another game is in its row.
 - A filter is applied first and saved second; a config save that fails is logged (`GamesPanel.save_config`),
   never raised.
 - `focus_list()` takes no focus while `MainFrame.initializing` or `dialog_active` is true. The view moves focus

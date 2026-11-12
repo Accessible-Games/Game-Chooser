@@ -849,7 +849,7 @@ class MainFrame(wx.Frame):
                             live.launch_path = new_path
                             live.library_id = ""
                             self.library_manager.save_games()
-                            self.games_changed()  # its row is known by its launch path
+                            self.games_changed()  # the view finds it again by the Game object, under its new id
                     dlg.Destroy()
                 return
 
@@ -1000,7 +1000,9 @@ class MainFrame(wx.Frame):
                     del games[i]
                     break
             self.library_manager.save_games()
-            self.games_changed()  # the selection keeps its row number (GamesPanel.set_rows)
+            # The selection stays on the deleted game's row number, also when another game has the same launch
+            # path and so takes over its row id (catalog_view.pick_index)
+            self.games_changed()
 
     def _forget_game(self, game):
         """Delete an untracked catalog install: its record goes and it leaves the list; its files stay"""
