@@ -91,7 +91,9 @@ Nothing outside `tracing/` and its tests (`tests/tracing/`) imports it; the one 
 `game-chooser.py`, inside `try/except ImportError`.
 
 ### Focus
-The progress area and background refreshes never move focus.
+The progress area and background refreshes never move focus. One exception, in `GamesPanel`: when the control
+that has focus is about to become unusable (the action button as its list empties or the progress area takes its
+place, the progress area as it hides), focus goes to that tab's games list; never while a dialog is open.
 
 ### Migration
 No migration (alpha): write no migration code.

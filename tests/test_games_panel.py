@@ -528,6 +528,14 @@ def test_a_tree_rebuild_keeps_the_open_categories_and_the_focused_item(make_view
     assert tree.GetItemText(tree.GetFocusedItem()) == "Genre" and view._selected_paths() == ["Genre/Puzzle"]
 
 
+def test_only_values_are_selected_from_the_saved_tree_selections(make_view):
+    """A category's own name in a hand-edited config.json selects nothing"""
+    view = make_view({"tree_selections": ["Genre", "Genre/Action", "Genre/Gone"]})
+    view.set_rows(rows(ALPHA, BRAVO))
+    tree = view.tree_ctrl
+    assert [tree.GetItemText(item) for item in tree.GetSelections()] == ["Action"] and titles(view) == ["Bravo"]
+
+
 def test_the_splitter_goes_where_it_was_saved_or_to_the_middle_and_is_saved(make_view):
     """restore_sash() is called once the window has its size. Left to wx, the sash would sit at the minimum pane
     size (100) for good, as the Catalog's did."""

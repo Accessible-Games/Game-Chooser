@@ -68,7 +68,8 @@ Which thread each member runs on: see CLAUDE.md (Threading).
 ## Installing and the Library's catalog actions
 - **Install confirmation** (`InstallConfirmDialog`; wording and decisions in `install_choices.py`): library
   choice (or a fixed one), optional extras, dependencies, and a blocked reason from `InstallService.blocked`.
-  Returns an `InstallChoice(library_id, library_path, extras)`.
+  Returns an `InstallChoice(library_id, library_path, extras)`. Both tabs open it through
+  `MainFrame.confirm_install(plan, fixed_library=None)`, and say things through `MainFrame._tell`.
 - **Progress area** (`ProgressArea`): shows the queue's current job, never the selected game. One copy on the
   Catalog tab and one beside Launch, all driven by `MainFrame._sync_progress`. Done appears while an installer
   runs; Cancel cancels the job. Focus: see CLAUDE.md (Focus).

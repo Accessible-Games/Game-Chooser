@@ -24,10 +24,15 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
   event: wx fires none when the selected row number stays the same and another game moves into it.
 - Every programmatic select also sets the list's focused item, so the arrow keys start from the selected game.
 - Every change to the games comes in through `set_rows`, which also brings the tree up to date: it is rebuilt
-  only when what it shows changed, and the player's tree selections are kept.
-- When the games change and the selected game is no longer listed, the selection keeps its row number; a filter
-  the player changes goes to the first row instead.
+  only when what it shows changed, and a rebuild keeps the player's tree selections, the open categories and
+  the tree's focused item.
+- `set_rows` and `refill` are background refreshes: they never scroll the list away from where the player
+  scrolled it, and when the selected game is no longer listed the selection keeps its row number. A filter the
+  player changes (`apply_filters`) brings the selected row into view and falls back to the first row instead.
 - A filter is applied first and saved second, and a save that fails is logged, never raised.
+- The view moves focus on its own in one case only, to its list: the control that has focus is about to become
+  unusable (the action button as the list empties or the progress area takes its place; the progress area as
+  it hides). Never while a dialog is open or the app is starting.
 What differs between the tabs is a setting of `GamesPanel` or lives in the tab's own code (what a row's action
 does, its context menu, the Catalog's status line).
 """
@@ -215,7 +220,8 @@ class GamesPanel(wx.Panel):
         self.on_tree_selection()
 
     def _sync_tree(self):
-        """Rebuild the tree only when what it shows changed, keeping the player's selections"""
+        """Rebuild the tree only when what it shows changed, keeping the player's selections, the open categories
+        and the tree's focused item"""
         values = tree_categories(self._all_rows)
         nodes = [(key, label, tree_values(key, values[key])) for key, label in self.categories
                  if key in self.tree_keys and values.get(key)]
@@ -296,7 +302,7 @@ class GamesPanel(wx.Panel):
                 if path in items:
                     tree.Expand(items[path])
             for path in selected:
-                if path in items:
+                if path in items and "/" in path:  # a value's path; a category selects nothing
                     tree.SelectItem(items[path], True)
             item = focused and (items.get(focused) or items.get(focused.split("/")[0]))
             if item:
@@ -331,9 +337,9 @@ class GamesPanel(wx.Panel):
         event.Skip()
 
     def apply_filters(self):
-        """A filter or the sort order changed (the search, the tree, what `row_filter` leaves out, a sort key's
-        values): refill the list. The selected game stays selected; when the new filter leaves it out, the
-        selection goes to the first row."""
+        """The player changed a filter or the sort order (the search, the tree, what `row_filter` leaves out):
+        refill the list and bring the selected row into view. The selected game stays selected; when the new
+        filter leaves it out, the selection goes to the first row."""
         self._fill(by_player=True)
 
     def _fill(self, by_player: bool):
@@ -487,7 +493,7 @@ class GamesPanel(wx.Panel):
                 act(row)
 
     def focus_list(self):
-        """Put keyboard focus in the games list (screen reader pattern: Select, Focus, SetFocus).
+        """Put keyboard focus in the games list (screen reader pattern: select, focused item, SetFocus).
         Not while the app is starting up (the first-run dialog may own focus) or a dialog is open."""
         if not self or self.frame.initializing or self.frame.dialog_active:
             return

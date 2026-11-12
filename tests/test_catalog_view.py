@@ -257,7 +257,7 @@ def test_library_row_ids_are_unique_when_games_share_a_launch_path():
     assert library_rows(games[2:], lambda game: None)[0].id == same
 
 
-def test_library_rows_show_what_the_library_tree_showed():
+def test_library_rows_give_the_tree_each_field_as_one_value():
     _, rows = _library()
     cats = tree_categories(rows)
     assert cats["platform"] == {"Windows", "macOS", "Web"}

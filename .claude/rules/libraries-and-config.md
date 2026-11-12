@@ -38,12 +38,11 @@ paths:
 - `libraries`: `[{"id", "path"}]`
 - `install`: `catalog_url` (default `DEFAULT_CATALOG_URL`), `register_shared_components` (default true),
   `last_library` (library last chosen for an install)
-- `SavedState`: `window_size`, `window_position`, `last_tab` ("library" or "catalog"), `tree_expansion`. Each
-  tab's games view (`GamesPanel`) keeps `last_selected` (the selected row's id: the catalog id, else the launch
-  path), `last_search`, `tree_selections` (path strings such as `Platform/Windows`) and `column_widths`: the
-  Library under those names, the Catalog under `catalog_last_selected`, `catalog_last_search`,
-  `catalog_tree_selections` and `catalog_column_widths`. Library only: `splitter_position`, `sort_column`,
-  `sort_ascending`, `tree_filters` (subset of platform/genre/developer/year);
+- `SavedState`: `window_size`, `window_position`, `last_tab` ("library" or "catalog"). Each tab's games view
+  (`GamesPanel`) keeps `last_selected` (the selected row's id: the catalog id, else the launch path),
+  `last_search`, `tree_selections` (path strings such as `Platform/Windows`), `column_widths` and
+  `splitter_position`: the Library under those names, the Catalog under the same names with `catalog_` in front.
+  Library only: `sort_column`, `sort_ascending`, `tree_filters` (subset of platform/genre/developer/year);
   `hidden_libraries` is added when the main window starts, if it is not there yet.
 - A missing config starts from defaults (first run); missing keys (also inside `SavedState` and `install`) are
   filled in.

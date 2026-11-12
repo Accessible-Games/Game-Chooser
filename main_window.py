@@ -313,7 +313,7 @@ class MainFrame(wx.Frame):
         self.delete_game_item.Enable(on_library)
 
     def focus_active_list(self):
-        """Move keyboard focus to the active tab's games list (screen reader pattern: Select, Focus, SetFocus).
+        """Move keyboard focus to the active tab's games list (screen reader pattern: select, focused item, SetFocus).
         Not while the app is starting up or a dialog is open (GamesPanel.focus_list)."""
         if not self:  # the window closed before this ran
             return
