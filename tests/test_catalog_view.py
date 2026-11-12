@@ -1,6 +1,6 @@
 from catalog_view import (action_kind, action_label, build_rows, link_items, description_text, entry_links, filter_rows,
                           homepage_item, initial_tab, link_at_line, install_candidates, markdown_to_text,
-                          tree_categories, tree_values)
+                          pick_index, tree_categories, tree_values)
 
 SRC = [{"platform": "windows", "install": {"method": "zip"}, "url": "https://x/e.zip"}]
 entombed = {"id": "entombed", "kind": "game", "title": "Entombed", "developer": ["Driftwood Entertainment"],
@@ -198,3 +198,12 @@ def test_install_candidates_only_games_that_install_and_are_not_busy():
     assert [r.id for r in install_candidates(rows, {"minimal"}, "windows")] == ["entombed"]
     assert [r.id for r in install_candidates(rows, set(), "windows")] == ["entombed", "minimal"]
     assert install_candidates([], set(), "windows") == []
+
+
+def test_pick_index_finds_the_wanted_game_else_the_clamped_fallback_row():
+    rows = build_rows([entombed, troopanum, minimal_entry], set())
+    assert pick_index(rows, "troopanum", 0) == 1  # the wanted game, wherever it is now
+    assert pick_index(rows, "gone", 1) == 1  # not listed: the fallback row number
+    assert pick_index(rows, "gone", 7) == 2  # clamped to the last row
+    assert pick_index(rows, "gone", -1) == 0 and pick_index(rows, None, -1) == 0  # nothing was selected before
+    assert pick_index([], "troopanum", 3) == -1  # an empty list selects nothing

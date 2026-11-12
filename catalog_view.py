@@ -165,6 +165,17 @@ def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[Catalo
     return result
 
 
+def pick_index(rows, wanted_id, fallback: int) -> int:
+    """The row to select in a list that was just refilled: the wanted game's; when that game is not listed, row
+    number `fallback`, clamped to the list; -1 for an empty list."""
+    if not rows:
+        return -1
+    for index, row in enumerate(rows):
+        if row.id == wanted_id:
+            return index
+    return min(max(fallback, 0), len(rows) - 1)
+
+
 _FENCE = re.compile(r"^[ \t]*(```|~~~)")
 
 

@@ -22,13 +22,17 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`);
 its context menu holds are the tab's.
 """
 
+import logging
+
 import wx
 
 from smart_list import VirtualSmartList
 
-from catalog_view import action_label, description_text, filter_rows, tree_categories, tree_values
+from catalog_view import action_label, description_text, filter_rows, pick_index, tree_categories, tree_values
 from description_field import DescriptionField
 from progress_area import ProgressArea
+
+log = logging.getLogger(__name__)
 
 
 class GamesPanel(wx.Panel):
@@ -50,7 +54,6 @@ class GamesPanel(wx.Panel):
         self.displayed = []  # the rows in the list now (filtered and sorted)
         self._categories = None  # the tree's categories; None until the tree is first built
         self._tree_has_values = False  # until it is, the saved tree selections wait (offline start, no cache)
-        self._selected_id = self._saved()[self._key("last_selected")]
         self._populating = False
         self.restoring_tree = False
 
@@ -125,8 +128,13 @@ class GamesPanel(wx.Panel):
         """This tab's SavedState key"""
         return self.state_prefix + name
 
-    def _save_config(self):
-        self.frame.library_manager.save_config()
+    def save_config(self):
+        """Write the config. A save that fails is logged and never stops what the player was doing: the change
+        stays in memory and is written with the next save that works."""
+        try:
+            self.frame.library_manager.save_config()
+        except OSError as e:
+            log.warning("Couldn't save the config: %s", e)
 
     def _get_virtual_item(self, index):
         return self.displayed[index] if 0 <= index < len(self.displayed) else None
@@ -138,11 +146,12 @@ class GamesPanel(wx.Panel):
     # ---- rows, tree and list -----------------------------------------------------------------------------------
 
     def set_rows(self, rows):
-        """Show these rows (the games changed, or what is installed) and re-filter, keeping the selected game
-        selected"""
+        """Every change to the games comes through here: show these rows, bring the tree up to date (its
+        selections kept) and refill the list. The selected game stays selected; when it is no longer listed
+        (deleted, uninstalled, gone from the catalog) the selection keeps its row number."""
         self._all_rows = rows
         self._sync_tree()
-        self.apply_filters()
+        self._fill(stay=True)
 
     def _sync_tree(self):
         categories = tree_categories(self._all_rows)
@@ -215,40 +224,60 @@ class GamesPanel(wx.Panel):
             criteria.setdefault(tree.GetItemData(parent), set()).add(tree.GetItemData(item))
         return criteria
 
-    def on_tree_selection(self, event):
+    def on_tree_selection(self, event=None):
+        """The player changed the tree's selection: filter first, then save it"""
         if self.restoring_tree:
             return
-        self._saved()[self._key("tree_selections")] = self._selected_paths()
-        self._save_config()
         self.apply_filters()
+        self._saved()[self._key("tree_selections")] = self._selected_paths()
+        self.save_config()
 
     def on_tree_key(self, event):
         if event.GetKeyCode() == wx.WXK_ESCAPE:
-            self.tree_ctrl.UnselectAll()  # clears every filter
+            self.restoring_tree = True  # UnselectAll fires a change event only when something was selected,
+            try:                        # so its event is ignored and the filters are applied here either way
+                self.tree_ctrl.UnselectAll()  # clears every filter
+            finally:
+                self.restoring_tree = False
+            self.on_tree_selection()
             return
         event.Skip()
 
     def apply_filters(self):
-        """Filter and sort the rows into the list, keeping the same game selected where it is still shown"""
+        """The player changed the search or the tree: refill the list. The selected game stays selected; when
+        the new filter leaves it out, the selection goes to the first row."""
+        self._fill(stay=False)
+
+    def _fill(self, stay: bool):
+        """Filter and sort the rows into the list and select the game that was selected (at startup, the one
+        remembered from the last run). When it is not listed, the selection keeps its row number (`stay`) or
+        goes to the first row. The action label and the description are set here, never left to a selection
+        event: wx fires none when the selected row number stays the same and another game moves into it."""
         rows = filter_rows(self._all_rows, self.search_combo.GetValue(), self._criteria())
         rows.sort(key=lambda r: (r.title.lower(), r.id))
-        wanted = self._selected_id
-        if self.selected_row() is not None:
-            wanted = self.selected_row().id
+        old, old_index = self.selected_row(), self.list.get_selected_index()
+        wanted = old.id if old is not None else self._saved()[self._key("last_selected")]
         self._populating = True  # the selection chosen here is not the player's, so it isn't saved
         try:
             self.displayed = rows
             self.list.update_count(len(rows))
-            index = next((i for i, r in enumerate(rows) if r.id == wanted), 0 if rows else -1)
+            index = pick_index(rows, wanted, old_index if stay else 0)
             if index >= 0:
-                self.list.control.Select(index, True)
-                if not self.list.control.use_dataview:
-                    self.list_ctrl.EnsureVisible(index)
+                self._select(index)
             if rows:
                 self.list.refresh()
         finally:
             self._populating = False
+        if stay and old is not None and index >= 0 and rows[index].id != wanted:
+            # The selected game is gone, so the one now in its row is what the next start selects
+            self._saved()[self._key("last_selected")] = rows[index].id
         self._show_selection()
+
+    def _select(self, index):
+        """Select a row and make it the list's focused item too, so the arrow keys start from it"""
+        self.list.control.Select(index, True)
+        if not self.list.control.use_dataview:
+            self.list_ctrl.Focus(index)  # also scrolls it into view
 
     def _show_selection(self):
         row = self.selected_row()
@@ -276,16 +305,13 @@ class GamesPanel(wx.Panel):
         row = self.selected_row()
         self._show_selection()
         if row is not None and not self._populating:
-            self._selected_id = row.id
             self._saved()[self._key("last_selected")] = row.id
-            self._save_config()
+            self.save_config()
 
     def select_row(self, row):
         for index, shown in enumerate(self.displayed):
             if shown.id == row.id:
-                self.list.control.Select(index, True)
-                if not self.list.control.use_dataview:
-                    self.list_ctrl.EnsureVisible(index)
+                self._select(index)
                 self._show_selection()
                 return
 
@@ -298,9 +324,7 @@ class GamesPanel(wx.Panel):
         if index < 0 and self.displayed:
             index = 0
         if index >= 0:
-            self.list.control.Select(index, True)
-            if not self.list.control.use_dataview:
-                self.list_ctrl.Focus(index)
+            self._select(index)
         self.list.control.SetFocus()
 
     def on_list_key(self, event):
