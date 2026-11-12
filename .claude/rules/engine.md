@@ -56,8 +56,31 @@ sits beside them. `scripts/fetch_tools.py` downloads them (SHA256-pinned) into `
 the first) plus `ExceptionManager.should_auto_exclude` (skips setup/uninstall-style exes) guess a launch exe when
 the catalog records no launch path, or the path it records is not a real file inside the game. It is temporary
 until the catalog records launch paths; `adopt_catalog_launch` switches a guessed path to the catalog's once one
-exists. **Nothing new may call it.** `launch_kind` / `start_game` decide how a launch file starts:
-`.html`/`.htm` open in the browser, anything else runs through `start_program`; the guess above never picks a
-page.
+exists. **Nothing new may call it.** The guess only picks `.exe` and `.bat` files: never a page, never an `.hta`.
+
+## How a launch file starts (`engine/launch.py`)
+
+`launch_kind` / `start_game` decide: `.html`/`.htm` open in the browser (kind "page"); an `.hta` runs through
+`start_hta` when the caller passes `hta_allowed`; anything else runs through `start_program`. The last two are
+kind "program" and return the started process's ID.
+
+- **`.hta` (HTML Application)**: a catalog game with no exe, started only when the catalog's launch path names the
+  file (`_recorded_launch_exe` accepts any real file inside the game, so the install and Status need nothing
+  special). `start_game` gives it the host only with `hta_allowed=True`, which
+  `library_actions.start_launch_file` (the one caller, used by `MainFrame`) sets from
+  `library_actions.may_start_hta(full_path, game, record, libraries)`: a catalog game whose record has
+  `launch_from_catalog`, and the file being launched is exactly `record_folder(record) / record.launch_path`
+  (resolved; case ignored on Windows), so a games.json path pointing anywhere else is refused. Without it
+  nothing starts an `.hta`: `start_game` raises `OSError` (`messages.HTA_NOT_ALLOWED`) and never calls
+  `start_program`, whose administrator-prompt route (`_shell_open`) would be the `.hta` file association.
+  `start_hta` runs `mshta.exe` with the file's full path as its one argument and the game's folder as
+  working directory. `hta_host` builds the host's path from the folders Windows reports (`GetSystemWow64DirectoryW`,
+  `GetSystemDirectoryW`): never from PATH, the environment or the game's folder. Windows only: elsewhere, or when
+  Windows has no `mshta.exe`, it raises `OSError` with words from `messages.py` (`HTA_NEEDS_WINDOWS`,
+  `HTA_HOST_MISSING`).
+- **`HTA_HOST_BITS`** (32) is the one place that chooses the 32-bit host (`SysWOW64\mshta.exe` on 64-bit Windows;
+  the system folder's on 32-bit Windows) or the 64-bit one; the evidence is in the comment above it. With the
+  32-bit host, a game that reads a file by the path `C:\Windows\system32\...` is given `C:\Windows\SysWOW64\...`.
+- The rule that an `.hta` is never a page is in CLAUDE.md (Launch pages).
 
 - **exception_manager.py** - filename filter used only by the temporary launch fallback

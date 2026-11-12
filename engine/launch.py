@@ -2,24 +2,45 @@
 
 `select_best_executable` holds temporary fallback preference rules, used until the catalog records
 launch paths.
+
+Three ways a launch file starts (`start_game`): a page (.html, .htm) opens in the browser; an HTML Application
+(.hta) runs in Windows' own mshta.exe (`start_hta`); anything else is run directly (`start_program`).
 """
 import functools
+import ntpath
 import os
+import sys
 from collections.abc import Callable
 from typing import NamedTuple
 from pathlib import Path
 from urllib.parse import quote
 
+from . import messages
 from .errors import UnsafePath
 from .paths import is_engine_dir
 from .safety import _resolve_game_path, is_link
 
 MAX_DEPTH = 10
+# What the temporary guess may pick. An .hta is never guessed: it starts only when the catalog's launch path names it.
 _EXE_SUFFIXES = (".exe", ".bat")
 # A launch file that opens in the browser; .hta is a program, never a page. On Windows `webbrowser.open` is a shell
 # open: the file opens in whatever program the player associates with .html, not necessarily a browser. So
 # `launch_kind`'s suffix check is the only gate: do not widen this on the assumption that "the browser" is safe.
 PAGE_SUFFIXES = (".html", ".htm")
+# An HTML Application: a program with the player's full rights, run by Windows' own host (`start_hta`).
+HTA_SUFFIX = ".hta"
+HTA_HOST_NAME = "mshta.exe"
+# Which mshta.exe runs an .hta game: 32 (SysWOW64 on 64-bit Windows) or 64 (System32). 32, because:
+# - it is what Windows itself runs for an .hta: on 64-bit Windows 11 the `htafile` open command is
+#   `C:\Windows\SysWOW64\mshta.exe "%1" ...` (read 2026-11-11; cited as evidence only, the association is never used);
+# - the games are from 2002-2004, written for 32-bit Windows, so any component one of them creates is a 32-bit
+#   one, which only the 32-bit host can load. A 64-bit host gains nothing for them.
+# Read from the catalog's files: Jump and Manhunt create no component at all (script and <bgsound> only), and
+# neither do the .hta files of 3-d Snake and Duck Blaster; those two keep their game script in a .js file that was
+# not read, so what that script creates is not known.
+# With the 32-bit host on 64-bit Windows, a path a game writes as C:\Windows\system32 is read from SysWOW64.
+# (64 would need more work in a 32-bit Game Chooser, where the system folder is itself redirected to SysWOW64.)
+HTA_HOST_BITS = 32
 
 ERROR_ELEVATION_REQUIRED = 740
 ERROR_CANCELLED = 1223  # ShellExecuteExW's last error when the player declines the administrator prompt
@@ -129,8 +150,83 @@ class Started(NamedTuple):
 
 
 def launch_kind(path: str) -> str:
-    """"page" for a launch file that is a web page (.html, .htm), otherwise "program"."""
+    """"page" for a launch file that is a web page (.html, .htm), otherwise "program" (an .hta is a program)."""
     return "page" if Path(path).suffix.lower() in PAGE_SUFFIXES else "program"
+
+
+def is_hta(path: str) -> bool:
+    """Is this launch file an HTML Application (.hta)?"""
+    return Path(path).suffix.lower() == HTA_SUFFIX
+
+
+def _windows_folder(function: Callable) -> str | None:
+    """The folder a GetSystemDirectoryW-style function names, or None when Windows names none: it returns 0 (the
+    32-bit twin on 32-bit Windows), or it writes no text.
+
+    The buffer starts at MAX_PATH and grows when Windows says how much it needs. Not 32768: on 64-bit Windows 11
+    GetSystemWow64DirectoryW given exactly that size returned 20 and wrote nothing."""
+    import ctypes
+
+    size = 260
+    for _ in range(3):
+        buffer = ctypes.create_unicode_buffer(size)
+        length = function(buffer, size)
+        if length < size:
+            return (buffer.value or None) if length else None
+        size = length + 1  # too small: the answer is the size needed
+    return None
+
+
+def _system_dirs() -> tuple[str, str | None]:
+    """Windows' system folder and its 32-bit twin (None on 32-bit Windows, which has none), asked of Windows
+    itself: never read from the environment or the search path, which a game or another program can change."""
+    import ctypes
+    from ctypes import wintypes
+
+    kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    for function in (kernel32.GetSystemDirectoryW, kernel32.GetSystemWow64DirectoryW):
+        function.argtypes = [wintypes.LPWSTR, wintypes.UINT]
+        function.restype = wintypes.UINT
+    system = _windows_folder(kernel32.GetSystemDirectoryW)
+    if system is None:
+        raise OSError(messages.HTA_HOST_MISSING)
+    return system, _windows_folder(kernel32.GetSystemWow64DirectoryW)
+
+
+def hta_host(bits: int | None = None,
+             system_dirs: Callable[[], tuple[str, str | None]] | None = None) -> str:
+    """The full path of the mshta.exe that runs .hta games: the `bits`-bit one (HTA_HOST_BITS when not given) in
+    Windows' own system folder. The 32-bit host on 32-bit Windows is the one in the system folder."""
+    system, wow64 = (system_dirs or _system_dirs)()
+    if bits is None:
+        bits = HTA_HOST_BITS
+    return ntpath.join(wow64 if bits == 32 and wow64 else system, HTA_HOST_NAME)
+
+
+def start_hta(path: str, cwd: str, popen: Callable | None = None,
+              system_dirs: Callable[[], tuple[str, str | None]] | None = None,
+              windows: bool | None = None) -> int | None:
+    """Start an .hta game: Windows' own mshta.exe, with the file's full path as its one argument and the game's
+    folder as the working directory. Returns the host's process ID.
+
+    An .hta is a program with the player's full rights, so it never goes through the browser or the shell's
+    file association (whatever program the player has for .hta), and the host is never looked for in the game's
+    folder or on the search path. Raises OSError (plain words from `messages`) on a system that is not Windows
+    or a Windows without mshta.exe; any other OSError from starting it passes through.
+    """
+    if windows is None:
+        windows = sys.platform == "win32"
+    if not windows:
+        raise OSError(messages.HTA_NEEDS_WINDOWS)
+    host = hta_host(system_dirs=system_dirs)
+    if popen is None:
+        import subprocess
+        popen = subprocess.Popen
+    try:
+        process = popen([host, ntpath.abspath(path)], cwd=cwd)
+    except FileNotFoundError:
+        raise OSError(messages.HTA_HOST_MISSING) from None
+    return getattr(process, "pid", None)
 
 
 def page_address(path: str) -> str:
@@ -145,10 +241,17 @@ def page_address(path: str) -> str:
 
 
 def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = None,
-               start: Callable[[str, str], int | None] | None = None) -> Started:
-    """Start a game's launch file and return what it started: a page opens in the web browser, anything else
-    runs through `start_program`. Raises OSError if the browser can't be opened; LaunchCancelled and the
-    OSError from `start` pass through."""
+               start: Callable[[str, str], int | None] | None = None,
+               hta_start: Callable[[str, str], int | None] | None = None, hta_allowed: bool = False) -> Started:
+    """Start a game's launch file and return what it started: a page opens in the web browser, an .hta runs in
+    Windows' mshta.exe through `start_hta` (a program, like an exe), anything else runs through `start_program`.
+
+    An .hta gets the host only with `hta_allowed`, which the caller sets when the catalog's launch path named the
+    file (`library_actions.may_start_hta`). Without it nothing starts an .hta: OSError (`messages.HTA_NOT_ALLOWED`).
+    It never reaches `start_program`, whose administrator-prompt route is a shell open, which for an .hta is the
+    file association.
+    Raises OSError if the browser can't be opened; LaunchCancelled and the OSError from `start` or `hta_start`
+    pass through."""
     kind = launch_kind(path)
     if kind == "page":
         if open_page is None:
@@ -157,6 +260,10 @@ def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = 
         if open_page(page_address(path)) is False:
             raise OSError("The web browser couldn't be opened.")
         return Started(kind, None)
+    if is_hta(path):
+        if not hta_allowed:
+            raise OSError(messages.HTA_NOT_ALLOWED)
+        return Started(kind, (hta_start or start_hta)(path, cwd))
     return Started(kind, (start or start_program)(path, cwd))
 
 

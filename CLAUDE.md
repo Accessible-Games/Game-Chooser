@@ -75,6 +75,14 @@ On Windows a catalog game's launch page (`.html` or `.htm`) opens through the sh
 player has for `.html`, so `launch_kind`'s suffix check is the only gate: never widen `PAGE_SUFFIXES` assuming
 "the browser" will handle the file safely.
 
+An `.hta` (HTML Application) is not a page: it is a program with the player's full rights, like an exe. It never
+goes into `PAGE_SUFFIXES`, `webbrowser` or the shell's file association. `engine.launch.start_hta` runs Windows'
+own `mshta.exe`, taken from the system folder Windows reports (never PATH, never the game's folder), with the
+file's full path as its one argument. It starts only when the catalog's launch path names it: it is never guessed,
+and `library_actions.may_start_hta` allows only the file that is exactly the install record's own launch file
+(`launch_from_catalog`), whatever path games.json holds. A game added by hand never gets the host. `MainFrame`
+launches through `library_actions.start_launch_file`, never `start_game` directly.
+
 ### Tracing
 Nothing outside `tracing/` and its tests (`tests/tracing/`) imports it; the one exception in app code is
 `game-chooser.py`, inside `try/except ImportError`.

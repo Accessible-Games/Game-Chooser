@@ -83,6 +83,17 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   (hand-added game: pick the file).
 - A catalog game whose launch file ends in `.html` or `.htm` opens in the default browser through
   `engine.launch.start_game` (no minimize). It is still an ordinary install, not a web game; the catalog must name
-  the page (it is never guessed); `.hta` is not supported. The rule against widening `PAGE_SUFFIXES` is in
-  CLAUDE.md (Launch pages).
+  the page (it is never guessed). The rule against widening `PAGE_SUFFIXES` is in CLAUDE.md (Launch pages).
+- A catalog game whose launch file ends in `.hta` (an HTML Application, with no exe) is a program launch:
+  `start_game` runs it in Windows' `mshta.exe` (`engine.launch.start_hta`, see `.claude/rules/engine.md`), the
+  tracing observer is called, and the window minimizes, as for an exe. `MainFrame` starts every launch file
+  through `library_actions.start_launch_file` (wx-free, tested), which passes `start_game` its `hta_allowed`:
+  `may_start_hta(full_path, game, record, libraries)`, true only for a catalog game whose record says its launch
+  path came from the catalog (it is never guessed) and only when the file being launched is exactly that record's
+  launch file. The path in games.json is not trusted: `..`, an absolute path elsewhere or another `.hta` in the
+  folder is refused. Windows only: on another system
+  the platform check refuses first, and failing that `start_hta` raises, shown as "Failed to launch game: This game
+  only runs on Windows." A game added by hand never runs an `.hta`: `PathManager.is_executable` and `GameDialog` do
+  not accept one, and one picked in the Locate dialog is refused ("Failed to launch game: " then
+  `messages.HTA_NOT_ALLOWED`); nothing is run.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.

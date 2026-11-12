@@ -153,3 +153,14 @@ def test_a_page_game_is_ready(tmp_path):
     assert game_status(str(page), False, rec, ok, "windows") == READY
     page.unlink()
     assert game_status(str(page), False, rec, ok, "windows") == EXE_NOT_FOUND
+
+
+def test_an_hta_game_is_ready(tmp_path):
+    hta = tmp_path / "jumpgame.hta"
+    hta.write_text("<html></html>")
+    rec = record()
+    ok = entry([src(sha="a" * 64)])
+    assert game_status(str(hta), False, rec, ok, "windows") == READY
+    assert game_status(str(hta), False, rec, entry([src(sha="e" * 64)]), "windows") == UPDATE_AVAILABLE
+    hta.unlink()
+    assert game_status(str(hta), False, rec, ok, "windows") == EXE_NOT_FOUND

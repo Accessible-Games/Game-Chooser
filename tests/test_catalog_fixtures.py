@@ -53,11 +53,11 @@ def load(tmp_path, **options):
 def test_index_loads_and_every_entry_is_readable(tmp_path):
     _, state = load(tmp_path)
     assert {"test-game", "test-game-no-path", "test-game-extras", "test-extra", "test-shared-extra",
-            "test-game-tar", "test-game-page"} <= set(state.entries)
+            "test-game-tar", "test-game-page", "test-game-hta"} <= set(state.entries)
     assert all(is_readable(e) for e in state.entries.values())
     visible = {e["id"] for e in visible_games(state.entries, current_platform())}
     assert {"test-game", "test-game-no-path", "test-game-extras", "trace-test"} <= visible
-    assert {"test-game-tar", "test-game-page"} <= visible
+    assert {"test-game-tar", "test-game-page", "test-game-hta"} <= visible
     assert not {"test-extra", "test-shared-extra"} & visible  # an extra is not a game
 
 
@@ -178,3 +178,17 @@ def test_test_story_is_a_page_game_with_its_own_files(tmp_path):
     with zipfile.ZipFile(build / "files" / "test-game-page.zip") as z:
         assert sorted(z.namelist()) == ["index.html", "page2.html"]
         assert b"page2.html" in z.read("index.html") and b"index.html" in z.read("page2.html")
+
+
+def test_test_hta_game_is_started_by_its_hta_file(tmp_path):
+    from engine.launch import is_hta, launch_kind
+    build, state = load(tmp_path)
+    entry = state.entries["test-game-hta"]
+    path = entry["launch"]["windows"]["path"]
+    assert entry["title"] == "Test HTA Game" and path == "test-game.hta"
+    assert is_hta(path) and launch_kind(path) == "program"
+    with zipfile.ZipFile(build / "files" / "test-game-hta.zip") as z:
+        assert z.namelist() == ["test-game.hta"]  # no exe or bat: the launch path is the only way to start it
+        text = z.read("test-game.hta").lower()
+    assert b"<hta:application" in text
+    assert b"<script" not in text and b"<object" not in text and b"javascript:" not in text  # it runs nothing

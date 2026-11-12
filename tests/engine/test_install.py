@@ -640,6 +640,31 @@ def test_pages_alone_without_a_launch_path_fail_as_no_program(tmp_path):
     assert ctx.records.load("entombed") is None
 
 
+HTA_FILES = {"jumpgame.hta": b"<html><hta:application applicationname='Jump'></html>", "jump1.wav": b"RIFF"}
+
+
+def test_install_with_an_hta_launch_path(tmp_path):
+    rec = _install_entombed(tmp_path, HTA_FILES, {"windows": {"path": "jumpgame.hta"}})
+    assert rec.launch_path == "jumpgame.hta" and rec.launch_from_catalog is True
+    assert set(rec.files) == {"jumpgame.hta", "jump1.wav"}
+    assert (tmp_path / "Games" / "Entombed" / "jumpgame.hta").is_file()
+
+
+def test_an_hta_alone_without_a_launch_path_fails_as_no_program(tmp_path):
+    routes = {}
+    e = game(routes, files=HTA_FILES)
+    engine, ctx, lib = setup(tmp_path, [e], routes)
+    with pytest.raises(InstallFailed) as ei:
+        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert ei.value.message.startswith(messages.NO_EXE.format(title="Entombed"))
+    assert ctx.records.load("entombed") is None
+
+
+def test_an_hta_beside_an_exe_is_not_the_guess(tmp_path):
+    rec = _install_entombed(tmp_path, {**HTA_FILES, "tools/helper.exe": b"MZ"})
+    assert rec.launch_path == "tools/helper.exe" and rec.launch_from_catalog is False
+
+
 def _tar_gz(files: dict[str, bytes]) -> bytes:
     import io
     import tarfile
