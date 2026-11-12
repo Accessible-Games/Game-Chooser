@@ -218,3 +218,15 @@ def test_a_recorder_whose_app_has_gone_closes_nothing(tmp_path):
     recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=gone.pid,
                                                       procmon="p.exe"))
     assert recorder.closer.limit is None
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_a_recorder_is_alive_only_as_the_process_that_started_then():
+    import os
+    from tracing.live import process_start_time
+    me = os.getpid()
+    started = process_start_time(me)
+    assert cli._recorder_is_alive(me, started) is True
+    assert cli._recorder_is_alive(me, started + 1) is False  # the pid, but another process
+    assert cli._recorder_is_alive(me, None) is True  # a status without a start time: by pid alone

@@ -176,7 +176,7 @@ def _stop(args, compiled: bool) -> int:
 
 def _run_stop(traces_dir: Path, run_path: Path | None, close_games: bool) -> int:
     from tracing.stop import stop_command
-    return stop_command(traces_dir, run_path, close_games, is_alive=_is_alive)
+    return stop_command(traces_dir, run_path, close_games, is_alive=_recorder_is_alive)
 
 
 def _trace_check(folder: Path) -> int:
@@ -210,6 +210,17 @@ def _is_alive(pid: int) -> bool:
         return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == STILL_ACTIVE
     finally:
         _close(handle)
+
+
+def _recorder_is_alive(pid: int, start: int | None) -> bool:
+    """The recorder a status names is still running: the pid is alive and, when the status gives the start time,
+    it is still that process and not another one Windows gave the pid to."""
+    if not _is_alive(pid):
+        return False
+    if start is None:
+        return True
+    from tracing.live import process_start_time
+    return process_start_time(pid) == start
 
 
 def _close(handle) -> None:

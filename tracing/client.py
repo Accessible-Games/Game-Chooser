@@ -111,6 +111,9 @@ class TraceClient:
         """Record a launch. A launch that gave no process ID (pid None) is recorded with root_pid 0 and no start
         time; its root is then found by the game's exe (`attribution.find_root_by_exe`)."""
         root_pid = pid or UNKNOWN_PID
+        # Ask the recorder again: the launch may have taken a while (an administrator prompt), and a run stopped
+        # in the meantime must not get a session it never captured.
+        self.poll()
         with self._lock:
             if self._state.phase != "on" or self._run is None:
                 return None

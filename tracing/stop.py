@@ -14,10 +14,12 @@ from typing import Callable
 
 from tracing.clock import now_filetime
 from tracing.recorder import CLOSE_WAIT_SECONDS
-from tracing.runfiles import RunDir, leftover_runs
+from tracing.runfiles import RunDir
 
 ACK_SECONDS = 30.0  # how long a capturing recorder gets to take the request
 POLL_SECONDS = 0.5
+READ_TRIES = 5  # status.json can't be read for a moment while the recorder replaces it
+READ_RETRY_SECONDS = 0.02
 
 CLOSE_NOTE = (f"The traced games are asked to close; any still open after {CLOSE_WAIT_SECONDS:g} seconds are "
               "ended. Unsaved game progress is lost. A game started through the administrator prompt is left open.")
@@ -25,14 +27,27 @@ NOTHING = "No tracing run is in progress."
 _PROGRESS = {"stopping": "The recorder is ending the run.", "splitting": "Splitting the capture."}
 
 
-def _recorder_alive(run: RunDir, is_alive: Callable[[int], bool]) -> bool:
-    status = run.read_status()
+IsAlive = Callable[[int, int | None], bool]  # (pid, start time or None): that very process is still running
+
+
+def _read_status(run: RunDir) -> dict | None:
+    """status.json; a file that is there but can't be read is read again, so a recorder caught in the middle of
+    replacing it is not mistaken for a run with no status."""
+    for _ in range(READ_TRIES):
+        status = run.read_status()
+        if status is not None or not run.status_path.exists():
+            return status
+        time.sleep(READ_RETRY_SECONDS)
+    return None
+
+
+def _recorder_alive(status: dict | None, is_alive: IsAlive) -> bool:
+    """The recorder the status names, by pid and start time (a pid alone may be another program by now)."""
     pid = status.get("recorder_pid") if status else None
-    return pid is not None and is_alive(pid)
+    return pid is not None and is_alive(pid, status.get("recorder_start"))
 
 
-def _ended(run: RunDir) -> bool:
-    status = run.read_status()
+def _ended(run: RunDir, status: dict | None) -> bool:
     return run.is_split() or (status is not None and status.get("state") == "done")
 
 
@@ -50,7 +65,7 @@ def _gone(run: RunDir) -> str:
     return text
 
 
-def stop_command(traces_dir: Path, run_path: Path | None, close_games: bool, *, is_alive: Callable[[int], bool],
+def stop_command(traces_dir: Path, run_path: Path | None, close_games: bool, *, is_alive: IsAlive,
                  clock: Callable[[], float] = time.monotonic, sleep: Callable[[float], None] = time.sleep,
                  now: Callable[[], int] = now_filetime, out: Callable[[str], None] = print) -> int:
     """End the run in progress under `traces_dir`, or the run folder `run_path` when one is named.
@@ -60,26 +75,31 @@ def stop_command(traces_dir: Path, run_path: Path | None, close_games: bool, *, 
     run is meant (more than one in progress and none named, or `run_path` is not a run folder)."""
     if run_path is not None:
         run = RunDir(run_path)
-        if run.read_status() is None:
+        status = _read_status(run)
+        if status is None:
             out(f"{run.path}: not a run folder")
             return 2
-        if _ended(run):
+        if _ended(run, status):
             out(f"{run.path}: already ended, nothing to do")
             return 0
-        if not _recorder_alive(run, is_alive):
+        if not _recorder_alive(status, is_alive):
             out(_gone(run))
             return 1
-        return _stop(run, close_games, is_alive, clock, sleep, now, out)
-    live = [run for run in _runs(traces_dir) if not _ended(run) and _recorder_alive(run, is_alive)]
+        return _stop(run, status, close_games, is_alive, clock, sleep, now, out)
+    runs = [(run, _read_status(run)) for run in _runs(traces_dir)]
+    live = [(run, status) for run, status in runs
+            if status is not None and not _ended(run, status) and _recorder_alive(status, is_alive)]
     if len(live) > 1:
         out("More than one tracing run is in progress. Name the one to end: --trace-stop RUN")
-        for run in live:
+        for run, _status in live:
             out(str(run.path))
         return 2
     if live:
-        return _stop(live[0], close_games, is_alive, clock, sleep, now, out)
+        run, status = live[0]
+        return _stop(run, status, close_games, is_alive, clock, sleep, now, out)
     # No recorder to ask. A capture left by a dead recorder is said, not split here: --trace-split does that.
-    dead = leftover_runs(traces_dir, is_alive)
+    dead = [run for run, status in runs
+            if run.capture_files() and not run.is_split() and not _recorder_alive(status, is_alive)]
     for run in dead:
         out(_gone(run))
     if not dead:
@@ -87,39 +107,43 @@ def stop_command(traces_dir: Path, run_path: Path | None, close_games: bool, *, 
     return 1 if dead else 0
 
 
-def _stop(run: RunDir, close_games: bool, is_alive, clock, sleep, now, out) -> int:
-    status = run.read_status() or {}
+def _stop(run: RunDir, status: dict, close_games: bool, is_alive, clock, sleep, now, out) -> int:
     capturing = status.get("state") in ("starting", "capturing")
     asked = run.read_stop_request() is not None or run.stop_taken_path.exists() or run.read_stop() is not None
+    written = False
     if capturing and not asked:
         try:
-            run.write_stop_request({"requested": now(), "close_games": close_games, "requester_pid": os.getpid()})
+            # never replaces a request another command got in first: then that one is waited for
+            written = run.write_stop_request({"requested": now(), "close_games": close_games,
+                                              "requester_pid": os.getpid()})
         except OSError as error:
             out(f"Problem: the stop request couldn't be written to {run.path} ({error}).")
             return 1
+    if written:
         out(f"Asked the recorder to end the run {run.path}.")
         if close_games:
             out(CLOSE_NOTE)
     else:
         out(f"The run {run.path} is already ending; waiting for it.")
-    return _wait(run, is_alive, clock, sleep, out)
+    return _wait(run, status, is_alive, clock, sleep, out)
 
 
-def _wait(run: RunDir, is_alive, clock, sleep, out) -> int:
+def _wait(run: RunDir, status: dict, is_alive, clock, sleep, out) -> int:
     """Wait for the recorder to take the request and finish; it works as long as it lives, with no time limit
-    (Process Monitor's stop and the split of a large capture take minutes)."""
+    (Process Monitor's stop and the split of a large capture take minutes). A status that can't be read at some
+    poll leaves the last one standing: it is never taken for the recorder's death."""
     deadline = clock() + ACK_SECONDS
     taken = False
     shown = None
     while True:
-        status = run.read_status() or {}
+        status = _read_status(run) or status
         state = status.get("state")
         if state in _PROGRESS and state != shown:
             shown = state
             out(_PROGRESS[state])
         if state == "done":
             break
-        if not _recorder_alive(run, is_alive):
+        if not _recorder_alive(status, is_alive):
             break
         if not taken:
             if state not in ("starting", "capturing") or run.read_stop() is not None:
@@ -149,7 +173,7 @@ def _read_split(run: RunDir) -> dict | None:
 
 
 def _report(run: RunDir, out) -> int:
-    status = run.read_status() or {}
+    status = _read_status(run) or {}
     state = status.get("state")
     stop = run.read_stop()
     split = _read_split(run)

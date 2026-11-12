@@ -254,6 +254,19 @@ game opened as its own child process, and orphans inside the game's folder.
 
 After a stop the mark key records nothing (the error beep), even for a game that is still open.
 
+A game whose launch was under way when the request was taken (waiting at an administrator prompt, say): when the
+launch returns, Game Chooser asks the recorder's files again and, the run being stopped, records no session for it.
+One gap is left: a request taken in the instant between that check and the session file being written. That session
+is not part of the stop's closing; it is split like any other, so it comes out `ended_by: "stop"` when its process
+is in the capture, or with a `problem` (the capture is kept and the command exits with 1) when Process Monitor had
+already stopped.
+
+A second `--trace-stop` while one is under way never replaces the first request: it waits for the same result,
+and its own `--close-games` (or the lack of it) does not count.
+
+`status.json` names the recorder by `recorder_pid` and `recorder_start` (its creation FILETIME). The command takes
+the recorder for running only while that pid still belongs to the process that started then.
+
 ## The run folder's split.json
 
 The recorder's working files are in `traces/_runs/<YYYYMMDD-HHMMSS>-<pid>/`. After the capture is split, that

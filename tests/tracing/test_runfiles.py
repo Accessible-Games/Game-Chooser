@@ -211,3 +211,31 @@ def test_a_request_that_cannot_be_removed_is_held_not_withdrawn(tmp_path, monkey
 
     monkeypatch.setattr(runfiles.Path, "unlink", denied)
     assert run.withdraw_stop_request() == "held"
+
+
+def test_two_writers_of_one_file_never_share_a_temp_file(tmp_path, monkeypatch):
+    run = new_run(tmp_path, FT, 5)
+    temps = []
+    real = runfiles.replace_with_retry
+    monkeypatch.setattr(runfiles, "replace_with_retry", lambda src, dst, **kw: temps.append(src.name) or real(src, dst))
+    run.write_status("starting", recorder_pid=7)
+    run.write_status("capturing")
+    assert len(set(temps)) == 2 and all(name.startswith("status.json.") and name.endswith(".tmp") for name in temps)
+    assert [p.name for p in run.path.iterdir() if p.is_file()] == ["status.json"]
+
+
+def test_a_second_stop_request_never_replaces_the_first(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    assert run.write_stop_request({"requested": 1, "close_games": False}) is True
+    assert run.write_stop_request({"requested": 2, "close_games": True}) is False
+    assert run.read_stop_request() == {"requested": 1, "close_games": False}
+    assert sorted(p.name for p in run.path.iterdir() if p.is_file()) == ["stop-request.json"]
+
+
+def test_status_keeps_the_recorders_pid_and_start_time(tmp_path):
+    run = RunDir(tmp_path)
+    run.write_status("starting", recorder_pid=7, recorder_start=123)
+    run.write_status("capturing")
+    run.write_status("failed", error="x")
+    status = run.read_status()
+    assert (status["recorder_pid"], status["recorder_start"], status["state"]) == (7, 123, "failed")

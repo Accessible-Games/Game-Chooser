@@ -14,6 +14,7 @@ FT = 133_000_000_000_000_000
 NOW = FT + 5
 GIB = 1024**3
 RECORDER = 700
+STARTED = 9000  # when the recorder processes of these tests started
 LISTS = {"asked_to_close": [], "ended": [], "not_closed": []}
 
 
@@ -22,13 +23,14 @@ class Setup:
         self.traces = tmp_path / "traces"
         self.clock = Clock()
         self.alive = {RECORDER}
+        self.starts = {}  # the start time of the process that has a pid now, when it isn't STARTED
         self.lines = []
         self.script = []  # what the recorder does at each of the command's sleeps
 
     def run(self, pid=5, state="capturing", recorder_pid=RECORDER, capture=True):
         run = new_run(self.traces, FT + pid, pid)
         if state is not None:
-            run.write_status(state, recorder_pid=recorder_pid)
+            run.write_status(state, recorder_pid=recorder_pid, recorder_start=STARTED)
         if capture:
             run.capture_path.write_bytes(b"pml")
         return run
@@ -40,8 +42,11 @@ class Setup:
 
     def stop(self, run=None, close_games=False):
         return stop.stop_command(self.traces, run.path if run else None, close_games,
-                                 is_alive=lambda pid: pid in self.alive, clock=self.clock, sleep=self.sleep,
+                                 is_alive=self.is_alive, clock=self.clock, sleep=self.sleep,
                                  now=lambda: NOW, out=self.lines.append)
+
+    def is_alive(self, pid, start):
+        return pid in self.alive and start in (None, self.starts.get(pid, STARTED))
 
     @property
     def text(self):
@@ -310,7 +315,7 @@ def plain_stamp(monkeypatch):
 def test_command_and_recorder_end_a_run_with_a_game_still_open(s, plain_stamp):
     run = s.run(state=None, capture=False)
     run.write_session(info())
-    run.write_status("capturing", recorder_pid=RECORDER)
+    run.write_status("capturing", recorder_pid=RECORDER, recorder_start=STARTED)
     rec = recorder_for(run, s.traces, Clock(), lambda: [LiveProc(100, 50, ROOT.start, r"C:\g\a.exe")])
     s.script = [rec.run]
     assert s.stop() == 0
@@ -327,7 +332,7 @@ def test_command_and_recorder_end_a_run_with_a_game_still_open(s, plain_stamp):
 def test_command_and_recorder_with_no_game_open(s, plain_stamp):
     run = s.run(state=None, capture=False)
     run.write_session(info())
-    run.write_status("capturing", recorder_pid=RECORDER)
+    run.write_status("capturing", recorder_pid=RECORDER, recorder_start=STARTED)
     rec = recorder_for(run, s.traces, Clock(), lambda: [])
     s.script = [rec.run]
     assert s.stop() == 0
@@ -353,7 +358,7 @@ def test_a_request_the_recorder_claimed_at_the_last_moment_is_waited_for_not_wit
 
 
 def test_a_request_that_cannot_be_removed_is_not_reported_as_withdrawn(s, monkeypatch):
-    run = s.run()
+    s.run()
     answers = ["held", "held", "withdrawn"]
     asked = []
     monkeypatch.setattr(RunDir, "withdraw_stop_request", lambda self: asked.append(1) or answers.pop(0))
@@ -379,3 +384,67 @@ def test_no_second_request_is_written_while_a_claimed_one_is_being_taken(s):
     s.script = [finish(run)]
     assert s.stop(close_games=True) == 0
     assert run.read_stop_request() is None and s.lines[0] == f"The run {run.path} is already ending; waiting for it."
+
+
+# --- the recorder is known by pid and start time; a status that can't be read for a moment is not its death ---
+
+def test_a_dead_run_whose_recorder_pid_went_to_another_program_is_not_in_progress(s):
+    run = s.run()
+    s.starts[RECORDER] = STARTED + 500  # the pid is alive, but it is another process now
+    assert s.stop() == 1
+    assert s.lines == [f"{run.path}: the recorder is no longer running, so there is nothing to stop. "
+                       "Its capture was not split; run --trace-split to split it."]
+    assert run.read_stop_request() is None
+
+
+def test_a_status_from_before_start_times_were_written_is_checked_by_pid(s):
+    run = s.run(state=None)
+    run.write_status("capturing", recorder_pid=RECORDER)
+    s.script = [finish(run)]
+    assert s.stop() == 0
+
+
+def test_a_status_that_cannot_be_read_for_a_moment_does_not_end_the_wait(s):
+    run = s.run()
+    text = {}
+
+    def unreadable():  # the command reads while the recorder is replacing the file
+        text["status"] = run.status_path.read_text(encoding="utf-8")
+        run.status_path.write_text("{", encoding="utf-8")
+
+    def readable():
+        run.status_path.write_text(text["status"], encoding="utf-8")
+
+    s.script = [unreadable, readable, finish(run)]
+    assert s.stop() == 0
+    assert "The run has ended." in s.lines and not any(line.startswith("Problem") for line in s.lines)
+
+
+def test_a_status_that_cannot_be_read_at_first_is_read_again(s, monkeypatch):
+    run = s.run()
+    real = RunDir.read_status
+    reads = []
+
+    def flaky(self):
+        reads.append(1)
+        return None if len(reads) == 1 else real(self)
+
+    monkeypatch.setattr(RunDir, "read_status", flaky)
+    monkeypatch.setattr(stop, "READ_RETRY_SECONDS", 0)
+    s.script = [finish(run)]
+    assert s.stop() == 0 and run.read_stop_request() is not None
+
+
+def test_a_request_another_command_wrote_first_is_kept_and_waited_for(s, monkeypatch):
+    run = s.run()
+    real = RunDir.write_stop_request
+
+    def beaten(self, request):  # another --trace-stop got in between this one's look and its write
+        assert real(self, {"requested": 1, "close_games": False}) is True
+        return real(self, request)
+
+    monkeypatch.setattr(RunDir, "write_stop_request", beaten)
+    s.script = [finish(run)]
+    assert s.stop(close_games=True) == 0
+    assert run.read_stop_request() == {"requested": 1, "close_games": False}
+    assert s.lines[0] == f"The run {run.path} is already ending; waiting for it." and stop.CLOSE_NOTE not in s.lines

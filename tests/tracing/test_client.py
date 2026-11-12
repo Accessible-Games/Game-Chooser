@@ -238,3 +238,16 @@ def test_no_mark_is_made_once_tracing_is_off(tmp_path):
     status(client, "done")
     assert client.mark() == []  # the game is still open, but the run has ended: nothing would hold the mark
     assert client._run.read_sessions()[0].marks == (NOW,)
+
+
+def test_a_launch_that_returns_after_a_stop_was_taken_is_not_recorded(tmp_path):
+    # the launch was let through as traced, then took a while (an administrator prompt); meanwhile the run was stopped
+    client, _, _ = make(tmp_path)
+    client.start()
+    status(client, "capturing")
+    assert client.poll().phase == "on"
+    client._run.write_stop(STOP)
+    status(client, "stopping")
+    assert client.game_launched(10, 1, 2, {"title": "T", "game_dir": "C:/g"}) is None
+    assert list(client._run.sessions_dir.glob("*.json")) == []
+    assert client.state.phase == "off" and client.state.announce is False

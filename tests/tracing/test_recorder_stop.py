@@ -104,9 +104,9 @@ def make(tmp_path, *, sessions=(), closer=True, app_until=10_000.0, dies_at=None
     states = []
     real = run.write_status
 
-    def spy(state, error=None, recorder_pid=None):
+    def spy(state, **kwargs):
         states.append(state)
-        real(state, error=error, recorder_pid=recorder_pid)
+        real(state, **kwargs)
 
     run.write_status = spy
     rec = recorder.Recorder(run, lambda: clock.t < app_until, pm, world.snapshot, lambda r: SplitResult([], []),
@@ -497,3 +497,22 @@ def test_a_refusal_is_on_disk_before_the_next_act(tmp_path):
     run.write_stop_request({"requested": NOW, "close_games": True})
     assert rec.run() == 0
     assert seen == [left(closing.REFUSED_RIGHTS, 100)]  # seen while 101 was being asked
+
+
+def test_stop_json_is_written_before_the_status_says_stopping(tmp_path):
+    # Game Chooser reads the status first and stop.json next: with the other order it would take a stop for a
+    # recorder that closed unexpectedly, and open a dialog.
+    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
+    one_game(world)
+    spy = run.write_status
+    seen = []
+
+    def look(state, **kwargs):
+        if state == "stopping":
+            seen.append(run.read_stop() is not None)
+        spy(state, **kwargs)
+
+    run.write_status = look
+    run.write_stop_request({"requested": NOW, "close_games": False})
+    assert rec.run() == 0
+    assert seen == [True]

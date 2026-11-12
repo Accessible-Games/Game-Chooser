@@ -42,10 +42,14 @@ Build: see `.claude/rules/build.md`.
   split problem, a process `--close-games` could not close); 2 when more than one run is in progress and none is
   named, or RUN is not a run folder.
 - **Ending a run (`--trace-stop`, `stop.py`):** the command runs unelevated and touches no process. It finds the
-  run whose recorder is alive (`status.json`'s `recorder_pid`) and that has not ended, writes `stop-request.json`
-  into its folder (atomic), then waits and prints what the recorder did (`Wrote <folder>`, `Problem: ...`). The
+  run whose recorder is alive (`status.json`'s `recorder_pid` and `recorder_start`, so a pid given to another
+  program doesn't count; `cli._recorder_is_alive`) and that has not ended, writes `stop-request.json` into its
+  folder (atomic), then waits and prints what the recorder did (`Wrote <folder>`, `Problem: ...`). A status that
+  can't be read for a moment is read again and never taken for the recorder's death. The
   recorder polls for the request in its loop (`Recorder._take_stop`): it writes `stop.json` (the sessions its live
-  tree counts as running), sets the status to `stopping`, takes no more sessions, and goes on as at a normal end
+  tree counts as running; rewritten after every process asked, ended or refused), and only then sets the status
+  to `stopping` (the app reads the status first, so this order is what keeps the title change quiet; a test pins
+  it), takes no more sessions, and goes on as at a normal end
   (Process Monitor stopped, capture split, `done`). The split marks those sessions `ended_by: "stop"`, and any
   other session the capture shows still running (`split.normalize_stop`, `split._ended`; LOG-FORMAT.md). A stop is
   not a failure and not a split problem. Once tracing is off, `TraceClient.mark` records nothing.
@@ -58,7 +62,11 @@ Build: see `.claude/rules/build.md`.
     command reports a withdrawal only when its own removal succeeded; a request already gone was taken (it waits
     for the result), and one it can't remove is tried again at each poll. After the request is taken there is no
     time limit while the recorder lives.
-  - A run that is already ending is waited for; its request is never overwritten.
+  - A run that is already ending is waited for; its request is never overwritten (`write_stop_request` only
+    creates: `runfiles._atomic_create`; every atomic write uses a temp file of its own).
+  - A launch under way when the stop is taken: `TraceClient.game_launched` polls again before recording, so it
+    writes no session. The instant between that poll and the write is not closed: such a session is split like
+    any other and, if Process Monitor had already stopped, becomes a split problem (exit 1, capture kept).
   - `--close-games` (opt-in; without it no process is touched): the recorder, before stopping Process Monitor, asks
     each running process of those sessions to close (`closing.WindowsCloser.ask_close`: WM_CLOSE to its visible
     top-level windows), waits `CLOSE_WAIT_SECONDS` (15 s, less when all are gone), ends what is left (`end`:

@@ -10,7 +10,7 @@ from typing import Callable
 from tracing import closing, messages
 from tracing.clock import now_filetime
 from tracing.closing import GameCloser, Refused
-from tracing.live import LiveProc, LiveTree
+from tracing.live import LiveProc, LiveTree, process_start_time
 from tracing.procmon import EXCLUDED_PROCESSES, ProcmonControl, describe_filter, write_filter_config
 from tracing.runfiles import RunDir
 from tracing.splitrun import SplitResult
@@ -139,7 +139,7 @@ class Recorder:
 
     def _run(self) -> int:
         run = self.run_dir
-        self._status("starting", recorder_pid=os.getpid())
+        self._status("starting", recorder_pid=os.getpid(), recorder_start=process_start_time(os.getpid()))
         try:
             write_filter_config(run.config_path)
             for line in describe_filter():

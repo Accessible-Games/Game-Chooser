@@ -61,9 +61,9 @@ def make(tmp_path, *, app_until=0.0, game_until=None, ready=True, dies_at=None, 
     states = []
     real = run.write_status
 
-    def spy(state, error=None, recorder_pid=None):
+    def spy(state, **kwargs):
         states.append(state)
-        real(state, error=error, recorder_pid=recorder_pid)
+        real(state, **kwargs)
 
     run.write_status = spy
     splits = []
@@ -288,3 +288,12 @@ def test_snapshot_failure_warning_is_rate_limited(tmp_path):
     lines = [x for x in run.log_path.read_text(encoding="utf-8").splitlines() if "live tree update failed" in x]
     assert len(lines) == 3  # the first at 0 s, then at 60 s and 120 s with how many there were since
     assert "nope" in lines[0] and "119 more times" in lines[1] and "119 more times" in lines[2]
+
+
+def test_status_says_when_the_recorder_process_started(tmp_path):
+    import os
+    from tracing.live import process_start_time
+    rec, run, *_ = make(tmp_path)
+    assert rec.run() == 0
+    status = run.read_status()
+    assert status["recorder_pid"] == os.getpid() and status["recorder_start"] == process_start_time(os.getpid())
