@@ -67,15 +67,15 @@ class GamesPanel(wx.Panel):
     - `on_action()`: Enter, Space, double-click or the button.
     - `context_menu(row)`: the wx.Menu for the selected row (None for no row); None shows no menu. The view
       shows the menu and destroys it.
-    - `sort_keys`: one sort key per column, for a list the player can sort (header click, digit keys, an arrow
-      in the header, the sort saved); None for a list that is always in title order.
+    - `sort_keys`: one sort key per column (the player sorts by a header click or the column's digit key; an
+      arrow in the header shows the sort, which is saved).
     - `tree_keys`: the categories the tree shows now (`set_tree_keys` changes them); None for all of them.
     - `row_filter(row)`: False for a row the list leaves out while the tree still shows its values.
     - `on_key(event)`: the tab's own keys in the list; it returns True for a key it took.
     - `on_shown()`: called after the action label and the description were set."""
 
-    def __init__(self, parent, frame, *, name, columns, categories, state_prefix, idle_label, on_action,
-                 context_menu, sort_keys=None, tree_keys=None, row_filter=None, on_key=None, on_shown=None):
+    def __init__(self, parent, frame, *, name, columns, sort_keys, categories, state_prefix, idle_label,
+                 on_action, context_menu, tree_keys=None, row_filter=None, on_key=None, on_shown=None):
         super().__init__(parent)
         self.frame = frame
         self.categories = categories
@@ -95,11 +95,10 @@ class GamesPanel(wx.Panel):
         self.restoring_tree = False
         # Read here, not by the main window later: the list is filled before the rest of the saved state loads
         self.sort_column, self.sort_ascending = 0, True
-        if sort_keys:
-            column = self._saved()[self._key("sort_column")]
-            if isinstance(column, int) and 0 <= column < len(sort_keys):
-                self.sort_column = column
-                self.sort_ascending = bool(self._saved()[self._key("sort_ascending")])
+        column = self._saved()[self._key("sort_column")]
+        if isinstance(column, int) and 0 <= column < len(sort_keys):
+            self.sort_column = column
+            self.sort_ascending = bool(self._saved()[self._key("sort_ascending")])
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -161,10 +160,9 @@ class GamesPanel(wx.Panel):
         self.tree_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_tree_key)
         self.search_combo.Bind(wx.EVT_TEXT, lambda event: self.apply_filters())
         self.search_combo.Bind(wx.EVT_COMBOBOX, lambda event: self.apply_filters())
-        if sort_keys:
-            self.list_ctrl.Bind(wx.EVT_LIST_COL_CLICK, lambda event: self.sort_by(event.GetColumn()))
-            self.list_ctrl.Bind(wx.EVT_CHAR, self.on_char)
-            self._show_sort()
+        self.list_ctrl.Bind(wx.EVT_LIST_COL_CLICK, lambda event: self.sort_by(event.GetColumn()))
+        self.list_ctrl.Bind(wx.EVT_CHAR, self.on_char)
+        self._show_sort()
 
     # ---- small helpers ----------------------------------------------------------------------------------------
 
@@ -357,8 +355,7 @@ class GamesPanel(wx.Panel):
         if self.row_filter is not None:
             rows = [row for row in rows if self.row_filter(row)]
         rows.sort(key=lambda r: (r.title.lower(), r.id))  # title order, also among rows that tie below
-        if self.sort_keys:
-            rows.sort(key=self.sort_keys[self.sort_column], reverse=not self.sort_ascending)
+        rows.sort(key=self.sort_keys[self.sort_column], reverse=not self.sort_ascending)
         old, old_index = self.selected_row(), self.list.get_selected_index()
         wanted = old.id if old is not None else self._saved()[self._key("last_selected")]
         scroll = by_player or self._in_view(old_index)  # asked before the list changes
@@ -408,7 +405,7 @@ class GamesPanel(wx.Panel):
         if self.on_shown is not None:
             self.on_shown()
 
-    # ---- sorting (a list with sort keys) -----------------------------------------------------------------------
+    # ---- sorting ------------------------------------------------------------------------------------------------
 
     def sort_by(self, column):
         """A header click or a digit key: sort by that column; the same column again, the other way round.

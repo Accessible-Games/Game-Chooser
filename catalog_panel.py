@@ -28,7 +28,7 @@ import wx
 
 from smart_list import Column
 
-from catalog_view import action_kind, action_label, build_rows, install_candidates, link_items
+from catalog_view import action_kind, action_label, build_rows, install_candidates, link_items, price_sort_key
 from engine import messages
 from engine.entries import current_platform, game_fields, platform_sources
 from games_panel import GamesPanel
@@ -84,6 +84,13 @@ class CatalogPanel(wx.Panel):
                 Column(title="Genre", model_field=lambda r: r.genre, width=120),
                 Column(title="Price", model_field=lambda r: r.price, width=200),
                 Column(title="Details", model_field=lambda r: r.details_text, width=200),
+            ],
+            sort_keys=[  # one per column
+                lambda r: r.title.lower(),
+                lambda r: r.developer.lower(),
+                lambda r: r.genre.lower(),
+                price_sort_key,  # free first, then by amount: not the text's order
+                lambda r: r.details_text.lower(),
             ],
             on_action=self.on_action, context_menu=self.context_menu)
         sizer.Add(self.view, 1, wx.EXPAND)

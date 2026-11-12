@@ -52,7 +52,9 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   `catalog_panel.view`): index entries as rows (`catalog_view.build_rows`), a filter tree (platform,
   genre (any of its genres), tags, price (each model plus "Can be played for free"), language, developer, year,
   support ("No longer supported"), installed), search (title, developer and a collection's `contains` titles),
-  columns Title / Developer / Genre (the main one) / Price / Details (tags, no longer supported, installed), and an
+  columns Title / Developer / Genre (the main one) / Price / Details (tags, no longer supported, installed), each
+  one sortable (Price by `catalog_view.price_sort_key`: what can be played for free first, then by the amount
+  shown, amounts compared as plain numbers whatever the currency; nothing recorded last), and an
   action button that reads Install / Add / Launch per row (`catalog_view.action_kind`). Links open in the
   browser only when the player chooses them. The panel never fetches: `MainFrame.start_index_fetch` fetches on a
   worker and hands the state to `_take_index` through `run_when_no_dialog`. Retry and F5 fetch again.

@@ -86,7 +86,7 @@ def make_view(app, isolated_manager_factory):
         manager.save_config = Saves()
         owner = FakeFrame(manager)
         settings = {"idle_label": "Install", "on_action": lambda: None, "context_menu": lambda row: None,
-                    **settings}
+                    "sort_keys": SORT_KEYS, **settings}
         return GamesPanel(top, owner, name="Games", state_prefix=prefix,
                           columns=[Column(title="Title", model_field=lambda r: r.title, width=200),
                                    Column(title="Year", model_field=lambda r: r.year, width=80)],
@@ -346,14 +346,6 @@ def test_a_sort_key_whose_values_changed_sorts_again_on_refill(make_view):
     view.refill()
     assert titles(view) == ["Bee", "Ant", "Cat"]
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (1, 1, "Install Ant")
-
-
-def test_a_view_without_sort_keys_stays_sorted_by_title(make_view):
-    view = make_view()
-    view.set_rows(rows(CAT, ANT, BEE))
-    click_header(view, 1)
-    press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR)
-    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title", "Year"]
 
 
 def test_tree_shows_only_the_chosen_categories(make_view):
@@ -676,19 +668,18 @@ def test_random_game_asks_then_selects_the_picked_row_and_acts_on_it(make_view, 
     assert acted[-1] == ("Bravo", True) and catalog.action_btn.GetLabel() == "Install Bravo"
 
 
-@pytest.mark.parametrize("prefix, sort_keys", [("", SORT_KEYS), ("catalog_", None)])
-def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, prefix, sort_keys):
+@pytest.mark.parametrize("prefix", ["", "catalog_"])
+def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, prefix):
     """The Library's keys have no prefix, the Catalog's start with catalog_. A key the defaults lack is a KeyError
     when the main window starts; one the view adds on its own is never filled in for a config without it."""
-    view = make_view(prefix=prefix, sort_keys=sort_keys)
+    view = make_view(prefix=prefix)
     defaults = set(saved(view))
     view.restore_sash()
     view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
     player_selects(view, 2)
     view.tree_ctrl.SelectItem(tree_nodes(view)["Genre"]["Puzzle"], True)
     view.search_combo.SetValue("a")
-    if sort_keys:
-        click_header(view, 1)
+    click_header(view, 1)
     view.set_tree_keys(["genre"])
     view.set_rows(rows(ALPHA, BRAVO))  # Charlie, the selected game, went: the row in its place is remembered
     view.save_state()
@@ -697,6 +688,8 @@ def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, pre
     assert (state[prefix + "last_selected"], state[prefix + "last_search"], state[prefix + "tree_selections"]) == \
         ("alpha", "a", ["Genre/Puzzle"])
     assert len(state[prefix + "column_widths"]) == 2 and state[prefix + "splitter_position"] > 0
+    assert (state[prefix + "sort_column"], state[prefix + "sort_ascending"]) == (1, True)
+    assert (state[other + "sort_column"], state[other + "sort_ascending"]) == (0, True)
     assert (state[other + "last_selected"], state[other + "last_search"], state[other + "tree_selections"],
             state[other + "column_widths"], state[other + "splitter_position"]) == (None, "", [], None, None)
 

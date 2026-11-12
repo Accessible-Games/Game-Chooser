@@ -1,6 +1,6 @@
 from catalog_view import (action_kind, action_label, build_rows, link_items, description_text, entry_links, filter_rows,
                           homepage_item, initial_tab, library_rows, link_at_line, install_candidates,
-                          markdown_to_text, pick_index, tree_categories, tree_values)
+                          markdown_to_text, pick_index, price_sort_key, tree_categories, tree_values)
 from models import Game
 
 SRC = [{"platform": "windows", "install": {"method": "zip"}, "url": "https://x/e.zip"}]
@@ -82,6 +82,31 @@ def test_price_branch_order_and_can_be_played_for_free():
     rows = build_rows([pwyw, paid, sub], set())
     assert [r.id for r in filter_rows(rows, "", {"price": {"Can be played for free"}})] == ["p"]
     assert [r.id for r in filter_rows(rows, "", {"price": {"Pay what you want"}})] == ["p", "q"]
+
+
+def test_price_sort_key_puts_free_first_then_orders_by_the_amount_shown():
+    """As text, "Buy once, $10" would come before "Buy once, $5\""""
+    def priced(id, **pricing):
+        return {"id": id, "title": id, **({"pricing": pricing} if pricing else {})}
+
+    entries = [
+        priced("ten", model="one-time", price=10, currency="USD"),
+        priced("none"),
+        priced("five", model="one-time", price=5, currency="USD"),
+        priced("try", model="free-to-try", price=5, currency="USD"),
+        priced("monthly", model="subscription", price=4.99, currency="USD", period="month"),
+        priced("free", model="free", price=9, currency="USD"),  # a price on a free game is not shown, nor counted
+        priced("name-your-price", model="pay-what-you-want", price=0, currency="USD"),
+        priced("at-least-3", model="pay-what-you-want", price=3, currency="EUR"),  # 3 is 3, whatever the currency
+        priced("no-currency", model="one-time", price=1),  # these three show no amount: after those that do,
+        priced("gone", model="one-time", price=2, currency="USD", no_longer_sold=True),  # in the text's order
+        priced("odd-period", model="subscription", price=2, currency="USD", period="decade"),
+    ]
+    rows = sorted(build_rows(entries, set()), key=price_sort_key)
+    assert [r.id for r in rows] == ["free", "name-your-price", "try", "at-least-3", "monthly", "five", "ten",
+                                    "no-currency", "gone", "odd-period", "none"]
+    assert [r.price for r in rows][7:10] == ["Buy once", "Buy once (the full version can no longer be bought)",
+                                             "Subscription"]
 
 
 def test_markdown_to_text():

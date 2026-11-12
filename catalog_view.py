@@ -11,7 +11,8 @@ from urllib.parse import urlsplit
 
 from engine import messages
 from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, platform_sources
-from engine.pricing import can_play_free, description_lines, donate_link, price_text, pricing_of, purchase_link
+from engine.pricing import (can_play_free, description_lines, donate_link, price_text, pricing_of, purchase_link,
+                            shown_price)
 from language_names import language_name
 
 _UNKNOWN = {"genre": "Unknown Genre", "developer": "Unknown Developer", "year": "Unknown Year"}
@@ -200,6 +201,19 @@ def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[Catalo
             continue
         result.append(row)
     return result
+
+
+def price_sort_key(row: CatalogRow) -> tuple:
+    """How the Price column sorts: what can be played for free first, then by the amount the column shows (as
+    text, "$10" would come before "$5"), then by how the price reads; a game with no price recorded comes last.
+    Amounts are compared as plain numbers, whatever their currency."""
+    pricing = pricing_of(row.entry)
+    if pricing is None:
+        return (2, 0, "")
+    free, amount = can_play_free(pricing), shown_price(pricing)
+    if amount is None:  # no amount shown: a free one is as good as 0, any other comes after those with one
+        amount = 0 if free else float("inf")
+    return (0 if free else 1, amount, row.price.lower())
 
 
 def pick_index(rows, wanted_id, fallback: int, wanted_game=None) -> int:

@@ -91,8 +91,9 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   action button as the list empties; the progress area as it hides).
 - Search: filters on every keystroke (no delay), case-insensitive substring over title and developer (and a
   collection's `contains` titles); a search containing "unknown" matches nothing.
-- Rows are in title order; a list with sort keys is then sorted by the chosen column, so rows that tie there
-  stay in title order.
+- Sorting: a header click or the column's digit key sorts by that column, the same again the other way round;
+  an arrow in the header shows it and the sort is saved. Rows are put in title order first, so rows that tie in
+  the chosen column stay in title order.
 - `restore_sash()` puts the splitter where it was saved, else in the middle; `MainFrame.load_saved_state` calls
   it for both views once the window has its size. A sash left to wx stays at the minimum pane size and does not
   follow a resize.
@@ -105,16 +106,16 @@ What differs between the tabs, each a setting passed to `GamesPanel`:
 | Setting | Library | Catalog |
 |---|---|---|
 | `idle_label` (button text with nothing selected) | "Launch" | "Install" |
-| `sort_keys` (header click, a digit key per column, header arrow, saved sort) | one per column | none: always by title |
+| `columns` with one of `sort_keys` each | Title, Genre, Developer, Year, Platform (by how many), Status | Title, Developer, Genre, Price (`catalog_view.price_sort_key`: free first, then by the amount shown), Details |
 | `categories` / `tree_keys` | Platform, Genre, Developer, Release Year; View > Filter Tree picks which show | `catalog_panel.TREE_CATEGORIES`, all shown |
 | `row_filter` | View > Libraries (hidden libraries) | none |
 | `on_key` | Del, Ctrl+E | none |
 | `on_shown` | `update_tab_menus` (Edit Game follows the selection) | none |
-| `on_action`, `context_menu`, `columns` | launch; `build_list_menu`; the Status column | install, add or launch; the action and links |
+| `on_action`, `context_menu` | launch; `build_list_menu` | install, add or launch; the action and links |
 | `random_game` candidates, and what Yes does | the listed games that run on this system; launch | any listed row, its own action (Ctrl+R); the rows that install, the install confirmation (Ctrl+Shift+R) |
 
 Each view saves under its own prefix (none for the Library, `catalog_` for the Catalog): the selected row, the
-search, the tree selections, the column widths and the splitter position. The Catalog's status line and Retry are
+search, the tree selections, the sort, the column widths and the splitter position. The Catalog's status line and Retry are
 `CatalogPanel`'s own.
 
 ## Modal safety

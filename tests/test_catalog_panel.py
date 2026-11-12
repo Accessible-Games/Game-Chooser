@@ -1,6 +1,7 @@
-"""What the Catalog tab's action button does while an install job runs or waits (it stays beside the progress
-area, so it can be pressed then). CatalogPanel on a frame that is never shown, with stand-ins for the main window
-and the install service: no dialog opens and nothing is queued, fetched or launched."""
+"""The Catalog tab's own part of its games view: what its action button does while an install job runs or waits
+(it stays beside the progress area, so it can be pressed then), and how its columns sort. CatalogPanel on a frame
+that is never shown, with stand-ins for the main window and the install service: no dialog opens and nothing is
+queued, fetched or launched."""
 
 from types import SimpleNamespace
 
@@ -10,7 +11,8 @@ wx = pytest.importorskip("wx")
 
 from catalog_panel import CatalogPanel  # noqa: E402
 from engine import messages  # noqa: E402
-from tests.test_games_panel import FakeFrame, Saves, app, entry  # noqa: E402,F401  (app is a fixture)
+from tests.test_games_panel import (FakeFrame, Saves, app, click_header, entry, headers, press,  # noqa: E402,F401
+                                    saved, titles)  # (app is a fixture)
 
 
 class Frame(FakeFrame):
@@ -61,13 +63,13 @@ class Service:
 def make_panel(app, isolated_manager_factory):
     frames = []
 
-    def make(installed=()):
+    def make(installed=(), entries=None, saved=None):
         top = wx.Frame(None)  # never shown
         frames.append(top)
-        manager = isolated_manager_factory(config={"libraries": []})
+        manager = isolated_manager_factory(config={"libraries": [], "SavedState": saved or {}})
         manager.save_config = Saves()
         frame = Frame(manager)
-        service = Service([entry("alpha"), entry("bravo")], installed)
+        service = Service(entries or [entry("alpha"), entry("bravo")], installed)
         return CatalogPanel(top, frame, service)
 
     yield make
@@ -113,3 +115,34 @@ def test_launch_on_an_installed_game_is_the_same_with_or_without_a_job_for_it(ma
     panel.service.jobs = {"alpha": "running"}
     press_action_button(panel, "Alpha")
     assert panel.frame.launched == ["Alpha", "Alpha"] and panel.frame.told == [] and panel.service.submitted == []
+
+
+def priced(id, genre, **pricing):
+    return {**entry(id, genre), "pricing": pricing}
+
+
+PRICED = [priced("alpha", "Puzzle", model="one-time", price=10, currency="USD"),
+          priced("bravo", "Action", model="one-time", price=5, currency="USD"),
+          priced("charlie", "Puzzle", model="free")]
+
+
+def test_the_catalog_list_sorts_by_each_column_and_remembers_it(make_panel):
+    view = make_panel(entries=PRICED).view
+    assert titles(view) == ["Alpha", "Bravo", "Charlie"]
+    assert headers(view) == ["Title ▲", "Developer", "Genre", "Price", "Details"]
+    click_header(view, 3)  # Price: free first, then by amount ("Buy once, $10" is before "Buy once, $5" as text)
+    assert titles(view) == ["Charlie", "Bravo", "Alpha"] and headers(view)[3] == "Price ▲"
+    assert (saved(view)["catalog_sort_column"], saved(view)["catalog_sort_ascending"]) == (3, True)
+    click_header(view, 3)
+    assert titles(view) == ["Alpha", "Bravo", "Charlie"] and headers(view)[3] == "Price ▼"
+    press(view.list_ctrl, ord("3"), wx.wxEVT_CHAR)  # a digit key: Genre, rows that tie in title order
+    assert titles(view) == ["Bravo", "Alpha", "Charlie"] and headers(view)[2] == "Genre ▲"
+    for digit in "25":  # Developer and Details sort too (all the same here: title order)
+        press(view.list_ctrl, ord(digit), wx.wxEVT_CHAR)
+        assert titles(view) == ["Alpha", "Bravo", "Charlie"]
+    assert saved(view)["catalog_sort_column"] == 4
+
+
+def test_the_catalog_list_starts_in_the_saved_sort(make_panel):
+    view = make_panel(entries=PRICED, saved={"catalog_sort_column": 3, "catalog_sort_ascending": False}).view
+    assert titles(view) == ["Alpha", "Bravo", "Charlie"] and headers(view)[3] == "Price ▼"
