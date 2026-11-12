@@ -446,3 +446,54 @@ def test_a_claim_that_fails_is_tried_again_at_the_next_poll(tmp_path):
     assert rec.run() == 0
     assert pm.stopped_at == 1.0 and run.read_stop() is not None
     assert "stop request" in run.log_path.read_text(encoding="utf-8")
+
+
+class Died(BaseException):
+    """The recorder process ending in the middle of its work (nothing after it runs in a real death)."""
+
+
+def test_stop_json_is_true_after_each_act_should_the_recorder_die_partway(tmp_path):
+    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
+    one_game(world)
+    world.add(101, 100, 1001, GAME + r"\helper.exe")
+    world.add(102, 100, 1002, GAME + r"\other.exe")
+    on_disk = {}
+    ask, end = world.ask_close, world.end
+
+    def ask_and_look(pid, start):
+        on_disk[("ask", pid)] = run.read_stop()["sessions"]["s1"]
+        return ask(pid, start)
+
+    def end_then_die(pid, start):
+        on_disk[("end", pid)] = run.read_stop()["sessions"]["s1"]
+        if pid == 102:
+            raise Died()
+        return end(pid, start)
+
+    world.ask_close, world.end = ask_and_look, end_then_die
+    run.write_stop_request({"requested": NOW, "close_games": True})
+    try:
+        rec.run()
+    except Died:
+        pass
+    # what the file said at the moment each act began: everything done before it
+    assert on_disk[("ask", 100)]["asked_to_close"] == []
+    assert on_disk[("ask", 101)]["asked_to_close"] == [100]
+    assert on_disk[("ask", 102)]["asked_to_close"] == [100, 101]
+    assert on_disk[("end", 100)] == {"asked_to_close": [100, 101, 102], "ended": [], "not_closed": []}
+    assert on_disk[("end", 101)]["ended"] == [100]
+    assert on_disk[("end", 102)]["ended"] == [100, 101]  # the death comes here: the file already says so
+
+
+def test_a_refusal_is_on_disk_before_the_next_act(tmp_path):
+    rec, run, pm, states, world, clock = make(tmp_path, closer="checked", sessions=[session("s1", 100, 1000)])
+    world.add(APP_PID, 1, 10, r"C:\GameChooser\game-chooser.exe")
+    one_game(world)
+    world.identity[100] = Identity(USER, HIGH)
+    world.add(101, 100, 1001, GAME + r"\helper.exe")
+    seen = []
+    ask = world.ask_close
+    world.ask_close = lambda pid, start: seen.append(run.read_stop()["sessions"]["s1"]["not_closed"]) or ask(pid, start)
+    run.write_stop_request({"requested": NOW, "close_games": True})
+    assert rec.run() == 0
+    assert seen == [left(closing.REFUSED_RIGHTS, 100)]  # seen while 101 was being asked

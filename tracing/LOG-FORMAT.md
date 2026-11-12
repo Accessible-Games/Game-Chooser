@@ -91,7 +91,8 @@ closest to the call. A process of the same exe that started outside that window 
     the administrator prompt), who it runs as couldn't be read, a stop never closes it, it could not be ended,
     Process Monitor stopped first, or this recorder can't close games. See "Ending a run with --trace-stop".
   - A session the recorder did not count as running (a game launched after the request was taken, or one whose
-    processes its live view missed) has three empty lists even with `close_games` true: it was not touched.
+    processes its live view missed) has three empty lists even with `close_games` true: it was not touched. The
+    lists are also short when the recorder died while closing (see "Ending a run with --trace-stop").
   - With `close_games` true and everything closed, `end` is set and `still_running_at_capture_end` is false, as for
     a game that exited by itself; `ended_by` is what tells the two apart.
 - `time_zero_source`: see Times. `root_pid`: pid of the game's first process (as found in the
@@ -209,8 +210,11 @@ files in the run folder (both written whole, then moved into place):
 - `stop.json`, written by the recorder when it takes the request: `requested` (copied from the request), `time`
   (FILETIME, when it was taken), `close_games`, and `sessions`: one entry per session the recorder counted as
   running at that moment, each with the lists `asked_to_close`, `ended` and `not_closed` (see `stop` under
-  session.json). With `--close-games` it is written again once the closing is over. A request the recorder never
-  took (no `stop.json`) is not a stop.
+  session.json). With `--close-games` it is written again after every process asked, ended or refused, so it
+  says what has been done even if the recorder dies in the middle; the full `not_closed` lists are written when the
+  closing is over. So in a run whose recorder died while closing (`status.json` never reached `done`), a pid in
+  none of the lists was not touched yet, and may or may not still be running. A request the recorder never took
+  (no `stop.json`) is not a stop.
 
 From the moment the request is taken, `status.json` says `stopping` (Game Chooser's title turns to `(tracing off)`
 without a dialog; the next launch says why and asks whether to launch untraced), no new launch joins the run, and

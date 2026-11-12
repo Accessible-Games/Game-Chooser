@@ -221,7 +221,8 @@ class Recorder:
         """End the run now, while traced programs may still be open. From here on no new session joins the run.
 
         stop.json records it for the split and for the app: the sessions that were running, and, when the request
-        asked for the games to be closed, what was done to each of their processes."""
+        asked for the games to be closed, what was done to each of their processes (written after each act; the
+        full `not_closed` lists come at the end)."""
         self._stop_taken = True
         self._accept_sessions = False
         close = request.get("close_games") is True
@@ -310,12 +311,17 @@ class Recorder:
         return True
 
     def _act(self, action: Callable[[int, int], bool], field: str, targets: dict, record: dict) -> None:
+        """Do `action` to each target and note it in the record. stop.json is written after every single one, so
+        the file says what has been done even if this recorder dies in the middle."""
         for (pid, start), (proc, sids) in targets.items():
             try:
                 done = action(pid, start)
             except Refused as refused:
                 self._refused[(pid, start)] = refused.reason
                 log.warning("%s refused for %d (%s): %s", field, pid, proc.image_path, refused.reason)
+                for sid in sids:
+                    record["sessions"][sid]["not_closed"].append({"pid": pid, "reason": refused.reason})
+                self._write_stop(record)
                 continue
             except Exception as exc:
                 log.warning("%s failed for %d (%s): %r", field, pid, proc.image_path, exc)
@@ -324,3 +330,4 @@ class Recorder:
             if done:
                 for sid in sids:
                     record["sessions"][sid][field].append(pid)
+                self._write_stop(record)
