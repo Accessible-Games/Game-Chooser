@@ -444,9 +444,12 @@ class GamesPanel(wx.Panel):
     def _type(self, char):
         """Add a character to the text being typed and jump to the title that text leads to. The jump is the
         player's own move: the selection event does the rest, as after an arrow key (label, description,
-        remembered game). A text no title starts with changes nothing."""
-        index = type_ahead_index([row.title for row in self.displayed], self.type_ahead.add(char),
-                                 self.list.get_selected_index())
+        remembered game). A text no title starts with moves nothing. Nor does a Space, ever: it only extends
+        the text, and the next character does the jump ("a h" finds "A Hero's Call")."""
+        text = self.type_ahead.add(char)
+        if char == " ":
+            return
+        index = type_ahead_index([row.title for row in self.displayed], text, self.list.get_selected_index())
         if index >= 0:
             self._select(index)
 

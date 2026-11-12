@@ -881,3 +881,23 @@ def test_typing_reads_the_character_not_the_key_code(make_view):
     event.SetUnicodeKey(ord("Ż"))  # typed in capitals: any case finds it
     assert event.GetKeyCode() == wx.WXK_NONE and view.list_ctrl.GetEventHandler().ProcessEvent(event)
     assert view.selected_row().title == "Żuk" and saved(view)["last_selected"] == "żuk"
+
+
+def test_space_in_a_text_never_moves_the_selection(make_view):
+    """The player types `a`, lands on Alpha and presses Space: the text is then "a ", which only "A Hero's Call"
+    starts with, and the selection must not go there"""
+    hero = {**entry("a hero's call"), "title": "A Hero's Call"}
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    now = [1000.0]
+    view.type_ahead.clock = lambda: now[0]
+    view.set_rows(rows(hero, entry("alpha"), entry("apple"), entry("bravo")))
+    assert titles(view) == ["A Hero's Call", "Alpha", "Apple", "Bravo"] and selected(view) == 0
+    type_text(view, "a ")
+    assert view.selected_row().title == "Alpha" and acted == []
+    now[0] += 4  # the text is over: Space is the action, on the game the player landed on
+    type_text(view, " ")
+    assert acted == ["Alpha"]
+    now[0] += 4
+    type_text(view, "a h")  # a Space only extends the text; the next character does the jump
+    assert view.selected_row().title == "A Hero's Call" and acted == ["Alpha"]
