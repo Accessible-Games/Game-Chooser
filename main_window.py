@@ -264,7 +264,7 @@ class MainFrame(wx.Frame):
         self.library_progress.Hide()
         launch_sizer.Add(self.library_progress, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
         main_sizer.Add(launch_sizer, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-        self.catalog_panel.progress_area.on_cancel = self.cancel_current_job
+        self.catalog_panel.view.progress_area.on_cancel = self.cancel_current_job
         
         # Description of the selected catalog game (empty for other games)
         self.description = DescriptionField(panel, "Description")
@@ -443,7 +443,7 @@ class MainFrame(wx.Frame):
                 self.game_list.Focus(index)
             self.game_list.SetFocus()
         else:
-            self.catalog_panel.focus_list()
+            self.catalog_panel.view.focus_list()
 
     def on_find(self, event):
         """Ctrl+F: the Library search box"""
@@ -890,7 +890,7 @@ class MainFrame(wx.Frame):
     def progress_areas(self):
         """Both progress areas (Library, beside Launch; Catalog, in place of its action button). They show the
         same job, whatever is selected."""
-        return [self.library_progress, self.catalog_panel.progress_area]
+        return [self.library_progress, self.catalog_panel.view.progress_area]
 
     def on_job_started(self, job):
         if self:
@@ -960,7 +960,7 @@ class MainFrame(wx.Frame):
             lost_focus = not active and self.library_progress.has_focus_inside()
             self.library_progress.Show(active)
             self.library_page.Layout()
-        self.catalog_panel.set_busy(active)
+        self.catalog_panel.view.set_busy(active)
         if not active:
             self._shown_job_id = None
         if lost_focus and not self.dialog_active:  # never leave focus on a control that just hid
@@ -1839,7 +1839,7 @@ class MainFrame(wx.Frame):
         state["splitter_position"] = self.splitter.GetSashPosition()
         state["last_search"] = self.search_combo.GetValue()
         state["last_tab"] = self.active_tab()
-        self.catalog_panel.save_state()
+        self.catalog_panel.view.save_state()
 
         # Save tree filters
         state["tree_filters"] = list(self.current_tree_filters)

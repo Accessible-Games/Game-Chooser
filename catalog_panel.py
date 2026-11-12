@@ -27,16 +27,14 @@ import webbrowser
 
 import wx
 
-from smart_list import Column, VirtualSmartList
+from smart_list import Column
 
-from catalog_view import (action_kind, action_label, action_verb, build_rows, description_text, filter_rows,
-                          install_candidates, link_items, tree_categories, tree_values)
-from description_field import DescriptionField
+from catalog_view import action_kind, action_label, action_verb, build_rows, install_candidates, link_items
 from engine import messages
 from engine.entries import current_platform, game_fields, platform_sources
+from games_panel import GamesPanel
 from install_dialogs import InstallConfirmDialog
 from install_service import InstallService
-from progress_area import ProgressArea
 
 log = logging.getLogger(__name__)
 
@@ -55,7 +53,8 @@ TREE_CATEGORIES = [
 
 
 class CatalogPanel(wx.Panel):
-    """Tab order: status line, Retry, Search, games list, filter tree, action button, description."""
+    """Tab order: status line, Retry, then the games view (Search, games list, filter tree, action button,
+    description)."""
 
     def __init__(self, parent, frame, service: InstallService):
         super().__init__(parent)
@@ -64,13 +63,6 @@ class CatalogPanel(wx.Panel):
         self.state = service.index_state
         self._checking = False
         self._newer_shown = False  # the "newer version needed" message shows once per session
-        self._all_rows = []
-        self._displayed = []
-        self._categories = None  # the tree's categories; None until the tree is first built
-        self._tree_has_values = False  # until it is, the saved tree selections wait (offline start, no cache)
-        self._selected_id = self._saved()["catalog_last_selected"]
-        self._populating = False
-        self.restoring_tree = False
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -84,89 +76,22 @@ class CatalogPanel(wx.Panel):
         self.retry_btn.Bind(wx.EVT_BUTTON, self.on_retry)
         sizer.Add(self.retry_btn, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 5)
 
-        search_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        search_label = wx.StaticText(self, label="Search:")
-        self.search_combo = wx.ComboBox(self, style=wx.CB_DROPDOWN)
-        self.search_combo.SetValue(self._saved()["catalog_last_search"] or "")
-        search_sizer.Add(search_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        search_sizer.Add(self.search_combo, 1, wx.EXPAND)
-        sizer.Add(search_sizer, 0, wx.EXPAND | wx.ALL, 5)
-
-        splitter = wx.SplitterWindow(self)
-        self.list = VirtualSmartList(parent=splitter, get_virtual_item=self._get_virtual_item,
-                                     style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
-        self.list.set_columns([
-            Column(title="Title", model_field=lambda r: r.title, width=200),
-            Column(title="Developer", model_field=lambda r: r.developer, width=180),
-            Column(title="Genre", model_field=lambda r: r.genre, width=120),
-            Column(title="Price", model_field=lambda r: r.price, width=200),
-            Column(title="Details", model_field=lambda r: r.details_text, width=200),
-        ])
-        self.list.SetLabel("Catalog games")
-        self.list_ctrl.SetName("Catalog games")
-
-        tree_panel = wx.Panel(splitter)
-        tree_sizer = wx.BoxSizer(wx.VERTICAL)
-        tree_label = wx.StaticText(tree_panel, label="Filter games by:")
-        tree_label.Hide()
-        tree_sizer.Add(tree_label, 0, wx.ALL, 0)
-        self.tree_ctrl = wx.TreeCtrl(tree_panel, style=wx.TR_DEFAULT_STYLE | wx.TR_MULTIPLE)
-        tree_sizer.Add(self.tree_ctrl, 1, wx.EXPAND)
-        tree_panel.SetSizer(tree_sizer)
-
-        splitter.SplitVertically(self.list_ctrl, tree_panel)
-        splitter.SetSashGravity(0.5)
-        splitter.SetMinimumPaneSize(100)
-        sizer.Add(splitter, 1, wx.EXPAND)
-
-        # The action button, or while an install job runs or waits, the install progress in its place
-        # (created next, so it takes the button's place in tab order too)
-        self.action_sizer_slot = wx.BoxSizer(wx.HORIZONTAL)
-        self.action_btn = wx.Button(self, label=action_label(None))
-        self.action_btn.Bind(wx.EVT_BUTTON, lambda event: self.on_action())
-        self.action_sizer_slot.Add(self.action_btn, 0, wx.ALIGN_CENTER)
-        self.progress_area = ProgressArea(self)
-        self.progress_area.Hide()
-        self.action_sizer_slot.Add(self.progress_area, 0, wx.ALIGN_CENTER)
-        sizer.Add(self.action_sizer_slot, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-
-        self.description = DescriptionField(self, "Description")
-        self.description.SetMinSize((-1, 120))
-        sizer.Add(self.description.label_ctrl, 0, wx.LEFT | wx.RIGHT, 5)
-        sizer.Add(self.description, 0, wx.EXPAND | wx.ALL, 5)
+        # Search, the games list with its filter tree, the action button and the description
+        self.view = GamesPanel(
+            self, frame, name="Catalog games", categories=TREE_CATEGORIES, state_prefix="catalog_",
+            columns=[
+                Column(title="Title", model_field=lambda r: r.title, width=200),
+                Column(title="Developer", model_field=lambda r: r.developer, width=180),
+                Column(title="Genre", model_field=lambda r: r.genre, width=120),
+                Column(title="Price", model_field=lambda r: r.price, width=200),
+                Column(title="Details", model_field=lambda r: r.details_text, width=200),
+            ],
+            on_action=self.on_action, context_menu=self.context_menu)
+        sizer.Add(self.view, 1, wx.EXPAND)
         self.SetSizer(sizer)
-
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_selected)
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda event: self.on_action())
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_context)
-        self.list_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_list_key)
-        self.tree_ctrl.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_selection)
-        self.tree_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_tree_key)
-        self.search_combo.Bind(wx.EVT_TEXT, lambda event: self.apply_filters())
-        self.search_combo.Bind(wx.EVT_COMBOBOX, lambda event: self.apply_filters())
 
         self._update_status()
         self.refresh_rows()
-
-    # ---- small helpers ----------------------------------------------------------------------------------------
-
-    @property
-    def list_ctrl(self):
-        """The wx control inside the smart list"""
-        return self.list.control.control
-
-    def _saved(self) -> dict:
-        return self.frame.library_manager.config["SavedState"]
-
-    def _save_config(self):
-        self.frame.library_manager.save_config()
-
-    def _get_virtual_item(self, index):
-        return self._displayed[index] if 0 <= index < len(self._displayed) else None
-
-    def selected_row(self):
-        index = self.list.get_selected_index()
-        return self._displayed[index] if 0 <= index < len(self._displayed) else None
 
     # ---- the index and the status line -------------------------------------------------------------------------
 
@@ -216,181 +141,18 @@ class CatalogPanel(wx.Panel):
         self.retry_btn.Show(retry)
         self.Layout()
         if lost_focus and not self.frame.dialog_active:  # never leave focus on a control that just hid
-            self.focus_list()
-
-    # ---- rows, tree and list -----------------------------------------------------------------------------------
+            self.view.focus_list()
 
     def refresh_rows(self):
         """Rebuild the rows from the service (installed state may have changed) and re-filter, keeping the
         selected game selected"""
-        self._all_rows = build_rows(self.service.visible_games(), self.service.installed_ids())
-        self._sync_tree()
-        self.apply_filters()
-
-    def _sync_tree(self):
-        categories = tree_categories(self._all_rows)
-        if categories == self._categories:
-            return
-        paths = self._selected_paths() if self._tree_has_values else self._saved()["catalog_tree_selections"]
-        self._categories = categories
-        self._build_tree(categories)
-        self._restore_tree(paths)
-        self._tree_has_values = any(categories.values())
-
-    def _build_tree(self, categories):
-        tree = self.tree_ctrl
-        self.restoring_tree = True
-        try:
-            tree.DeleteAllItems()
-            root = tree.AddRoot("Filters")
-            for key, label in TREE_CATEGORIES:
-                values = categories.get(key)
-                if not values:
-                    continue
-                node = tree.AppendItem(root, label)
-                tree.SetItemData(node, key)
-                for value in tree_values(key, values):
-                    child = tree.AppendItem(node, value)
-                    tree.SetItemData(child, value)
-            tree.Expand(root)  # the categories stay collapsed
-        finally:
-            self.restoring_tree = False
-
-    def _selected_paths(self) -> list[str]:
-        tree = self.tree_ctrl
-        paths = []
-        root = tree.GetRootItem()
-        for item in tree.GetSelections():
-            parent = tree.GetItemParent(item)
-            if not parent or not parent.IsOk() or parent == root:
-                continue
-            paths.append(f"{tree.GetItemText(parent)}/{tree.GetItemText(item)}")
-        return paths
-
-    def _restore_tree(self, paths):
-        tree = self.tree_ctrl
-        root = tree.GetRootItem()
-        if not paths or not root or not root.IsOk():
-            return
-        self.restoring_tree = True
-        try:
-            tree.UnselectAll()
-            category, cookie = tree.GetFirstChild(root)
-            while category.IsOk():
-                label = tree.GetItemText(category)
-                child, child_cookie = tree.GetFirstChild(category)
-                while child.IsOk():
-                    if f"{label}/{tree.GetItemText(child)}" in paths:
-                        tree.SelectItem(child, True)
-                    child, child_cookie = tree.GetNextChild(category, child_cookie)
-                category, cookie = tree.GetNextChild(root, cookie)
-        finally:
-            self.restoring_tree = False
-
-    def _criteria(self) -> dict[str, set[str]]:
-        tree = self.tree_ctrl
-        root = tree.GetRootItem()
-        criteria: dict[str, set[str]] = {}
-        for item in tree.GetSelections():
-            parent = tree.GetItemParent(item)
-            if not parent or not parent.IsOk() or parent == root:
-                continue  # the root and category nodes select nothing
-            criteria.setdefault(tree.GetItemData(parent), set()).add(tree.GetItemData(item))
-        return criteria
-
-    def on_tree_selection(self, event):
-        if self.restoring_tree:
-            return
-        self._saved()["catalog_tree_selections"] = self._selected_paths()
-        self._save_config()
-        self.apply_filters()
-
-    def on_tree_key(self, event):
-        if event.GetKeyCode() == wx.WXK_ESCAPE:
-            self.tree_ctrl.UnselectAll()  # clears every filter
-            return
-        event.Skip()
-
-    def apply_filters(self):
-        """Filter and sort the rows into the list, keeping the same game selected where it is still shown"""
-        rows = filter_rows(self._all_rows, self.search_combo.GetValue(), self._criteria())
-        rows.sort(key=lambda r: (r.title.lower(), r.id))
-        wanted = self._selected_id
-        if self.selected_row() is not None:
-            wanted = self.selected_row().id
-        self._populating = True  # the selection chosen here is not the player's, so it isn't saved
-        try:
-            self._displayed = rows
-            self.list.update_count(len(rows))
-            index = next((i for i, r in enumerate(rows) if r.id == wanted), 0 if rows else -1)
-            if index >= 0:
-                self.list.control.Select(index, True)
-                if not self.list.control.use_dataview:
-                    self.list_ctrl.EnsureVisible(index)
-            if rows:
-                self.list.refresh()
-        finally:
-            self._populating = False
-        self._show_selection()
-
-    def _show_selection(self):
-        row = self.selected_row()
-        self.action_btn.SetLabel(action_label(row))
-        self.action_btn.Enable(row is not None)
-        self.description.set_text(description_text(row.entry) if row else "")
-        self.action_sizer_slot.Layout()
-
-    def set_busy(self, busy: bool):
-        """While an install job runs or waits, the progress area takes the action button's place.
-        Focus never moves into the progress area; if it was on the control that hides, it goes to the list."""
-        if self.progress_area.IsShown() == busy:
-            return
-        lost_focus = self.action_btn.HasFocus() if busy else self.progress_area.has_focus_inside()
-        self.action_btn.Show(not busy)
-        self.progress_area.Show(busy)
-        self.action_sizer_slot.Layout()
-        self.Layout()
-        if lost_focus and not self.frame.dialog_active:
-            self.focus_list()
-
-    def on_selected(self, event):
-        if self.frame.dialog_active:  # spurious events while a modal dialog is open
-            return
-        row = self.selected_row()
-        self._show_selection()
-        if row is not None and not self._populating:
-            self._selected_id = row.id
-            self._saved()["catalog_last_selected"] = row.id
-            self._save_config()
-
-    def _select_row(self, row):
-        for index, shown in enumerate(self._displayed):
-            if shown.id == row.id:
-                self.list.control.Select(index, True)
-                if not self.list.control.use_dataview:
-                    self.list_ctrl.EnsureVisible(index)
-                self._show_selection()
-                return
-
-    def focus_list(self):
-        """Put keyboard focus in the games list (screen reader pattern: Select, Focus, SetFocus).
-        Not while the app is starting up (a scan dialog may own focus) or a dialog is open."""
-        if not self or self.frame.initializing or self.frame.dialog_active:
-            return
-        index = self.list.get_selected_index()
-        if index < 0 and self._displayed:
-            index = 0
-        if index >= 0:
-            self.list.control.Select(index, True)
-            if not self.list.control.use_dataview:
-                self.list_ctrl.Focus(index)
-        self.list.control.SetFocus()
+        self.view.set_rows(build_rows(self.service.visible_games(), self.service.installed_ids()))
 
     # ---- actions -------------------------------------------------------------------------------------------------
 
     def on_action(self):
         """Enter, Space, double-click or the button: launch an installed game; otherwise install or add it"""
-        row = self.selected_row()
+        row = self.view.selected_row()
         if row is None:
             return
         if row.installed:
@@ -473,30 +235,30 @@ class CatalogPanel(wx.Panel):
         """Back to the row in the list, by the screen reader pattern (Select, Focus, SetFocus)"""
         if not self:
             return
-        self._select_row(row)
-        self.focus_list()
+        self.view.select_row(row)
+        self.view.focus_list()
 
     def on_random_game(self):
         """Ctrl+R: pick a random game from the list as shown (filters applied) and offer to act on it"""
-        if not self._displayed:
+        if not self.view.displayed:
             with self.frame.modal_dialog():
                 wx.MessageBox(messages.CATALOG_NO_GAMES, "No Games", wx.OK | wx.ICON_INFORMATION)
             return
-        row = random.choice(self._displayed)
+        row = random.choice(self.view.displayed)
         # The row is held across the prompt, so no index refresh may replace it meanwhile
         with self.frame.modal_dialog():
             response = wx.MessageBox(
                 messages.CATALOG_RANDOM_PROMPT.format(title=row.title, verb=action_verb(row)),
                 "Random Game", wx.YES_NO | wx.ICON_QUESTION)
             if response == wx.YES:
-                self._select_row(row)
+                self.view.select_row(row)
                 self.on_action()
 
     def on_random_install(self):
         """Ctrl+Shift+R: pick a random game to install from the list as shown (filters applied), leaving out
         installed games, web games and games already queued, and offer to install it"""
-        busy = {r.id for r in self._displayed if self.service.queue.job_for(r.id) is not None}
-        candidates = install_candidates(self._displayed, busy)
+        busy = {r.id for r in self.view.displayed if self.service.queue.job_for(r.id) is not None}
+        candidates = install_candidates(self.view.displayed, busy)
         if not candidates:
             with self.frame.modal_dialog():
                 wx.MessageBox(messages.CATALOG_NO_GAMES_TO_INSTALL, "No Games", wx.OK | wx.ICON_INFORMATION)
@@ -508,47 +270,17 @@ class CatalogPanel(wx.Panel):
                 messages.CATALOG_RANDOM_PROMPT.format(title=row.title, verb="Install"),
                 "Random Game to Install", wx.YES_NO | wx.ICON_QUESTION)
             if response == wx.YES:
-                self._select_row(row)
+                self.view.select_row(row)
                 self._confirm_install(row)
 
-    def on_list_key(self, event):
-        key = event.GetKeyCode()
-        if key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE) and not event.HasAnyModifiers():
-            self.on_action()
-        elif key == wx.WXK_WINDOWS_MENU or (key == wx.WXK_F10 and event.ShiftDown()):
-            self.on_context(event)
-        else:
-            event.Skip()
-
-    def on_context(self, event):
-        """The action, then a link item for each link the game has (right-click, Shift+F10, Applications key)"""
-        row = self.selected_row()
+    def context_menu(self, row):
+        """The action, then a link item for each link the game has"""
         if row is None:
-            return
+            return None
         menu = wx.Menu()
         action = menu.Append(wx.ID_ANY, action_label(row))
         menu.Bind(wx.EVT_MENU, lambda e: self.on_action(), action)
         for label, url in link_items(row.entry):
             item = menu.Append(wx.ID_ANY, label)
             menu.Bind(wx.EVT_MENU, lambda e, link=url: webbrowser.open(link), item)
-        if event.GetEventType() == wx.wxEVT_LIST_ITEM_RIGHT_CLICK:
-            self.list_ctrl.PopupMenu(menu)
-        else:  # keyboard: next to the selected row
-            index = self.list.get_selected_index()
-            rect = self.list_ctrl.GetItemRect(index) if index >= 0 and not self.list.control.use_dataview else None
-            if rect is not None:
-                self.list_ctrl.PopupMenu(menu, wx.Point(rect.x + 10, rect.y + rect.height // 2))
-            else:
-                self.list_ctrl.PopupMenu(menu)
-        menu.Destroy()
-
-    # ---- saving ----------------------------------------------------------------------------------------------------
-
-    def save_state(self):
-        """Search text and tree filters (on close). Nothing is saved while the catalog is empty (offline with no
-        saved copy), so the player's last filters survive until the games load."""
-        if not self._all_rows:
-            return
-        state = self._saved()
-        state["catalog_last_search"] = self.search_combo.GetValue()
-        state["catalog_tree_selections"] = self._selected_paths()
+        return menu
