@@ -365,14 +365,136 @@ def test_start_game_passes_on_a_declined_prompt(tmp_path):
         start_game(str(tmp_path / "game.exe"), str(tmp_path), start=declined)
 
 
-def test_an_hta_file_is_never_opened_as_a_page(tmp_path):
-    opened, started = [], []
-    start_game(str(tmp_path / "game.hta"), str(tmp_path), open_page=lambda a: opened.append(a) or True,
-               start=lambda p, c: started.append((p, c)))
-    assert opened == [] and len(started) == 1
-
-
 def test_start_game_passes_on_what_the_program_start_returned(tmp_path):
     result = start_game(str(tmp_path / "game.exe"), str(tmp_path), start=lambda p, c: 4321)
     assert result == Started("program", 4321)
     assert result.kind == "program" and result.pid == 4321
+
+
+# ---- .hta games (HTML Applications): run by Windows' own mshta.exe, never opened as a page, never guessed ----
+
+from engine import launch, messages
+from engine.launch import hta_host, start_hta
+
+WINDOWS_64 = ("C:\\Windows\\system32", "C:\\Windows\\SysWOW64")  # (system folder, its 32-bit twin)
+WINDOWS_32 = ("C:\\Windows\\system32", None)  # 32-bit Windows has no twin
+
+
+@pytest.mark.parametrize("name", ["game.hta", "Game.HTA"])
+def test_an_hta_file_goes_to_the_hta_starter_and_is_a_program(tmp_path, name):
+    hta = str(tmp_path / name)
+    opened, started, hosted = [], [], []
+    result = start_game(hta, str(tmp_path), open_page=lambda a: opened.append(a) or True,
+                        start=lambda p, c: started.append((p, c)),
+                        hta_start=lambda p, c: hosted.append((p, c)) or 6001)
+    assert hosted == [(hta, str(tmp_path))]
+    assert opened == [] and started == []  # not the browser or the shell, and not run as if it were an exe
+    assert result == Started("program", 6001)  # a program: traced, and the window minimizes
+
+
+def test_a_program_never_goes_to_the_hta_starter(tmp_path):
+    start_game(str(tmp_path / "game.exe"), str(tmp_path), start=lambda p, c: 1,
+               hta_start=lambda p, c: pytest.fail("an exe is not an HTML Application"))
+
+
+def test_start_game_passes_on_an_hta_that_would_not_start(tmp_path):
+    def broken(path, cwd):
+        raise OSError("no host")
+    with pytest.raises(OSError, match="no host"):
+        start_game(str(tmp_path / "game.hta"), str(tmp_path), hta_start=broken)
+
+
+@pytest.mark.parametrize("bits, dirs, host", [
+    (32, WINDOWS_64, "C:\\Windows\\SysWOW64\\mshta.exe"),
+    (32, WINDOWS_32, "C:\\Windows\\system32\\mshta.exe"),  # on 32-bit Windows the system folder is the 32-bit one
+    (64, WINDOWS_64, "C:\\Windows\\system32\\mshta.exe"),
+])
+def test_hta_host_is_mshta_in_the_windows_system_folder(bits, dirs, host):
+    assert hta_host(bits, system_dirs=lambda: dirs) == host
+
+
+@pytest.mark.parametrize("bits, host", [(32, "C:\\Windows\\SysWOW64\\mshta.exe"),
+                                        (64, "C:\\Windows\\system32\\mshta.exe")])
+def test_start_hta_runs_the_chosen_host_with_the_file_as_its_one_argument(monkeypatch, bits, host):
+    monkeypatch.setattr(launch, "HTA_HOST_BITS", bits)
+    calls = []
+
+    def popen(args, cwd):
+        calls.append((args, cwd))
+        return _Process(7007)
+
+    pid = start_hta("C:/Games/Jump Game/jumpgame.hta", "C:/Games/Jump Game", popen=popen,
+                    system_dirs=lambda: WINDOWS_64, windows=True)
+    assert calls == [([host, "C:\\Games\\Jump Game\\jumpgame.hta"], "C:/Games/Jump Game")]
+    assert pid == 7007
+
+
+def test_start_hta_never_takes_the_host_from_the_games_folder_or_the_search_path(tmp_path):
+    (tmp_path / "mshta.exe").write_bytes(b"MZ")  # a planted host beside the game
+    calls = []
+    start_hta(str(tmp_path / "game.hta"), str(tmp_path), popen=lambda args, cwd: calls.append(args) or _Process(1),
+              system_dirs=lambda: WINDOWS_64, windows=True)
+    assert calls[0][0] == "C:\\Windows\\SysWOW64\\mshta.exe"  # a full path, so nothing is searched for
+
+
+def test_start_hta_says_when_windows_has_no_host():
+    def popen(args, cwd):
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+
+    with pytest.raises(OSError) as e:
+        start_hta("C:/Games/X/x.hta", "C:/Games/X", popen=popen, system_dirs=lambda: WINDOWS_64, windows=True)
+    assert str(e.value) == messages.HTA_HOST_MISSING
+
+
+def test_start_hta_passes_on_other_errors():
+    def popen(args, cwd):
+        raise PermissionError(13, "Access is denied")
+
+    with pytest.raises(PermissionError):
+        start_hta("C:/Games/X/x.hta", "C:/Games/X", popen=popen, system_dirs=lambda: WINDOWS_64, windows=True)
+
+
+def test_an_hta_does_not_start_on_another_system():
+    with pytest.raises(OSError) as e:
+        start_hta("/games/x/x.hta", "/games/x", popen=lambda *a, **k: pytest.fail("nothing to run it with"),
+                  system_dirs=lambda: pytest.fail("no Windows folders to ask for"), windows=False)
+    assert str(e.value) == messages.HTA_NEEDS_WINDOWS
+
+
+@pytest.mark.windows
+def test_hta_host_asks_windows_for_its_system_folder():
+    import sys
+    if sys.platform != "win32":
+        pytest.skip("Windows' own folders")
+    windows = Path(os.environ["SystemRoot"]).resolve()
+    for bits in (32, 64):
+        host = Path(hta_host(bits))
+        assert host.name.lower() == "mshta.exe" and host.is_absolute()
+        assert host.parent.parent.resolve() == windows
+        assert host.parent.name.lower() in ("system32", "syswow64")
+
+
+def test_a_catalog_named_hta_is_the_launch_file(tmp_path):
+    hta = touch(tmp_path, "jumpgame.hta")
+    touch(tmp_path, "game.exe")  # even the guess's favourite name loses to the catalog's path
+    assert find_launch_exe(tmp_path, "jumpgame.hta", EXCL) == hta
+
+
+def test_an_hta_is_never_guessed(tmp_path):
+    touch(tmp_path, "game.hta")
+    touch(tmp_path, "more/play.hta")
+    assert find_launch_exe(tmp_path, None, EXCL) is None
+    deeper = touch(tmp_path, "tools/helper.exe")
+    assert find_launch_exe(tmp_path, None, EXCL) == deeper  # the guess looks past the .hta beside it
+    assert find_launch_exe(tmp_path, "missing.hta", EXCL) == deeper  # a path that names no file is not followed
+
+
+def test_adopt_catalog_launch_takes_an_hta(tmp_path):
+    from types import SimpleNamespace
+    from engine.launch import adopt_catalog_launch
+    touch(tmp_path, "jumpgame.hta")
+    touch(tmp_path, "guess.exe")
+    rec = SimpleNamespace(launch_path="guess.exe", launch_from_catalog=False)
+    entry = {"launch": {"windows": {"path": "jumpgame.hta"}}}
+    assert adopt_catalog_launch(rec, entry, "windows", tmp_path) is True
+    assert rec.launch_path == "jumpgame.hta" and rec.launch_from_catalog is True
