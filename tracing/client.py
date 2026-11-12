@@ -22,6 +22,9 @@ log = logging.getLogger(__name__)
 class TraceState:
     phase: str  # "starting", "on" or "off"
     reason: str | None = None
+    # False for an off the admin asked for (--trace-stop): the title follows, but no dialog is opened for it; the
+    # reason is said when a game is next launched.
+    announce: bool = True
 
 
 class TraceClient:
@@ -49,10 +52,17 @@ class TraceClient:
         with self._lock:
             return self._state
 
-    def _set_off(self, reason: str) -> None:
+    def _set_off(self, reason: str, announce: bool = True) -> None:
         with self._lock:
             if self._state.phase != "off":
-                self._state = TraceState("off", reason)
+                self._state = TraceState("off", reason, announce)
+
+    def _set_gone(self, run: RunDir | None) -> None:
+        """The recorder has left capturing or exited: a stop it took (stop.json) is quiet, anything else is not."""
+        if run is not None and run.read_stop() is not None:
+            self._set_off(messages.STOPPED, announce=False)
+        else:
+            self._set_off(messages.RECORDER_GONE)
 
     def start(self) -> None:
         if not self._procmon.exists():
@@ -88,9 +98,9 @@ class TraceClient:
         if recorder_state == "failed":
             self._set_off(messages.RECORDER_FAILED.format(error=status.get("error")))
         elif recorder_state not in (None, "starting", "capturing"):
-            self._set_off(messages.RECORDER_GONE)
+            self._set_gone(run)
         elif process is not None and process.wait(0) is not None:
-            self._set_off(messages.RECORDER_GONE)
+            self._set_gone(run)
         elif recorder_state == "capturing":
             with self._lock:
                 if self._state.phase == "starting":

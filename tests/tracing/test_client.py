@@ -173,3 +173,54 @@ def test_launch_without_a_pid_is_recorded_with_root_pid_0(tmp_path):
     assert (data["root_pid"], data["root_start"], data["launch_before"], data["launch_after"]) == (0, None, 1, 2)
     client.poll()
     assert client.mark() == [sid]  # the live tree found the root by exe
+
+
+STOP = {"requested": NOW, "time": NOW, "close_games": False, "sessions": {}}
+
+
+def test_a_stop_turns_tracing_off_without_an_announcement(tmp_path):
+    for later in ("stopping", "splitting", "done"):
+        (tmp_path / later).mkdir()
+        client, proc, _ = make(tmp_path / later)
+        client.start()
+        status(client, "capturing")
+        assert client.poll().phase == "on" and client.poll().announce is True
+        client._run.write_stop(STOP)
+        status(client, later)
+        state = client.poll()
+        assert (state.phase, state.reason, state.announce) == ("off", messages.STOPPED, False)
+        assert client.game_launched(10, 1, 2, {"title": "T"}) is None  # nothing launched now joins the run
+
+
+def test_a_recorder_that_closed_unexpectedly_is_still_announced(tmp_path):
+    client, proc, _ = make(tmp_path)
+    client.start()
+    status(client, "capturing")
+    client.poll()
+    client._run.write_stop_request({"requested": NOW, "close_games": False})  # asked for, never taken
+    proc.code = 1
+    state = client.poll()
+    assert (state.phase, state.reason, state.announce) == ("off", messages.RECORDER_GONE, True)
+
+
+def test_a_stopped_recorder_seen_only_by_its_exit_is_a_stop(tmp_path):
+    client, proc, _ = make(tmp_path)
+    client.start()
+    status(client, "capturing")
+    client.poll()
+    client._run.write_stop(STOP)
+    proc.code = 0
+    state = client.poll()
+    assert (state.phase, state.reason, state.announce) == ("off", messages.STOPPED, False)
+
+
+def test_a_failure_during_a_stop_is_announced(tmp_path):
+    client, proc, _ = make(tmp_path)
+    client.start()
+    status(client, "capturing")
+    client.poll()
+    client._run.write_stop(STOP)
+    status(client, "failed", messages.PROCMON_STOP_SLOW)
+    state = client.poll()
+    assert state.reason == messages.RECORDER_FAILED.format(error=messages.PROCMON_STOP_SLOW)
+    assert state.phase == "off" and state.announce is True
