@@ -94,5 +94,6 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   folder is refused. Windows only: on another system
   the platform check refuses first, and failing that `start_hta` raises, shown as "Failed to launch game: This game
   only runs on Windows." A game added by hand never runs an `.hta`: `PathManager.is_executable` and `GameDialog` do
-  not accept one, and one picked in the Locate dialog fails to start as any file that is not a program does.
+  not accept one, and one picked in the Locate dialog is refused ("Failed to launch game: " then
+  `messages.HTA_NOT_ALLOWED`); nothing is run.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.

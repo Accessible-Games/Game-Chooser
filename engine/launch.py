@@ -247,8 +247,9 @@ def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = 
     Windows' mshta.exe through `start_hta` (a program, like an exe), anything else runs through `start_program`.
 
     An .hta gets the host only with `hta_allowed`, which the caller sets when the catalog's launch path named the
-    file (`library_actions.may_start_hta`). Without it an .hta goes to `start_program` like any other file, which
-    Windows refuses to run: the host is never handed a file the player or a guess picked.
+    file (`library_actions.may_start_hta`). Without it nothing starts an .hta: OSError (`messages.HTA_NOT_ALLOWED`).
+    It never reaches `start_program`, whose administrator-prompt route is a shell open, which for an .hta is the
+    file association.
     Raises OSError if the browser can't be opened; LaunchCancelled and the OSError from `start` or `hta_start`
     pass through."""
     kind = launch_kind(path)
@@ -259,7 +260,9 @@ def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = 
         if open_page(page_address(path)) is False:
             raise OSError("The web browser couldn't be opened.")
         return Started(kind, None)
-    if hta_allowed and is_hta(path):
+    if is_hta(path):
+        if not hta_allowed:
+            raise OSError(messages.HTA_NOT_ALLOWED)
         return Started(kind, (hta_start or start_hta)(path, cwd))
     return Started(kind, (start or start_program)(path, cwd))
 

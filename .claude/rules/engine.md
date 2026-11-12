@@ -71,7 +71,8 @@ kind "program" and return the started process's ID.
   `library_actions.may_start_hta(full_path, game, record, libraries)`: a catalog game whose record has
   `launch_from_catalog`, and the file being launched is exactly `record_folder(record) / record.launch_path`
   (resolved; case ignored on Windows), so a games.json path pointing anywhere else is refused. Without it
-  an `.hta` goes to `start_program` like any other file, and Windows refuses to run it (as before this existed).
+  nothing starts an `.hta`: `start_game` raises `OSError` (`messages.HTA_NOT_ALLOWED`) and never calls
+  `start_program`, whose administrator-prompt route (`_shell_open`) would be the `.hta` file association.
   `start_hta` runs `mshta.exe` with the file's full path as its one argument and the game's folder as
   working directory. `hta_host` builds the host's path from the folders Windows reports (`GetSystemWow64DirectoryW`,
   `GetSystemDirectoryW`): never from PATH, the environment or the game's folder. Windows only: elsewhere, or when

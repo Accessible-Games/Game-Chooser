@@ -434,6 +434,9 @@ LAUNCH_NOT_FOUND_CATALOG = "Game executable not found.\n\n" + DEFENDER_NOTE
 HTA_NEEDS_WINDOWS = "This game only runs on Windows."
 HTA_HOST_MISSING = ("This game needs mshta.exe, a part of Windows that runs this kind of game, and it wasn't found "
                     "on this computer.")
+# An .hta that is not the file the catalog names for the game (engine.launch.start_game): nothing starts it
+HTA_NOT_ALLOWED = ("This is a .hta file, and Game Chooser only starts one when it is the file the catalog names as "
+                   "the game's program.")
 EDIT_GAME_TITLE = "Edit Game"
 LIBRARY_NOT_FOUND_TITLE = "Library Not Found"
 GAME_BUSY = "Game Chooser is still working on {title}. Wait for it to finish, then try again."

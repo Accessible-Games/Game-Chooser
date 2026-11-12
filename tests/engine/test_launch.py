@@ -397,16 +397,24 @@ def test_a_program_never_goes_to_the_hta_starter(tmp_path):
                hta_start=lambda p, c: pytest.fail("an exe is not an HTML Application"), hta_allowed=True)
 
 
-def test_an_hta_the_catalog_did_not_name_is_not_given_to_the_host(tmp_path):
-    # start_game's caller says whether the catalog named the file. Unless it does, an .hta gets no host: it goes
-    # the way of any other file (run directly, which Windows refuses for an .hta), and never to a page.
-    hta = str(tmp_path / "game.hta")
-    opened, started = [], []
-    result = start_game(hta, str(tmp_path), open_page=lambda a: opened.append(a) or True,
-                        start=lambda p, c: started.append((p, c)),
-                        hta_start=lambda p, c: pytest.fail("only a catalog-named .hta gets the host"))
-    assert started == [(hta, str(tmp_path))] and opened == []
-    assert result == Started("program", None)
+@pytest.mark.parametrize("name", ["game.hta", "Game.HTA"])
+def test_an_hta_the_catalog_did_not_name_is_started_by_nothing(tmp_path, name):
+    # start_game's caller says whether the catalog named the file. Unless it does, nothing starts an .hta: not
+    # the host, not the browser, and not start_program, whose administrator-prompt route is a shell open (the
+    # .hta file association).
+    with pytest.raises(OSError) as e:
+        start_game(str(tmp_path / name), str(tmp_path),
+                   open_page=lambda a: pytest.fail("an .hta is not a page"),
+                   start=lambda p, c: pytest.fail("an .hta is never run directly or through the shell"),
+                   hta_start=lambda p, c: pytest.fail("only a catalog-named .hta gets the host"))
+    assert str(e.value) == messages.HTA_NOT_ALLOWED
+
+
+def test_an_hta_that_is_not_allowed_never_reaches_start_program(tmp_path, monkeypatch):
+    monkeypatch.setattr(launch, "start_program", lambda p, c: pytest.fail("no direct run, no shell open"))
+    monkeypatch.setattr(launch, "start_hta", lambda p, c: pytest.fail("no host"))
+    with pytest.raises(OSError):
+        start_game(str(tmp_path / "game.hta"), str(tmp_path))
 
 
 def test_start_game_uses_start_hta_when_no_starter_is_given(tmp_path, monkeypatch):
