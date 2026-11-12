@@ -1,6 +1,7 @@
 """The games view both tabs are built from (GamesPanel), on a hidden frame: no window is shown and nothing is
 fetched. Skips when wxPython is not installed or there is no display."""
 
+import logging
 import types
 
 import pytest
@@ -33,20 +34,17 @@ ANT, BEE, CAT = entry("ant", year=2003), entry("bee", "Action", year=2002), entr
 SORT_KEYS = [lambda r: r.title.lower(), lambda r: r.year]
 
 
-class FakeManager:
-    """Stands in for GameLibraryManager: the config in memory, and a count of the saves."""
+class Saves:
+    """In place of the manager's save_config: counts the saves, and can fail as a full disk does"""
 
-    def __init__(self, saved):
-        self.config = {"SavedState": {"catalog_last_selected": None, "catalog_last_search": "",
-                                      "catalog_tree_selections": [], "catalog_column_widths": None,
-                                      "catalog_sort_column": 0, "catalog_sort_ascending": True, **saved}}
-        self.saves = 0
+    def __init__(self):
+        self.count = 0
         self.fail = False
 
-    def save_config(self):
+    def __call__(self):
         if self.fail:
             raise OSError("the disk is full")
-        self.saves += 1
+        self.count += 1
 
 
 @pytest.fixture(scope="module")
@@ -55,17 +53,20 @@ def app():
 
 
 @pytest.fixture
-def make_view(app):
+def make_view(app, isolated_manager_factory):
+    """Builds a view on a real GameLibraryManager, so its SavedState is the real default config (plus `saved`).
+    `prefix` is the tab's: "" for the Library's keys, "" for the Catalog's."""
     frames = []
 
-    def make(saved=None, **settings):
+    def make(saved=None, prefix="", **settings):
         top = wx.Frame(None)  # never shown
         frames.append(top)
-        owner = types.SimpleNamespace(library_manager=FakeManager(saved or {}), initializing=False,
-                                      dialog_active=False)
+        manager = isolated_manager_factory(config={"libraries": [], "SavedState": saved or {}})
+        manager.save_config = Saves()
+        owner = types.SimpleNamespace(library_manager=manager, initializing=False, dialog_active=False)
         settings = {"idle_label": "Install", "progress_replaces_action": True, "on_action": lambda: None,
                     "context_menu": lambda row: None, **settings}
-        return GamesPanel(top, owner, name="Games", state_prefix="catalog_",
+        return GamesPanel(top, owner, name="Games", state_prefix=prefix,
                           columns=[Column(title="Title", model_field=lambda r: r.title, width=200),
                                    Column(title="Year", model_field=lambda r: r.year, width=80)],
                           categories=[("genre", "Genre"), ("developer", "Developer")], **settings)
@@ -89,6 +90,10 @@ def focused(view):
 
 def saved(view):
     return view.frame.library_manager.config["SavedState"]
+
+
+def saves(view):
+    return view.frame.library_manager.save_config
 
 
 def player_selects(view, index):
@@ -149,7 +154,7 @@ def test_label_and_description_follow_the_row_when_its_number_stays_but_the_game
 
 def test_every_programmatic_select_also_moves_the_focused_item(make_view):
     """Else the arrow keys start from the old focused row (row 0 after startup), not from the selected game"""
-    view = make_view({"catalog_last_selected": "charlie"})
+    view = make_view({"last_selected": "charlie"})
     view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
     assert (selected(view), focused(view)) == (2, 2)  # the game remembered from the last run
     view.search_combo.SetValue("b")
@@ -166,7 +171,7 @@ def test_tree_gains_a_node_for_a_new_value_and_keeps_its_selection(make_view):
     view.set_rows(rows(ALPHA, BRAVO))
     assert list(tree_nodes(view)["Genre"]) == ["Action", "Puzzle"]
     view.tree_ctrl.SelectItem(tree_nodes(view)["Genre"]["Puzzle"], True)  # as clicked
-    assert titles(view) == ["Alpha"] and saved(view)["catalog_tree_selections"] == ["Genre/Puzzle"]
+    assert titles(view) == ["Alpha"] and saved(view)["tree_selections"] == ["Genre/Puzzle"]
     view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))
     assert list(tree_nodes(view)["Genre"]) == ["Action", "Puzzle", "Strategy"]
     assert view._selected_paths() == ["Genre/Puzzle"] and titles(view) == ["Alpha"]
@@ -178,10 +183,10 @@ def test_when_the_selected_game_is_gone_the_selection_keeps_its_row_number(make_
     view = make_view()
     view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
     player_selects(view, 1)
-    assert saved(view)["catalog_last_selected"] == "bravo"
+    assert saved(view)["last_selected"] == "bravo"
     view.set_rows(rows(ALPHA, CHARLIE))  # Bravo was deleted: Charlie is in its row now
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (1, 1, "Install Charlie")
-    assert saved(view)["catalog_last_selected"] == "charlie"  # and is what the next start selects
+    assert saved(view)["last_selected"] == "charlie"  # and is what the next start selects
     view.set_rows(rows(ALPHA))  # the last row went: clamped to the list
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (0, 0, "Install Alpha")
     view.set_rows([])
@@ -196,7 +201,7 @@ def test_a_filter_of_the_players_own_goes_to_the_first_row_and_is_not_remembered
     assert selected(view) == 3
     view.search_combo.SetValue("r")  # Bravo, Charlie: Delta is filtered out, it is not gone
     assert titles(view) == ["Bravo", "Charlie"] and (selected(view), focused(view)) == (0, 0)
-    assert saved(view)["catalog_last_selected"] == "delta"
+    assert saved(view)["last_selected"] == "delta"
 
 
 def test_a_refresh_that_changes_nothing_is_quiet(make_view):
@@ -205,11 +210,12 @@ def test_a_refresh_that_changes_nothing_is_quiet(make_view):
     view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
     player_selects(view, 1)
     events = []
-    view.list_ctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, lambda event: (events.append(event.GetIndex()), event.Skip()))
-    saves = view.frame.library_manager.saves
+    for kind in (wx.EVT_LIST_ITEM_SELECTED, wx.EVT_LIST_ITEM_FOCUSED):  # what a screen reader would announce
+        view.list_ctrl.Bind(kind, lambda event: (events.append(event.GetIndex()), event.Skip()))
+    before = saves(view).count
     view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
     view.apply_filters()
-    assert events == [] and view.frame.library_manager.saves == saves
+    assert events == [] and saves(view).count == before
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (1, 1, "Install Bravo")
 
 
@@ -225,7 +231,7 @@ def test_a_refill_while_a_dialog_is_open_still_shows_the_selected_game(make_view
     view.set_rows(rows(ALPHA, BRAVO))  # and when it goes: Bravo, in the last row
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (1, 1, "Install Bravo")
     assert view.description.GetValue().startswith("About Bravo.")
-    assert saved(view)["catalog_last_selected"] == "bravo" and view.frame.library_manager.saves == 1
+    assert saved(view)["last_selected"] == "bravo" and saves(view).count == 1
 
 
 def test_focus_leaves_the_action_button_before_an_empty_list_disables_it(make_view):
@@ -248,14 +254,14 @@ def test_focus_leaves_the_action_button_before_an_empty_list_disables_it(make_vi
 def test_a_failed_config_save_never_stops_the_filter(make_view):
     view = make_view()
     view.set_rows(rows(ALPHA, BRAVO))
-    view.frame.library_manager.fail = True
+    saves(view).fail = True
     view.tree_ctrl.SelectItem(tree_nodes(view)["Genre"]["Action"], True)
     assert titles(view) == ["Bravo"] and view.action_btn.GetLabel() == "Install Bravo"
-    assert saved(view)["catalog_tree_selections"] == ["Genre/Action"]  # kept for the next save that works
+    assert saved(view)["tree_selections"] == ["Genre/Action"]  # kept for the next save that works
     view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
     press_escape_in_tree(view)
     player_selects(view, 2)
-    assert view.action_btn.GetLabel() == "Install Charlie" and saved(view)["catalog_last_selected"] == "charlie"
+    assert view.action_btn.GetLabel() == "Install Charlie" and saved(view)["last_selected"] == "charlie"
 
 
 def test_escape_in_the_tree_clears_every_filter(make_view):
@@ -264,7 +270,7 @@ def test_escape_in_the_tree_clears_every_filter(make_view):
     view.tree_ctrl.SelectItem(tree_nodes(view)["Genre"]["Action"], True)
     assert titles(view) == ["Bravo"]
     press_escape_in_tree(view)
-    assert titles(view) == ["Alpha", "Bravo"] and saved(view)["catalog_tree_selections"] == []
+    assert titles(view) == ["Alpha", "Bravo"] and saved(view)["tree_selections"] == []
     press_escape_in_tree(view)  # nothing selected: wx fires no event, the filters are applied all the same
     assert titles(view) == ["Alpha", "Bravo"]
 
@@ -273,7 +279,7 @@ def test_escape_in_the_tree_clears_every_filter(make_view):
 
 def test_saved_search_and_sort_are_read_when_the_view_is_built(make_view):
     """The list is filled before the main window loads the rest of its saved state"""
-    view = make_view({"catalog_last_search": "a", "catalog_sort_column": 1, "catalog_sort_ascending": False},
+    view = make_view({"last_search": "a", "sort_column": 1, "sort_ascending": False},
                      sort_keys=SORT_KEYS)
     view.set_rows(rows(ANT, BEE, CAT))
     assert view.search_combo.GetValue() == "a" and titles(view) == ["Ant", "Cat"]  # newest first; no "a" in Bee
@@ -290,10 +296,10 @@ def test_sorting_keeps_the_game_selected_and_its_label_right(make_view):
     click_header(view, 1)  # the same column again: the other way round
     assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title", "Year ▼"]
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (0, 0, "Install Ant")
-    assert (saved(view)["catalog_sort_column"], saved(view)["catalog_sort_ascending"]) == (1, False)
+    assert (saved(view)["sort_column"], saved(view)["sort_ascending"]) == (1, False)
     press(view.list_ctrl, ord("1"), wx.wxEVT_CHAR)  # a digit key sorts by that column
-    assert headers(view) == ["Title ▲", "Year"] and saved(view)["catalog_sort_column"] == 0
-    view.frame.library_manager.fail = True  # a failed save doesn't stop the sort
+    assert headers(view) == ["Title ▲", "Year"] and saved(view)["sort_column"] == 0
+    saves(view).fail = True  # a failed save doesn't stop the sort
     press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR)
     assert titles(view) == ["Cat", "Bee", "Ant"] and view.action_btn.GetLabel() == "Install Ant"
 
@@ -338,7 +344,7 @@ def test_tree_shows_only_the_chosen_categories(make_view):
     assert view._selected_paths() == ["Genre/Action"] and titles(view) == ["Bravo"]
     view.set_tree_keys(["developer"])  # the category that held the selection goes: it no longer filters
     assert list(tree_nodes(view)) == ["Developer"] and titles(view) == ["Alpha", "Bravo"]
-    assert saved(view)["catalog_tree_selections"] == []
+    assert saved(view)["tree_selections"] == []
     view.set_tree_keys([])
     assert tree_nodes(view) == {} and titles(view) == ["Alpha", "Bravo"]
 
@@ -375,30 +381,30 @@ def test_library_rows_launch_describe_and_are_remembered_by_id(make_view):
     assert view.description.GetValue().startswith("About Alpha.")
     player_selects(view, 1)
     assert (view.action_btn.GetLabel(), view.description.GetValue()) == ("Launch Hand", "")
-    assert saved(view)["catalog_last_selected"] == "C:/games/hand.exe"
+    assert saved(view)["last_selected"] == "C:/games/hand.exe"
     view.set_rows([])
     assert (view.action_btn.GetLabel(), view.action_btn.IsEnabled()) == ("Launch", False)
 
 
 def test_column_widths_are_restored_and_saved(make_view):
-    view = make_view({"catalog_column_widths": [123, 45]})
+    view = make_view({"column_widths": [123, 45]})
     assert [view.list_ctrl.GetColumnWidth(i) for i in range(2)] == [123, 45]
     view.list_ctrl.SetColumnWidth(0, 222)
     view.save_state()
-    assert saved(view)["catalog_column_widths"] == [222, 45]
+    assert saved(view)["column_widths"] == [222, 45]
 
 
 def test_search_and_tree_filters_are_saved_only_while_there_are_rows(make_view):
     """With no rows (the catalog offline with no saved copy) the last filters wait for the games"""
-    view = make_view({"catalog_last_search": "bra", "catalog_tree_selections": ["Genre/Action"]})
+    view = make_view({"last_search": "bra", "tree_selections": ["Genre/Action"]})
     view.set_rows([])
     view.save_state()
-    assert (saved(view)["catalog_last_search"], saved(view)["catalog_tree_selections"]) == ("bra", ["Genre/Action"])
+    assert (saved(view)["last_search"], saved(view)["tree_selections"]) == ("bra", ["Genre/Action"])
     view.set_rows(rows(ALPHA, BRAVO))  # the tree has values now: the saved selections come back
     assert view._selected_paths() == ["Genre/Action"] and titles(view) == ["Bravo"]
     view.search_combo.SetValue("b")
     view.save_state()
-    assert saved(view)["catalog_last_search"] == "b"
+    assert saved(view)["last_search"] == "b"
 
 
 def test_a_tabs_own_keys_and_its_hook_after_every_refill(make_view):
@@ -432,3 +438,99 @@ def test_focus_list_refuses_while_a_dialog_is_open_or_the_app_is_starting(make_v
     view.frame.initializing = False
     view.focus_list()
     assert focus == [True] and (selected(view), focused(view)) == (0, 0)
+
+
+@pytest.mark.parametrize("prefix, sort_keys", [("", SORT_KEYS), ("catalog_", None)])
+def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, prefix, sort_keys):
+    """The Library's keys have no prefix, the Catalog's start with catalog_. A key the defaults lack is a KeyError
+    when the main window starts; one the view adds on its own is never filled in for a config without it."""
+    view = make_view(prefix=prefix, sort_keys=sort_keys)
+    defaults = set(saved(view))
+    view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
+    player_selects(view, 2)
+    view.tree_ctrl.SelectItem(tree_nodes(view)["Genre"]["Puzzle"], True)
+    view.search_combo.SetValue("a")
+    if sort_keys:
+        click_header(view, 1)
+    view.set_tree_keys(["genre"])
+    view.set_rows(rows(ALPHA, BRAVO))  # Charlie, the selected game, went: the row in its place is remembered
+    view.save_state()
+    state, other = saved(view), "" if prefix else "catalog_"
+    assert set(state) == defaults
+    assert (state[prefix + "last_selected"], state[prefix + "last_search"], state[prefix + "tree_selections"]) == \
+        ("alpha", "a", ["Genre/Puzzle"])
+    assert len(state[prefix + "column_widths"]) == 2
+    assert (state[other + "last_selected"], state[other + "last_search"], state[other + "tree_selections"],
+            state[other + "column_widths"]) == (None, "", [], None)  # the other tab's are left alone
+
+
+def test_the_tree_is_rebuilt_only_when_what_it_shows_changed(make_view):
+    view = make_view()
+    builds, build = [], view._build_tree
+    view._build_tree = lambda nodes: (builds.append(len(nodes)), build(nodes))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.set_rows(rows(ALPHA, BRAVO))  # a background refresh
+    view.set_rows(rows(BRAVO, ALPHA, DELTA))  # another game, no new tree value
+    view.apply_filters()
+    assert len(builds) == 1
+    view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))
+    assert len(builds) == 2
+
+
+def test_a_config_save_that_fails_is_logged_and_never_raised(make_view, caplog):
+    """Called directly: an exception inside a wx event handler is swallowed by wx and would prove nothing"""
+    view = make_view(sort_keys=SORT_KEYS)
+    view.set_rows(rows(ANT, BEE, CAT))
+    saves(view).fail = True
+    with caplog.at_level(logging.WARNING):
+        view.save_config()
+        view.sort_by(1)
+        view.set_tree_keys(["genre"])
+        view.on_tree_selection()
+    assert caplog.text.count("Couldn't save the config") == 4
+
+
+def test_the_filter_is_applied_before_the_config_is_saved(make_view):
+    view = make_view(sort_keys=SORT_KEYS)
+    view.set_rows(rows(ALPHA, BRAVO))
+    seen = []
+    view.frame.library_manager.save_config = lambda: seen.append(titles(view))  # what the list shows at each save
+    view.tree_ctrl.SelectItem(tree_nodes(view)["Genre"]["Action"], True)
+    assert seen == [["Bravo"]]
+    press_escape_in_tree(view)
+    assert seen[-1] == ["Alpha", "Bravo"]
+    click_header(view, 0)  # Title again: the other way round
+    assert seen[-1] == ["Bravo", "Alpha"]
+
+
+def test_focus_goes_to_the_list_when_the_progress_area_hides_the_focused_control(make_view):
+    for replaces, moved in ((True, [True]), (False, [])):  # beside the button, nothing hides when a job starts
+        view = make_view(progress_replaces_action=replaces)
+        view.set_rows(rows(ALPHA))
+        focus = []
+        view.list.control.SetFocus = lambda: focus.append(True)
+        view.action_btn.HasFocus = lambda: True
+        view.set_busy(True)
+        assert focus == moved
+        view.action_btn.HasFocus = lambda: False
+        view.progress_area.has_focus_inside = lambda: True  # on Cancel, say, when the job ends
+        view.set_busy(False)
+        assert focus == moved + [True]
+
+
+def test_a_selection_event_while_a_dialog_is_open_is_not_the_players(make_view):
+    """No dialog lets the player reach the list, so such an event is spurious: nothing is remembered or saved"""
+    view = make_view()
+    view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
+    player_selects(view, 1)
+    view.frame.dialog_active = True
+    player_selects(view, 2)
+    assert saved(view)["last_selected"] == "bravo" and saves(view).count == 1
+
+
+@pytest.mark.parametrize("column", [7, -1, "1", None])
+def test_a_saved_sort_column_the_list_does_not_have_is_ignored(make_view, column):
+    """A hand-edited config.json must not stop every fill with an IndexError"""
+    view = make_view({"sort_column": column, "sort_ascending": False}, sort_keys=SORT_KEYS)
+    view.set_rows(rows(CAT, ANT, BEE))
+    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title ▲", "Year"]
