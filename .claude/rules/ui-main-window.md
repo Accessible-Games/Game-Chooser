@@ -173,8 +173,8 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - `GamesPanel.restoring_tree` is true while the view itself changes the tree (building it, restoring its
   selections, Escape): the tree's change events are then ignored.
 - Filling a list, restoring its selection and the search rule are `GamesPanel`'s (above). A fill calls `SetFocus`
-  in one case only: the list became empty while focus was on its action button. What never moves focus, and what
-  `CatalogPanel`'s status line does today, is in CLAUDE.md (Focus).
+  in one case only: the list became empty while focus was on its action button. What never moves focus, and the two
+  exceptions (this view's, and `CatalogPanel`'s move to its status line), is in CLAUDE.md (Focus).
 - After a dialog the code calls `focus_active_list()` only in these places. Startup: at the end of
   `check_libraries`, which follows the first-run dialog when there is one. Library: after the message that a
   catalog game can't be edited (Ctrl+E); in the forget flow when nothing was forgotten; after a catalog action

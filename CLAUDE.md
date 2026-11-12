@@ -92,15 +92,15 @@ Nothing outside `tracing/` and its tests (`tests/tracing/`) imports it; the one 
 `game-chooser.py`, inside `try/except ImportError`.
 
 ### Focus
-The progress area and background refreshes never move focus. One exception, in `GamesPanel`: when the control
-that has focus is about to become unusable (the action button as its list empties, the progress area as it
-hides), focus goes to that tab's games list; never while a dialog is open.
+The progress area and background refreshes never move focus, with two exceptions. The first is `GamesPanel`'s:
+when the control that has focus is about to become unusable (the action button as its list empties, the progress
+area as it hides), focus goes to that tab's games list; never while a dialog is open.
 
-Not part of this rule, and not decided: what `CatalogPanel` does today. It moves focus on a background event in
-two places. When a fetched index is taken and there is no catalog to show (the status line says why, with Retry)
-while the Catalog tab is showing, focus goes to the status line (`set_index_state`). When the status line or
-Retry hides while it has focus, focus goes to the Catalog's games list (`_update_status`). Neither happens while
-a dialog is open or the app is starting.
+The second is `CatalogPanel`'s, decided on Nov 12, 2026: it stays, so that a catalog that could not be fetched is
+announced. It moves focus on a background event in two places. When a fetched index is taken and there is no
+catalog to show (the status line says why, with Retry) while the Catalog tab is showing, focus goes to the status
+line (`set_index_state`). When the status line or Retry hides while it has focus, focus goes to the Catalog's
+games list (`_update_status`). Neither happens while a dialog is open or the app is starting.
 
 ### Migration
 No migration (alpha): write no migration code.
