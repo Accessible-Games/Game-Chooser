@@ -137,7 +137,7 @@ def tree_nodes(view):
     return nodes
 
 
-def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False):
+def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False, shift=False):
     """True when a handler took the key"""
     event = wx.KeyEvent(event_type)
     event.SetKeyCode(key_code)
@@ -145,6 +145,7 @@ def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False)
         event.SetUnicodeKey(key_code)  # a character, as wx gives it
     event.SetControlDown(ctrl)
     event.SetAltDown(alt)
+    event.SetShiftDown(shift)
     return window.GetEventHandler().ProcessEvent(event)
 
 
@@ -860,13 +861,13 @@ def test_a_pause_starts_a_new_text_and_a_repeated_letter_steps_on(make_view):
     assert selected(view) == 1
 
 
-def test_typing_that_matches_no_title_and_keys_with_ctrl_or_alt_change_nothing(make_view):
+def test_typing_that_matches_no_title_and_keys_with_ctrl_alone_or_alt_alone_change_nothing(make_view):
     view, now = typing_view(make_view)
     player_selects(view, 2)
     before = saves(view).count
     type_text(view, "zz")
     now[0] += 2
-    for modifiers in ({"ctrl": True}, {"alt": True}, {"ctrl": True, "alt": True}):
+    for modifiers in ({"ctrl": True}, {"alt": True}):
         press(view.list_ctrl, ord("t"), wx.wxEVT_CHAR, **modifiers)
     for key in (wx.WXK_ESCAPE, wx.WXK_BACK, wx.WXK_TAB, wx.WXK_DELETE):  # wx sends these as characters too
         press(view.list_ctrl, key, wx.wxEVT_CHAR)
@@ -932,3 +933,25 @@ def test_a_typed_text_ends_on_a_key_that_ends_a_thought(make_view, key):
     player_selects(view, 2)  # where an arrow key takes the player
     type_text(view, " ")
     assert acted == ["Bravo"]
+
+
+def test_a_character_typed_with_altgr_is_text(make_view):
+    """Ctrl and Alt both down is what AltGr is to Windows. wx hands over a letter outside the system code page
+    that way (\u0119 and \u017c on a Polish layout, under code page 1252), and with no key code"""
+    view = make_view()
+    view.set_rows(rows(entry("alpha"), entry("zebra"), entry("\u017cuk")))
+    event = wx.KeyEvent(wx.wxEVT_CHAR)
+    event.SetUnicodeKey(ord("\u017c"))
+    event.SetControlDown(True)
+    event.SetAltDown(True)
+    view.list_ctrl.GetEventHandler().ProcessEvent(event)
+    assert view.selected_row().title == "\u017buk"
+
+
+def test_a_digit_sorts_only_with_neither_ctrl_nor_alt_held(make_view):
+    view, _ = typing_view(make_view)
+    for modifiers in ({"alt": True}, {"ctrl": True}, {"ctrl": True, "alt": True}):
+        press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR, **modifiers)
+        assert headers(view) == ["Title \u25b2", "Year"] and not view.type_ahead.typing()
+    press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR, shift=True)  # some layouts (French) give digits only with Shift
+    assert headers(view) == ["Title", "Year \u25b2"]

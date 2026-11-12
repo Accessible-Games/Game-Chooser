@@ -435,16 +435,17 @@ class GamesPanel(wx.Panel):
         """A character typed in the list is type-ahead (the virtual list does none by itself), or a digit that
         sorts by its column. A digit only extends a text that is being typed ("area 51"), so a title that
         starts with a digit can't be reached by typing; nor does a Space start one (`TypeAhead` has its limits).
-        A key with Ctrl or Alt is never text. Not on the macOS DataView control: there every key but a sorting
-        digit is left to the control."""
+        A key with Ctrl alone or Alt alone is never text and sorts nothing. With both it is AltGr and is text:
+        wx hands over a letter outside the system code page that way. Not on the macOS DataView control: there
+        every key but a sorting digit is left to the control."""
         code = event.GetUnicodeKey()
         char = chr(code) if code != wx.WXK_NONE else ""
-        text = (char != "" and char.isprintable() and not event.ControlDown() and not event.AltDown()
-                and not self.list.control.use_dataview)
+        ctrl, alt = event.ControlDown(), event.AltDown()
+        text = char != "" and char.isprintable() and ctrl == alt and not self.list.control.use_dataview
         column = event.GetKeyCode() - ord("1")
         if text and (self.type_ahead.typing() or char not in "0123456789"):
             self._type(char)
-        elif 0 <= column < len(self.sort_keys):
+        elif 0 <= column < len(self.sort_keys) and not ctrl and not alt:  # Shift may be what gives the digit
             self.sort_by(column)
         elif not text:  # a character is never passed on: the control might search for it on its own
             event.Skip()

@@ -749,7 +749,7 @@ class MainFrame(wx.Frame):
         """The Library list's own keys (the view handles Enter, Space and the context menu keys); True for a key
         that was taken"""
         key = event.GetKeyCode()
-        if key == ord('E') and event.ControlDown():
+        if key == ord('E') and event.ControlDown() and not event.AltDown():  # with Alt it is AltGr+E, a letter
             self.on_edit_game(None)
         elif key == wx.WXK_DELETE:
             self.on_delete_game(None)
