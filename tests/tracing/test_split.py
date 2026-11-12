@@ -214,6 +214,15 @@ def test_a_stop_record_of_the_wrong_shape_is_no_stop():
     assert r.stop == {"time": 40 * S, "close_games": False, "asked_to_close": [], "ended": [1], "not_closed": []}
 
 
+def test_not_closed_keeps_each_pid_with_its_reason():
+    entries = [{"pid": 7, "reason": "runs as another user"}, {"pid": "x", "reason": "r"}, {"pid": 8}, 9,
+               {"pid": 10, "reason": 5}]
+    [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()],
+                    stop_record({"s": {**LISTS, "not_closed": entries}}, close_games=True))
+    assert r.stop["not_closed"] == [{"pid": 7, "reason": "runs as another user"}, {"pid": 8, "reason": None},
+                                    {"pid": 10, "reason": None}]
+
+
 def test_a_session_the_stop_did_not_list_but_the_capture_shows_running_is_ended_by_the_stop():
     # launched after the request was taken, or held by a process the recorder's live view missed
     [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()], stop_record({}, close_games=True))

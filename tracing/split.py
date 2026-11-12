@@ -111,18 +111,27 @@ def _is_int(value) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
+def _not_closed(item: dict) -> dict:
+    reason = item.get("reason")
+    return {"pid": item["pid"], "reason": reason if isinstance(reason, str) else None}
+
+
 def normalize_stop(stop) -> dict | None:
     """The recorder's stop record (the run folder's stop.json) in a known shape, or None when the run wasn't
     stopped or the record can't be used: `requested` (FILETIME or None), `time` (FILETIME), `close_games` and
-    `sessions`, the sessions that were running, each with its three pid lists."""
+    `sessions`, the sessions that were running, each with its pid lists `asked_to_close` and `ended` and its
+    `not_closed` list of {pid, reason}."""
     if not isinstance(stop, dict) or not _is_int(stop.get("time")) or not isinstance(stop.get("sessions"), dict):
         return None
     sessions = {}
     for session_id, entry in stop["sessions"].items():
         if isinstance(entry, dict):
+            lists = {name: entry[name] if isinstance(entry.get(name), list) else [] for name in STOP_LISTS}
             sessions[session_id] = {
-                name: [pid for pid in entry[name] if _is_int(pid)] if isinstance(entry.get(name), list) else []
-                for name in STOP_LISTS}
+                "asked_to_close": [pid for pid in lists["asked_to_close"] if _is_int(pid)],
+                "ended": [pid for pid in lists["ended"] if _is_int(pid)],
+                "not_closed": [_not_closed(item) for item in lists["not_closed"]
+                               if isinstance(item, dict) and _is_int(item.get("pid"))]}
     requested = stop.get("requested")
     return {"requested": requested if _is_int(requested) else None, "time": stop["time"],
             "close_games": stop.get("close_games") is True, "sessions": sessions}

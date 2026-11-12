@@ -15,7 +15,7 @@ from tests.tracing.test_closing import SLEEPER, WINDOW
 from tests.tracing.test_recorder import Clock, FakeProcmon
 from tracing import recorder, stop
 from tracing.clock import now_filetime
-from tracing.closing import WindowsCloser
+from tracing.closing import WindowsCloser, process_identity
 from tracing.live import process_start_time, windows_snapshot
 from tracing.model import SessionInfo
 from tracing.runfiles import new_run
@@ -48,7 +48,7 @@ def test_close_games_closes_the_game_tree_and_nothing_else(tmp_path, monkeypatch
                                       {"game_dir": str(tmp_path / "game"), "exe": sys._base_executable}, {}, ()))
         rec = recorder.Recorder(run, lambda: True, FakeProcmon(Clock(), True, None, run), windows_snapshot,
                                 lambda r: SplitResult([], []), lambda: [], lambda: 10 * 1024**3, time.monotonic,
-                                time.sleep, closer=WindowsCloser(), protected_pids=())
+                                time.sleep, closer=WindowsCloser(process_identity(os.getpid())), protected_pids=())
         thread = threading.Thread(target=rec.run, daemon=True)
         thread.start()
         deadline = time.monotonic() + 20

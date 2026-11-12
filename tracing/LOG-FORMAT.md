@@ -86,8 +86,10 @@ closest to the call. A process of the same exe that started outside that window 
   - `ended`: pids that were still running after the wait and were ended by force (TerminateProcess). A program
     ended this way had no chance to save, so its last writes may be missing from the trace because they were never
     made.
-  - `not_closed`: pids of the session still running after all that (the end failed, or the process is one the stop
-    never touches: see "Ending a run with --trace-stop").
+  - `not_closed`: one `{"pid", "reason"}` per process of the session still running after all that. `reason` is a
+    short sentence: it runs as another user, it runs with more rights than Game Chooser (a game started through
+    the administrator prompt), who it runs as couldn't be read, a stop never closes it, it could not be ended,
+    Process Monitor stopped first, or this recorder can't close games. See "Ending a run with --trace-stop".
   - A session the recorder did not count as running (a game launched after the request was taken, or one whose
     processes its live view missed) has three empty lists even with `close_games` true: it was not touched.
   - With `close_games` true and everything closed, `end` is set and `still_running_at_capture_end` is false, as for
@@ -202,7 +204,7 @@ files in the run folder (both written whole, then moved into place):
   `requester_pid`. The recorder looks for it every half second while it is capturing.
 - `stop.json`, written by the recorder when it takes the request: `requested` (copied from the request), `time`
   (FILETIME, when it was taken), `close_games`, and `sessions`: one entry per session the recorder counted as
-  running at that moment, each with the pid lists `asked_to_close`, `ended` and `not_closed` (see `stop` under
+  running at that moment, each with the lists `asked_to_close`, `ended` and `not_closed` (see `stop` under
   session.json). With `--close-games` it is written again once the closing is over. A request the recorder never
   took (no `stop.json`) is not a stop.
 
@@ -223,10 +225,20 @@ With `--close-games`, before Process Monitor is stopped (so the writes games mak
 3. What is still running is ended (TerminateProcess), each process only if its pid still has the same start time.
    Then up to 5 seconds for them to be gone.
 
-Never asked or ended, even if a session's tree holds them: the recorder itself, Game Chooser, pids 0 and 4, any
+A process is asked or ended only if it runs as Game Chooser's user with no more rights than Game Chooser (the
+same user in its token, and an integrity level no higher). The recorder reads both from Game Chooser's own process
+when it starts, and checks each process right before touching it. This is what keeps the recorder, which has
+administrator rights and takes its list of sessions from files any program of the user can write, from closing
+anything those programs couldn't close themselves. **The cost: a game started through the administrator prompt is
+not closed by `--close-games`.** It is left running and listed in `not_closed` with the reason, and the command
+exits with 1. Processes of another user and Windows' own services are refused the same way. If Game Chooser had
+already gone when the recorder started, nothing is closed.
+
+Also never asked or ended, even if a session's tree holds them: the recorder itself, Game Chooser, pids 0 and 4, any
 program on the list of processes the capture drops (first list at the top of this file), and a process whose
-program path can't be read. They show up in `not_closed`. A game launched after the request was taken is not part
-of the stop. If Process Monitor dies during the wait, nothing is ended.
+program path can't be read. They show up in `not_closed` too. Nothing in `not_closed` is waited for. A game
+launched after the request was taken is not part of the stop. If Process Monitor dies during the wait, nothing is
+ended.
 
 What the live view holds, and so what `--close-games` closes, is everything a traced game started that is still
 running: its helpers, the console host (`conhost.exe`) Windows gives a console program, a browser or an editor the

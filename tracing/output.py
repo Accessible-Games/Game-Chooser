@@ -47,7 +47,7 @@ def _stop_entry(stop: dict | None, zero: int) -> dict | None:
         return None
     return {"time": filetime_to_iso(stop["time"]), "t": _t(stop["time"], zero), "close_games": stop["close_games"],
             "asked_to_close": list(stop["asked_to_close"]), "ended": list(stop["ended"]),
-            "not_closed": list(stop["not_closed"])}
+            "not_closed": [dict(item) for item in stop["not_closed"]]}
 
 
 def _session_json(result: SessionResult) -> dict:

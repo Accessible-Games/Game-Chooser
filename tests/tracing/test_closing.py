@@ -3,12 +3,14 @@
 The children's windows are never seen: one is hidden, the other is a zero-size, off-screen tool window that can't
 be activated, so no test moves focus or shows anything.
 """
+import os
 import subprocess
 import sys
 
 import pytest
 
-from tracing.closing import WindowsCloser
+from tracing import closing
+from tracing.closing import Identity, Refused, WindowsCloser, process_identity
 from tracing.live import process_start_time
 
 pytestmark = [pytest.mark.windows, pytest.mark.skipif(sys.platform != "win32", reason="Windows only")]
@@ -41,6 +43,11 @@ sys.exit(7 if not user32.IsWindow(hwnd) else 4)
 """
 
 
+def closer():
+    """The closer as the recorder builds it, with this test standing in for Game Chooser."""
+    return WindowsCloser(process_identity(os.getpid()))
+
+
 @pytest.fixture
 def child():
     started = []
@@ -65,13 +72,13 @@ def child():
 
 def test_end_ends_the_process(child):
     proc, start = child(SLEEPER)
-    assert WindowsCloser().end(proc.pid, start) is True
+    assert closer().end(proc.pid, start) is True
     assert proc.wait(10) == 1
 
 
 def test_end_refuses_a_process_with_another_start_time(child):
     proc, start = child(SLEEPER)
-    assert WindowsCloser().end(proc.pid, start + 1) is False
+    assert closer().end(proc.pid, start + 1) is False
     assert proc.poll() is None
 
 
@@ -79,30 +86,56 @@ def test_end_of_a_process_that_has_gone_is_false(child):
     proc, start = child(SLEEPER)
     proc.kill()
     proc.wait(10)
-    assert WindowsCloser().end(proc.pid, start) is False
+    assert closer().end(proc.pid, start) is False
 
 
 def test_ask_close_closes_a_visible_window_and_the_program_ends_by_itself(child):
     proc, start = child(WINDOW, "visible")
-    assert WindowsCloser().ask_close(proc.pid, start) is True
+    assert closer().ask_close(proc.pid, start) is True
     assert proc.wait(10) == 7
 
 
 def test_ask_close_refuses_a_process_with_another_start_time(child):
     proc, start = child(WINDOW, "visible")
-    assert WindowsCloser().ask_close(proc.pid, start + 1) is False
+    assert closer().ask_close(proc.pid, start + 1) is False
     with pytest.raises(subprocess.TimeoutExpired):
         proc.wait(0.5)
 
 
 def test_ask_close_leaves_hidden_windows_alone(child):
     proc, start = child(WINDOW, "hidden")
-    assert WindowsCloser().ask_close(proc.pid, start) is False
+    assert closer().ask_close(proc.pid, start) is False
     with pytest.raises(subprocess.TimeoutExpired):
         proc.wait(0.5)
 
 
 def test_ask_close_of_a_program_without_a_window_is_false(child):
     proc, start = child(SLEEPER)
-    assert WindowsCloser().ask_close(proc.pid, start) is False
+    assert closer().ask_close(proc.pid, start) is False
     assert proc.poll() is None
+
+
+def test_process_identity_reads_the_user_and_the_rights_of_a_process(child):
+    me = process_identity(os.getpid())
+    assert me.user.startswith("S-1-5-") and me.integrity >= 0x1000
+    proc, start = child(SLEEPER)
+    assert process_identity(proc.pid) == me  # a child runs as its parent does
+    proc.kill()
+    proc.wait(10)
+    assert process_identity(proc.pid) is None
+
+
+@pytest.mark.parametrize("limit, reason", [
+    (lambda me: Identity("S-1-5-21-0-0-0-99999", me.integrity), closing.REFUSED_USER),
+    (lambda me: Identity(me.user, me.integrity - 1), closing.REFUSED_RIGHTS),
+    (lambda me: None, closing.REFUSED_NO_LIMIT),
+])
+def test_a_process_outside_the_limit_is_neither_asked_nor_ended(child, limit, reason):
+    proc, start = child(WINDOW, "visible")
+    refusing = WindowsCloser(limit(process_identity(os.getpid())))
+    for action in (refusing.ask_close, refusing.end):
+        with pytest.raises(Refused) as refused:
+            action(proc.pid, start)
+        assert refused.value.reason == reason
+    with pytest.raises(subprocess.TimeoutExpired):
+        proc.wait(0.5)

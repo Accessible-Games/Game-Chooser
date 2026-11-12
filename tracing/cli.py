@@ -68,9 +68,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--close-games", action="store_true",
                         help="with --trace-stop: close the traced games first. Every process of a traced game is "
                              f"asked to close; any still open after {CLOSE_WAIT_SECONDS:g} seconds are ended. "
-                             "Unsaved game progress is lost. Only processes a traced game started are touched "
-                             "(that can be a browser or an editor the game opened), never Game Chooser or "
-                             "Process Monitor")
+                             "Unsaved game progress is lost. A process is closed only if it runs as Game "
+                             "Chooser's user with no more rights than Game Chooser, so a game started through "
+                             "the administrator prompt is not closed (it is reported, and the exit code is 1). "
+                             "Which processes belong to a traced game comes from the run folder's session "
+                             "files and the running process tree, and can include a browser or an editor the "
+                             "game opened. Game Chooser, the recorder and Process Monitor are never closed")
     parser.add_argument("--trace-split", nargs="*", metavar="RUN",
                         help="split leftover runs (after a crash) into session folders, or the named run folders")
     parser.add_argument("--trace-check", metavar="FOLDER",
@@ -236,7 +239,7 @@ def _recorder(args, compiled: bool) -> int:
 
 
 def _build_recorder(args) -> "Recorder":
-    from tracing.closing import WindowsCloser
+    from tracing.closing import WindowsCloser, process_identity
     from tracing.live import windows_snapshot
     from tracing.pml import read_capture
     from tracing.procmon import WindowsProcmon
@@ -247,4 +250,6 @@ def _build_recorder(args) -> "Recorder":
         run, _app_alive_check(args.app_pid), WindowsProcmon(Path(args.procmon)), windows_snapshot,
         lambda r: split_run_dir(r, traces_dir, read_capture), lambda: leftover_runs(traces_dir, _is_alive),
         lambda: shutil.disk_usage(run.path).free, time.monotonic, time.sleep,
-        closer=WindowsCloser(), protected_pids=(args.app_pid,))
+        # --close-games closes only what runs as the app's user with no more rights than the app: both are read
+        # here, once, from the app's own process (the one that started this recorder and named itself).
+        closer=WindowsCloser(process_identity(args.app_pid)), protected_pids=(args.app_pid,))

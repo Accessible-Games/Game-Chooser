@@ -2,6 +2,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import tracing.cli as cli
 from tracing.runfiles import RunDir, new_run
 from tracing.splitrun import SplitResult
@@ -183,18 +185,36 @@ def test_help_with_a_command_prints_the_help_and_runs_nothing(monkeypatch, capsy
         for name in cli.COMMANDS + ("--close-games", "--traces-dir"):
             assert name in text
         assert "Unsaved game progress is lost" in text and "15 seconds" in text
+        assert "a game started through the administrator prompt is not closed" in text
+        assert "runs as Game Chooser's user with no more rights than Game Chooser" in text
 
 
 def test_help_alone_is_not_a_tracing_command():
     assert cli.run_command(["--help"], True) is None
 
 
-def test_the_recorder_is_built_able_to_close_games_and_never_the_app(tmp_path, monkeypatch):
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_the_recorder_is_built_to_close_only_what_the_app_could_and_never_the_app(tmp_path):
     import argparse
     import os
-    from tracing.closing import WindowsCloser
+    from tracing.closing import WindowsCloser, process_identity
     run = new_run(tmp_path, 133_000_000_000_000_000, 5)
-    monkeypatch.setattr(cli, "_app_alive_check", lambda pid: lambda: True)
-    recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=4242, procmon="p.exe"))
+    recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=os.getpid(),
+                                                      procmon="p.exe"))
     assert isinstance(recorder.closer, WindowsCloser)
-    assert {4242, os.getpid()} <= recorder._protected_pids
+    # the limit is who the process named by --app-pid runs as, read from that process itself
+    assert recorder.closer.limit == process_identity(os.getpid()) and recorder.closer.limit is not None
+    assert os.getpid() in recorder._protected_pids
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_a_recorder_whose_app_has_gone_closes_nothing(tmp_path):
+    import argparse
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait(30)
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=gone.pid,
+                                                      procmon="p.exe"))
+    assert recorder.closer.limit is None

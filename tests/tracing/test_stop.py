@@ -189,9 +189,11 @@ def test_close_games_goes_into_the_request_with_its_warning(s):
 
 def test_a_process_that_could_not_be_closed_is_a_problem(s):
     run = s.run()
-    s.script = [finish(run, {"s001-9": {**LISTS, "not_closed": [100, 103]}}, close_games=True)]
+    left = [{"pid": 100, "reason": "could not be ended"}, {"pid": 103, "reason": "runs as another user"}]
+    s.script = [finish(run, {"s001-9": {**LISTS, "not_closed": left}}, close_games=True)]
     assert s.stop(close_games=True) == 1
-    assert "Problem: s001-9: still running after the stop: 100, 103" in s.lines
+    assert ("Problem: s001-9: still running after the stop: 100 (could not be ended), "
+            "103 (runs as another user)") in s.lines
     assert "The run has ended." not in s.lines
 
 

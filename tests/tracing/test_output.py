@@ -120,10 +120,11 @@ def test_session_json_says_how_the_session_ended(tmp_path):
 def test_session_json_stop_fields(tmp_path):
     result = make_result()
     result.ended_by = "stop"
+    left = [{"pid": 300, "reason": "runs as another user"}]
     result.stop = {"time": T0 + 30 * S, "close_games": True, "asked_to_close": [100], "ended": [200],
-                   "not_closed": []}
+                   "not_closed": left}
     data = json.loads((write_session(result, tmp_path) / "session.json").read_text(encoding="utf-8"))
     assert data["ended_by"] == "stop"
     assert data["stop"] == {"time": filetime_to_iso(T0 + 30 * S), "t": 30.0, "close_games": True,
-                            "asked_to_close": [100], "ended": [200], "not_closed": []}
+                            "asked_to_close": [100], "ended": [200], "not_closed": left}
     assert data["format"] == 1

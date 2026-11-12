@@ -59,10 +59,19 @@ Build: see `.claude/rules/build.md`.
     each running process of those sessions to close (`closing.WindowsCloser.ask_close`: WM_CLOSE to its visible
     top-level windows), waits `CLOSE_WAIT_SECONDS` (15 s, less when all are gone), ends what is left (`end`:
     TerminateProcess after checking the start time on the opened handle), then waits `END_WAIT_SECONDS` (5 s).
-    Targets come only from `LiveTree.running_processes()` for the sessions listed in `stop.json`, by (pid, start);
-    never the recorder's own pid, the app's pid (`protected_pids`), pids 0 and 4, a name in `EXCLUDED_PROCESSES`
-    or a process with no readable path. **Keep it that way: the session files are written unelevated, and the
-    recorder that acts on them is elevated.**
+    Candidates come from `LiveTree.running_processes()` for the sessions listed in `stop.json`, by (pid, start),
+    minus the recorder's own pid, the app's pid (`protected_pids`), pids 0 and 4, a name in `EXCLUDED_PROCESSES`
+    and a process with no readable path. That list is not a safeguard: the live tree is seeded from session files
+    (and the request from a file) that any program of the user can write, while the recorder is elevated.
+    **The safeguard is `closing.Closer`:** on the process handle it then acts on, after the start time, it
+    refuses (`Refused`) any process whose token user is not the app's user, whose integrity level is above the
+    app's, or whose token can't be read. The app's user and level (`Identity`) are read once, when the recorder
+    is built, from the process named by `--app-pid` (`closing.process_identity`); if that fails, every process is
+    refused. What this guarantees: `--close-games` closes nothing the user's own unelevated programs couldn't
+    close themselves. What it does not: a session file can still name another unelevated program of the same
+    user. The cost: a game started through the administrator prompt is not closed. A refused or protected
+    process is left alone, not waited for, and listed in `not_closed` with its reason (exit code 1).
+    **Never act on a process outside `Closer`, and never widen the limit.**
 - **Where logs go:** `traces/` beside the exe (from source: beside `game-chooser.py`; git-ignored). One folder per
   play session, `<catalog id or title>-<YYYYMMDD-HHMMSS>`, holding `session.json` and `events.jsonl`. The recorder's
   working files live in `traces/_runs/<YYYYMMDD-HHMMSS>-<pid>/`: `status.json`, `sessions/<id>.json`, `filter.pmc`,
@@ -101,7 +110,8 @@ Build: see `.claude/rules/build.md`.
   - `client.py` - app side: starts the recorder, writes session files, records launches and marks
   - `recorder.py` - elevated side: drives Process Monitor for the whole run, then splits; takes a stop request
   - `stop.py` - the `--trace-stop` command (unelevated): finds the run, writes the request, waits, reports
-  - `closing.py` - `GameCloser` and `WindowsCloser`: ask one process to close, or end it (lazy ctypes)
+  - `closing.py` - `Closer` (the rules: start time, then who the process runs as) over `ProcessAccess`
+    (`WindowsProcesses`: lazy ctypes), `WindowsCloser`, `Identity`, `process_identity`, the `not_closed` reasons
   - `procmon.py` - Process Monitor's filter file, start, ready check, stop
   - `pml.py` - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`). `read_capture` swaps
     in `event_offsets` for procmon-parser's event offsets reader, which drops bits 32 to 39 of each offset and so
@@ -115,7 +125,8 @@ Build: see `.claude/rules/build.md`.
   - `check_trace_test.py` - `python -m tracing.check_trace_test <session folder>` checks a session of the
     trace test game (`tests/catalog_fixtures/games/trace-test`)
 - **Tests of the stop:** `test_recorder_stop.py` (the recorder, with a fake machine and closer), `test_stop.py` (the
-  command, and command plus recorder through the run folder's files), `test_closing.py` and
+  command, and command plus recorder through the run folder's files), `test_closing_policy.py` (who the closer
+  refuses, on fake processes), `test_closing.py` and
   `test_stop_real_processes.py` (marker `windows`: the real closer and snapshot on Python child processes of the
   test, whose windows are hidden or off-screen and can't be activated), `test_app_glue.py` (the glue's state
   handling without a running wx app; the only tracing test that imports wx, skipped when wxPython is missing).

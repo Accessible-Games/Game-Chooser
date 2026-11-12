@@ -2,7 +2,8 @@
 
 The command runs unelevated and never touches a process. It writes `stop-request.json` into the run folder; the
 elevated recorder, which polls that folder, takes the request (`stop.json`), closes the traced games first when
-asked to, stops Process Monitor and splits the capture as at a normal end. The command waits for that and prints
+asked to (only processes of the app's user with no more rights than the app: see closing.py), stops Process
+Monitor and splits the capture as at a normal end. The command waits for that and prints
 what happened.
 """
 import json
@@ -19,7 +20,7 @@ ACK_SECONDS = 30.0  # how long a capturing recorder gets to take the request
 POLL_SECONDS = 0.5
 
 CLOSE_NOTE = (f"The traced games are asked to close; any still open after {CLOSE_WAIT_SECONDS:g} seconds are "
-              "ended. Unsaved game progress is lost.")
+              "ended. Unsaved game progress is lost. A game started through the administrator prompt is left open.")
 NOTHING = "No tracing run is in progress."
 _PROGRESS = {"stopping": "The recorder is ending the run.", "splitting": "Splitting the capture."}
 
@@ -190,9 +191,10 @@ def _report_stop(stop: dict, out) -> bool:
         entry = sessions[session_id] if isinstance(sessions[session_id], dict) else {}
         asked.update(entry.get("asked_to_close") or [])
         ended.update(entry.get("ended") or [])
-        left = entry.get("not_closed") or []
+        left = [item for item in entry.get("not_closed") or [] if isinstance(item, dict)]
         if left:
-            out(f"Problem: {session_id}: still running after the stop: " + ", ".join(str(pid) for pid in left))
+            out(f"Problem: {session_id}: still running after the stop: "
+                + ", ".join(f"{item.get('pid')} ({item.get('reason')})" for item in left))
             problem = True
     out(f"Asked {len(asked)} processes to close; ended {len(ended)} that stayed open.")
     return problem

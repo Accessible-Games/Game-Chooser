@@ -2,7 +2,8 @@
 import os
 
 from tests.tracing.test_recorder import Clock, FakeProcmon
-from tracing import messages, recorder
+from tracing import closing, messages, recorder
+from tracing.closing import Closer, Identity
 from tracing.live import LiveProc
 from tracing.model import SessionInfo
 from tracing.runfiles import RunDir
@@ -13,6 +14,14 @@ NOW = 133_500_000_000_000_000
 APP_PID = 42
 GAME = r"C:\Games\Foo"
 NO_LISTS = {"asked_to_close": [], "ended": [], "not_closed": []}
+MEDIUM, HIGH, SYSTEM = 0x2000, 0x3000, 0x4000
+USER = "S-1-5-21-1-2-3-1001"
+APP_IDENTITY = Identity(USER, MEDIUM)
+
+
+def left(reason, *pids):
+    """stop.json's not_closed entries."""
+    return [{"pid": pid, "reason": reason} for pid in pids]
 
 
 class World:
@@ -28,6 +37,7 @@ class World:
         self.asked: list[tuple[int, int]] = []
         self.ended: list[tuple[int, int]] = []
         self.ended_at: list[float] = []
+        self.identity: dict[int, Identity | None] = {}  # who a process runs as; the app's user when not given
 
     def add(self, pid, ppid, start, image, until=None):
         self.procs[pid] = LiveProc(pid, ppid, start, image)
@@ -54,6 +64,31 @@ class World:
         return True
 
 
+class WorldProcesses:
+    """What the real closer (closing.Closer) sees of the fake machine."""
+
+    def __init__(self, world):
+        self.world = world
+
+    def open(self, pid, terminate):
+        return pid if any(p.pid == pid for p in self.world.snapshot()) else None
+
+    def creation_time(self, handle):
+        return self.world.procs[handle].start
+
+    def identity(self, handle):
+        return self.world.identity.get(handle, APP_IDENTITY)
+
+    def close_windows(self, pid):
+        return self.world.ask_close(pid, self.world.procs[pid].start)
+
+    def terminate(self, handle):
+        return self.world.end(handle, self.world.procs[handle].start)
+
+    def close(self, handle):
+        pass
+
+
 def session(sid, pid, start, game_dir=GAME):
     return SessionInfo(sid, pid, start, start - 5, start - 1, {"game_dir": game_dir}, {}, ())
 
@@ -76,8 +111,15 @@ def make(tmp_path, *, sessions=(), closer=True, app_until=10_000.0, dies_at=None
     run.write_status = spy
     rec = recorder.Recorder(run, lambda: clock.t < app_until, pm, world.snapshot, lambda r: SplitResult([], []),
                             lambda: [], lambda: 10 * GIB, clock, clock.sleep,
-                            closer=world if closer else None, now=lambda: NOW, protected_pids=(APP_PID,))
+                            closer=_closer(world, closer), now=lambda: NOW, protected_pids=(APP_PID,))
     return rec, run, pm, states, world, clock
+
+
+def _closer(world, kind):
+    """True: the world acts as the closer itself. "checked": the real closer, with its identity check, over it."""
+    if kind == "checked":
+        return Closer(APP_IDENTITY, WorldProcesses(world))
+    return world if kind else None
 
 
 def one_game(world, until=None):
@@ -233,9 +275,11 @@ def test_close_games_never_targets_anything_outside_a_running_session(tmp_path):
     stop = run.read_stop()
     assert sorted(stop["sessions"]) == ["app", "me", "s1"]
     assert stop["sessions"]["s1"] == {"asked_to_close": [100, 101, 102], "ended": [100, 101, 102],
-                                      "not_closed": [103, 104]}
-    assert stop["sessions"]["app"] == {"asked_to_close": [], "ended": [], "not_closed": [APP_PID]}
-    assert stop["sessions"]["me"] == {"asked_to_close": [], "ended": [], "not_closed": [os.getpid()]}
+                                      "not_closed": left(closing.NOT_CLOSED_PROTECTED, 103, 104)}
+    assert stop["sessions"]["app"] == {"asked_to_close": [], "ended": [],
+                                       "not_closed": left(closing.NOT_CLOSED_PROTECTED, APP_PID)}
+    assert stop["sessions"]["me"] == {"asked_to_close": [], "ended": [],
+                                      "not_closed": left(closing.NOT_CLOSED_PROTECTED, os.getpid())}
 
 
 def test_a_game_launched_after_the_stop_was_taken_is_left_alone(tmp_path):
@@ -264,7 +308,8 @@ def test_a_process_that_cannot_be_ended_is_recorded_and_the_run_still_ends(tmp_p
     run.write_stop_request({"requested": NOW, "close_games": True})
     assert rec.run() == 0
     assert world.ended == [(100, 1000)]
-    assert run.read_stop()["sessions"]["s1"] == {"asked_to_close": [100], "ended": [], "not_closed": [100]}
+    assert run.read_stop()["sessions"]["s1"] == {"asked_to_close": [100], "ended": [],
+                                                 "not_closed": left(closing.NOT_CLOSED_FAILED, 100)}
     assert pm.stopped_at == recorder.CLOSE_WAIT_SECONDS + recorder.END_WAIT_SECONDS
     assert "100" in run.log_path.read_text(encoding="utf-8")
 
@@ -287,7 +332,8 @@ def test_process_monitor_dying_during_the_wait_ends_nothing(tmp_path):
     assert rec.run() == 1
     assert world.asked == [(100, 1000)] and world.ended == []
     assert run.read_status()["error"] == messages.PROCMON_STOPPED
-    assert run.read_stop()["sessions"]["s1"] == {"asked_to_close": [100], "ended": [], "not_closed": [100]}
+    assert run.read_stop()["sessions"]["s1"] == {"asked_to_close": [100], "ended": [],
+                                                 "not_closed": left(closing.NOT_CLOSED_PROCMON, 100)}
 
 
 def test_a_closer_that_raises_does_not_stop_the_stop(tmp_path):
@@ -310,4 +356,67 @@ def test_close_games_without_a_closer_closes_nothing_and_says_so(tmp_path):
     run.write_stop_request({"requested": NOW, "close_games": True})
     assert rec.run() == 0
     assert pm.stopped_at == 0.0
-    assert run.read_stop()["sessions"]["s1"] == {"asked_to_close": [], "ended": [], "not_closed": [100]}
+    assert run.read_stop()["sessions"]["s1"] == {"asked_to_close": [], "ended": [],
+                                                 "not_closed": left(closing.NOT_CLOSED_NO_CLOSER, 100)}
+
+
+# --- the session files are written unelevated: they must not be able to point the elevated recorder at anything
+# --- the app's user could not close without it
+
+def forged(sid, root_pid, root_start, before, after, **game):
+    return SessionInfo(sid, root_pid, root_start, before, after, game, {}, ())
+
+
+def test_session_files_cannot_point_close_games_at_a_foreign_process(tmp_path):
+    rec, run, pm, states, world, clock = make(tmp_path, closer="checked", sessions=[
+        session("s1", 100, 1000),
+        # no start time: whatever process has pid 700
+        forged("null-start", 700, None, 695, 699, game_dir=r"C:\x"),
+        # no pid: the root is picked by a program path and a time window the file sets
+        forged("by-exe", 0, None, 705, 715, game_dir=r"C:\y", exe=r"C:\Windows\regedit.exe"),
+        # a game folder that holds the whole disk, since the beginning of time: every orphan on the machine
+        forged("orphans", 999_999, 1, 0, 0, game_dir="C:\\"),
+    ])
+    world.add(APP_PID, 900, 10, r"C:\GameChooser\game-chooser.exe")
+    world.add(900, 4, 5, r"C:\Windows\explorer.exe")
+    world.add(4, 0, 1, "System")
+    one_game(world)
+    world.add(700, 600, 700, r"C:\Program Files\Backup\agent.exe")  # a service
+    world.identity[700] = Identity("S-1-5-18", SYSTEM)
+    world.add(710, 900, 710, r"C:\Windows\regedit.exe")  # the user's own, started as administrator
+    world.identity[710] = Identity(USER, HIGH)
+    world.add(720, 602, 720, r"C:\Users\other\app.exe")  # another user's
+    world.identity[720] = Identity("S-1-5-21-1-2-3-1002", MEDIUM)
+    world.add(730, 603, 730, r"C:\Protected\guard.exe")  # one that won't say who it runs as
+    world.identity[730] = None
+    run.write_stop_request({"requested": NOW, "close_games": True})
+    assert rec.run() == 0
+    assert world.asked == [(100, 1000)] and world.ended == [(100, 1000)]  # the real game, and nothing else
+    sessions = run.read_stop()["sessions"]
+    assert sessions["s1"] == {"asked_to_close": [100], "ended": [100], "not_closed": []}
+    assert sessions["null-start"] == {"asked_to_close": [], "ended": [],
+                                      "not_closed": left(closing.REFUSED_USER, 700)}
+    assert sessions["by-exe"] == {"asked_to_close": [], "ended": [], "not_closed": left(closing.REFUSED_RIGHTS, 710)}
+    assert sessions["orphans"]["asked_to_close"] == [] and sessions["orphans"]["ended"] == []
+    assert {entry["pid"]: entry["reason"] for entry in sessions["orphans"]["not_closed"]} == {
+        700: closing.REFUSED_USER, 720: closing.REFUSED_USER,
+        730: closing.REFUSED_UNKNOWN}
+    # one poll to see the ended game gone; the refused ones are not waited for (that would be 5 s more)
+    assert pm.stopped_at == recorder.CLOSE_WAIT_SECONDS + recorder.POLL_SECONDS
+
+
+def test_a_game_started_through_the_administrator_prompt_is_not_closed_and_says_why(tmp_path):
+    rec, run, pm, states, world, clock = make(tmp_path, closer="checked", sessions=[
+        session("s1", 100, 1000), session("s2", 200, 2000, r"C:\Games\Admin")])
+    world.add(APP_PID, 1, 10, r"C:\GameChooser\game-chooser.exe")
+    one_game(world)
+    world.closes_when_asked[100] = 1.0
+    world.add(200, APP_PID, 2000, r"C:\Games\Admin\game.exe")
+    world.identity[200] = Identity(USER, HIGH)
+    run.write_stop_request({"requested": NOW, "close_games": True})
+    assert rec.run() == 0
+    assert world.asked == [(100, 1000)] and world.ended == []
+    assert pm.stopped_at == 1.0  # the refused game is not waited for
+    assert run.read_stop()["sessions"]["s2"] == {"asked_to_close": [], "ended": [],
+                                                 "not_closed": left(closing.REFUSED_RIGHTS, 200)}
+    assert "administrator prompt" in run.log_path.read_text(encoding="utf-8")

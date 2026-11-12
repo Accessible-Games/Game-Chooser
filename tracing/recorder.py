@@ -7,9 +7,9 @@ import ntpath
 import os
 from typing import Callable
 
-from tracing import messages
+from tracing import closing, messages
 from tracing.clock import now_filetime
-from tracing.closing import GameCloser
+from tracing.closing import GameCloser, Refused
 from tracing.live import LiveProc, LiveTree
 from tracing.procmon import EXCLUDED_PROCESSES, ProcmonControl, describe_filter, write_filter_config
 from tracing.runfiles import RunDir
@@ -53,6 +53,7 @@ class Recorder:
         self._protected_pids = _PROTECTED_PIDS | {os.getpid()} | set(protected_pids)
         self._accept_sessions = True
         self._stop_taken = False
+        self._refused: dict[tuple[int, int], str] = {}  # processes the closer would not touch, and why
         self.tree = LiveTree()
         self._added: set[str] = set()
         self._failed = False
@@ -224,18 +225,34 @@ class Recorder:
         self._status("stopping")
         if not close:
             return
+        why = closing.NOT_CLOSED_FAILED
         try:
             if self.closer is None:
-                log.warning("this recorder can't close games; none was touched")
-            else:
-                self._close_games(record)
+                why = closing.NOT_CLOSED_NO_CLOSER
+            elif not self._close_games(record):
+                why = closing.NOT_CLOSED_PROCMON
         finally:
             for sid, procs in self.tree.running_processes().items():
                 if sid in record["sessions"]:
-                    record["sessions"][sid]["not_closed"] = sorted(p.pid for p in procs)
-                    log.warning("still running after the stop, session %s: %s", sid,
-                                ", ".join(f"{p.pid} ({p.image_path})" for p in procs))
+                    left = [{"pid": p.pid, "reason": self._not_closed_reason(p, why)}
+                            for p in sorted(procs, key=lambda p: p.pid)]
+                    record["sessions"][sid]["not_closed"] = left
+                    for p, entry in zip(sorted(procs, key=lambda p: p.pid), left):
+                        log.warning("still running after the stop, session %s: %d (%s): %s", sid, p.pid,
+                                    p.image_path, entry["reason"])
             self._write_stop(record)
+
+    def _protected(self, proc: LiveProc) -> bool:
+        """Never a target, whatever the session files say: this recorder, Game Chooser, pids 0 and 4, a program
+        the capture drops, or one whose path couldn't be read."""
+        if proc.pid in self._protected_pids or not proc.image_path:
+            return True
+        return ntpath.basename(proc.image_path).lower() in _PROTECTED_NAMES
+
+    def _not_closed_reason(self, proc: LiveProc, default: str) -> str:
+        if self._protected(proc):
+            return closing.NOT_CLOSED_PROTECTED
+        return self._refused.get((proc.pid, proc.start), default)
 
     def _write_stop(self, record: dict) -> None:
         try:
@@ -247,43 +264,50 @@ class Recorder:
         """The running processes of the sessions the stop found running, each with the sessions holding it.
 
         Only what the live tree attributes to one of those sessions, as (pid, start) so a reused pid is never
-        taken; never a protected pid (this recorder, Game Chooser, System), a program the capture drops, or one
-        whose path couldn't be read."""
+        taken; never a protected process (`_protected`) or one the closer has refused. The tree comes from
+        session files any program of the user can write, so this is not the safeguard: the closer's check of who
+        each process runs as is (closing.Closer)."""
         targets: dict[tuple[int, int], tuple[LiveProc, list[str]]] = {}
         for sid, procs in self.tree.running_processes().items():
             if sid not in record["sessions"]:
                 continue
             for proc in procs:
-                if proc.pid in self._protected_pids or not proc.image_path:
-                    continue
-                if ntpath.basename(proc.image_path).lower() in _PROTECTED_NAMES:
+                if self._protected(proc) or (proc.pid, proc.start) in self._refused:
                     continue
                 targets.setdefault((proc.pid, proc.start), (proc, []))[1].append(sid)
         return targets
 
-    def _close_games(self, record: dict) -> None:
-        """Ask every traced process to close, wait CLOSE_WAIT_SECONDS for them to go, then end what is left."""
-        targets = self._close_targets(record)
-        self._act(self.closer.ask_close, "asked_to_close", targets, record)
+    def _close_games(self, record: dict) -> bool:
+        """Ask every traced process to close, wait CLOSE_WAIT_SECONDS for them to go, then end what is left.
+        A process the closer refuses is left alone from then on and not waited for. False when Process Monitor
+        died during the wait, and so nothing was ended."""
+        self._act(self.closer.ask_close, "asked_to_close", self._close_targets(record), record)
+        targets = self._close_targets(record)  # without the refused ones
         deadline = self.clock() + CLOSE_WAIT_SECONDS
         while targets and self.clock() < deadline:
             self.sleep(POLL_SECONDS)
             self._update_tree()
             if not self.procmon.running():
                 self._failure(messages.PROCMON_STOPPED)  # nothing records any more: end nothing
-                return
+                return False
             targets = self._close_targets(record)
         self._act(self.closer.end, "ended", targets, record)
+        targets = self._close_targets(record)
         deadline = self.clock() + END_WAIT_SECONDS
         while targets and self.clock() < deadline:
             self.sleep(POLL_SECONDS)
             self._update_tree()
             targets = self._close_targets(record)
+        return True
 
     def _act(self, action: Callable[[int, int], bool], field: str, targets: dict, record: dict) -> None:
         for (pid, start), (proc, sids) in targets.items():
             try:
                 done = action(pid, start)
+            except Refused as refused:
+                self._refused[(pid, start)] = refused.reason
+                log.warning("%s refused for %d (%s): %s", field, pid, proc.image_path, refused.reason)
+                continue
             except Exception as exc:
                 log.warning("%s failed for %d (%s): %r", field, pid, proc.image_path, exc)
                 done = False
