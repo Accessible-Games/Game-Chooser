@@ -1,4 +1,5 @@
-from catalog_view import (action_kind, action_label, build_rows, link_items, description_text, entry_links, filter_rows,
+from catalog_view import (TypeAhead, action_kind, action_label, build_rows, link_items, description_text, entry_links,
+                          filter_rows, type_ahead_index,
                           homepage_item, initial_tab, library_rows, link_at_line, install_candidates,
                           markdown_to_text, pick_index, price_sort_key, tree_categories, tree_values)
 from models import Game
@@ -82,6 +83,37 @@ def test_price_branch_order_and_can_be_played_for_free():
     rows = build_rows([pwyw, paid, sub], set())
     assert [r.id for r in filter_rows(rows, "", {"price": {"Can be played for free"}})] == ["p"]
     assert [r.id for r in filter_rows(rows, "", {"price": {"Pay what you want"}})] == ["p", "q"]
+
+
+def test_type_ahead_index_is_the_next_title_that_starts_with_the_typed_text():
+    titles = ["Alpha", "Area 51", "Bravo", "Émile", "area 52", "Temple of Doom", "Temple Run"]
+    # A text of several different letters: the first title at or after the current row that starts with it
+    assert type_ahead_index(titles, "ar", 0) == 1
+    assert type_ahead_index(titles, "AREA 5", 1) == 1  # the current row still fits: it stays
+    assert type_ahead_index(titles, "area 52", 1) == 4
+    assert type_ahead_index(titles, "te", 6) == 6 and type_ahead_index(titles, "temple o", 6) == 5  # wraps round
+    assert type_ahead_index(titles, "é", 0) == 3 and type_ahead_index(titles, "ÉM", 4) == 3  # any case, any letter
+    # One letter, typed once or again and again, steps on to the next title that starts with it
+    assert type_ahead_index(titles, "a", 0) == 1 and type_ahead_index(titles, "aa", 1) == 4
+    assert type_ahead_index(titles, "AAA", 4) == 0  # and round to the first
+    assert type_ahead_index(titles, "b", 2) == 2  # the only one: it stays
+    assert type_ahead_index(titles, "t", -1) == 5  # nothing was selected
+    # Only the start of the title counts; no match, no text and no rows give -1
+    assert type_ahead_index(titles, "doom", 0) == -1 and type_ahead_index(titles, "x", 0) == -1
+    assert type_ahead_index(titles, "", 0) == -1 and type_ahead_index([], "a", -1) == -1
+
+
+def test_type_ahead_text_grows_until_the_player_pauses():
+    now = [50.0]
+    typed = TypeAhead(clock=lambda: now[0])
+    assert not typed.typing()
+    assert typed.add("t") == "t" and typed.typing()
+    now[0] += 0.9
+    assert typed.add("e") == "te"
+    now[0] += 1.0  # a second since the last key: still the same text
+    assert typed.typing() and typed.add(" ") == "te "
+    now[0] += 1.1  # longer: the next key starts a new text
+    assert not typed.typing() and typed.add("a") == "a"
 
 
 def test_price_sort_key_puts_free_first_then_orders_by_the_amount_shown():

@@ -137,11 +137,34 @@ def tree_nodes(view):
     return nodes
 
 
-def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN):
+def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False):
     """True when a handler took the key"""
     event = wx.KeyEvent(event_type)
     event.SetKeyCode(key_code)
+    if event_type == wx.wxEVT_CHAR:
+        event.SetUnicodeKey(key_code)  # a character, as wx gives it
+    event.SetControlDown(ctrl)
+    event.SetAltDown(alt)
     return window.GetEventHandler().ProcessEvent(event)
+
+
+def type_text(view, text):
+    """Type into the list as wx delivers it: a key-down for each key and, unless a handler took that, the
+    character"""
+    for char in text:
+        key_code = wx.WXK_SPACE if char == " " else ord(char.upper())
+        if not press(view.list_ctrl, key_code):
+            press(view.list_ctrl, ord(char), wx.wxEVT_CHAR)
+
+
+def typing_view(make_view, saved=None, **settings):
+    """A view with five titles and a clock the test moves: (view, now)"""
+    view = make_view(saved, **settings)
+    now = [1000.0]
+    view.type_ahead.clock = lambda: now[0]
+    view.set_rows(rows(*[entry(name) for name in ("alpha", "area 51", "bravo", "temple of doom", "temple run")]))
+    assert sorted(titles(view)) == ["Alpha", "Area 51", "Bravo", "Temple Of Doom", "Temple Run"]
+    return view, now
 
 
 def press_escape_in_tree(view):
@@ -763,3 +786,98 @@ def test_a_saved_sort_column_the_list_does_not_have_is_ignored(make_view, column
     view = make_view({"sort_column": column, "sort_ascending": False}, sort_keys=SORT_KEYS)
     view.set_rows(rows(CAT, ANT, BEE))
     assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title ▲", "Year"]
+
+
+# ---- type-ahead: typing in the list jumps to the title that starts with what was typed --------------------------
+
+def test_typing_jumps_to_the_title_as_the_players_own_move(make_view):
+    """As an arrow key: the label, the description, the focused item, the scroll and the remembered game follow"""
+    view, _ = typing_view(make_view)
+    scrolled = []
+    view.list_ctrl.EnsureVisible = scrolled.append
+    type_text(view, "te")
+    assert (selected(view), focused(view), scrolled[-1]) == (3, 3, 3)
+    assert view.action_btn.GetLabel() == "Install Temple Of Doom"
+    assert view.description.GetValue().startswith("About Temple Of Doom.")
+    assert saved(view)["last_selected"] == "temple of doom" and saves(view).count == 1
+    restarted = make_view({"last_selected": saved(view)["last_selected"]})
+    restarted.set_rows(list(view.displayed))
+    assert restarted.selected_row().title == "Temple Of Doom"
+
+
+def test_space_belongs_to_the_text_while_typing_and_acts_otherwise(make_view):
+    acted = []
+    view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
+    type_text(view, "temple")
+    # The key-down itself is taken: wx turns a Space key-down that reaches the list control into an activation
+    assert press(view.list_ctrl, wx.WXK_SPACE) and acted == []
+    type_text(view, "r")  # "temple r": past "Temple Of Doom", which "temple of" must not launch or install
+    assert acted == [] and selected(view) == 4
+    type_text(view, "\r")  # Enter always acts, mid-word too
+    assert acted == ["Temple Run"]
+    now[0] += 2  # the player paused: Space is the action again
+    type_text(view, " ")
+    assert acted == ["Temple Run", "Temple Run"] and selected(view) == 4
+
+
+def test_a_digit_belongs_to_the_text_while_typing_and_sorts_otherwise(make_view):
+    view, now = typing_view(make_view)
+    type_text(view, "area 51")
+    assert selected(view) == 1 and headers(view) == ["Title ▲", "Year"]  # "5" and "1" did not sort
+    now[0] += 2
+    type_text(view, "2")  # nothing is being typed: the digit sorts by its column
+    assert headers(view) == ["Title", "Year ▲"] and view.selected_row().title == "Area 51"
+    now[0] += 2
+    type_text(view, "9")  # no such column, and a digit never starts a text
+    assert headers(view) == ["Title", "Year ▲"] and view.selected_row().title == "Area 51"
+    assert not view.type_ahead.typing()
+
+
+def test_a_pause_starts_a_new_text_and_a_repeated_letter_steps_on(make_view):
+    view, now = typing_view(make_view)
+    type_text(view, "t")
+    assert selected(view) == 3
+    now[0] += 1.5
+    type_text(view, "a")  # a new text: "a", not "ta"
+    assert selected(view) == 0
+    type_text(view, "a")  # the same letter again: the next title that starts with it
+    assert selected(view) == 1
+    type_text(view, "a")
+    assert selected(view) == 0  # and round again
+    now[0] += 1.5
+    type_text(view, "ar")  # several letters: at or after the current row
+    assert selected(view) == 1
+
+
+def test_typing_that_matches_no_title_and_keys_with_ctrl_or_alt_change_nothing(make_view):
+    view, now = typing_view(make_view)
+    player_selects(view, 2)
+    before = saves(view).count
+    type_text(view, "zz")
+    now[0] += 2
+    for modifiers in ({"ctrl": True}, {"alt": True}, {"ctrl": True, "alt": True}):
+        press(view.list_ctrl, ord("t"), wx.wxEVT_CHAR, **modifiers)
+    for key in (wx.WXK_ESCAPE, wx.WXK_BACK, wx.WXK_TAB, wx.WXK_DELETE):  # wx sends these as characters too
+        press(view.list_ctrl, key, wx.wxEVT_CHAR)
+    assert selected(view) == 2 and saves(view).count == before and not view.type_ahead.typing()
+
+
+def test_typing_looks_at_titles_only_in_the_order_the_list_shows(make_view):
+    view, now = typing_view(make_view, {"sort_column": 0, "sort_ascending": False})
+    assert titles(view)[0] == "Temple Run" and selected(view) == 0
+    type_text(view, "dev")  # every row's developer is "Dev": the title alone counts
+    assert selected(view) == 0
+    now[0] += 2
+    type_text(view, "t")  # steps on from the current row, downwards in the order shown
+    assert view.selected_row().title == "Temple Of Doom"
+
+
+def test_typing_reads_the_character_not_the_key_code(make_view):
+    """wx gives a character outside Latin-1 no key code (WXK_NONE): only GetUnicodeKey holds it"""
+    view = make_view()
+    view.set_rows(rows(entry("alpha"), entry("zebra"), entry("żuk")))
+    assert titles(view) == ["Alpha", "Zebra", "Żuk"]
+    event = wx.KeyEvent(wx.wxEVT_CHAR)
+    event.SetUnicodeKey(ord("Ż"))  # typed in capitals: any case finds it
+    assert event.GetKeyCode() == wx.WXK_NONE and view.list_ctrl.GetEventHandler().ProcessEvent(event)
+    assert view.selected_row().title == "Żuk" and saved(view)["last_selected"] == "żuk"

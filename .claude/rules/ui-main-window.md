@@ -50,13 +50,13 @@ description. The Catalog tab has its status line and Retry above these.
   `catalog_view.initial_tab(saved, is_first_run)` picks the starting tab.
 
 ## The games view (`GamesPanel`)
-Both tabs' search, list, filter tree, selection memory, action button, progress area, splitter, random-game
-prompt and description are this one class. A tab gives it rows (`catalog_view.CatalogRow`; a Library row also
-holds its `Game`) through `set_rows`. What a tab does differently is a setting of the class (the table below) or
-the tab's own code.
+Both tabs' search, list (with its sorting and type-ahead), filter tree, selection memory, action button,
+progress area, splitter, random-game prompt and description are this one class. A tab gives it rows
+(`catalog_view.CatalogRow`; a Library row also holds its `Game`) through `set_rows`. What a tab does differently
+is a setting of the class (the table below) or the tab's own code.
 
-Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free parts, rows, filters and
-`pick_index`, by `tests/test_catalog_view.py`):
+Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free parts, rows, filters,
+`pick_index` and the type-ahead matching, by `tests/test_catalog_view.py`):
 - After every refill or sort the action label and the description are set directly, never left to a selection
   event: wx fires none when the selected row number stays the same and another game moves into it.
 - Every programmatic select also sets the list's focused item (not on the macOS DataView control), so the arrow
@@ -93,7 +93,20 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   collection's `contains` titles); a search containing "unknown" matches nothing.
 - Sorting: a header click or the column's digit key sorts by that column, the same again the other way round;
   an arrow in the header shows it and the sort is saved. Rows are put in title order first, so rows that tie in
-  the chosen column stay in title order.
+  the chosen column stay in title order. A digit sorts only while no text is being typed (next rule).
+- Type-ahead (`on_char`; the virtual list does none by itself): characters typed in the list within a second of
+  each other build one text (`catalog_view.TypeAhead`), and the selection jumps to the first row at or after the
+  selected one whose title starts with it, wrapping round (`catalog_view.type_ahead_index`). One letter, typed
+  once or repeated, steps on to the next title that starts with it. Only the title counts, whatever the sort
+  column, in any case (casefolded); the character is read with `GetUnicodeKey`. No match changes nothing.
+  - The jump is the player's own move: `_select` makes the row the selected and focused item and scrolls to it,
+    and the selection event does the rest, as after an arrow key (label, description, the remembered game).
+  - While a text is being typed, Space and the digits extend it ("temple of", "area 51"); otherwise Space is the
+    action and a digit sorts. So a title that starts with a digit can't be reached by typing. Enter always acts.
+  - A key with Ctrl or Alt is never text (a letter typed with AltGr is: wx reports it with neither).
+  - Space mid-text is taken in the key-down handler (`on_list_key`), never skipped on to `on_char`: wx turns a
+    Space key-down that reaches the list control into an activation.
+  - Not on the macOS DataView control: there every key but a sorting digit is left to the control.
 - `restore_sash()` puts the splitter where it was saved, else in the middle; `MainFrame.load_saved_state` calls
   it for both views once the window has its size. A sash left to wx stays at the minimum pane size and does not
   follow a resize.
@@ -143,8 +156,10 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - **Del**: Library only (Uninstall for a tracked catalog install, forget for an untracked one, else delete).
 - **Ctrl+E**: Library only; refuses catalog games and says why (its accelerator stays enabled for that, while the
   Edit menu item is disabled). Edit and Delete menu items are disabled on the Catalog tab.
-- **Ctrl+N** add game, **Ctrl+F** the active tab's search box, **Ctrl+Enter** open folder, **Ctrl+,** preferences,
-  Enter/Space launch.
+- **Ctrl+N** add game, **Ctrl+F** the active tab's search box, **Ctrl+Enter** open folder, **Ctrl+,** preferences.
+- In a games list (both tabs; the games-view rules above): **Enter** and **Space** run the row's action (Launch on
+  the Library; Install, Add or Launch on the Catalog), Space only while no text is being typed; **typing** jumps
+  to the title that starts with what was typed; a **digit** sorts by that column while no text is being typed.
 
 ## Accessibility and focus
 - Screen reader announcement needs this sequence: select the row, make it the list's focused item, then

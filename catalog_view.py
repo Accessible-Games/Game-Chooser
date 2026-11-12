@@ -6,6 +6,7 @@ Entries follow catalog schema v2; a saved version 1 index may still be shown, so
 flags) are skipped, never an error.
 """
 import re
+import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -201,6 +202,42 @@ def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[Catalo
             continue
         result.append(row)
     return result
+
+
+class TypeAhead:
+    """The text a player is typing into a games list to jump to a title. Keys that follow each other within
+    `timeout` seconds build one text; after a longer pause the next key starts a new one. `clock` is the time
+    source, so a test needs no sleep."""
+
+    def __init__(self, clock=time.monotonic, timeout=1.0):
+        self.clock, self.timeout = clock, timeout
+        self._text, self._last_key = "", 0.0
+
+    def typing(self) -> bool:
+        """Whether a text is being typed: then Space and the digits belong to it"""
+        return bool(self._text) and self.clock() - self._last_key <= self.timeout
+
+    def add(self, char: str) -> str:
+        """The text with this character added"""
+        self._text = (self._text if self.typing() else "") + char
+        self._last_key = self.clock()
+        return self._text
+
+
+def type_ahead_index(titles, text: str, current: int) -> int:
+    """The row a typed text jumps to, as in a Windows list: the first title at or after row `current` that starts
+    with it, wrapping round; -1 when none does. One letter, typed once or repeated, steps on to the next title
+    that starts with that letter instead. Any case (casefolded); only the start of the title counts."""
+    text = text.casefold()
+    if not text or not titles:
+        return -1
+    step = len(set(text)) == 1
+    prefix, start = (text[0], current + 1) if step else (text, max(current, 0))
+    for offset in range(len(titles)):
+        index = (start + offset) % len(titles)
+        if titles[index].casefold().startswith(prefix):
+            return index
+    return -1
 
 
 def price_sort_key(row: CatalogRow) -> tuple:

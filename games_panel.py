@@ -32,6 +32,9 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
   scrolled it, and when the selected game is no longer listed the selection keeps its row number. A filter the
   player changes (`apply_filters`) brings the selected row into view and falls back to the first row instead.
 - A filter is applied first and saved second, and a save that fails is logged, never raised.
+- Typing in the list jumps to the next title that starts with what was typed (type-ahead), as the player's own
+  move. While a text is being typed, Space and the digit keys belong to it; otherwise Space is the action and a
+  digit sorts.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
   unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
   open or the app is starting.
@@ -46,8 +49,8 @@ import wx
 
 from smart_list import VirtualSmartList
 
-from catalog_view import (action_label, action_verb, description_text, filter_rows, pick_index, tree_categories,
-                          tree_values)
+from catalog_view import (TypeAhead, action_label, action_verb, description_text, filter_rows, pick_index,
+                          tree_categories, tree_values, type_ahead_index)
 from description_field import DescriptionField
 from engine import messages
 from progress_area import ProgressArea
@@ -64,7 +67,7 @@ class GamesPanel(wx.Panel):
     - `categories`: (criteria key, tree category label) in tree order.
     - `state_prefix`: what this tab's SavedState keys start with.
     - `idle_label`: the action button's text while no game is selected.
-    - `on_action()`: Enter, Space, double-click or the button.
+    - `on_action()`: Enter, Space (while no text is being typed in the list), double-click or the button.
     - `context_menu(row)`: the wx.Menu for the selected row (None for no row); None shows no menu. The view
       shows the menu and destroys it.
     - `sort_keys`: one sort key per column (the player sorts by a header click or the column's digit key; an
@@ -93,6 +96,7 @@ class GamesPanel(wx.Panel):
         self._tree_nodes = None  # what the tree shows: (key, label, values) per category; None until first built
         self._populating = False
         self.restoring_tree = False
+        self.type_ahead = TypeAhead()  # the text being typed into the list to jump to a title
         # Read here, not by the main window later: the list is filled before the rest of the saved state loads
         self.sort_column, self.sort_ascending = 0, True
         column = self._saved()[self._key("sort_column")]
@@ -421,12 +425,30 @@ class GamesPanel(wx.Panel):
         self.save_config()
 
     def on_char(self, event):
-        """Digit keys sort by that column"""
+        """A character typed in the list is type-ahead (the virtual list does none by itself), or a digit that
+        sorts by its column. A digit or a space only extends a text that is being typed ("area 51"), so a
+        title that starts with a digit can't be reached by typing. A key with Ctrl or Alt is never text. Not on
+        the macOS DataView control: there every key but a sorting digit is left to the control."""
+        code = event.GetUnicodeKey()
+        char = chr(code) if code != wx.WXK_NONE else ""
+        text = (char != "" and char.isprintable() and not event.ControlDown() and not event.AltDown()
+                and not self.list.control.use_dataview)
         column = event.GetKeyCode() - ord("1")
-        if 0 <= column < len(self.sort_keys):
+        if text and (self.type_ahead.typing() or char not in "0123456789 "):
+            self._type(char)
+        elif 0 <= column < len(self.sort_keys):
             self.sort_by(column)
-        else:
+        elif not text:  # a character is never passed on: the control might search for it on its own
             event.Skip()
+
+    def _type(self, char):
+        """Add a character to the text being typed and jump to the title that text leads to. The jump is the
+        player's own move: the selection event does the rest, as after an arrow key (label, description,
+        remembered game). A text no title starts with changes nothing."""
+        index = type_ahead_index([row.title for row in self.displayed], self.type_ahead.add(char),
+                                 self.list.get_selected_index())
+        if index >= 0:
+            self._select(index)
 
     def _show_sort(self):
         """An arrow in the sorted column's header (a DataViewCtrl, on macOS, has none)"""
@@ -500,7 +522,12 @@ class GamesPanel(wx.Panel):
 
     def on_list_key(self, event):
         key = event.GetKeyCode()
-        if key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE) and not event.HasAnyModifiers():
+        plain = not event.HasAnyModifiers()
+        if key == wx.WXK_SPACE and plain and self.type_ahead.typing():
+            # Part of the text being typed ("temple of"). Taken here, never skipped on to on_char: wx turns a
+            # Space key-down that reaches the list control into an activation.
+            self._type(" ")
+        elif key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE) and plain:
             self.on_action()
         elif key == wx.WXK_WINDOWS_MENU or (key == wx.WXK_F10 and event.ShiftDown()):
             self.on_context(event)
