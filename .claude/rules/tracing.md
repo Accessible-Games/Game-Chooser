@@ -20,7 +20,8 @@ Build: see `.claude/rules/build.md`.
   imported only inside `tracing/` and its tests; inside `tracing/` always lazily, inside functions. Only
   `app_glue.py` imports wx. The game launch is
   unchanged: `MainFrame` calls `frame.launch_observer` around its `engine.launch.start_game` for a program launch
-  only (passing on `Started.pid`, the process ID `start_program` returns; a web page launch is never observed),
+  only (passing on `Started.pid`, the process ID `start_program` returns, or `start_hta` for an `.hta` game, whose
+  process is Windows' `mshta.exe`; a web page launch is never observed),
   and shows `frame.title_note` in the title. The normal build is checked by `scripts/check_no_tracing.py` (fails
   the build on any tracing module or `tracing`/`procmon`/`traces` file, or a report with no modules).
 - **Commands** (`game-chooser.py`, through `tracing/cli.py`): `--tracing` (turn tracing on from source; a compiled
