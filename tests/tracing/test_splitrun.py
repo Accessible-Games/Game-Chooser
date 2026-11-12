@@ -161,7 +161,8 @@ def test_split_json_has_no_stop_for_a_run_that_ended_by_itself(tmp_path):
 def test_a_stopped_run_marks_its_sessions_and_split_json(tmp_path):
     run = make_run(tmp_path)
     lists = {"asked_to_close": [100], "ended": [200], "not_closed": []}
-    run.write_stop({"requested": FT - 10_000_000, "time": FT, "close_games": True, "sessions": {"s": lists, "gone": {}}})
+    run.write_stop({"requested": FT - 10_000_000, "time": FT, "close_games": True,
+                    "sessions": {"s": lists, "gone": {}}})
     result = split_run_dir(run, tmp_path, fake_read)
     assert result.problems == [] and result.capture_kept is False  # a stop is not a problem
     marker = json.loads(run.split_path.read_text(encoding="utf-8"))
