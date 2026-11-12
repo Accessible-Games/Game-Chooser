@@ -1,0 +1,14 @@
+{
+  "id": "test-game-hta",
+  "kind": "game",
+  "title": "Test HTA Game",
+  "developer": ["Game Chooser Tests"],
+  "genres": ["Arcade"],
+  "year": 2026,
+  "version": "1.0",
+  "description": "A harmless HTML Application (.hta) with no program beside it, for trying a game that Windows' mshta.exe runs. It shows a short text and runs no script.",
+  "launch": {"windows": {"path": "test-game.hta"}},
+  "sources": [
+    {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}
+  ]
+}

@@ -11,7 +11,8 @@ It prints "Serving test catalog at http://127.0.0.1:8765/". Point Preferences > 
 
 The entries (catalog schema v2) come from tests/catalog_fixtures/entries/*.json, the files they install from
 tests/catalog_fixtures/games/. Test Shared Extra Level is an optional extra of two games (Test Game With Extra and
-Test Game Tar), each getting its own copy. Test Story is a two-page web page game (it opens in the browser). The zips,
+Test Game Tar), each getting its own copy. Test Story is a two-page web page game (it opens in the browser). Test HTA
+Game is one harmless .hta file with no script (Windows' mshta.exe runs it). The zips,
 the password 7z, the tar.gz, TinyGame.exe (a copy of where.exe) and the index are built into
 tests/catalog_fixtures/_build/ (git-ignored). Only the source files are committed. Every download address points at this
 server; nothing here contacts a real host. (The entries' web page links point at example.com and example.org, which only
@@ -119,6 +120,7 @@ def build_catalog(out_dir: Path = DEFAULT_BUILD_DIR, port: int = DEFAULT_PORT, v
         "test-extra": ("test-extra.zip", lambda p: _zip_dir(GAMES_DIR / "test-extra", p)),
         "test-shared-extra": ("test-shared-extra.zip", lambda p: _zip_dir(GAMES_DIR / "test-shared-extra", p)),
         "test-game-page": ("test-game-page.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-page", p)),
+        "test-game-hta": ("test-game-hta.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-hta", p)),
         "test-game-tar": ("test-game-tar.tar.gz", lambda p: _tar_gz_dir(GAMES_DIR / "test-game-tar" / "TarGame", p)),
     }
     if seven_zip is not None:
