@@ -299,7 +299,7 @@ class MainFrame(wx.Frame):
         if event.GetEventObject() is not self.notebook:  # a book control inside a page
             return
         self.library_manager.config["SavedState"]["last_tab"] = self.active_tab()
-        self.library_manager.save_config()
+        self.views[self.active_tab()].save_config()  # a save that fails is logged; the menus and focus still follow
         self.update_tab_menus()
         if self.active_tab() == "catalog":
             self.catalog_panel.refresh_rows()  # Library changes may have changed what is installed
@@ -355,7 +355,7 @@ class MainFrame(wx.Frame):
         if not self or generation != self._status_generation:  # closed, or a newer result is coming
             return
         self.statuses = statuses
-        self.library_view.apply_filters()  # the Status column; a list sorted by it is sorted again
+        self.library_view.refill()  # the Status column; a list sorted by it is sorted again
 
     def start_index_fetch(self):
         """Fetch the catalog index on a daemon thread (startup, F5 and Retry on the Catalog tab).
@@ -1394,7 +1394,6 @@ class MainFrame(wx.Frame):
 
         # Save hidden libraries
         state["hidden_libraries"] = sorted(self.hidden_libraries)
-        state.pop("active_libraries", None)
 
         self.library_manager.save_config()
     

@@ -240,6 +240,23 @@ def test_library_row_id_survives_the_game_object_being_replaced():
     assert [r.id for r in library_rows(replaced, lambda game: None)] == [r.id for r in rows]
 
 
+def test_library_row_ids_are_unique_when_games_share_a_launch_path():
+    """Locate has no duplicate check and games.json can be edited by hand. With one id for two rows, the next
+    refill would select the first of them, and Delete or Enter would act on the wrong game."""
+    same = "C:/games/same.exe"
+    games = [Game(title="First", launch_path=same), Game(title="Other", launch_path="C:/games/other.exe"),
+             Game(title="Second", launch_path=same), Game(title="Third", launch_path=same),
+             Game(title="Odd", launch_path=same + " #2")]  # a path that looks like a numbered repeat
+    rows = library_rows(games, lambda game: None)
+    ids = [r.id for r in rows]
+    assert len(set(ids)) == 5 and ids[:2] == [same, "C:/games/other.exe"]  # a path used once is the id as it is
+    assert [pick_index(rows, row.id, 0) for row in rows] == [0, 1, 2, 3, 4]  # each id finds its own row
+    assert [r.id for r in library_rows(list(games), lambda game: None)] == ids  # and is the same on every build
+    # A repeat is numbered by its place among the games with that path, so when the first of them goes the next
+    # one takes over its id
+    assert library_rows(games[2:], lambda game: None)[0].id == same
+
+
 def test_library_rows_show_what_the_library_tree_showed():
     _, rows = _library()
     cats = tree_categories(rows)

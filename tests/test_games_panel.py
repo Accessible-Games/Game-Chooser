@@ -440,6 +440,72 @@ def test_focus_list_refuses_while_a_dialog_is_open_or_the_app_is_starting(make_v
     assert focus == [True] and (selected(view), focused(view)) == (0, 0)
 
 
+def test_two_games_with_one_launch_path_are_two_rows_that_stay_apart(make_view):
+    games = [Game(title="First", launch_path="C:/games/same.exe"), Game(title="Second", launch_path="C:/games/same.exe")]
+    view = make_view(idle_label="Launch")
+    view.set_rows(library_rows(games, lambda game: None))
+    player_selects(view, 1)
+    view.set_rows(library_rows(games, lambda game: None))
+    view.refill()  # as every Status result does
+    assert view.selected_row().game is games[1] and view.action_btn.GetLabel() == "Launch Second"
+
+
+def test_a_background_refill_scrolls_only_to_a_selected_row_that_was_in_view(make_view):
+    """A finished job or a Status result must not scroll the list away from where the player scrolled it. The
+    list is never shown here, so what it has in view is given by hand."""
+    view = make_view()
+    many = [entry(f"game{number:03d}") for number in range(100)]
+    view.set_rows(rows(*many))
+    player_selects(view, 50)
+    scrolled, lc = [], view.list_ctrl
+    lc.EnsureVisible = scrolled.append
+    lc.GetTopItem, lc.GetCountPerPage = (lambda: 0), (lambda: 10)  # the player scrolled to the top: rows 0 to 9
+    view.set_rows(rows(entry("aaa"), *many))  # a game appeared above the selected one
+    view.refill()
+    assert (selected(view), focused(view)) == (51, 51) and scrolled == []
+    lc.GetTopItem = lambda: 45  # the selected row is in view now
+    view.set_rows(rows(entry("aaa"), entry("aab"), *many))
+    assert (selected(view), focused(view)) == (52, 52) and scrolled == [52]
+    lc.GetTopItem = lambda: 0  # out of view again: what the player does always brings the selected row into view
+    view.search_combo.SetValue("game")
+    assert (selected(view), scrolled) == (50, [52, 50])
+    view.select_row(view.displayed[70])
+    view.focus_list()
+    assert scrolled == [52, 50, 70, 70]
+
+
+def test_the_first_fill_brings_the_remembered_row_into_view(make_view):
+    view = make_view({"last_selected": "game090"})
+    scrolled = []
+    view.list_ctrl.EnsureVisible = scrolled.append
+    view.set_rows(rows(*[entry(f"game{number:03d}") for number in range(100)]))
+    assert (selected(view), focused(view), scrolled) == (90, 90, [90])
+
+
+def test_a_tree_rebuild_keeps_the_open_categories_and_the_focused_item(make_view):
+    view = make_view()
+    view.set_rows(rows(ALPHA, BRAVO))
+    tree, nodes = view.tree_ctrl, tree_nodes(view)
+    tree.Expand(tree.GetItemParent(nodes["Developer"]["Dev"]))  # open, with nothing selected under it
+    tree.SetFocusedItem(nodes["Developer"]["Dev"])  # the player moved there without selecting it
+    before = saves(view).count
+    view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))  # a refresh that adds a tree value
+    nodes = tree_nodes(view)
+    assert tree.IsExpanded(tree.GetItemParent(nodes["Developer"]["Dev"]))
+    assert not tree.IsExpanded(tree.GetItemParent(nodes["Genre"]["Action"]))  # a closed one stays closed
+    assert tree.GetItemText(tree.GetFocusedItem()) == "Dev"
+    assert view._selected_paths() == [] and titles(view) == ["Alpha", "Bravo", "Echo"]
+    assert saves(view).count == before  # moving the tree's focus is not a change of filter
+    tree.SelectItem(nodes["Genre"]["Puzzle"], True)
+    tree.SetFocusedItem(nodes["Genre"]["Action"])
+    view.set_rows(rows(ALPHA, BRAVO))  # Strategy went: rebuilt again, with a selection this time
+    assert tree.GetItemText(tree.GetFocusedItem()) == "Action"
+    assert view._selected_paths() == ["Genre/Puzzle"] and titles(view) == ["Alpha"]
+    assert tree.IsExpanded(tree.GetItemParent(tree_nodes(view)["Developer"]["Dev"]))
+    view.set_rows(rows(ALPHA))  # the focused value is gone: its category has the focus
+    assert tree.GetItemText(tree.GetFocusedItem()) == "Genre" and view._selected_paths() == ["Genre/Puzzle"]
+
+
 @pytest.mark.parametrize("prefix, sort_keys", [("", SORT_KEYS), ("catalog_", None)])
 def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, prefix, sort_keys):
     """The Library's keys have no prefix, the Catalog's start with catalog_. A key the defaults lack is a KeyError

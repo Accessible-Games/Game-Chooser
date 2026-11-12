@@ -198,7 +198,12 @@ class GamesPanel(wx.Panel):
         (deleted, uninstalled, gone from the catalog) the selection keeps its row number."""
         self._all_rows = rows
         self._sync_tree()
-        self._fill(stay=True)
+        self._fill(by_player=False)
+
+    def refill(self):
+        """What the rows show or sort by changed while the games stayed the same (the Library's Status column,
+        worked out on a worker thread): fill the list again, as quietly as `set_rows` does."""
+        self._fill(by_player=False)
 
     def set_tree_keys(self, keys):
         """Show only these categories in the tree. A selection under a category that goes no longer filters."""
@@ -215,9 +220,39 @@ class GamesPanel(wx.Panel):
             return
         # Until the tree has values, the saved selections wait (the catalog offline with no saved copy)
         paths = self._selected_paths() if self._tree_nodes else self._saved()[self._key("tree_selections")]
+        tree = self.tree_ctrl
+        opened = [path for path, item in self._tree_items().items() if tree.IsExpanded(item)]
+        focused = self._tree_path(tree.GetFocusedItem())
         self._tree_nodes = nodes
         self._build_tree(nodes)
-        self._restore_tree(paths)
+        self._restore_tree(paths, opened, focused)
+
+    def _tree_path(self, item) -> str | None:
+        """"Category/Value" for a value's item, "Category" for a category's; None for the root or no item"""
+        tree = self.tree_ctrl
+        root = tree.GetRootItem()
+        if not item or not item.IsOk() or item == root:
+            return None
+        parent = tree.GetItemParent(item)
+        text = tree.GetItemText(item)
+        return text if parent == root else f"{tree.GetItemText(parent)}/{text}"
+
+    def _tree_items(self) -> dict:
+        """Every category's and value's item, by its path"""
+        tree = self.tree_ctrl
+        items = {}
+        root = tree.GetRootItem()
+        if not root or not root.IsOk():
+            return items
+        category, cookie = tree.GetFirstChild(root)
+        while category.IsOk():
+            items[self._tree_path(category)] = category
+            child, child_cookie = tree.GetFirstChild(category)
+            while child.IsOk():
+                items[self._tree_path(child)] = child
+                child, child_cookie = tree.GetNextChild(category, child_cookie)
+            category, cookie = tree.GetNextChild(root, cookie)
+        return items
 
     def _build_tree(self, nodes):
         tree = self.tree_ctrl
@@ -231,7 +266,7 @@ class GamesPanel(wx.Panel):
                 for value in values:
                     child = tree.AppendItem(node, value)
                     tree.SetItemData(child, value)
-            tree.Expand(root)  # the categories stay collapsed
+            tree.Expand(root)  # the categories start closed
         finally:
             self.restoring_tree = False
 
@@ -246,23 +281,22 @@ class GamesPanel(wx.Panel):
             paths.append(f"{tree.GetItemText(parent)}/{tree.GetItemText(item)}")
         return paths
 
-    def _restore_tree(self, paths):
+    def _restore_tree(self, selected, opened, focused):
+        """In the tree just built: select the values that were selected, open the categories that were open and
+        put the tree's focus back on its item (on its category when the value is gone)"""
         tree = self.tree_ctrl
-        root = tree.GetRootItem()
-        if not paths or not root or not root.IsOk():
-            return
+        items = self._tree_items()
         self.restoring_tree = True
         try:
-            tree.UnselectAll()
-            category, cookie = tree.GetFirstChild(root)
-            while category.IsOk():
-                label = tree.GetItemText(category)
-                child, child_cookie = tree.GetFirstChild(category)
-                while child.IsOk():
-                    if f"{label}/{tree.GetItemText(child)}" in paths:
-                        tree.SelectItem(child, True)
-                    child, child_cookie = tree.GetNextChild(category, child_cookie)
-                category, cookie = tree.GetNextChild(root, cookie)
+            for path in opened:
+                if path in items:
+                    tree.Expand(items[path])
+            for path in selected:
+                if path in items:
+                    tree.SelectItem(items[path], True)
+            item = focused and (items.get(focused) or items.get(focused.split("/")[0]))
+            if item:
+                tree.SetFocusedItem(item)
         finally:
             self.restoring_tree = False
 
@@ -300,13 +334,17 @@ class GamesPanel(wx.Panel):
         """A filter or the sort order changed (the search, the tree, what `row_filter` leaves out, a sort key's
         values): refill the list. The selected game stays selected; when the new filter leaves it out, the
         selection goes to the first row."""
-        self._fill(stay=False)
+        self._fill(by_player=True)
 
-    def _fill(self, stay: bool):
+    def _fill(self, by_player: bool):
         """Filter and sort the rows into the list and select the game that was selected (at startup, the one
-        remembered from the last run). When it is not listed, the selection keeps its row number (`stay`) or
-        goes to the first row. The action label and the description are set here, never left to a selection
-        event: wx fires none when the selected row number stays the same and another game moves into it."""
+        remembered from the last run). The action label and the description are set here, never left to a
+        selection event: wx fires none when the selected row number stays the same and another game moves into it.
+
+        `by_player`: the player changed a filter or the sort order. Then a selected game that is no longer listed
+        gives way to the first row, and the selected row is brought into view. Otherwise (the games changed, or a
+        background result arrived) the selection keeps its row number, and the list scrolls to the selected row
+        only when that row was in view before: a refresh never scrolls away from where the player is looking."""
         rows = filter_rows(self._all_rows, self.search_combo.GetValue(), self._criteria())
         if self.row_filter is not None:
             rows = [row for row in rows if self.row_filter(row)]
@@ -315,28 +353,40 @@ class GamesPanel(wx.Panel):
             rows.sort(key=self.sort_keys[self.sort_column], reverse=not self.sort_ascending)
         old, old_index = self.selected_row(), self.list.get_selected_index()
         wanted = old.id if old is not None else self._saved()[self._key("last_selected")]
+        scroll = by_player or self._in_view(old_index)  # asked before the list changes
         self._populating = True  # the selection chosen here is not the player's, so it isn't saved
         try:
             self.displayed = rows
             self.list.update_count(len(rows))
-            index = pick_index(rows, wanted, old_index if stay else 0)
+            index = pick_index(rows, wanted, 0 if by_player else old_index)
             if index >= 0:
-                self._select(index)
+                self._select(index, scroll)
             if rows and not self.list.control.use_dataview:  # a DataViewCtrl (macOS) redraws on the new count
                 self.list.refresh()
         finally:
             self._populating = False
-        if stay and old is not None and index >= 0 and rows[index].id != wanted:
+        if not by_player and old is not None and index >= 0 and rows[index].id != wanted:
             # The selected game is gone, so the one now in its row is what the next start selects
             self._saved()[self._key("last_selected")] = rows[index].id
         self._show_selection()
 
-    def _select(self, index):
-        """Select a row and make it the list's focused item too, so the arrow keys start from it. A row that is
-        both already is left as it is: no event, and no scrolling back to it during a background refresh."""
+    def _in_view(self, index) -> bool:
+        """Whether the list shows this row now. With no row (nothing selected yet: the first fill) the answer is
+        yes, so the remembered row is brought into view."""
+        if index < 0 or self.list.control.use_dataview:
+            return True
+        top = self.list_ctrl.GetTopItem()
+        return top <= index < top + self.list_ctrl.GetCountPerPage()
+
+    def _select(self, index, scroll=True):
+        """Select a row and make it the list's focused item too, so the arrow keys start from it; `scroll` also
+        brings it into view. (ListCtrl.Focus would do both, so it can't be used for a refresh that must not
+        scroll.)"""
         self.list.control.Select(index, True)
-        if not self.list.control.use_dataview and self.list_ctrl.GetFocusedItem() != index:
-            self.list_ctrl.Focus(index)  # also scrolls it into view
+        if not self.list.control.use_dataview:
+            self.list_ctrl.SetItemState(index, wx.LIST_STATE_FOCUSED, wx.LIST_STATE_FOCUSED)
+            if scroll:
+                self.list_ctrl.EnsureVisible(index)
 
     def _show_selection(self):
         row = self.selected_row()

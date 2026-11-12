@@ -121,22 +121,32 @@ def library_rows(games, entry_for) -> list[CatalogRow]:
     `entry_for(game)` gives a catalog game's index entry (None for a game added by hand, or one the catalog no
     longer lists).
 
-    The id is the catalog id, else the launch path: it stays the same when the Game object is replaced. The
-    values are the game's own (games.json): one genre, the developer text as one value, even when it names
-    several people."""
-    return [CatalogRow(
-        id=game.catalog_id or game.launch_path,
-        title=game.title,
-        developer=game.developer,
-        developers=[game.developer] if game.developer else [],
-        genres=[game.genre] if game.genre else [],
-        year=game.year,
-        platforms=list(game.platforms),
-        installed=True,
-        entry=entry_for(game),
-        tags=[], languages=[], contains=[], unsupported=False, price="", price_values=set(),
-        game=game,
-    ) for game in games]
+    The id is the catalog id, else the launch path: it stays the same when the Game object is replaced. Two
+    games can share a launch path (Locate has no duplicate check, games.json can be edited by hand); a repeat
+    then gets its number among them added, so every row has an id of its own. The values are the game's own
+    (games.json): one genre, the developer text as one value, even when it names several people."""
+    rows, used = [], set()
+    for game in games:
+        base = row_id = game.catalog_id or game.launch_path
+        repeat = 1
+        while row_id in used:
+            repeat += 1
+            row_id = f"{base} #{repeat}"
+        used.add(row_id)
+        rows.append(CatalogRow(
+            id=row_id,
+            title=game.title,
+            developer=game.developer,
+            developers=[game.developer] if game.developer else [],
+            genres=[game.genre] if game.genre else [],
+            year=game.year,
+            platforms=list(game.platforms),
+            installed=True,
+            entry=entry_for(game),
+            tags=[], languages=[], contains=[], unsupported=False, price="", price_values=set(),
+            game=game,
+        ))
+    return rows
 
 
 def _row_values(row: CatalogRow) -> dict[str, set[str]]:

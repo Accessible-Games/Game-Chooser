@@ -156,7 +156,6 @@ class GameLibraryManager:
                 "last_selected": None,
                 "last_search": "",
                 "column_widths": None,
-                "tree_expansion": {},
                 "tree_selections": [],
                 "tree_filters": ["platform", "genre", "developer", "year"],
                 "last_tab": None,
