@@ -68,6 +68,27 @@ closest to the call. A process of the same exe that started outside that window 
 - `start`: time zero as UTC text. `end`: when the last process exited, or null.
 - `still_running_at_capture_end`: true when some process was still running when the capture ended (then `end` is
   null; the processes that did exit still have their `process_exit` lines).
+- `ended_by`: how the session ended.
+  - `"exit"`: every process of the session exited by itself (`end` is the last exit).
+  - `"stop"`: the run was ended with `--trace-stop` while the recorder still counted this session as running. `stop`
+    says more.
+  - `"capture_end"`: a process was still running when the capture ended for any other reason (the recorder failed
+    or was killed, or the capture is being split after a crash).
+  - null: the game's first process isn't in the capture (see `problem`) and no stop named the session.
+- `stop`: null unless `ended_by` is `"stop"`. Then an object:
+  - `time` (UTC text) and `t`: when the recorder took the stop request. Events after it are still recorded, up to
+    the moment Process Monitor stopped.
+  - `close_games`: true when the stop was asked to close the traced games (`--close-games`). When false the three
+    lists below are empty, no process was touched, and the processes without an `end` in `processes` are the ones
+    left running.
+  - `asked_to_close`: pids that had a visible window and were asked to close it (WM_CLOSE).
+  - `ended`: pids that were still running after the wait and were ended by force (TerminateProcess). A program
+    ended this way had no chance to save, so its last writes may be missing from the trace because they were never
+    made.
+  - `not_closed`: pids of the session still running after all that (the end failed, or the process is one the stop
+    never touches: see "Ending a run with --trace-stop").
+  - With `close_games` true and everything closed, `end` is set and `still_running_at_capture_end` is false, as for
+    a game that exited by itself; `ended_by` is what tells the two apart.
 - `time_zero_source`: see Times. `root_pid`: pid of the game's first process (as found in the
   capture; when it wasn't found, the pid recorded at launch, which is 0 when the launch gave no pid).
 - `processes`: one object per process in the session: `pid`, `parent_pid`, `image_path`, `command_line`, `start`,
@@ -165,13 +186,56 @@ session's processes run. That includes an orphan: a process whose parent is gone
 program is inside the game's folder. Waiting for it does not make its writes part of the session: a process is
 attributed only when its chain of parents, as the capture records them, reaches the game's first process.
 
+A run that waits on a process nobody is going to close (a helper program, a Windows prompt) is ended with
+`--trace-stop`.
+
+## Ending a run with --trace-stop
+
+`game-chooser.exe --trace-stop [RUN] [--close-games]` ends the run in progress while traced programs are still open.
+The command runs without administrator rights and touches no process itself. It and the recorder talk through two
+files in the run folder (both written whole, then moved into place):
+
+- `stop-request.json`, written by the command: `requested` (FILETIME), `close_games` (true or false) and
+  `requester_pid`. The recorder looks for it every half second while it is capturing.
+- `stop.json`, written by the recorder when it takes the request: `requested` (copied from the request), `time`
+  (FILETIME, when it was taken), `close_games`, and `sessions`: one entry per session the recorder counted as
+  running at that moment, each with the pid lists `asked_to_close`, `ended` and `not_closed` (see `stop` under
+  session.json). With `--close-games` it is written again once the closing is over. A request the recorder never
+  took (no `stop.json`) is not a stop.
+
+From the moment the request is taken, `status.json` says `stopping` (Game Chooser's title turns to `(tracing off)`
+without a dialog; the next launch says why and asks whether to launch untraced), no new launch joins the run, and
+the recorder goes on as at a normal end: Process Monitor is stopped, the capture is split, `status.json` says `done`.
+A stop is not a problem: it does not keep the capture.
+
+"Running" is the recorder's live view (the launched process, its descendants, and orphans inside the game's folder:
+see the section above), which can hold a process the capture does not attribute to the session. So a session can
+have `ended_by` `"stop"` while every process the capture gave it has an `end`.
+
+With `--close-games`, before Process Monitor is stopped (so the writes games make while closing are recorded):
+
+1. Every running process of those sessions is asked to close: WM_CLOSE to each of its visible top-level windows. A
+   process with no visible window is not asked.
+2. The recorder waits up to 15 seconds, checking every half second; it goes on as soon as all of them are gone.
+3. What is still running is ended (TerminateProcess), each process only if its pid still has the same start time.
+   Then up to 5 seconds for them to be gone.
+
+Never asked or ended, even if a session's tree holds them: the recorder itself, Game Chooser, pids 0 and 4, any
+program on the list of processes the capture drops (first list at the top of this file), and a process whose
+program path can't be read. They show up in `not_closed`. A game launched after the request was taken is not part
+of the stop. If Process Monitor dies during the wait, nothing is ended.
+
 ## The run folder's split.json
 
 The recorder's working files are in `traces/_runs/<YYYYMMDD-HHMMSS>-<pid>/`. After the capture is split, that
 folder holds `split.json`: `folders` (the session folders written), `problems` (one sentence per session that
-couldn't be recovered: a session with a `problem`, or a session file under `sessions/` that couldn't be read) and
-`capture_kept`. When there are no problems, `capture_kept` is false and the capture files (`capture.pml`,
-`capture-N.pml`) and `filter.pmc` are removed. When there is any problem, `capture_kept` is true and they stay, so
+couldn't be recovered: a session with a `problem`, or a session file under `sessions/` that couldn't be read),
+`capture_kept` and `stop`. `stop` is null for a run that ended by itself; for a run ended with `--trace-stop` it is
+`requested` and `time` (UTC text; `requested` is null when the request didn't carry one), `close_games` and
+`sessions` (the ids of the sessions that were running, sorted).
+
+When there are no problems, `capture_kept` is false and the capture files (`capture.pml`, `capture-N.pml`) and
+`filter.pmc` are removed. When there is any problem, `capture_kept` is true and they stay, so
 `--trace-split <run folder>` can split them again (the new session folders get the usual `-2` suffixes). A run with
 `split.json` and no capture files left is already done: `--trace-split <run folder>` says so and does nothing.
 `--trace-split` without a folder splits only runs that have no `split.json` yet.

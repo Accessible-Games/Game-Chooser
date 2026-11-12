@@ -28,17 +28,45 @@ Build: see `.claude/rules/build.md`.
   the app), `--trace-split [RUN...]` (split leftover runs after a crash; prints "No runs to split." when there are none;
   a named RUN that has `split.json` and no capture left prints "already split, nothing to do"; a named RUN whose
   capture was kept is split again; without RUN only runs with no `split.json` are split),
+  `--trace-stop [RUN] [--close-games]` (end the run in progress while traced programs are still open; see Ending a
+  run below), `-h`/`--help` beside any command (print the help and run nothing; alone it is not a tracing command),
   `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds),
   `--trace-check FOLDER` (the trace-test acceptance check on a session folder, for a machine with only the compiled
   build: prints `PASS` or one problem per line; exit 0 pass, 1 problems, 2 not a session folder), `--traces-dir PATH`
   (use another traces folder). Exit codes: 2 for a bad command line. `--trace-split`: 0 done, 1 when a run
   couldn't be split or its split had a problem. `--trace-recorder`: 0, 1 when the recorder recorded a failure, 2
   when it could not start. `--trace-probe`: 0, 1 on a missing file, a declined administrator prompt or an error
-  (started unelevated, it passes on the elevated probe's code).
+  (started unelevated, it passes on the elevated probe's code). `--trace-stop`: 0 when the run ended cleanly or no
+  run was in progress ("No tracing run is in progress."), or a named RUN had already ended ("already ended, nothing
+  to do"); 1 on a problem (the recorder is gone, or didn't take the request within 30 s, a recorder failure, a
+  split problem, a process `--close-games` could not close); 2 when more than one run is in progress and none is
+  named, or RUN is not a run folder.
+- **Ending a run (`--trace-stop`, `stop.py`):** the command runs unelevated and touches no process. It finds the
+  run whose recorder is alive (`status.json`'s `recorder_pid`) and that has not ended, writes `stop-request.json`
+  into its folder (atomic), then waits and prints what the recorder did (`Wrote <folder>`, `Problem: ...`). The
+  recorder polls for the request in its loop (`Recorder._take_stop`): it writes `stop.json` (the sessions its live
+  tree counts as running), sets the status to `stopping`, takes no more sessions, and goes on as at a normal end
+  (Process Monitor stopped, capture split, `done`). The split marks those sessions `ended_by: "stop"`
+  (`split.normalize_stop`; LOG-FORMAT.md). A stop is not a failure and not a split problem.
+  - Recorder already gone: nothing is written; "the recorder is no longer running, so there is nothing to stop",
+    plus the advice to run `--trace-split` when its capture is unsplit; exit 1. A dead run beside a live one is
+    left to the live recorder, which splits leftovers at its end.
+  - No answer within `ACK_SECONDS` (30 s, counted only while the status says `capturing`): the request is removed
+    and the run goes on. After the request is taken there is no time limit while the recorder lives.
+  - A run that is already ending is waited for; its request is never overwritten.
+  - `--close-games` (opt-in; without it no process is touched): the recorder, before stopping Process Monitor, asks
+    each running process of those sessions to close (`closing.WindowsCloser.ask_close`: WM_CLOSE to its visible
+    top-level windows), waits `CLOSE_WAIT_SECONDS` (15 s, less when all are gone), ends what is left (`end`:
+    TerminateProcess after checking the start time on the opened handle), then waits `END_WAIT_SECONDS` (5 s).
+    Targets come only from `LiveTree.running_processes()` for the sessions listed in `stop.json`, by (pid, start);
+    never the recorder's own pid, the app's pid (`protected_pids`), pids 0 and 4, a name in `EXCLUDED_PROCESSES`
+    or a process with no readable path. **Keep it that way: the session files are written unelevated, and the
+    recorder that acts on them is elevated.**
 - **Where logs go:** `traces/` beside the exe (from source: beside `game-chooser.py`; git-ignored). One folder per
   play session, `<catalog id or title>-<YYYYMMDD-HHMMSS>`, holding `session.json` and `events.jsonl`. The recorder's
   working files live in `traces/_runs/<YYYYMMDD-HHMMSS>-<pid>/`: `status.json`, `sessions/<id>.json`, `filter.pmc`,
-  `capture.pml` (and `capture-N.pml`), `recorder.log`, `split.json` (`folders`, `problems`, `capture_kept`). The
+  `capture.pml` (and `capture-N.pml`), `recorder.log`, `stop-request.json` and `stop.json` (only for a run ended
+  with `--trace-stop`), `split.json` (`folders`, `problems`, `capture_kept`, `stop`). The
   capture and `filter.pmc` are removed after a split with no problems, and kept (`capture_kept: true`) when any
   session has a problem or a session file can't be read. Atomic writes retry `os.replace` while Windows says the
   file is held (`runfiles.replace_with_retry`).
@@ -59,7 +87,9 @@ Build: see `.claude/rules/build.md`.
   delete right, so a delete-on-close open is kept), `REG_OPENED_EXISTING_KEY` and `Delete: False` events. The
   recorder logs the active filter to `recorder.log` (`describe_filter`). Reads were never recorded.
 - **Title:** `Game Chooser (tracing starting)`, `(tracing)` or `(tracing off)`. When off, a dialog says why and
-  games launch untraced after the player confirms.
+  games launch untraced after the player confirms. The one exception is a run ended with `--trace-stop`
+  (`TraceState.announce` is False): the title turns to `(tracing off)` and no dialog opens from the timer; the
+  next launch question starts with the reason (`messages.STOPPED`).
 - **Mark key:** Ctrl+Alt+Shift+M adds a numbered mark to every running traced game. Windows OK beep = mark recorded;
   error beep = no game being traced.
 - **Modules:**
@@ -68,7 +98,9 @@ Build: see `.claude/rules/build.md`.
   - `messages.py` - the UI and recorder messages (the commands in `cli.py`, `probe.py` and `check_trace_test.py`
     print their own text)
   - `client.py` - app side: starts the recorder, writes session files, records launches and marks
-  - `recorder.py` - elevated side: drives Process Monitor for the whole run, then splits
+  - `recorder.py` - elevated side: drives Process Monitor for the whole run, then splits; takes a stop request
+  - `stop.py` - the `--trace-stop` command (unelevated): finds the run, writes the request, waits, reports
+  - `closing.py` - `GameCloser` and `WindowsCloser`: ask one process to close, or end it (lazy ctypes)
   - `procmon.py` - Process Monitor's filter file, start, ready check, stop
   - `pml.py` - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`). `read_capture` swaps
     in `event_offsets` for procmon-parser's event offsets reader, which drops bits 32 to 39 of each offset and so
@@ -81,3 +113,8 @@ Build: see `.claude/rules/build.md`.
   - `probe.py` - the `--trace-probe` command
   - `check_trace_test.py` - `python -m tracing.check_trace_test <session folder>` checks a session of the
     trace test game (`tests/catalog_fixtures/games/trace-test`)
+- **Tests of the stop:** `test_recorder_stop.py` (the recorder, with a fake machine and closer), `test_stop.py` (the
+  command, and command plus recorder through the run folder's files), `test_closing.py` and
+  `test_stop_real_processes.py` (marker `windows`: the real closer and snapshot on Python child processes of the
+  test, whose windows are hidden or off-screen and can't be activated), `test_app_glue.py` (the glue's state
+  handling without a running wx app; the only tracing test that imports wx, skipped when wxPython is missing).
