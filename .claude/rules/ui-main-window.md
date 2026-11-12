@@ -8,6 +8,7 @@ paths:
   - "/progress_area.py"
   - "/description_field.py"
   - "/tests/test_games_panel.py"
+  - "/tests/test_catalog_panel.py"
 ---
 
 # Main window and dialogs
@@ -26,10 +27,9 @@ A `wx.Notebook` with two pages (`TABS = ("library", "catalog")`; `active_tab()`)
 `GamesPanel` (`MainFrame.library_view`); the Catalog page is `CatalogPanel`, which holds one (`catalog_panel.view`).
 `MainFrame.views` maps each tab name to its view.
 
-Menu bar: File, Edit, View, Launch. Library tab, top to bottom: Search; the game list with the filter tree to
-its right; the Launch button with its progress area; the description. Catalog tab, top to bottom: the status line
-and Retry; Search; the catalog list with the filter tree to its right; the action button (the progress area
-takes its place while a job runs or waits); the description.
+Menu bar: File, Edit, View, Launch. Both tabs, top to bottom: Search; the games list with the filter tree to its
+right; the action button (Launch on the Library) with the progress area beside it while a job runs or waits; the
+description. The Catalog tab has its status line and Retry above these.
 
 - **Library tab**: the player's games as rows (`catalog_view.library_rows`), columns Title / Genre / Developer /
   Year / Platform / **Status**, a description field (`DescriptionField`: catalog text for catalog games, empty for
@@ -88,7 +88,7 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   never raised.
 - `focus_list()` takes no focus while `MainFrame.initializing` or `dialog_active` is true. The view moves focus
   on its own in one case only, and then to its list: the control that has focus is about to become unusable (the
-  action button as the list empties or the progress area takes its place; the progress area as it hides).
+  action button as the list empties; the progress area as it hides).
 - Search: filters on every keystroke (no delay), case-insensitive substring over title and developer (and a
   collection's `contains` titles); a search containing "unknown" matches nothing.
 - Rows are in title order; a list with sort keys is then sorted by the chosen column, so rows that tie there
@@ -105,7 +105,6 @@ What differs between the tabs, each a setting passed to `GamesPanel`:
 | Setting | Library | Catalog |
 |---|---|---|
 | `idle_label` (button text with nothing selected) | "Launch" | "Install" |
-| `progress_replaces_action` | no: the progress area shows beside Launch | yes: it takes the button's place |
 | `sort_keys` (header click, a digit key per column, header arrow, saved sort) | one per column | none: always by title |
 | `categories` / `tree_keys` | Platform, Genre, Developer, Release Year; View > Filter Tree picks which show | `catalog_panel.TREE_CATEGORIES`, all shown |
 | `row_filter` | View > Libraries (hidden libraries) | none |

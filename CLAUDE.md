@@ -26,13 +26,14 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   `description_field.py`) are not unit-tested; `wx_bridge.py` takes injectable `post` functions so its threading
   is tested without a running wx app (the test skips when wxPython is not installed). `games_panel.py` (the games
   view both tabs are built from) is tested on a frame that is never shown (`tests/test_games_panel.py`, which
-  skips when wxPython is not installed or there is no display).
+  skips when wxPython is not installed or there is no display); so is one part of `catalog_panel.py`, what its
+  action button does while a job runs (`tests/test_catalog_panel.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
-- Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, games
-  panel, install choices, install prefs, install service, language names, library actions, library integration,
-  library manager, wx bridge, catalog fixtures).
+- Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, catalog
+  panel, games panel, install choices, install prefs, install service, language names, library actions, library
+  integration, library manager, wx bridge, catalog fixtures).
 - `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
   except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
   build check) cover the tracing build.
@@ -92,8 +93,8 @@ Nothing outside `tracing/` and its tests (`tests/tracing/`) imports it; the one 
 
 ### Focus
 The progress area and background refreshes never move focus. One exception, in `GamesPanel`: when the control
-that has focus is about to become unusable (the action button as its list empties or the progress area takes its
-place, the progress area as it hides), focus goes to that tab's games list; never while a dialog is open.
+that has focus is about to become unusable (the action button as its list empties, the progress area as it
+hides), focus goes to that tab's games list; never while a dialog is open.
 
 Not part of this rule, and not decided: what `CatalogPanel` does today. It moves focus on a background event in
 two places. When a fetched index is taken and there is no catalog to show (the status line says why, with Retry)

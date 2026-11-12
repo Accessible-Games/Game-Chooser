@@ -134,7 +134,7 @@ class MainFrame(wx.Frame):
             tree_keys = [key for key, _ in LIBRARY_TREE]
         self.library_view = GamesPanel(
             self.notebook, self, name="Games", categories=LIBRARY_TREE, tree_keys=tree_keys, state_prefix="",
-            idle_label="Launch", progress_replaces_action=False,
+            idle_label="Launch",
             columns=[
                 Column(title="Title", model_field=lambda r: r.title, width=200),
                 Column(title="Genre", model_field=lambda r: r.genre, width=150),
@@ -519,7 +519,7 @@ class MainFrame(wx.Frame):
 
     @property
     def progress_areas(self):
-        """Both progress areas (Library, beside Launch; Catalog, in place of its action button). They show the
+        """Both progress areas (each beside its tab's action button). They show the
         same job, whatever is selected."""
         return [view.progress_area for view in self.views.values()]
 

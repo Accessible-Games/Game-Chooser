@@ -70,9 +70,13 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   choice (or a fixed one), optional extras, dependencies, and a blocked reason from `InstallService.blocked`.
   Returns an `InstallChoice(library_id, library_path, extras)`. Both tabs open it through
   `MainFrame.confirm_install(plan, fixed_library=None)`, and say things through `MainFrame._tell`.
-- **Progress area** (`ProgressArea`): shows the queue's current job, never the selected game. One copy on the
-  Catalog tab and one beside Launch, all driven by `MainFrame._sync_progress`. Done appears while an installer
-  runs; Cancel cancels the job. Focus: see CLAUDE.md (Focus).
+- **Progress area** (`ProgressArea`): shows the queue's current job, never the selected game. One copy beside
+  each tab's action button, all driven by `MainFrame._sync_progress`; the button stays usable. Done appears while
+  an installer runs; Cancel cancels the job. Focus: see CLAUDE.md (Focus).
+- **Install while a job runs or waits** (`CatalogPanel._confirm_install`): on a game that itself has a job
+  queued or running it says so (`messages.JOB_ALREADY_RUNNING` / `JOB_ALREADY_WAITING`) and changes nothing;
+  the queue's `submit` would return that same job anyway. Another game is planned, confirmed and queued as
+  usual. An installed row reads Launch, which is the Library's launch and is not held back by a job.
 - **Library catalog actions** (`library_actions.py`): context menu for catalog games (Update, Undo, Extras,
   Repair, Uninstall, plus links). Delete on a tracked catalog install is **Uninstall** (`delete_kind`: "uninstall";
   "forget" for an untracked install, files untouched; else "delete"). An uninstall that stopped partway (record

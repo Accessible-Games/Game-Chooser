@@ -18,7 +18,7 @@
 """The install progress area: a gauge, a status line, Done (while an installer runs) and Cancel.
 
 UI thread only. It shows the queue's current job, never the selected game: MainFrame drives every copy of it
-(one on the Catalog tab, one beside Launch) with the same calls. It never moves focus into itself.
+(one beside each tab's action button) with the same calls. It never moves focus into itself.
 """
 
 from typing import Callable

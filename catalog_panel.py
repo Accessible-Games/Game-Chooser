@@ -77,7 +77,7 @@ class CatalogPanel(wx.Panel):
         # Search, the games list with its filter tree, the action button and the description
         self.view = GamesPanel(
             self, frame, name="Catalog games", categories=TREE_CATEGORIES, state_prefix="catalog_",
-            idle_label=action_label(None), progress_replaces_action=True,
+            idle_label=action_label(None),
             columns=[
                 Column(title="Title", model_field=lambda r: r.title, width=200),
                 Column(title="Developer", model_field=lambda r: r.developer, width=180),

@@ -85,8 +85,8 @@ def make_view(app, isolated_manager_factory):
         manager = isolated_manager_factory(config={"libraries": [], "SavedState": saved or {}})
         manager.save_config = Saves()
         owner = FakeFrame(manager)
-        settings = {"idle_label": "Install", "progress_replaces_action": True, "on_action": lambda: None,
-                    "context_menu": lambda row: None, **settings}
+        settings = {"idle_label": "Install", "on_action": lambda: None, "context_menu": lambda row: None,
+                    **settings}
         return GamesPanel(top, owner, name="Games", state_prefix=prefix,
                           columns=[Column(title="Title", model_field=lambda r: r.title, width=200),
                                    Column(title="Year", model_field=lambda r: r.year, width=80)],
@@ -382,16 +382,17 @@ def test_row_filter_hides_rows_from_the_list_but_keeps_their_tree_values(make_vi
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (0, 0, "Install Alpha")
 
 
-def test_progress_takes_the_buttons_place_or_shows_beside_it(make_view):
-    replacing, beside = make_view(), make_view(progress_replaces_action=False, idle_label="Launch")
-    assert (replacing.action_btn.GetLabel(), beside.action_btn.GetLabel()) == ("Install", "Launch")
-    for view in (replacing, beside):
-        view.set_busy(True)
-    assert (replacing.action_btn.IsShown(), replacing.progress_area.IsShown()) == (False, True)
-    assert (beside.action_btn.IsShown(), beside.progress_area.IsShown()) == (True, True)
-    for view in (replacing, beside):
-        view.set_busy(False)
-        assert (view.action_btn.IsShown(), view.progress_area.IsShown()) == (True, False)
+def test_the_install_progress_shows_beside_the_action_button_which_stays(make_view):
+    """On both tabs: while a job runs or waits the button is still there to press"""
+    view = make_view(idle_label="Launch")
+    assert view.action_btn.GetLabel() == "Launch"
+    view.set_rows(rows(ALPHA))
+    button = view.action_btn
+    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, False)
+    view.set_busy(True)
+    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, True)
+    view.set_busy(False)
+    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, False)
 
 
 def test_library_rows_launch_describe_and_are_remembered_by_id(make_view):
@@ -739,19 +740,18 @@ def test_the_filter_is_applied_before_the_config_is_saved(make_view):
     assert seen[-1] == ["Bravo", "Alpha"]
 
 
-def test_focus_goes_to_the_list_when_the_progress_area_hides_the_focused_control(make_view):
-    for replaces, moved in ((True, [True]), (False, [])):  # beside the button, nothing hides when a job starts
-        view = make_view(progress_replaces_action=replaces)
-        view.set_rows(rows(ALPHA))
-        focus = []
-        view.list.control.SetFocus = lambda: focus.append(True)
-        view.action_btn.HasFocus = lambda: True
-        view.set_busy(True)
-        assert focus == moved
-        view.action_btn.HasFocus = lambda: False
-        view.progress_area.has_focus_inside = lambda: True  # on Cancel, say, when the job ends
-        view.set_busy(False)
-        assert focus == moved + [True]
+def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(make_view):
+    view = make_view()
+    view.set_rows(rows(ALPHA))
+    focus = []
+    view.list.control.SetFocus = lambda: focus.append(True)
+    view.action_btn.HasFocus = lambda: True
+    view.set_busy(True)  # a job starts: the button stays, so focus stays on it
+    assert focus == []
+    view.action_btn.HasFocus = lambda: False
+    view.progress_area.has_focus_inside = lambda: True  # on Cancel, say, when the job ends
+    view.set_busy(False)
+    assert focus == [True]
 
 
 def test_a_selection_event_while_a_dialog_is_open_is_not_the_players(make_view):

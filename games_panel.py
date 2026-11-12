@@ -33,8 +33,8 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
   player changes (`apply_filters`) brings the selected row into view and falls back to the first row instead.
 - A filter is applied first and saved second, and a save that fails is logged, never raised.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
-  unusable (the action button as the list empties or the progress area takes its place; the progress area as
-  it hides). Never while a dialog is open or the app is starting.
+  unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
+  open or the app is starting.
 What differs between the tabs is a setting of `GamesPanel` or lives in the tab's own code (what a row's action
 does, its context menu, the Catalog's status line).
 """
@@ -64,8 +64,6 @@ class GamesPanel(wx.Panel):
     - `categories`: (criteria key, tree category label) in tree order.
     - `state_prefix`: what this tab's SavedState keys start with.
     - `idle_label`: the action button's text while no game is selected.
-    - `progress_replaces_action`: while a job runs or waits, the install progress takes the action button's
-      place (True) or shows beside it (False).
     - `on_action()`: Enter, Space, double-click or the button.
     - `context_menu(row)`: the wx.Menu for the selected row (None for no row); None shows no menu. The view
       shows the menu and destroys it.
@@ -76,15 +74,13 @@ class GamesPanel(wx.Panel):
     - `on_key(event)`: the tab's own keys in the list; it returns True for a key it took.
     - `on_shown()`: called after the action label and the description were set."""
 
-    def __init__(self, parent, frame, *, name, columns, categories, state_prefix, idle_label,
-                 progress_replaces_action, on_action, context_menu, sort_keys=None, tree_keys=None,
-                 row_filter=None, on_key=None, on_shown=None):
+    def __init__(self, parent, frame, *, name, columns, categories, state_prefix, idle_label, on_action,
+                 context_menu, sort_keys=None, tree_keys=None, row_filter=None, on_key=None, on_shown=None):
         super().__init__(parent)
         self.frame = frame
         self.categories = categories
         self.state_prefix = state_prefix
         self.idle_label = idle_label
-        self.progress_replaces_action = progress_replaces_action
         self.on_action = on_action
         self.context_menu = context_menu
         self.sort_keys = sort_keys
@@ -140,16 +136,15 @@ class GamesPanel(wx.Panel):
         splitter.SetMinimumPaneSize(100)
         sizer.Add(splitter, 1, wx.EXPAND)
 
-        # The action button and, while an install job runs or waits, the install progress: in the button's place
-        # or beside it (created next, so it follows the button in tab order, or takes its place there too)
+        # The action button and, beside it while an install job runs or waits, the install progress (created
+        # next, so it follows the button in tab order)
         self.action_sizer_slot = wx.BoxSizer(wx.HORIZONTAL)
         self.action_btn = wx.Button(self, label=idle_label)
         self.action_btn.Bind(wx.EVT_BUTTON, lambda event: self.on_action())
         self.action_sizer_slot.Add(self.action_btn, 0, wx.ALIGN_CENTER)
         self.progress_area = ProgressArea(self)
         self.progress_area.Hide()
-        self.action_sizer_slot.Add(self.progress_area, 0, wx.ALIGN_CENTER | wx.LEFT,
-                                   0 if progress_replaces_action else 10)
+        self.action_sizer_slot.Add(self.progress_area, 0, wx.ALIGN_CENTER | wx.LEFT, 10)
         sizer.Add(self.action_sizer_slot, 0, wx.ALIGN_CENTER | wx.ALL, 5)
 
         self.description = DescriptionField(self, "Description")
@@ -451,17 +446,11 @@ class GamesPanel(wx.Panel):
     # ---- the install progress, selection and focus ---------------------------------------------------------------
 
     def set_busy(self, busy: bool):
-        """Show the install progress while a job runs or waits: in the action button's place, or beside it
-        (`progress_replaces_action`). Focus never moves into the progress area; if it was on a control that
-        hides, it goes to the list."""
+        """Show the install progress beside the action button while a job runs or waits. Focus never moves into
+        the progress area; if it was in there when the area hides, it goes to the list."""
         if self.progress_area.IsShown() == busy:
             return
-        if busy:
-            lost_focus = self.progress_replaces_action and self.action_btn.HasFocus()
-        else:
-            lost_focus = self.progress_area.has_focus_inside()
-        if self.progress_replaces_action:
-            self.action_btn.Show(not busy)
+        lost_focus = not busy and self.progress_area.has_focus_inside()
         self.progress_area.Show(busy)
         self.action_sizer_slot.Layout()
         self.Layout()
