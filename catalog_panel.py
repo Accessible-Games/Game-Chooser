@@ -139,7 +139,7 @@ class CatalogPanel(wx.Panel):
         self.status.Show(bool(text))
         self.retry_btn.Show(retry)
         self.Layout()
-        if lost_focus and not self.frame.dialog_active:  # never leave focus on a control that just hid
+        if lost_focus:  # never leave focus on a control that just hid (focus_list refuses under a dialog)
             self.view.focus_list()
 
     def refresh_rows(self):

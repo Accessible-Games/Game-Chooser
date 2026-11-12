@@ -273,16 +273,17 @@ class GamesPanel(wx.Panel):
         finally:
             self.restoring_tree = False
 
-    def _selected_paths(self) -> list[str]:
+    def _selected_values(self):
+        """(category item, value item) for each selected value; the root and the categories select nothing"""
         tree = self.tree_ctrl
-        paths = []
         root = tree.GetRootItem()
         for item in tree.GetSelections():
             parent = tree.GetItemParent(item)
-            if not parent or not parent.IsOk() or parent == root:
-                continue
-            paths.append(f"{tree.GetItemText(parent)}/{tree.GetItemText(item)}")
-        return paths
+            if parent and parent.IsOk() and parent != root:
+                yield parent, item
+
+    def _selected_paths(self) -> list[str]:
+        return [self._tree_path(item) for _, item in self._selected_values()]
 
     def _restore_tree(self, selected, opened, focused):
         """In the tree just built: select the values that were selected, open the categories that were open and
@@ -305,13 +306,9 @@ class GamesPanel(wx.Panel):
 
     def _criteria(self) -> dict[str, set[str]]:
         tree = self.tree_ctrl
-        root = tree.GetRootItem()
         criteria: dict[str, set[str]] = {}
-        for item in tree.GetSelections():
-            parent = tree.GetItemParent(item)
-            if not parent or not parent.IsOk() or parent == root:
-                continue  # the root and category nodes select nothing
-            criteria.setdefault(tree.GetItemData(parent), set()).add(tree.GetItemData(item))
+        for category, item in self._selected_values():
+            criteria.setdefault(tree.GetItemData(category), set()).add(tree.GetItemData(item))
         return criteria
 
     def on_tree_selection(self, event=None):
@@ -393,8 +390,8 @@ class GamesPanel(wx.Panel):
 
     def _show_selection(self):
         row = self.selected_row()
-        if row is None and self.action_btn.HasFocus() and not self.frame.dialog_active:
-            self.focus_list()  # never leave focus on a control that is about to be disabled
+        if row is None and self.action_btn.HasFocus():
+            self.focus_list()  # never leave focus on a control that is about to be disabled (not under a dialog)
         self.action_btn.SetLabel(action_label(row) if row else self.idle_label)
         self.action_btn.Enable(row is not None)
         self.description.set_text(description_text(row.entry) if row else "")
@@ -454,8 +451,8 @@ class GamesPanel(wx.Panel):
         self.progress_area.Show(busy)
         self.action_sizer_slot.Layout()
         self.Layout()
-        if lost_focus and not self.frame.dialog_active:
-            self.focus_list()
+        if lost_focus:
+            self.focus_list()  # which refuses while a dialog is open
 
     def on_selected(self, event):
         if self.frame.dialog_active:  # spurious events while a modal dialog is open

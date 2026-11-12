@@ -21,7 +21,6 @@ Main window for Game Chooser application
 
 import wx
 import wx.adv
-import os
 import logging
 import subprocess
 import platform
@@ -148,7 +147,7 @@ class MainFrame(wx.Frame):
                 lambda r: r.title.lower(),
                 lambda r: r.genre.lower(),
                 lambda r: r.developer.lower(),
-                lambda r: (r.year == "unknown", r.year),
+                lambda r: r.year,
                 lambda r: len(r.platforms),
                 lambda r: self.status_lookup(r.game).lower(),
             ],
@@ -1347,12 +1346,7 @@ class MainFrame(wx.Frame):
         state["last_tab"] = self.active_tab()
         for view in self.views.values():
             view.save_state()  # splitter position, column widths, search and tree selections
-
-        # Save tree filters
-        state["tree_filters"] = list(self.library_view.tree_keys)
-
-        # Save hidden libraries
-        state["hidden_libraries"] = sorted(self.hidden_libraries)
+        # (tree_filters and hidden_libraries are stored by their own toggles)
 
         self.library_manager.save_config()
     
