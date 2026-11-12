@@ -805,19 +805,30 @@ def test_typing_jumps_to_the_title_as_the_players_own_move(make_view):
     assert restarted.selected_row().title == "Temple Of Doom"
 
 
-def test_space_belongs_to_the_text_while_typing_and_acts_otherwise(make_view):
+def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_view):
     acted = []
     view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
     type_text(view, "temple")
+    assert selected(view) == 3
+    now[0] += 1.2  # the player waits for the screen reader to finish the row
     # The key-down itself is taken: wx turns a Space key-down that reaches the list control into an activation
     assert press(view.list_ctrl, wx.WXK_SPACE) and acted == []
-    type_text(view, "r")  # "temple r": past "Temple Of Doom", which "temple of" must not launch or install
+    now[0] += 0.5
+    type_text(view, "r")  # "temple r", within a second of the Space: past "Temple Of Doom", and nothing launched
     assert acted == [] and selected(view) == 4
-    type_text(view, "\r")  # Enter always acts, mid-word too
+    type_text(view, "\r")  # Enter always acts, in the middle of a text too
     assert acted == ["Temple Run"]
-    now[0] += 2  # the player paused: Space is the action again
+    now[0] += 3.5  # more than 3 seconds after the last character: Space is the action again
     type_text(view, " ")
     assert acted == ["Temple Run", "Temple Run"] and selected(view) == 4
+    type_text(view, "t")  # steps on to "Temple Of Doom"; then a Space every 0.8 seconds
+    for _ in range(3):
+        now[0] += 0.8
+        type_text(view, " ")
+    assert acted == ["Temple Run", "Temple Run"] and selected(view) == 3
+    now[0] += 0.8  # 3.2 seconds after "t": the Spaces before it did not push the limit out
+    type_text(view, " ")
+    assert acted == ["Temple Run", "Temple Run", "Temple Of Doom"]
 
 
 def test_a_digit_belongs_to_the_text_while_typing_and_sorts_otherwise(make_view):

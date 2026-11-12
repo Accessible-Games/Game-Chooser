@@ -116,6 +116,32 @@ def test_type_ahead_text_grows_until_the_player_pauses():
     assert not typed.typing() and typed.add("a") == "a"
 
 
+def test_type_ahead_gives_a_space_three_seconds_and_any_other_character_one():
+    """A player waits for the screen reader to finish the row before typing on"""
+    now = [50.0]
+    typed = TypeAhead(clock=lambda: now[0])
+
+    def after(seconds, char):
+        now[0] += seconds
+        return typed.add(char)
+
+    assert not typed.takes_space()  # no text: Space is the list's action
+    for char in "temple":
+        typed.add(char)
+    now[0] += 1.2  # too late for a letter to continue the text, not for a Space
+    assert not typed.typing() and typed.takes_space()
+    assert typed.add(" ") == "temple " and typed.typing()  # a character within a second of that Space continues
+    assert after(0.5, "r") == "temple r"
+    now[0] += 3.5  # more than 3 seconds after the last character: Space is the action again
+    assert not typed.takes_space()
+    # Spaces do not push the limit out: it counts from the last character that is not a Space
+    assert typed.add("t") == "t"
+    assert [after(0.8, " ") for _ in range(3)] == ["t ", "t  ", "t   "]  # at 0.8, 1.6 and 2.4 seconds
+    now[0] += 0.8  # 3.2 seconds after "t"
+    assert not typed.takes_space() and typed.add(" ") == "t   "  # a Space that comes too late adds nothing
+    assert typed.add("a") == "t   a"  # a character counts from the key before it: the last Space taken, 0.8 s ago
+
+
 def test_price_sort_key_puts_free_first_then_orders_by_the_amount_shown():
     """As text, "Buy once, $10" would come before "Buy once, $5\""""
     def priced(id, **pricing):

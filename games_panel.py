@@ -33,8 +33,9 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
   player changes (`apply_filters`) brings the selected row into view and falls back to the first row instead.
 - A filter is applied first and saved second, and a save that fails is logged, never raised.
 - Typing in the list jumps to the next title that starts with what was typed (type-ahead), as the player's own
-  move. While a text is being typed, Space and the digit keys belong to it; otherwise Space is the action and a
-  digit sorts.
+  move. While a text is being typed, Space and the digit keys belong to it (Space for 3 seconds after the last
+  character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. Enter
+  always acts.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
   unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
   open or the app is starting.
@@ -426,15 +427,16 @@ class GamesPanel(wx.Panel):
 
     def on_char(self, event):
         """A character typed in the list is type-ahead (the virtual list does none by itself), or a digit that
-        sorts by its column. A digit or a space only extends a text that is being typed ("area 51"), so a
-        title that starts with a digit can't be reached by typing. A key with Ctrl or Alt is never text. Not on
-        the macOS DataView control: there every key but a sorting digit is left to the control."""
+        sorts by its column. A digit only extends a text that is being typed ("area 51"), so a title that
+        starts with a digit can't be reached by typing; nor does a Space start one (`TypeAhead` has its limits).
+        A key with Ctrl or Alt is never text. Not on the macOS DataView control: there every key but a sorting
+        digit is left to the control."""
         code = event.GetUnicodeKey()
         char = chr(code) if code != wx.WXK_NONE else ""
         text = (char != "" and char.isprintable() and not event.ControlDown() and not event.AltDown()
                 and not self.list.control.use_dataview)
         column = event.GetKeyCode() - ord("1")
-        if text and (self.type_ahead.typing() or char not in "0123456789 "):
+        if text and (self.type_ahead.typing() or char not in "0123456789"):
             self._type(char)
         elif 0 <= column < len(self.sort_keys):
             self.sort_by(column)
@@ -526,9 +528,10 @@ class GamesPanel(wx.Panel):
     def on_list_key(self, event):
         key = event.GetKeyCode()
         plain = not event.HasAnyModifiers()
-        if key == wx.WXK_SPACE and plain and self.type_ahead.typing():
-            # Part of the text being typed ("temple of"). Taken here, never skipped on to on_char: wx turns a
-            # Space key-down that reaches the list control into an activation.
+        if key == wx.WXK_SPACE and plain and self.type_ahead.takes_space():
+            # Part of the text being typed ("temple of"), for 3 seconds after its last character: a player
+            # waits for the screen reader to finish the row. Taken here, never skipped on to on_char: wx turns
+            # a Space key-down that reaches the list control into an activation.
             self._type(" ")
         elif key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE) and plain:
             self.on_action()

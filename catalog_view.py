@@ -205,22 +205,32 @@ def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[Catalo
 
 
 class TypeAhead:
-    """The text a player is typing into a games list to jump to a title. Keys that follow each other within
-    `timeout` seconds build one text; after a longer pause the next key starts a new one. `clock` is the time
-    source, so a test needs no sleep."""
+    """The text a player is typing into a games list to jump to a title. A character continues the text when it
+    comes within `timeout` seconds of the key before it (a Space included); later than that it starts a new text.
+    A Space has longer: it belongs to the text for `space_timeout` seconds after the last character that is not a
+    Space (a player waits for the screen reader to finish the row), and Spaces do not push that limit out.
+    `clock` is the time source, so a test needs no sleep."""
 
-    def __init__(self, clock=time.monotonic, timeout=1.0):
-        self.clock, self.timeout = clock, timeout
-        self._text, self._last_key = "", 0.0
+    def __init__(self, clock=time.monotonic, timeout=1.0, space_timeout=3.0):
+        self.clock, self.timeout, self.space_timeout = clock, timeout, space_timeout
+        self._text, self._last_key, self._last_char = "", 0.0, 0.0
 
     def typing(self) -> bool:
-        """Whether a text is being typed: then Space and the digits belong to it"""
+        """Whether a character typed now continues the text: then a digit belongs to it"""
         return bool(self._text) and self.clock() - self._last_key <= self.timeout
 
+    def takes_space(self) -> bool:
+        """Whether a Space typed now belongs to the text; if not, it is the list's action"""
+        return bool(self._text) and self.clock() - self._last_char <= self.space_timeout
+
     def add(self, char: str) -> str:
-        """The text with this character added"""
-        self._text = (self._text if self.typing() else "") + char
-        self._last_key = self.clock()
+        """The text with this character added. A Space that comes too late adds nothing: it starts no text."""
+        now = self.clock()
+        if char != " ":
+            self._text = (self._text if self.typing() else "") + char
+            self._last_key = self._last_char = now
+        elif self.takes_space():
+            self._text, self._last_key = self._text + " ", now
         return self._text
 
 
