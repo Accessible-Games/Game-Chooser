@@ -95,6 +95,12 @@ The progress area and background refreshes never move focus. One exception, in `
 that has focus is about to become unusable (the action button as its list empties or the progress area takes its
 place, the progress area as it hides), focus goes to that tab's games list; never while a dialog is open.
 
+Not part of this rule, and not decided: what `CatalogPanel` does today. It moves focus on a background event in
+two places. When a fetched index is taken and there is no catalog to show (the status line says why, with Retry)
+while the Catalog tab is showing, focus goes to the status line (`set_index_state`). When the status line or
+Retry hides while it has focus, focus goes to the Catalog's games list (`_update_status`). Neither happens while
+a dialog is open or the app is starting.
+
 ### Migration
 No migration (alpha): write no migration code.
 

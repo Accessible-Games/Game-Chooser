@@ -79,7 +79,8 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
 - After `apply_filters` the selected row is brought into view, and a selected game the filter leaves out gives
   way to the first row.
 - `set_rows` also syncs the tree. It is rebuilt only when what it shows changed, and a rebuild keeps the
-  player's tree selections, the open categories and the tree's focused item.
+  player's tree selections, the open categories and the tree's focused item: the root, a category or a value
+  (when the value is gone, its category).
 - The remembered game (`last_selected`, a row id: what the next start selects) changes only when the player
   moves the selection, or when a background refresh leaves the selected row with another id: the game got a new
   launch path, or it left the list and another game is in its row.
@@ -157,6 +158,14 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - `GamesPanel.restoring_tree` is true while the view itself changes the tree (building it, restoring its
   selections, Escape): the tree's change events are then ignored.
 - Filling a list, restoring its selection and the search rule are `GamesPanel`'s (above). A fill calls `SetFocus`
-  in one case only: the list became empty while focus was on its action button. What never moves focus is in
-  CLAUDE.md (Focus). After a dialog, both tabs return focus with `focus_active_list()`. The description is a
-  read-only multi-line field so a screen reader reads it line by line.
+  in one case only: the list became empty while focus was on its action button. What never moves focus, and what
+  `CatalogPanel`'s status line does today, is in CLAUDE.md (Focus).
+- After a dialog the code calls `focus_active_list()` only in these places. Library: after the message that a
+  catalog game can't be edited (Ctrl+E); in the forget flow when nothing was forgotten; after a catalog action
+  from the context menu (Update, Extras, Undo, Repair, Uninstall); when Uninstall is refused, and after its
+  dialog; after the damaged-file message at startup. Catalog: at every exit of Install (already queued, could not
+  be planned, the confirmation confirmed or cancelled) and of adding a web game. Add, Edit, Delete of a game
+  added by hand, a forget that succeeded, Locate, the random-game prompt and the Catalog's "not in the Library"
+  message make no focus call. Inside `random_game` the action runs within `modal_dialog()`, so a
+  `focus_active_list()` call it makes is refused.
+- The description is a read-only multi-line field so a screen reader reads it line by line.
