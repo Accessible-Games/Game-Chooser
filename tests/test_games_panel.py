@@ -2,7 +2,7 @@
 fetched. Skips when wxPython is not installed or there is no display."""
 
 import logging
-import types
+from contextlib import contextmanager
 
 import pytest
 
@@ -47,6 +47,27 @@ class Saves:
         self.count += 1
 
 
+class FakeFrame:
+    """What a view uses of MainFrame: the manager, the two flags, modal_dialog() and _tell()"""
+
+    def __init__(self, manager):
+        self.library_manager = manager
+        self.initializing = False
+        self.dialog_active = False
+        self.told = []
+
+    @contextmanager
+    def modal_dialog(self):
+        was_active, self.dialog_active = self.dialog_active, True
+        try:
+            yield
+        finally:
+            self.dialog_active = was_active
+
+    def _tell(self, text, caption, icon=None):
+        self.told.append((text, caption))
+
+
 @pytest.fixture(scope="module")
 def app():
     yield wx.GetApp() or wx.App(False)
@@ -55,15 +76,15 @@ def app():
 @pytest.fixture
 def make_view(app, isolated_manager_factory):
     """Builds a view on a real GameLibraryManager, so its SavedState is the real default config (plus `saved`).
-    `prefix` is the tab's: "" for the Library's keys, "" for the Catalog's."""
+    `prefix` is the tab's: "" for the Library's keys, "catalog_" for the Catalog's."""
     frames = []
 
     def make(saved=None, prefix="", **settings):
-        top = wx.Frame(None)  # never shown
+        top = wx.Frame(None, size=(800, 600))  # never shown
         frames.append(top)
         manager = isolated_manager_factory(config={"libraries": [], "SavedState": saved or {}})
         manager.save_config = Saves()
-        owner = types.SimpleNamespace(library_manager=manager, initializing=False, dialog_active=False)
+        owner = FakeFrame(manager)
         settings = {"idle_label": "Install", "progress_replaces_action": True, "on_action": lambda: None,
                     "context_menu": lambda row: None, **settings}
         return GamesPanel(top, owner, name="Games", state_prefix=prefix,
@@ -441,7 +462,8 @@ def test_focus_list_refuses_while_a_dialog_is_open_or_the_app_is_starting(make_v
 
 
 def test_two_games_with_one_launch_path_are_two_rows_that_stay_apart(make_view):
-    games = [Game(title="First", launch_path="C:/games/same.exe"), Game(title="Second", launch_path="C:/games/same.exe")]
+    games = [Game(title="First", launch_path="C:/games/same.exe"),
+             Game(title="Second", launch_path="C:/games/same.exe")]
     view = make_view(idle_label="Launch")
     view.set_rows(library_rows(games, lambda game: None))
     player_selects(view, 1)
@@ -506,12 +528,58 @@ def test_a_tree_rebuild_keeps_the_open_categories_and_the_focused_item(make_view
     assert tree.GetItemText(tree.GetFocusedItem()) == "Genre" and view._selected_paths() == ["Genre/Puzzle"]
 
 
+def test_the_splitter_goes_where_it_was_saved_or_to_the_middle_and_is_saved(make_view):
+    """restore_sash() is called once the window has its size. Left to wx, the sash would sit at the minimum pane
+    size (100) for good, as the Catalog's did."""
+    fresh, saved_before = make_view(), make_view({"splitter_position": 300})
+    for view in (fresh, saved_before):
+        view.GetTopLevelParent().SendSizeEvent()  # the window gets its size
+        view.restore_sash()
+    width = fresh.splitter.GetSize()[0]
+    assert width > 400 and fresh.splitter.GetSashPosition() == width // 2
+    assert saved_before.splitter.GetSashPosition() == 300
+    saved_before.splitter.SetSashPosition(250)  # as dragged
+    saved_before.save_state()
+    assert saved(saved_before)["splitter_position"] == 250
+
+
+def test_random_game_asks_then_selects_the_picked_row_and_acts_on_it(make_view, monkeypatch):
+    """One skeleton for Ctrl+R on both tabs and Ctrl+Shift+R; the tab gives the candidates, the text for when
+    there are none, and what Yes does"""
+    asked, acted, answers = [], [], [wx.NO, wx.YES, wx.YES]
+    monkeypatch.setattr(wx, "MessageBox",
+                        lambda text, caption, style: (asked.append((text, caption)), answers.pop(0))[1])
+    monkeypatch.setattr("games_panel.random.choice", lambda candidates: candidates[-1])
+    games = [Game(title="Hand", launch_path="C:/games/hand.exe"), Game(title="Zed", launch_path="C:/games/zed.exe")]
+    view = make_view(idle_label="Launch")
+    view.set_rows(library_rows(games, lambda game: None))
+    nothing = ("No games available to choose from.", "No Games")
+
+    def act_in(frame):  # the row is held while it is acted on: no refresh may replace it meanwhile
+        return lambda row: acted.append((row.title, frame.dialog_active))
+
+    view.random_game([], nothing, act_in(view.frame))
+    assert view.frame.told == [nothing] and asked == [] and acted == []
+    view.random_game(view.displayed, nothing, act_in(view.frame))  # the player says No
+    assert asked == [("Your game for today is...\n\nZed\n\nLaunch now?", "Random Game")]  # the Library's wording
+    assert acted == [] and selected(view) == 0
+    view.random_game(view.displayed, nothing, act_in(view.frame))  # and then Yes
+    assert acted == [("Zed", True)] and not view.frame.dialog_active
+    assert (selected(view), focused(view), view.action_btn.GetLabel()) == (1, 1, "Launch Zed")
+    catalog = make_view(prefix="catalog_")
+    catalog.set_rows(rows(ALPHA, BRAVO))
+    catalog.random_game(catalog.displayed, nothing, act_in(catalog.frame), caption="Random Game to Install")
+    assert asked[-1] == ("Your game for today is...\n\nBravo\n\nInstall now?", "Random Game to Install")
+    assert acted[-1] == ("Bravo", True) and catalog.action_btn.GetLabel() == "Install Bravo"
+
+
 @pytest.mark.parametrize("prefix, sort_keys", [("", SORT_KEYS), ("catalog_", None)])
 def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, prefix, sort_keys):
     """The Library's keys have no prefix, the Catalog's start with catalog_. A key the defaults lack is a KeyError
     when the main window starts; one the view adds on its own is never filled in for a config without it."""
     view = make_view(prefix=prefix, sort_keys=sort_keys)
     defaults = set(saved(view))
+    view.restore_sash()
     view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
     player_selects(view, 2)
     view.tree_ctrl.SelectItem(tree_nodes(view)["Genre"]["Puzzle"], True)
@@ -525,9 +593,9 @@ def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, pre
     assert set(state) == defaults
     assert (state[prefix + "last_selected"], state[prefix + "last_search"], state[prefix + "tree_selections"]) == \
         ("alpha", "a", ["Genre/Puzzle"])
-    assert len(state[prefix + "column_widths"]) == 2
+    assert len(state[prefix + "column_widths"]) == 2 and state[prefix + "splitter_position"] > 0
     assert (state[other + "last_selected"], state[other + "last_search"], state[other + "tree_selections"],
-            state[other + "column_widths"]) == (None, "", [], None)  # the other tab's are left alone
+            state[other + "column_widths"], state[other + "splitter_position"]) == (None, "", [], None, None)
 
 
 def test_the_tree_is_rebuilt_only_when_what_it_shows_changed(make_view):

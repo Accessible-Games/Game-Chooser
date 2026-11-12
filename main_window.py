@@ -27,7 +27,6 @@ import subprocess
 import platform
 import webbrowser
 import threading
-import random
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -171,7 +170,7 @@ class MainFrame(wx.Frame):
         self.setup_accelerators()
 
         # Fill the Library list (the view has read its saved search and sort itself)
-        self.refresh_game_list()
+        self._refresh_library_rows()
 
     def create_menu_bar(self):
         """Create the menu bar"""
@@ -327,9 +326,8 @@ class MainFrame(wx.Frame):
         return row.game if row else None
 
     def on_find(self, event):
-        """Ctrl+F: the Library search box"""
-        if self.active_tab() == "library":
-            self.library_view.search_combo.SetFocus()
+        """Ctrl+F: the active tab's search box"""
+        self.views[self.active_tab()].search_combo.SetFocus()
 
     def status_lookup(self, game):
         """The Status column's text for a game"""
@@ -409,16 +407,15 @@ class MainFrame(wx.Frame):
         try:
             self.service.take_index(state)
             taken = True
-            # Always: the index may have replaced games (an adopted launch path), changed a genre, or changed
-            # what a game's description says
-            self.refresh_game_list()
-            self.refresh_statuses()
         except Exception:
             log.exception("Couldn't use the fetched catalog index")
         finally:
             self._index_fetching = False
         try:
             if taken:
+                # Always: the index may have replaced games (an adopted launch path), changed a genre, or changed
+                # what a game's description says
+                self.games_changed()
                 self.catalog_panel.set_index_state(state)
         except Exception:
             log.exception("Couldn't show the fetched catalog index")
@@ -508,8 +505,7 @@ class MainFrame(wx.Frame):
             dlg.Destroy()
 
             # Refresh UI in case they added stuff
-            self.refresh_game_list()
-            self.build_libraries_menu()
+            self.games_changed()
 
         # Always continue to main window
         self.initializing = False
@@ -644,7 +640,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't apply the result of %s", job.title)
         if self._quitting:
             return
-        self._refresh_after_job()
+        self.games_changed()
         self.notify(messages.finished_text(result.action, result.title or job.title, result.notes,
                                            result.backups))
         self._run_job_done_hooks(job)
@@ -656,7 +652,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't clean up after %s failed", job.title)
         if self._quitting:
             return
-        self._refresh_after_job()
+        self.games_changed()
         self.notify(messages.failed_text(job.request.action, job.title))
         with self.modal_dialog():  # a second failure waits for this box instead of stacking on it
             wx.MessageBox(message, messages.INSTALL_PROBLEM_TITLE, wx.OK | wx.ICON_ERROR, self)
@@ -670,7 +666,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't clean up after %s was cancelled", job.title)
         if self._quitting:
             return
-        self._refresh_after_job()
+        self.games_changed()
         self._run_job_done_hooks(job)
 
     def _apply_outcomes_on_quit(self):
@@ -689,15 +685,20 @@ class MainFrame(wx.Frame):
             except Exception:
                 log.exception("Couldn't apply how %s ended while quitting", job.title)
 
-    def _refresh_after_job(self):
-        """Both lists (each with its tree), the Libraries menu and the statuses (a game or a library may have
-        come or gone). None of these moves focus."""
-        for refresh in (self.refresh_game_list, self.build_libraries_menu, self.catalog_panel.refresh_rows,
+    def games_changed(self):
+        """A game, the games list, a library or what is installed changed, or what the catalog says about a game:
+        bring everything that shows them up to date. Both tabs' rows (each view then brings its tree up to date
+        and keeps its selection), the Libraries menu and the statuses. Every such change calls this, whoever
+        made it. A step that fails is logged and the others still run.
+
+        Focus stays where it is, with one exception that is the view's: when a list becomes empty while focus is
+        on its action button, focus goes to that list (the button is about to be disabled)."""
+        for refresh in (self._refresh_library_rows, self.build_libraries_menu, self.catalog_panel.refresh_rows,
                         self.refresh_statuses):
             try:
                 refresh()
             except Exception:
-                log.exception("Couldn't refresh after an install job")
+                log.exception("Couldn't refresh after the games changed")
 
     def _run_job_done_hooks(self, job):
         for hook in list(self.job_done_hooks):
@@ -706,10 +707,9 @@ class MainFrame(wx.Frame):
             except Exception:
                 log.exception("A job-done hook failed")
 
-    def refresh_game_list(self):
-        """The games changed (or what the catalog says about them): rebuild the Library's rows. The view brings
-        its tree up to date, filters again and keeps the selected game selected. Call it after every change to
-        a game or to manager.games; it never moves focus."""
+    def _refresh_library_rows(self):
+        """The Library's part of games_changed(): rebuild its rows from the games and their catalog entries.
+        The view brings its tree up to date, filters again and keeps the selected game selected."""
         self.library_view.set_rows(library_rows(self.library_manager.games, self.service.entry_for))
         self.update_title()
 
@@ -850,8 +850,7 @@ class MainFrame(wx.Frame):
                             live.launch_path = new_path
                             live.library_id = ""
                             self.library_manager.save_games()
-                            self.refresh_game_list()  # its row is known by its launch path
-                            self.refresh_statuses()
+                            self.games_changed()  # its row is known by its launch path
                     dlg.Destroy()
                 return
 
@@ -914,17 +913,11 @@ class MainFrame(wx.Frame):
         self.launch_game(game)
 
     def on_random_game(self, event):
-        """Pick a random game from filtered list and offer to launch it"""
+        """Ctrl+R: a random game from the active tab's list as shown (GamesPanel.random_game asks, selects its row
+        and acts). Library: among the games that run on this system (web games included); Yes launches it."""
         if self.active_tab() == "catalog":
             self.catalog_panel.on_random_game()
             return
-        games = [row.game for row in self.library_view.displayed]
-        if not games:
-            wx.MessageBox("No games available to choose from.",
-                        "No Games", wx.OK | wx.ICON_INFORMATION)
-            return
-
-        # Filter for platform-compatible games only
         current_system = platform.system()
         platform_map = {
             "Windows": "Windows",
@@ -932,34 +925,15 @@ class MainFrame(wx.Frame):
             "Linux": "Linux"
         }
         current_platform = platform_map.get(current_system, current_system)
-
-        # Get games compatible with current platform (or web games)
-        compatible_games = [
-            game for game in games
-            if game.launch_path.startswith("http") or current_platform in game.platforms
-        ]
-
-        if not compatible_games:
-            wx.MessageBox(
-                f"No games compatible with {current_platform} in the current filtered list.",
-                "No Compatible Games",
-                wx.OK | wx.ICON_INFORMATION
-            )
-            return
-
-        # Pick random game
-        random_game = random.choice(compatible_games)
-
-        # Show dialog (the game object is held until it launches, so no refresh may replace it meanwhile)
-        with self.modal_dialog():
-            response = wx.MessageBox(
-                f"Your game for today is...\n\n{random_game.title}\n\nLaunch now?",
-                "Random Game",
-                wx.YES_NO | wx.ICON_QUESTION
-            )
-
-            if response == wx.YES:
-                self.launch_game(random_game)
+        rows = self.library_view.displayed
+        compatible = [row for row in rows
+                      if row.game.launch_path.startswith("http") or current_platform in row.game.platforms]
+        if rows:
+            none_left = (f"No games compatible with {current_platform} in the current filtered list.",
+                         "No Compatible Games")
+        else:
+            none_left = ("No games available to choose from.", "No Games")
+        self.library_view.random_game(compatible, none_left, lambda row: self.launch_game(row.game))
 
     def on_random_install(self, event):
         """Pick a random game to install from the Catalog tab's filtered list (switching to that tab first)"""
@@ -988,8 +962,7 @@ class MainFrame(wx.Frame):
             try:
                 if dlg.ShowModal() == wx.ID_OK:
                     self.library_manager.save_games()
-                    self.refresh_game_list()
-                    self.refresh_statuses()
+                    self.games_changed()
             finally:
                 dlg.Destroy()
     
@@ -1028,14 +1001,7 @@ class MainFrame(wx.Frame):
                     del games[i]
                     break
             self.library_manager.save_games()
-            self._after_delete()
-
-    def _after_delete(self):
-        """A game left the list: refresh. The selection keeps its row number (GamesPanel.set_rows), so it stays
-        in the same place in the list."""
-        self.refresh_game_list()
-        self.catalog_panel.refresh_rows()  # a catalog game it was is no longer installed
-        self.refresh_statuses()
+            self.games_changed()  # the selection keeps its row number (GamesPanel.set_rows)
 
     def _forget_game(self, game):
         """Delete an untracked catalog install: its record goes and it leaves the list; its files stay"""
@@ -1055,11 +1021,11 @@ class MainFrame(wx.Frame):
             log.warning("Couldn't forget %s: %s", live.catalog_id, e)
             self._tell(messages.FORGET_FAILED.format(title=live.title), messages.FORGET_GAME_TITLE)
             if self._live_game(live) is None:  # it left the list after all (games.json couldn't be saved)
-                self._after_delete()
+                self.games_changed()
             else:  # nothing changed: the selection stays on it
                 self.focus_active_list()
             return
-        self._after_delete()
+        self.games_changed()
 
     # ---- a catalog game's actions (Library context menu, Delete, a launch that finds no executable) ------------
 
@@ -1129,6 +1095,16 @@ class MainFrame(wx.Frame):
         finally:
             self.focus_active_list()
 
+    def confirm_install(self, plan, fixed_library=None):
+        """The confirmation dialog for a plan (install, update or extras): the player's InstallChoice, or None
+        when they cancelled"""
+        with self.modal_dialog():
+            dlg = InstallConfirmDialog(self, plan, self.service, fixed_library=fixed_library)
+            try:
+                return dlg.get_choice() if dlg.ShowModal() == wx.ID_OK else None
+            finally:
+                dlg.Destroy()
+
     def _confirm_change(self, game, action):
         """Update or Extras: the confirmation dialog for that plan, with the game's library fixed"""
         try:
@@ -1137,14 +1113,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't plan %s of %s", action, game.catalog_id)
             self._tell(messages.ACTION_NOT_STARTED.format(title=game.title), "Game Chooser")
             return
-        choice = None
-        with self.modal_dialog():
-            dlg = InstallConfirmDialog(self, plan, self.service, fixed_library=self._fixed_library(game))
-            try:
-                if dlg.ShowModal() == wx.ID_OK:
-                    choice = dlg.get_choice()
-            finally:
-                dlg.Destroy()
+        choice = self.confirm_install(plan, fixed_library=self._fixed_library(game))
         live = self._live_game(game)
         if choice is not None and live is not None and live.catalog_id:
             self._submit_catalog(plan.action, live, extras=choice.extras)
@@ -1207,8 +1176,7 @@ class MainFrame(wx.Frame):
                 if dlg.ShowModal() == wx.ID_OK:
                     self.library_manager.games.append(dlg.game)
                     self.library_manager.save_games()
-                    self.refresh_game_list()
-                    self.refresh_statuses()
+                    self.games_changed()
             finally:
                 dlg.Destroy()
 
@@ -1316,10 +1284,7 @@ class MainFrame(wx.Frame):
         """Refresh UI after preferences dialog closes; a new catalog address fetches the catalog again"""
         if catalog_changed:
             self.refetch_index()
-        self.refresh_game_list()
-        self.build_libraries_menu()
-        self.catalog_panel.refresh_rows()
-        self.refresh_statuses()  # a library may have been added, moved or removed
+        self.games_changed()  # a library may have been added, moved or removed
     
     def on_refresh(self, event):
         """F5: on the Catalog tab check for catalog updates; on Library rebuild the game list and tree and
@@ -1327,9 +1292,7 @@ class MainFrame(wx.Frame):
         if self.active_tab() == "catalog":
             self.catalog_panel.check_for_updates()
             return
-        self.refresh_game_list()
-        self.build_libraries_menu()
-        self.refresh_statuses()
+        self.games_changed()
 
     def on_exit(self, event):
         """Exit application"""
@@ -1358,13 +1321,10 @@ class MainFrame(wx.Frame):
         else:
             self.Centre()
 
-        # The Library's splitter position (the search, sort, tree filters and column widths are each view's own)
-        if state["splitter_position"]:
-            self.library_view.splitter.SetSashPosition(state["splitter_position"])
-        else:
-            # Default 50/50 split
-            width = self.GetSize()[0]
-            self.library_view.splitter.SetSashPosition(width // 2)
+        # Each tab's splitter, now that the window has its size (the search, sort, tree filters and column widths
+        # were read by each view when it was built)
+        for view in self.views.values():
+            view.restore_sash()
 
         # Update menu item check states based on current filters
         self.update_filter_menu_state()
@@ -1384,10 +1344,9 @@ class MainFrame(wx.Frame):
 
         state["window_size"] = list(self.GetSize())
         state["window_position"] = list(self.GetPosition())
-        state["splitter_position"] = self.library_view.splitter.GetSashPosition()
         state["last_tab"] = self.active_tab()
         for view in self.views.values():
-            view.save_state()  # column widths, search and tree selections
+            view.save_state()  # splitter position, column widths, search and tree selections
 
         # Save tree filters
         state["tree_filters"] = list(self.library_view.tree_keys)

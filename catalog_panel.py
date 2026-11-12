@@ -22,18 +22,16 @@ hands the result to `set_index_state`. Links open in the browser only when the p
 """
 
 import logging
-import random
 import webbrowser
 
 import wx
 
 from smart_list import Column
 
-from catalog_view import action_kind, action_label, action_verb, build_rows, install_candidates, link_items
+from catalog_view import action_kind, action_label, build_rows, install_candidates, link_items
 from engine import messages
 from engine.entries import current_platform, game_fields, platform_sources
 from games_panel import GamesPanel
-from install_dialogs import InstallConfirmDialog
 from install_service import InstallService
 
 log = logging.getLogger(__name__)
@@ -97,11 +95,11 @@ class CatalogPanel(wx.Panel):
     # ---- the index and the status line -------------------------------------------------------------------------
 
     def set_index_state(self, state):
-        """Show a fetched (or saved) index: update the status line and the rows"""
+        """A fetched (or saved) index was taken: update the status line. The rows are MainFrame.games_changed()'s,
+        which runs first."""
         self.state = state
         self._checking = False
         self._update_status()
-        self.refresh_rows()
         if (self.retry_btn.IsShown() and self.frame.active_tab() == "catalog" and not self.frame.initializing
                 and not self.frame.dialog_active):
             self.status.SetFocus()  # no catalog at all: a screen reader reads why, and Retry is next
@@ -165,9 +163,7 @@ class CatalogPanel(wx.Panel):
         game = self.service.manager.catalog_game(row.id)
         if game is None:
             log.warning("%s is installed but has no Library entry", row.id)
-            with self.frame.modal_dialog():
-                wx.MessageBox(messages.CATALOG_NOT_IN_LIBRARY.format(title=row.title), "Catalog",
-                              wx.OK | wx.ICON_INFORMATION)
+            self.frame._tell(messages.CATALOG_NOT_IN_LIBRARY.format(title=row.title), "Catalog", wx.ICON_INFORMATION)
             return
         self.frame.launch_game(game)
 
@@ -179,38 +175,25 @@ class CatalogPanel(wx.Panel):
         job = self.service.queue.job_for(row.id)
         if job is not None:  # already queued or running: say so, and change nothing (not even last_library)
             text = messages.JOB_ALREADY_RUNNING if job.state == "running" else messages.JOB_ALREADY_WAITING
-            self._tell(text.format(title=row.title), wx.ICON_INFORMATION)
-            self._focus_row(row)
+            self.frame._tell(text.format(title=row.title), "Catalog", wx.ICON_INFORMATION)
+            self.frame.focus_active_list()
             return
         try:
             plan = self.service.plan(row.id)
         except Exception:
             log.exception("Couldn't plan installing %s", row.id)
-            self._tell(messages.INSTALL_NOT_STARTED.format(title=row.title), wx.ICON_ERROR)
-            self._focus_row(row)
+            self.frame._tell(messages.INSTALL_NOT_STARTED.format(title=row.title), "Catalog", wx.ICON_ERROR)
+            self.frame.focus_active_list()
             return
-        choice = None
-        with self.frame.modal_dialog():
-            dlg = InstallConfirmDialog(self.frame, plan, self.service)
-            try:
-                if dlg.ShowModal() == wx.ID_OK:
-                    choice = dlg.get_choice()
-            finally:
-                dlg.Destroy()
+        choice = self.frame.confirm_install(plan)
         if choice is not None:
             try:
                 self.service.submit(plan.action, row.id, choice.library_id, choice.library_path, choice.extras)
             except Exception:
                 log.exception("Couldn't queue installing %s", row.id)
-                self._tell(messages.INSTALL_NOT_STARTED.format(title=row.title), wx.ICON_ERROR)
-            self.frame.refresh_game_list()
-            self.refresh_rows()
-            self.frame.refresh_statuses()
-        self._focus_row(row)
-
-    def _tell(self, text, icon):
-        with self.frame.modal_dialog():
-            wx.MessageBox(text, "Catalog", wx.OK | icon, self.frame)
+                self.frame._tell(messages.INSTALL_NOT_STARTED.format(title=row.title), "Catalog", wx.ICON_ERROR)
+            self.frame.games_changed()
+        self.frame.focus_active_list()  # back to the row: it stayed selected
 
     def _add_web_game(self, row):
         sources = platform_sources(row.entry, current_platform())
@@ -223,56 +206,26 @@ class CatalogPanel(wx.Panel):
         except OSError as e:  # games.json couldn't be saved: nothing changes (the file on disk is whole)
             log.warning("Couldn't add the web game %s: %s", row.id, e)
             manager.games = before
-            self._tell(messages.WEB_GAME_NOT_ADDED.format(title=fields["title"] or row.title), wx.ICON_ERROR)
-            self._focus_row(row)
+            self.frame._tell(messages.WEB_GAME_NOT_ADDED.format(title=fields["title"] or row.title), "Catalog",
+                             wx.ICON_ERROR)
+            self.frame.focus_active_list()
             return
-        self.frame.refresh_game_list()
-        self.refresh_rows()
-        self.frame.refresh_statuses()
+        self.frame.games_changed()
         self.frame.notify(messages.ADDED.format(title=fields["title"] or row.title))
-        self._focus_row(row)
-
-    def _focus_row(self, row):
-        """Back to the row in the list, by the screen reader pattern (Select, Focus, SetFocus)"""
-        if not self:
-            return
-        self.view.select_row(row)
-        self.view.focus_list()
+        self.frame.focus_active_list()
 
     def on_random_game(self):
-        """Ctrl+R: pick a random game from the list as shown (filters applied) and offer to act on it"""
-        if not self.view.displayed:
-            with self.frame.modal_dialog():
-                wx.MessageBox(messages.CATALOG_NO_GAMES, "No Games", wx.OK | wx.ICON_INFORMATION)
-            return
-        row = random.choice(self.view.displayed)
-        # The row is held across the prompt, so no index refresh may replace it meanwhile
-        with self.frame.modal_dialog():
-            response = wx.MessageBox(
-                messages.CATALOG_RANDOM_PROMPT.format(title=row.title, verb=action_verb(row)),
-                "Random Game", wx.YES_NO | wx.ICON_QUESTION)
-            if response == wx.YES:
-                self.view.select_row(row)
-                self.on_action()
+        """Ctrl+R: a random game from the list as shown (filters applied); Yes runs the row's own action"""
+        self.view.random_game(self.view.displayed, (messages.CATALOG_NO_GAMES, "No Games"),
+                              lambda row: self.on_action())
 
     def on_random_install(self):
-        """Ctrl+Shift+R: pick a random game to install from the list as shown (filters applied), leaving out
-        installed games, web games and games already queued, and offer to install it"""
+        """Ctrl+Shift+R: a random game to install from the list as shown (filters applied), leaving out installed
+        games, web games and games already queued; Yes opens the install confirmation"""
         busy = {r.id for r in self.view.displayed if self.service.queue.job_for(r.id) is not None}
-        candidates = install_candidates(self.view.displayed, busy)
-        if not candidates:
-            with self.frame.modal_dialog():
-                wx.MessageBox(messages.CATALOG_NO_GAMES_TO_INSTALL, "No Games", wx.OK | wx.ICON_INFORMATION)
-            return
-        row = random.choice(candidates)
-        # The row is held across the prompt, so no index refresh may replace it meanwhile
-        with self.frame.modal_dialog():
-            response = wx.MessageBox(
-                messages.CATALOG_RANDOM_PROMPT.format(title=row.title, verb="Install"),
-                "Random Game to Install", wx.YES_NO | wx.ICON_QUESTION)
-            if response == wx.YES:
-                self.view.select_row(row)
-                self._confirm_install(row)
+        self.view.random_game(install_candidates(self.view.displayed, busy),
+                              (messages.CATALOG_NO_GAMES_TO_INSTALL, "No Games"), self._confirm_install,
+                              caption="Random Game to Install")
 
     def context_menu(self, row):
         """The action, then a link item for each link the game has"""

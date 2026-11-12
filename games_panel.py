@@ -33,13 +33,16 @@ does, its context menu, the Catalog's status line).
 """
 
 import logging
+import random
 
 import wx
 
 from smart_list import VirtualSmartList
 
-from catalog_view import action_label, description_text, filter_rows, pick_index, tree_categories, tree_values
+from catalog_view import (action_label, action_verb, description_text, filter_rows, pick_index, tree_categories,
+                          tree_values)
 from description_field import DescriptionField
+from engine import messages
 from progress_area import ProgressArea
 
 log = logging.getLogger(__name__)
@@ -470,6 +473,22 @@ class GamesPanel(wx.Panel):
                 self._show_selection()
                 return
 
+    def random_game(self, candidates, none_left, act, caption="Random Game"):
+        """Ctrl+R and Ctrl+Shift+R: pick one of `candidates` (rows of the list as shown) at random and ask. On Yes
+        its row is selected and `act(row)` runs. `none_left` is the (text, caption) to show when there is no
+        candidate."""
+        if not candidates:
+            self.frame._tell(*none_left, wx.ICON_INFORMATION)
+            return
+        row = random.choice(candidates)
+        # The row is held across the prompt and the action, so no refresh may replace it meanwhile
+        with self.frame.modal_dialog():
+            answer = wx.MessageBox(messages.CATALOG_RANDOM_PROMPT.format(title=row.title, verb=action_verb(row)),
+                                   caption, wx.YES_NO | wx.ICON_QUESTION)
+            if answer == wx.YES:
+                self.select_row(row)
+                act(row)
+
     def focus_list(self):
         """Put keyboard focus in the games list (screen reader pattern: Select, Focus, SetFocus).
         Not while the app is starting up (the first-run dialog may own focus) or a dialog is open."""
@@ -509,11 +528,19 @@ class GamesPanel(wx.Panel):
 
     # ---- saving ----------------------------------------------------------------------------------------------------
 
+    def restore_sash(self):
+        """Put the splitter where it was saved, else in the middle. The main window calls this once it has its
+        size: a position set before that does not hold, and one left to wx stays at the minimum pane size and
+        does not follow a resize."""
+        saved = self._saved()[self._key("splitter_position")]
+        self.splitter.SetSashPosition(saved or self.splitter.GetSize()[0] // 2)
+
     def save_state(self):
-        """On close, into SavedState (the caller writes the config): the column widths, the search text and the
-        tree filters. The last two are not saved while there are no rows (the catalog offline with no saved
-        copy), so the player's last filters survive until the games load."""
+        """On close, into SavedState (the caller writes the config): the splitter position, the column widths, the
+        search text and the tree filters. The last two are not saved while there are no rows (the catalog offline
+        with no saved copy), so the player's last filters survive until the games load."""
         state = self._saved()
+        state[self._key("splitter_position")] = self.splitter.GetSashPosition()
         if not self.list.control.use_dataview:
             state[self._key("column_widths")] = [self.list_ctrl.GetColumnWidth(column)
                                                  for column in range(self.list_ctrl.GetColumnCount())]
