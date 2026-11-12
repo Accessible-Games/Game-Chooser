@@ -20,6 +20,7 @@ START_FAILED = "Tracing is off: the recorder couldn't start ({error}). Games wil
 RECORDER_FAILED = "Tracing has stopped: {error} Games launched from now on run untraced."
 RECORDER_GONE = ("Tracing has stopped: the recorder closed unexpectedly. "
                  "Games launched from now on run untraced.")
+STOPPED = "Tracing has stopped: the run was ended with --trace-stop. Games launched from now on run untraced."
 LAUNCH_STARTING = "Tracing is still starting, so {title} would not be recorded. Launch it anyway, untraced?"
 LAUNCH_OFF = "Tracing is off, so {title} would not be recorded. Launch it anyway, untraced?"
 HOTKEY_FAILED = ("The mark key, Ctrl+Alt+Shift+M, couldn't be set up; another program may be using it. "

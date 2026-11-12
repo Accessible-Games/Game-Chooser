@@ -2,6 +2,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 import tracing.cli as cli
 from tracing.runfiles import RunDir, new_run
 from tracing.splitrun import SplitResult
@@ -139,3 +141,92 @@ def test_trace_check_missing_or_non_session_folder(tmp_path, capsys):
     assert cli.run_command(["--trace-check", str(tmp_path / "nope")], True) == 2
     assert "not a session folder" in capsys.readouterr().out
     assert cli.run_command(["--trace-check", str(tmp_path)], True) == 2
+
+
+def test_stop_is_a_tracing_command(tmp_path, capsys):
+    assert cli.run_command(["--trace-stop", "--traces-dir", str(tmp_path)], False) == 0
+    assert capsys.readouterr().out.strip() == "No tracing run is in progress."
+
+
+def test_stop_passes_the_traces_folder_the_run_and_the_close_flag(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(cli, "_run_stop", lambda traces_dir, run, close: seen.append((traces_dir, run, close)) or 7)
+    assert cli.run_command(["--trace-stop", "--traces-dir", str(tmp_path)], False) == 7
+    assert cli.run_command(["--trace-stop", "--close-games", "--traces-dir", str(tmp_path)], False) == 7
+    assert cli.run_command(["--trace-stop", str(tmp_path / "r"), "--close-games"], True) == 7
+    assert cli.run_command(["--close-games", "--traces-dir", str(tmp_path), "--trace-stop"], False) == 7
+    assert seen[0] == (tmp_path, None, False) and seen[1] == (tmp_path, None, True)
+    assert seen[2][1:] == (tmp_path / "r", True) and seen[3] == (tmp_path, None, True)
+
+
+def test_close_games_alone_is_not_a_command():
+    assert cli.run_command(["--close-games"], True) is None
+
+
+def test_stop_asks_whether_the_recorder_is_alive(tmp_path, monkeypatch, capsys):
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    run.write_status("capturing", recorder_pid=4321)
+    run.capture_path.write_bytes(b"pml")
+    asked = []
+    monkeypatch.setattr(cli, "_is_alive", lambda pid: asked.append(pid) or False)
+    assert cli.run_command(["--trace-stop", "--traces-dir", str(tmp_path)], False) == 1
+    assert 4321 in asked and "the recorder is no longer running" in capsys.readouterr().out
+
+
+def test_help_with_a_command_prints_the_help_and_runs_nothing(monkeypatch, capsys):
+    def never(*args):
+        raise AssertionError("--help must not run the command")
+
+    for name in ("_run_stop", "_split", "_recorder", "_trace_check", "_run_probe"):
+        monkeypatch.setattr(cli, name, never)
+    for argv in (["--trace-stop", "--close-games", "--help"], ["-h", "--trace-stop"], ["--trace-split", "--help"]):
+        assert cli.run_command(argv, False) == 0
+        text = " ".join(capsys.readouterr().out.split())
+        for name in cli.COMMANDS + ("--close-games", "--traces-dir"):
+            assert name in text
+        assert "Unsaved game progress is lost" in text and "15 seconds" in text
+        assert "a game started through the administrator prompt is not closed" in text
+        assert "runs as Game Chooser's user with no more rights than Game Chooser" in text
+
+
+def test_help_alone_is_not_a_tracing_command():
+    assert cli.run_command(["--help"], True) is None
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_the_recorder_is_built_to_close_only_what_the_app_could_and_never_the_app(tmp_path):
+    import argparse
+    import os
+    from tracing.closing import WindowsCloser, process_identity
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=os.getpid(),
+                                                      procmon="p.exe"))
+    assert isinstance(recorder.closer, WindowsCloser)
+    # the limit is who the process named by --app-pid runs as, read from that process itself
+    assert recorder.closer.limit == process_identity(os.getpid()) and recorder.closer.limit is not None
+    assert os.getpid() in recorder._protected_pids
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_a_recorder_whose_app_has_gone_closes_nothing(tmp_path):
+    import argparse
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait(30)
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=gone.pid,
+                                                      procmon="p.exe"))
+    assert recorder.closer.limit is None
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_a_recorder_is_alive_only_as_the_process_that_started_then():
+    import os
+    from tracing.live import process_start_time
+    me = os.getpid()
+    started = process_start_time(me)
+    assert cli._recorder_is_alive(me, started) is True
+    assert cli._recorder_is_alive(me, started + 1) is False  # the pid, but another process
+    assert cli._recorder_is_alive(me, None) is True  # a status without a start time: by pid alone

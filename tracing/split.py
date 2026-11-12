@@ -26,6 +26,8 @@ class SessionResult:
     end: int | None
     still_running: bool
     problem: str | None
+    ended_by: str | None = None  # "exit", "stop" or "capture_end"; None when the root wasn't found and no stop
+    stop: dict | None = None  # for a session the stop found running: time (FILETIME), close_games and the pid lists
 
 
 def _name(path: str) -> str:
@@ -102,8 +104,59 @@ def _process_lines(tree: dict[tuple[int, int], ProcInfo], zero: int) -> list[dic
     return lines
 
 
-def split_run(processes: list[ProcInfo], events: Iterable[RawEvent],
-              sessions: list[SessionInfo]) -> list[SessionResult]:
+STOP_LISTS = ("asked_to_close", "ended", "not_closed")
+
+
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _not_closed(item: dict) -> dict:
+    reason = item.get("reason")
+    return {"pid": item["pid"], "reason": reason if isinstance(reason, str) else None}
+
+
+def normalize_stop(stop) -> dict | None:
+    """The recorder's stop record (the run folder's stop.json) in a known shape, or None when the run wasn't
+    stopped or the record can't be used: `requested` (FILETIME or None), `time` (FILETIME), `close_games` and
+    `sessions`, the sessions that were running, each with its pid lists `asked_to_close` and `ended` and its
+    `not_closed` list of {pid, reason}."""
+    if not isinstance(stop, dict) or not _is_int(stop.get("time")) or not isinstance(stop.get("sessions"), dict):
+        return None
+    sessions = {}
+    for session_id, entry in stop["sessions"].items():
+        if isinstance(entry, dict):
+            lists = {name: entry[name] if isinstance(entry.get(name), list) else [] for name in STOP_LISTS}
+            sessions[session_id] = {
+                "asked_to_close": [pid for pid in lists["asked_to_close"] if _is_int(pid)],
+                "ended": [pid for pid in lists["ended"] if _is_int(pid)],
+                "not_closed": [_not_closed(item) for item in lists["not_closed"]
+                               if isinstance(item, dict) and _is_int(item.get("pid"))]}
+    requested = stop.get("requested")
+    return {"requested": requested if _is_int(requested) else None, "time": stop["time"],
+            "close_games": stop.get("close_games") is True, "sessions": sessions}
+
+
+def _ended(result: SessionResult, stop: dict | None) -> None:
+    """How the session ended. In a stopped run, by the stop when the recorder counted the session as running
+    then (whatever the capture holds) or the capture shows a process of it still running (a game launched after
+    the request was taken, or one the recorder's live view missed: its lists are empty). Otherwise by its last
+    process exiting, or by the capture ending under it."""
+    if stop is not None:
+        lists = stop["sessions"].get(result.info.session_id)
+        if lists is not None or result.still_running:
+            result.ended_by = "stop"
+            result.stop = {"time": stop["time"], "close_games": stop["close_games"],
+                           **(lists or {name: [] for name in STOP_LISTS})}
+            return
+    if result.root is not None:
+        result.ended_by = "capture_end" if result.still_running else "exit"
+
+
+def split_run(processes: list[ProcInfo], events: Iterable[RawEvent], sessions: list[SessionInfo],
+              stop: dict | None = None) -> list[SessionResult]:
+    """`stop` is the run's stop record when the run was ended by --trace-stop (see normalize_stop)."""
+    stop = normalize_stop(stop)
     results: list[SessionResult | None] = [None] * len(sessions)
     owner: dict[tuple[int, int], int] = {}
     # Sessions whose pid is known first; then those found by exe, never taking a process another session owns.
@@ -135,6 +188,7 @@ def split_run(processes: list[ProcInfo], events: Iterable[RawEvent],
         result.lines.append(_write_line(kind, event, proc, result.time_zero, result.info))
 
     for result in results:
+        _ended(result, stop)
         if result.root is None:
             continue
         zero = result.time_zero

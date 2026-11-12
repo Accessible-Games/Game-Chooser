@@ -5,6 +5,7 @@ import pytest
 
 from tests.tracing.test_split import CHILD, CHOOSER, ROOT, SEVENZ, ev, info
 import tracing.splitrun as splitrun_module
+from tracing.clock import filetime_to_iso
 from tracing.runfiles import new_run
 from tracing.splitrun import SplitResult, split_run_dir
 
@@ -37,7 +38,8 @@ def test_split_writes_sessions_marker_and_deletes_capture(tmp_path):
     [folder] = result.folders
     assert (folder / "session.json").is_file() and (folder / "events.jsonl").is_file()
     marker = json.loads(run.split_path.read_text(encoding="utf-8"))
-    assert marker == {"folders": [folder.name], "problems": [], "capture_kept": False} and run.is_split()
+    assert marker == {"folders": [folder.name], "problems": [], "capture_kept": False, "stop": None}
+    assert run.is_split()
     assert not run.capture_path.exists() and not run.config_path.exists()
 
 
@@ -120,7 +122,7 @@ def test_no_sessions_just_finishes(tmp_path):
     result = split_run_dir(run, tmp_path, never)
     assert result.folders == [] and result.problems == []
     assert json.loads(run.split_path.read_text(encoding="utf-8")) == {
-        "folders": [], "problems": [], "capture_kept": False}
+        "folders": [], "problems": [], "capture_kept": False, "stop": None}
     assert not run.capture_path.exists() and not run.config_path.exists()
 
 
@@ -146,3 +148,45 @@ def test_failed_write_removes_this_calls_folders_and_retry_has_no_suffix(tmp_pat
     monkeypatch.setattr(splitrun_module, "write_session", real)
     result = split_run_dir(run, tmp_path, fake_read)
     assert sorted(f.name for f in result.folders) == ["c-stamp", "other-stamp"]
+
+
+def test_split_json_has_no_stop_for_a_run_that_ended_by_itself(tmp_path):
+    run = make_run(tmp_path)
+    result = split_run_dir(run, tmp_path, fake_read)
+    assert json.loads(run.split_path.read_text(encoding="utf-8"))["stop"] is None
+    data = json.loads((result.folders[0] / "session.json").read_text(encoding="utf-8"))
+    assert data["ended_by"] == "capture_end" and data["stop"] is None  # CHILD has no exit in the fixture
+
+
+def test_a_stopped_run_marks_its_sessions_and_split_json(tmp_path):
+    run = make_run(tmp_path)
+    lists = {"asked_to_close": [100], "ended": [200], "not_closed": []}
+    run.write_stop({"requested": FT - 10_000_000, "time": FT, "close_games": True,
+                    "sessions": {"s": lists, "gone": {}}})
+    result = split_run_dir(run, tmp_path, fake_read)
+    assert result.problems == [] and result.capture_kept is False  # a stop is not a problem
+    marker = json.loads(run.split_path.read_text(encoding="utf-8"))
+    assert marker["stop"] == {"requested": filetime_to_iso(FT - 10_000_000), "time": filetime_to_iso(FT),
+                              "close_games": True, "sessions": ["gone", "s"]}
+    data = json.loads((result.folders[0] / "session.json").read_text(encoding="utf-8"))
+    assert data["ended_by"] == "stop"
+    assert data["stop"]["time"] == filetime_to_iso(FT) and data["stop"]["close_games"] is True
+    assert data["stop"]["asked_to_close"] == [100] and data["stop"]["ended"] == [200]
+
+
+def test_a_stopped_run_with_no_sessions_still_says_stop(tmp_path):
+    run = make_run(tmp_path, with_session=False)
+    run.write_stop({"requested": None, "time": FT, "close_games": False, "sessions": {}})
+    split_run_dir(run, tmp_path, fake_read)
+    assert json.loads(run.split_path.read_text(encoding="utf-8")) == {
+        "folders": [], "problems": [], "capture_kept": False,
+        "stop": {"requested": None, "time": filetime_to_iso(FT), "close_games": False, "sessions": []}}
+
+
+def test_a_request_the_recorder_never_took_is_not_a_stop(tmp_path):
+    run = make_run(tmp_path)
+    run.write_stop_request({"requested": FT, "close_games": True})
+    result = split_run_dir(run, tmp_path, fake_read)
+    assert json.loads(run.split_path.read_text(encoding="utf-8"))["stop"] is None
+    data = json.loads((result.folders[0] / "session.json").read_text(encoding="utf-8"))
+    assert data["ended_by"] == "capture_end"

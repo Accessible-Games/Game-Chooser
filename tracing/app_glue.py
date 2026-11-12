@@ -132,8 +132,9 @@ class TracingGlue:
         except Exception:
             log.exception("Polling the recorder before a launch failed")
             state = self._client.state  # the last known state, not an assumed off
-        # Turned off just now (by this poll): the question carries the reason, so it isn't told again afterwards.
-        just_off = state.phase == "off" and self._phase != "off"
+        # Off and the reason not told yet (turned off by this poll, or by a stop, which opens no dialog): the
+        # question carries the reason, so it isn't told again afterwards.
+        just_off = state.phase == "off" and not self._told_off
         if just_off:
             self._told_off = True
         try:
@@ -199,7 +200,8 @@ class TracingGlue:
         self._frame.update_title()
         if state.phase == "off":
             self._timer.Stop()  # off is final: nothing more to poll for
-            if not self._told_off:
+            # A stop the admin asked for (announce False) changes the title only: no dialog from the timer.
+            if not self._told_off and state.announce:
                 self._told_off = True
                 self._tell(state.reason or messages.RECORDER_GONE)
 

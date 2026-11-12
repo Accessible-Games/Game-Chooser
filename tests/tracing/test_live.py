@@ -175,3 +175,61 @@ def test_root_by_exe_prefers_a_start_after_the_launch_call():
     t.update([LiveProc(700, 4, 10 * s - s // 2, EXE), LiveProc(701, 4, 10 * s + s, EXE)])
     t.update([LiveProc(700, 4, 10 * s - s // 2, EXE)])
     assert t.running() == set()  # the root was 701, which has exited
+
+
+def test_running_processes_lists_the_live_members_of_each_session():
+    t = tree()
+    t.add_session("s2", 50, 500, None, 500)
+    root = LiveProc(10, 1, 100, r"C:\Games\Foo\a.exe")
+    child = LiveProc(11, 10, 110, r"C:\Windows\helper.exe")
+    other = LiveProc(99, 1, 50, r"C:\Windows\notepad.exe")
+    t.update([root, child, other])
+    assert t.running_processes() == {"s1": [root, child]}
+    # the root has gone: the child it left behind is still the session's
+    t.update([child, other, LiveProc(50, 1, 500, None)])
+    assert t.running_processes() == {"s1": [child], "s2": [LiveProc(50, 1, 500, None)]}
+    t.update([other])
+    assert t.running_processes() == {}
+
+
+def test_running_processes_skips_a_reused_pid():
+    t = tree()
+    t.update([LiveProc(10, 1, 100, None)])
+    t.update([LiveProc(10, 1, 999, r"C:\Other\x.exe")])
+    assert t.running_processes() == {}
+
+
+S = 10_000_000  # ticks per second
+
+
+def startless(before=100 * S, after=101 * S):
+    t = LiveTree()
+    t.add_session("s1", 10, None, GAME_DIR, before, None, after)  # the launch gave a pid but no start time
+    return t
+
+
+def test_a_root_with_no_start_time_is_not_a_later_process_with_that_pid():
+    t = startless()
+    t.update([LiveProc(10, 1, 200 * S, r"C:\Other\x.exe"), LiveProc(11, 10, 201 * S, None)])
+    assert t.running() == set() and t.running_processes() == {}
+
+
+def test_a_root_with_no_start_time_is_not_a_process_from_before_the_launch():
+    t = startless()
+    t.update([LiveProc(10, 1, 50 * S, r"C:\Other\x.exe")])
+    assert t.running() == set()
+
+
+def test_a_root_with_no_start_time_is_found_within_the_launch_window_and_then_kept():
+    for start in (98 * S, 100 * S + 5, 103 * S):  # 2 s before the call to 2 s after it returned
+        t = startless()
+        root = LiveProc(10, 1, start, r"C:\Games\Foo\a.exe")
+        t.update([root, LiveProc(11, 10, 110 * S, None)])
+        assert t.running() == {"s1"} and len(t.running_processes()["s1"]) == 2
+        # once found, that process is the root: the pid given to another program later is not
+        t.update([LiveProc(10, 1, 400 * S, r"C:\Other\x.exe")])
+        assert t.running() == set()
+    for start in (98 * S - 1, 103 * S + 1):
+        t = startless()
+        t.update([LiveProc(10, 1, start, r"C:\Games\Foo\a.exe")])
+        assert t.running() == set()

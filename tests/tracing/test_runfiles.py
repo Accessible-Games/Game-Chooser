@@ -136,3 +136,106 @@ def test_capture_files_ignore_case(tmp_path):
     for name in ("Capture.PML", "CAPTURE-1.pml", "capture-2.Pml", "capture-x.pml", "notes.pml"):
         (tmp_path / name).write_bytes(b"x")
     assert [p.name for p in RunDir(tmp_path).capture_files()] == ["Capture.PML", "CAPTURE-1.pml", "capture-2.Pml"]
+
+
+def test_stop_request_round_trip(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    assert run.read_stop_request() is None
+    run.write_stop_request({"requested": FT, "close_games": True})
+    assert run.stop_request_path.name == "stop-request.json"
+    assert run.read_stop_request() == {"requested": FT, "close_games": True}
+    assert not list(run.path.glob("*.tmp"))
+
+
+def test_stop_record_round_trip_and_unreadable_is_none(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    assert run.read_stop() is None
+    run.write_stop({"time": FT, "close_games": False, "sessions": {}})
+    assert run.stop_path.name == "stop.json"
+    assert run.read_stop() == {"time": FT, "close_games": False, "sessions": {}}
+    run.stop_path.write_text("[1]", encoding="utf-8")
+    assert run.read_stop() is None
+    run.stop_request_path.write_text("{cut", encoding="utf-8")
+    assert run.read_stop_request() is None
+
+
+REQUEST = {"requested": FT, "close_games": True}
+
+
+def test_the_recorder_claims_a_request_and_the_command_then_sees_it_taken(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    run.write_stop_request(REQUEST)
+    assert run.claim_stop_request() == REQUEST
+    assert not run.stop_request_path.exists() and run.stop_taken_path.name == "stop-request.taken.json"
+    assert run.read_stop_request() is None and run.stop_taken_path.exists()
+    assert run.withdraw_stop_request() == "taken"
+    assert run.claim_stop_request() is None  # claimed once only
+
+
+def test_a_request_the_command_withdrew_first_can_no_longer_be_claimed(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    run.write_stop_request(REQUEST)
+    assert run.withdraw_stop_request() == "withdrawn"
+    assert run.claim_stop_request() is None
+    assert not run.stop_taken_path.exists() and not run.stop_request_path.exists()
+
+
+def test_a_request_withdrawn_between_the_recorders_look_and_its_claim_is_not_claimed(tmp_path, monkeypatch):
+    run = new_run(tmp_path, FT, 5)
+    run.write_stop_request(REQUEST)
+    real = runfiles.replace_with_retry
+
+    def withdrawn_just_before(src, dst, **kwargs):
+        assert run.withdraw_stop_request() == "withdrawn"
+        real(src, dst, **kwargs)
+
+    monkeypatch.setattr(runfiles, "replace_with_retry", withdrawn_just_before)
+    assert run.claim_stop_request() is None
+    assert not run.stop_taken_path.exists()
+
+
+def test_an_unreadable_request_is_not_claimed_and_can_be_withdrawn(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    run.stop_request_path.write_text("{cut off", encoding="utf-8")
+    assert run.claim_stop_request() is None
+    assert run.stop_request_path.exists() and not run.stop_taken_path.exists()
+    assert run.withdraw_stop_request() == "withdrawn"
+
+
+def test_a_request_that_cannot_be_removed_is_held_not_withdrawn(tmp_path, monkeypatch):
+    run = new_run(tmp_path, FT, 5)
+    run.write_stop_request(REQUEST)
+
+    def denied(self, missing_ok=False):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(runfiles.Path, "unlink", denied)
+    assert run.withdraw_stop_request() == "held"
+
+
+def test_two_writers_of_one_file_never_share_a_temp_file(tmp_path, monkeypatch):
+    run = new_run(tmp_path, FT, 5)
+    temps = []
+    real = runfiles.replace_with_retry
+    monkeypatch.setattr(runfiles, "replace_with_retry", lambda src, dst, **kw: temps.append(src.name) or real(src, dst))
+    run.write_status("starting", recorder_pid=7)
+    run.write_status("capturing")
+    assert len(set(temps)) == 2 and all(name.startswith("status.json.") and name.endswith(".tmp") for name in temps)
+    assert [p.name for p in run.path.iterdir() if p.is_file()] == ["status.json"]
+
+
+def test_a_second_stop_request_never_replaces_the_first(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    assert run.write_stop_request({"requested": 1, "close_games": False}) is True
+    assert run.write_stop_request({"requested": 2, "close_games": True}) is False
+    assert run.read_stop_request() == {"requested": 1, "close_games": False}
+    assert sorted(p.name for p in run.path.iterdir() if p.is_file()) == ["stop-request.json"]
+
+
+def test_status_keeps_the_recorders_pid_and_start_time(tmp_path):
+    run = RunDir(tmp_path)
+    run.write_status("starting", recorder_pid=7, recorder_start=123)
+    run.write_status("capturing")
+    run.write_status("failed", error="x")
+    status = run.read_status()
+    assert (status["recorder_pid"], status["recorder_start"], status["state"]) == (7, 123, "failed")

@@ -42,6 +42,14 @@ def _process_entry(proc, zero: int) -> dict:
             "virtualized": proc.virtualized, "is_64bit": proc.is_64bit}
 
 
+def _stop_entry(stop: dict | None, zero: int) -> dict | None:
+    if stop is None:
+        return None
+    return {"time": filetime_to_iso(stop["time"]), "t": _t(stop["time"], zero), "close_games": stop["close_games"],
+            "asked_to_close": list(stop["asked_to_close"]), "ended": list(stop["ended"]),
+            "not_closed": [dict(item) for item in stop["not_closed"]]}
+
+
 def _session_json(result: SessionResult) -> dict:
     info, zero = result.info, result.time_zero
     return {
@@ -49,6 +57,7 @@ def _session_json(result: SessionResult) -> dict:
         "start": filetime_to_iso(zero),
         "end": None if result.end is None else filetime_to_iso(result.end),
         "still_running_at_capture_end": result.still_running,
+        "ended_by": result.ended_by, "stop": _stop_entry(result.stop, zero),
         "time_zero_source": result.time_zero_source,
         # the root found in the capture (by exe when the launch gave no pid), else the pid recorded at launch
         "root_pid": result.root.pid if result.root is not None else info.root_pid,

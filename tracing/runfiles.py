@@ -3,6 +3,8 @@ import json
 import logging
 import os
 import re
+import secrets
+import sys
 import time
 from pathlib import Path
 from typing import Callable
@@ -36,14 +38,44 @@ def replace_with_retry(src: Path, dst: Path, *, replace: Callable | None = None,
             sleep(REPLACE_DELAY)
 
 
+def _temp_for(path: Path) -> Path:
+    """A temp file beside `path` that no other writer uses, in this process or another."""
+    return path.with_name(f"{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp")
+
+
 def _atomic_write(path: Path, text: str) -> None:
-    temp = path.with_name(path.name + ".tmp")
+    temp = _temp_for(path)
     temp.write_text(text, encoding="utf-8")
     try:
         replace_with_retry(temp, path)
     except BaseException:
         temp.unlink(missing_ok=True)
         raise
+
+
+def _atomic_create(path: Path, text: str) -> bool:
+    """Write `path` whole, only if it does not exist yet; False (and nothing changed) when it does."""
+    temp = _temp_for(path)
+    temp.write_text(text, encoding="utf-8")
+    try:
+        if sys.platform == "win32":
+            os.rename(temp, path)  # on Windows a rename never replaces a file
+        else:
+            os.link(temp, path)  # nor does a hard link, anywhere
+        return True
+    except FileExistsError:
+        return False
+    finally:
+        temp.unlink(missing_ok=True)
+
+
+def _read_dict(path: Path) -> dict | None:
+    """The JSON object in a file; None when it is missing, unreadable or not an object."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
 
 
 class RunDir:
@@ -74,6 +106,21 @@ class RunDir:
     def split_path(self) -> Path:
         return self.path / "split.json"
 
+    @property
+    def stop_request_path(self) -> Path:
+        """Written by --trace-stop: asks the recorder to end the run."""
+        return self.path / "stop-request.json"
+
+    @property
+    def stop_taken_path(self) -> Path:
+        """The request once the recorder has claimed it (renamed, so it can be claimed or withdrawn, never both)."""
+        return self.path / "stop-request.taken.json"
+
+    @property
+    def stop_path(self) -> Path:
+        """Written by the recorder when it takes a stop request: what the stop did."""
+        return self.path / "stop.json"
+
     def capture_files(self) -> list[Path]:
         found = []
         try:
@@ -86,20 +133,59 @@ class RunDir:
                 found.append((int(match.group(1) or 0), item))
         return [item for _, item in sorted(found)]
 
-    def write_status(self, state: str, error: str | None = None, recorder_pid: int | None = None) -> None:
+    def write_status(self, state: str, error: str | None = None, recorder_pid: int | None = None,
+                     recorder_start: int | None = None) -> None:
+        """`recorder_pid` and `recorder_start` (the recorder process's creation FILETIME: together they name one
+        process, since a pid alone can be given to another program later) are kept from the last status when
+        no pid is given."""
         if recorder_pid is None:
-            previous = self.read_status()
-            recorder_pid = previous.get("recorder_pid") if previous else None
-        status = {"state": state, "error": error, "recorder_pid": recorder_pid,
+            previous = self.read_status() or {}
+            recorder_pid, recorder_start = previous.get("recorder_pid"), previous.get("recorder_start")
+        status = {"state": state, "error": error, "recorder_pid": recorder_pid, "recorder_start": recorder_start,
                   "updated": filetime_to_iso(now_filetime())}
         _atomic_write(self.status_path, json.dumps(status))
 
     def read_status(self) -> dict | None:
-        try:
-            data = json.loads(self.status_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+        return _read_dict(self.status_path)
+
+    def write_stop_request(self, request: dict) -> bool:
+        """False, and nothing written, when a request is already there (another command's is never replaced)."""
+        return _atomic_create(self.stop_request_path, json.dumps(request))
+
+    def read_stop_request(self) -> dict | None:
+        return _read_dict(self.stop_request_path)
+
+    def claim_stop_request(self) -> dict | None:
+        """The recorder's side: take the request by renaming it, and return it; None when there is none, it can't
+        be read, or the command withdrew it first. The rename and the command's removal are each atomic and only
+        one of them can succeed, so a request is never both taken and reported withdrawn. Raises OSError when the
+        file is held; the caller tries again."""
+        request = _read_dict(self.stop_request_path)
+        if request is None:
             return None
-        return data if isinstance(data, dict) else None
+        try:
+            replace_with_retry(self.stop_request_path, self.stop_taken_path)
+        except FileNotFoundError:
+            return None
+        return _read_dict(self.stop_taken_path) or request
+
+    def withdraw_stop_request(self) -> str:
+        """The command's side, when the recorder didn't answer: remove the request. "withdrawn" when it was removed
+        (the recorder can no longer take it), "taken" when it had already gone (the recorder claimed it), "held"
+        when it couldn't be removed (nothing is known yet)."""
+        try:
+            self.stop_request_path.unlink()
+        except FileNotFoundError:
+            return "taken"
+        except OSError:
+            return "held"
+        return "withdrawn"
+
+    def write_stop(self, record: dict) -> None:
+        _atomic_write(self.stop_path, json.dumps(record))
+
+    def read_stop(self) -> dict | None:
+        return _read_dict(self.stop_path)
 
     def write_session(self, info: SessionInfo) -> None:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)

@@ -31,8 +31,9 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 - Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, install
   choices, install prefs, install service, language names, library actions, library integration, library manager,
   wx bridge, catalog fixtures).
-- `tests/tracing/test_*.py` (tests for the `tracing/` modules, no wx, admin rights, Process Monitor or network) and
-  `tests/test_check_no_tracing.py` (the build check) cover the tracing build.
+- `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
+  except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
+  build check) cover the tracing build.
 - Mock minimal structures, test edge cases (empty/None, mixed states), keep logic out of the UI layer.
 
 ## Rules that hold everywhere

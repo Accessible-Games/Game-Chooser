@@ -8,12 +8,16 @@ process whose image is the game's exe and whose start lies from ROOT_SLACK befor
 `launch_after` (`started_at` when not given), and that no other session holds, picks one (the earliest that started
 at or after `started_at`; failing that, the closest to it), and from then on that process is the root, as if its
 pid had been known.
+
+A session whose launch gave a process ID but no start time (it couldn't be read) takes the process with that pid
+only if it started in the same window, as `attribution.find_root` does, and from then on only that process: a
+later program that Windows gives the pid to is never the root.
 """
 import os
 import sys
 from dataclasses import dataclass
 
-from tracing.attribution import UNKNOWN_PID, find_root_by_exe
+from tracing.attribution import ROOT_SLACK, UNKNOWN_PID, find_root_by_exe
 
 
 @dataclass(frozen=True)
@@ -33,6 +37,7 @@ class _Session:
         self.game_dir = os.path.normcase(os.path.normpath(game_dir)) if game_dir else None
         self.started_at = started_at
         self.members: set[tuple[int, int]] = set()
+        self.live: list[LiveProc] = []  # the members in the last snapshot
         self.alive = False
         self.seen = False
 
@@ -57,6 +62,11 @@ class _Session:
             root = find_root_by_exe(procs, self.exe, self.started_at, self.launch_after, exclude)
             if root is not None:
                 self.root_pid, self.root_start = root.pid, root.start
+        elif self.root_start is None:
+            low, high = self.started_at - ROOT_SLACK, self.launch_after + ROOT_SLACK
+            for p in procs:
+                if p.pid == self.root_pid and low <= p.start <= high:
+                    self.root_start = p.start
         member_pids = {}
         for pid, start in self.members:
             member_pids.setdefault(pid, []).append(start)
@@ -71,13 +81,14 @@ class _Session:
                     self.members.add(key)
                     member_pids.setdefault(p.pid, []).append(p.start)
                     changed = True
-        self.alive = any(alive_start.get(pid) == start for pid, start in self.members)
+        self.live = [p for p in procs if (p.pid, p.start) in self.members]
+        self.alive = bool(self.live)
         if self.members:
             self.seen = True
 
     def _qualifies(self, p, member_pids, alive_start):
         if self.root_pid != UNKNOWN_PID and p.pid == self.root_pid:
-            return self.root_start is None or p.start == self.root_start
+            return self.root_start is not None and p.start == self.root_start
         parents = member_pids.get(p.ppid, [])
         current = alive_start.get(p.ppid)
         for start in parents:
@@ -116,6 +127,10 @@ class LiveTree:
 
     def running(self):
         return {sid for sid, s in self._sessions.items() if s.alive}
+
+    def running_processes(self):
+        """Each running session's members that were in the last snapshot, in snapshot order."""
+        return {sid: list(s.live) for sid, s in self._sessions.items() if s.live}
 
     def forget_ended(self):
         for sid in [sid for sid, s in self._sessions.items() if s.seen and not s.alive]:
