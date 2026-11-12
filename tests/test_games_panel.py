@@ -536,6 +536,24 @@ def test_only_values_are_selected_from_the_saved_tree_selections(make_view):
     assert [tree.GetItemText(item) for item in tree.GetSelections()] == ["Action"] and titles(view) == ["Bravo"]
 
 
+@pytest.mark.parametrize("prefix", ["", "catalog_"])
+@pytest.mark.parametrize("selections", [None, 7, [["Genre/Action"], 7, None, "Genre/Action"]])
+def test_saved_tree_selections_that_are_not_a_list_of_paths_do_not_stop_the_first_fill(make_view, prefix, selections):
+    """A hand-edited config.json: the app must still start. Only the paths in a list count."""
+    view = make_view({prefix + "tree_selections": selections}, prefix=prefix)
+    view.set_rows(rows(ALPHA, BRAVO))
+    assert titles(view) == (["Bravo"] if isinstance(selections, list) else ["Alpha", "Bravo"])
+
+
+@pytest.mark.parametrize("prefix", ["", "catalog_"])
+@pytest.mark.parametrize("position", ["wide", 3.5, [300], None])
+def test_a_saved_splitter_position_that_is_not_a_number_gives_the_middle(make_view, prefix, position):
+    view = make_view({prefix + "splitter_position": position}, prefix=prefix)
+    view.GetTopLevelParent().SendSizeEvent()
+    view.restore_sash()
+    assert view.splitter.GetSashPosition() == view.splitter.GetSize()[0] // 2 > 200
+
+
 def test_the_splitter_goes_where_it_was_saved_or_to_the_middle_and_is_saved(make_view):
     """restore_sash() is called once the window has its size. Left to wx, the sash would sit at the minimum pane
     size (100) for good, as the Catalog's did."""

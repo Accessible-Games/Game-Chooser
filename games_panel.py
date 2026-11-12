@@ -301,8 +301,8 @@ class GamesPanel(wx.Panel):
             for path in opened:
                 if path in items:
                     tree.Expand(items[path])
-            for path in selected:
-                if path in items and "/" in path:  # a value's path; a category selects nothing
+            for path in selected if isinstance(selected, list) else ():  # a hand-edited config.json may hold
+                if isinstance(path, str) and "/" in path and path in items:  # anything; a category selects nothing
                     tree.SelectItem(items[path], True)
             item = focused and (items.get(focused) or items.get(focused.split("/")[0]))
             if item:
@@ -536,7 +536,9 @@ class GamesPanel(wx.Panel):
         size: a position set before that does not hold, and one left to wx stays at the minimum pane size and
         does not follow a resize."""
         saved = self._saved()[self._key("splitter_position")]
-        self.splitter.SetSashPosition(saved or self.splitter.GetSize()[0] // 2)
+        if not isinstance(saved, int) or not saved:  # nothing saved, or not a position (a hand-edited config.json)
+            saved = self.splitter.GetSize()[0] // 2
+        self.splitter.SetSashPosition(saved)
 
     def save_state(self):
         """On close, into SavedState (the caller writes the config): the splitter position, the column widths, the
