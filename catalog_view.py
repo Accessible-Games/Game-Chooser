@@ -206,12 +206,13 @@ def pick_index(rows, wanted_id, fallback: int, wanted_game=None) -> int:
     """The row to select in a list that was just refilled: the wanted game's; when that game is not listed, row
     number `fallback`, clamped to the list; -1 for an empty list.
 
-    `wanted_game` is the Game of the row that was selected (a Library row; a Catalog row has none, and at the
-    first fill there is no row). The row that holds that same object is the game, whatever its id is now: a new
-    launch path changes the id of a game added by hand, and the old id may then be another game's (two games
-    with one launch path). A game added by hand is never another object, so when no row holds it, it is gone and
-    its id is not asked. A catalog game's object is replaced by a finished job or an index take: its catalog id
-    finds it then. `wanted_id` alone decides for a Catalog row and at the first fill."""
+    `wanted_game` is the Game of the row that was selected (a Library row; a Catalog row has none, and there
+    is no row at the first fill or after an empty list). The row that holds that same object is the game,
+    whatever its id is now: a new launch path changes the id of a game added by hand, and the old id may then be
+    another game's (two games with one launch path). A game added by hand is never another object, so when no
+    row holds it, it is gone and its id is not asked. A catalog game's object is replaced by a finished job or an
+    index take: its catalog id finds it then. `wanted_id` alone decides for a Catalog row, and whenever no row
+    was selected."""
     if not rows:
         return -1
     by_id = True

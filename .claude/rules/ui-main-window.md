@@ -67,8 +67,8 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
 - The selected game stays selected through every refill; `catalog_view.pick_index` finds its row. A Library row
   is found by its `Game` object, so a rename or a new launch path (Ctrl+E, Locate) keeps it selected. A game
   added by hand is never another object: when no row holds it, it is gone. A catalog game's object is replaced by
-  a finished job or an index take, and its catalog id finds it then. A Catalog row, and the remembered row at the
-  first fill, are found by the row id.
+  a finished job or an index take, and its catalog id finds it then. A Catalog row is found by the row id, and
+  so is the remembered row whenever no row was selected (the first fill, or a list that was empty).
 - A row's id is the catalog id, else the launch path. `library_rows` numbers a launch path that repeats, in the
   games' order, so two rows never share an id; but such an id passes to the other game when the first is deleted
   or gets another path, which is why the object is looked for first.
@@ -160,7 +160,8 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - Filling a list, restoring its selection and the search rule are `GamesPanel`'s (above). A fill calls `SetFocus`
   in one case only: the list became empty while focus was on its action button. What never moves focus, and what
   `CatalogPanel`'s status line does today, is in CLAUDE.md (Focus).
-- After a dialog the code calls `focus_active_list()` only in these places. Library: after the message that a
+- After a dialog the code calls `focus_active_list()` only in these places. Startup: at the end of
+  `check_libraries`, which follows the first-run dialog when there is one. Library: after the message that a
   catalog game can't be edited (Ctrl+E); in the forget flow when nothing was forgotten; after a catalog action
   from the context menu (Update, Extras, Undo, Repair, Uninstall); when Uninstall is refused, and after its
   dialog; after the damaged-file message at startup. Catalog: at every exit of Install (already queued, could not

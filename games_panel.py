@@ -385,8 +385,8 @@ class GamesPanel(wx.Panel):
         self._show_selection()
 
     def _in_view(self, index) -> bool:
-        """Whether the list shows this row now. With no row (nothing selected yet: the first fill) the answer is
-        yes, so the remembered row is brought into view."""
+        """Whether the list shows this row now. With no row (nothing was selected: the first fill, or a list that
+        was empty) the answer is yes, so the remembered row is brought into view."""
         if index < 0 or self.list.control.use_dataview:
             return True
         top = self.list_ctrl.GetTopItem()
