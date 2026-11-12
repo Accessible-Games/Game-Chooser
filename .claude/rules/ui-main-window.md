@@ -4,9 +4,10 @@ paths:
   - "/dialogs.py"
   - "/install_dialogs.py"
   - "/catalog_panel.py"
-  - "/game_list.py"
+  - "/games_panel.py"
   - "/progress_area.py"
   - "/description_field.py"
+  - "/tests/test_games_panel.py"
 ---
 
 # Main window and dialogs
@@ -17,19 +18,25 @@ paths:
 - **install_dialogs.py** - `InstallConfirmDialog`, `UninstallDialog`, `RemoveLibraryDialog`
 - **description_field.py** - read-only multi-line description; Enter on a link line opens it
 - **progress_area.py** - gauge, status line, Done and Cancel for the running job
-- **game_list.py** - `GameListCtrl` (smart_list wrapper; has a Status column)
+- **games_panel.py** - `GamesPanel`: the games view both tabs are built from (Search, the games list, the filter
+  tree, the action button with the install progress, the description)
 
 ## Main window (`MainFrame`)
-A `wx.Notebook` with two pages (`TABS = ("library", "catalog")`; `active_tab()`).
+A `wx.Notebook` with two pages (`TABS = ("library", "catalog")`; `active_tab()`). The Library page is a
+`GamesPanel` (`MainFrame.library_view`); the Catalog page is `CatalogPanel`, which holds one (`catalog_panel.view`).
+`MainFrame.views` maps each tab name to its view.
 
 Menu bar: File, Edit, View, Launch. Library tab, top to bottom: Search; the game list with the filter tree to
 its right; the Launch button with its progress area; the description. Catalog tab, top to bottom: the status line
 and Retry; Search; the catalog list with the filter tree to its right; the action button (the progress area
 takes its place while a job runs or waits); the description.
 
-- **Library tab**: the player's games (`GameListCtrl`: sorting, keyboard nav, persisted column widths) with a
-  **Status** column, a description field (`DescriptionField`: catalog text for catalog games, empty for others), a
-  filter tree (Platform/Genre/Developer/Year, multi-select OR) and View > Libraries to hide libraries.
+- **Library tab**: the player's games as rows (`catalog_view.library_rows`; `MainFrame.refresh_game_list` rebuilds
+  them after every change to a game or to `manager.games`), columns Title / Genre / Developer / Year / Platform /
+  **Status**, a description field (`DescriptionField`: catalog text for catalog games, empty for others), a
+  filter tree (Platform/Genre/Developer/Year, multi-select OR; View > Filter Tree chooses which of the four show)
+  and View > Libraries to hide libraries (their games leave the list; the tree still shows their values).
+  `MainFrame.selected_game()` is the selected row's `Game`.
   Status values (`engine/status.py`): `Ready`, `Update available`, `Executable not found`, `Library not found`.
   A `self_updating` entry never shows `Update available`.
   Statuses are computed on a worker thread (`refresh_statuses`) and applied on the UI thread.
@@ -39,6 +46,50 @@ takes its place while a job runs or waits); the description.
   "register shared components"). An invalid address saves nothing; a changed address refetches the catalog on close.
 - **FirstTimeSetupDialog**: shown when config.json didn't exist; the player can add a library or skip.
   `catalog_view.initial_tab(saved, is_first_run)` picks the starting tab.
+
+## The games view (`GamesPanel`)
+Both tabs' search, list, filter tree, selection memory, action button, progress area and description are this one
+class. A tab gives it rows (`catalog_view.CatalogRow`; a Library row also holds its `Game`) through `set_rows`.
+What a tab does differently is a setting of the class (the table below) or the tab's own code.
+
+Rules it holds for both tabs (pinned by `tests/test_games_panel.py`):
+- After every refill or sort the action label and the description are set directly, never left to a selection
+  event: wx fires none when the selected row number stays the same and another game moves into it.
+- Every programmatic select also sets the list's focused item (`ListCtrl.Focus`; not on the macOS DataView
+  control), so the arrow keys start from the selected game.
+- Every change to the games comes in through `set_rows`, which also syncs the tree: it is rebuilt only when what
+  it shows changed, and the player's tree selections are kept.
+- The selected game stays selected through every refill (a row is known by its id: the catalog id, else the
+  launch path). When it is no longer listed: after `set_rows` (the games changed: Delete, an uninstall, a game
+  that left the catalog) the selection keeps its row number, clamped to the list, and that row is remembered;
+  after a filter the player changed (`apply_filters`: search, tree, View > Libraries, View > Filter Tree) it goes
+  to the first row. `catalog_view.pick_index` picks the row.
+- The remembered game (`last_selected`, what the next start selects) changes only when the player moves the
+  selection, or when the selected game left the list.
+- A filter is applied first and saved second; a config save that fails is logged (`GamesPanel.save_config`),
+  never raised.
+- `focus_list()` takes no focus while `MainFrame.initializing` or `dialog_active` is true.
+- Search: filters on every keystroke (no delay), case-insensitive substring over title and developer (and a
+  collection's `contains` titles); a search containing "unknown" matches nothing.
+- Rows are in title order; a list with sort keys is then sorted by the chosen column, so rows that tie there
+  stay in title order.
+
+What differs between the tabs, each a setting passed to `GamesPanel`:
+
+| Setting | Library | Catalog |
+|---|---|---|
+| `idle_label` (button text with nothing selected) | "Launch" | "Install" |
+| `progress_replaces_action` | no: the progress area shows beside Launch | yes: it takes the button's place |
+| `sort_keys` (header click, digit keys 1-6, header arrow, saved sort) | one per column | none: always by title |
+| `categories` / `tree_keys` | 4 categories; View > Filter Tree picks which show | its 9 categories, all shown |
+| `row_filter` | View > Libraries (hidden libraries) | none |
+| `on_key` | Del, Ctrl+E | none |
+| `on_shown` | `update_tab_menus` (Edit Game follows the selection) | none |
+| `on_action`, `context_menu`, `columns` | launch; `build_list_menu`; the Status column | install, add or launch; the action and links |
+
+Column widths are saved for both tabs (`column_widths`, `catalog_column_widths`). The splitter position is saved
+for the Library only, by `MainFrame`: a notebook page that was never shown does not report a sash position that
+can be trusted. The Catalog's status line and Retry are `CatalogPanel`'s own.
 
 ## Modal safety
 The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn, *args)` are in CLAUDE.md
@@ -71,13 +122,12 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - Screen reader announcement needs the sequence `Select()`, `Focus()`, `SetFocus()` (`focus_active_list`).
 - Flags on `MainFrame`:
   - **`initializing`**: `MainFrame` sets it true when it is created and false at the end of `check_libraries()`
-    (after the first-run dialog, just before the first `focus_active_list()`). Only `CatalogPanel` reads it: its
-    `focus_list()` and `set_index_state()` take no focus while it is true (don't steal focus from the first-run
-    dialog)
+    (after the first-run dialog, just before the first `focus_active_list()`). `GamesPanel.focus_list()` (both
+    tabs) and `CatalogPanel.set_index_state()` take no focus while it is true (don't steal focus from the
+    first-run dialog)
   - **`dialog_active`**: set by `modal_dialog()`; blocks selection events and defers work during modal dialogs
-  - **`restoring_tree`**: blocks `save_tree_selections()` while the tree is restored, to prevent loops
-- `on_filter_complete()` fills the list, restores the selection by title and manages focus. What never moves focus
-  is in CLAUDE.md (Focus). The description is a read-only multi-line field so a screen reader reads
-  it line by line.
-- Library search: filters on every keystroke (no delay), case-insensitive substring over title and developer; a
-  search containing "unknown" matches nothing.
+- `GamesPanel.restoring_tree` is true while the view itself changes the tree (building it, restoring its
+  selections, Escape): the tree's change events are then ignored.
+- Filling a list, restoring its selection and the search rule are `GamesPanel`'s (above); filling never calls
+  `SetFocus`. What never moves focus is in CLAUDE.md (Focus). The description is a read-only multi-line field so a
+  screen reader reads it line by line.

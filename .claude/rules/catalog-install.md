@@ -2,6 +2,7 @@
 paths:
   - "/install_*.py"
   - "/catalog_*.py"
+  - "/games_panel.py"
   - "/library_*.py"
   - "/wx_bridge.py"
   - "/main_window.py"
@@ -22,8 +23,11 @@ paths:
 - **install_prefs.py** - wx-free validation of the Installing preferences
 - **install_service.py** - `InstallService`: catalog index + engine + queue + games/records/libraries
 - **library_actions.py** - wx-free: Library tab context menu, Edit/Delete rules, Uninstall/Remove wording
-- **catalog_panel.py** - the Catalog tab; **catalog_view.py** - wx-free rows, filters, description text,
-  links; **language_names.py** - ISO 639-1 codes to English names (unknown codes shown as written)
+- **catalog_panel.py** - the Catalog tab: its status line, Retry and what a row's action does, around a
+  `GamesPanel` (`games_panel.py`, the games view both tabs share; see `.claude/rules/ui-main-window.md`);
+  **catalog_view.py** - wx-free rows for both tabs (`build_rows` for catalog entries, `library_rows` for the
+  player's games), filters, `pick_index`, description text, links; **language_names.py** - ISO 639-1 codes to
+  English names (unknown codes shown as written)
 - **wx_bridge.py** - queue listener and installer-UI bridges to the UI thread, `run_in_background`
 
 ## Install service (`install_service.py`)
@@ -44,7 +48,8 @@ Which thread each member runs on: see CLAUDE.md (Threading).
 - `call_after(fn, *args)` and `run_in_background(work, done, name, ...)`.
 
 ## Catalog tab and catalog entries
-- **Catalog tab** (`CatalogPanel`): index entries as rows (`catalog_view.build_rows`), a filter tree (platform,
+- **Catalog tab** (`CatalogPanel`; its search, list, tree, button and description are a `GamesPanel`,
+  `catalog_panel.view`): index entries as rows (`catalog_view.build_rows`), a filter tree (platform,
   genre (any of its genres), tags, price (each model plus "Can be played for free"), language, developer, year,
   support ("No longer supported"), installed), search (title, developer and a collection's `contains` titles),
   columns Title / Developer / Genre (the main one) / Price / Details (tags, no longer supported, installed), and an

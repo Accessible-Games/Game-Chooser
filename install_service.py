@@ -119,9 +119,9 @@ class InstallService:
         """Give each catalog game the catalog's main genre (the first of its genres), so the Library's Genre column
         and filter follow the catalog; returns how many changed. UI thread only.
 
-        Only the genre: the title is how the Library remembers its selection. A game with a queued or running job
-        is left alone (its result brings the catalog's fields), as is one the catalog no longer lists. When any
-        changed, manager.games is a new list (so the Library rebuilds its tree) and games.json is saved once."""
+        Only the genre is refreshed here. A game with a queued or running job is left alone (its result brings
+        the catalog's fields), as is one the catalog no longer lists. When any changed, manager.games is a new
+        list and games.json is saved once; the main window rebuilds the Library's rows after every index take."""
         changed = 0
         for game in self.manager.games:
             entry = self.entries.get(game.catalog_id) if game.catalog_id else None
