@@ -88,8 +88,10 @@ What differs between the tabs, each a setting passed to `GamesPanel`:
 | `on_action`, `context_menu`, `columns` | launch; `build_list_menu`; the Status column | install, add or launch; the action and links |
 
 Column widths are saved for both tabs (`column_widths`, `catalog_column_widths`). The splitter position is saved
-for the Library only, by `MainFrame`: a notebook page that was never shown does not report a sash position that
-can be trusted. The Catalog's status line and Retry are `CatalogPanel`'s own.
+for the Library only, by `MainFrame` (`splitter_position`); the Catalog's starts in the middle. Sharing it was
+left out: on a frame that is never shown (the only place it was tried) the unselected page's splitter stayed at
+its minimum pane size, so what it would save and restore there could not be checked. The Catalog's status line
+and Retry are `CatalogPanel`'s own.
 
 ## Modal safety
 The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn, *args)` are in CLAUDE.md

@@ -213,6 +213,38 @@ def test_a_refresh_that_changes_nothing_is_quiet(make_view):
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (1, 1, "Install Bravo")
 
 
+def test_a_refill_while_a_dialog_is_open_still_shows_the_selected_game(make_view):
+    """Add, Edit and Locate refresh the list inside modal_dialog(), where selection events are ignored"""
+    view = make_view()
+    view.set_rows(rows(BRAVO, CHARLIE))
+    player_selects(view, 1)
+    view.frame.dialog_active = True
+    view.set_rows(rows(ALPHA, BRAVO, CHARLIE))  # a game was added above it: Charlie is in row 2 now
+    assert (selected(view), focused(view), view.action_btn.GetLabel()) == (2, 2, "Install Charlie")
+    assert view.description.GetValue().startswith("About Charlie.")
+    view.set_rows(rows(ALPHA, BRAVO))  # and when it goes: Bravo, in the last row
+    assert (selected(view), focused(view), view.action_btn.GetLabel()) == (1, 1, "Install Bravo")
+    assert view.description.GetValue().startswith("About Bravo.")
+    assert saved(view)["catalog_last_selected"] == "bravo" and view.frame.library_manager.saves == 1
+
+
+def test_focus_leaves_the_action_button_before_an_empty_list_disables_it(make_view):
+    """As when the progress area hides it: focus goes to the list, never while a dialog is open"""
+    view = make_view()
+    view.set_rows(rows(ALPHA))
+    focus = []
+    view.list.control.SetFocus = lambda: focus.append(True)
+    view.action_btn.HasFocus = lambda: True
+    view.frame.dialog_active = True
+    view.search_combo.SetValue("zzz")
+    assert focus == [] and not view.action_btn.IsEnabled()
+    view.frame.dialog_active = False
+    view.search_combo.SetValue("")
+    assert focus == [] and view.action_btn.IsEnabled()  # a game is selected again: nothing to move
+    view.set_rows([])
+    assert focus == [True] and not view.action_btn.IsEnabled()
+
+
 def test_a_failed_config_save_never_stops_the_filter(make_view):
     view = make_view()
     view.set_rows(rows(ALPHA, BRAVO))
