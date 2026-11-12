@@ -1,11 +1,17 @@
-"""What the Library tab offers for a game: context menu items, Edit, Delete, launch problems and the Uninstall and
-Remove-library wording. No wx here, so it is unit-tested; main_window and the dialogs only show what this decides.
+"""What the Library tab offers for a game: context menu items, Edit, Delete, launch problems, whether an .hta may
+run, and the Uninstall and Remove-library wording. No wx here, so it is unit-tested; main_window and the dialogs
+only show what this decides.
 """
 
+import os
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from catalog_view import homepage_item, link_items
 from engine import messages
+from engine.launch import is_hta, start_game
+from engine.records import record_folder
 
 # Context menu actions for catalog-installed games, in menu order after "Delete"
 UPDATE, UNDO, EXTRAS, REPAIR, UNINSTALL, LINK = "update", "undo", "extras", "repair", "uninstall", "link"
@@ -117,11 +123,44 @@ def launch_problem(game, library_reachable: bool, record, entry: dict | None) ->
     return "locate"
 
 
-def may_start_hta(game, record) -> bool:
-    """May this game's .hta launch file be run (engine.launch.start_game's `hta_allowed`)? Only when the catalog's
-    launch path named it: a catalog game whose install record says its launch path came from the catalog. A game
-    added by hand never qualifies, whatever file was picked for it."""
-    return bool(game.catalog_id) and is_game_record(record) and getattr(record, "launch_from_catalog", False) is True
+def _same_file(a: Path, b: Path) -> bool:
+    """Do two paths name one file? Compared resolved (".." and links followed), and without regard to case on
+    Windows."""
+    return os.path.normcase(str(a.resolve())) == os.path.normcase(str(b.resolve()))
+
+
+def may_start_hta(full_path: str, game, record, libraries: list[dict]) -> bool:
+    """May the .hta at `full_path`, about to be launched for `game`, be run (engine.launch.start_game's
+    `hta_allowed`)? Only when it is the file the catalog named: `game` is a catalog game, its install record says
+    its launch path came from the catalog, and `full_path` is exactly that record's own launch file (the record's
+    folder plus its launch path, which must lie inside that folder).
+
+    The path being launched comes from games.json, which nothing checks; the record is the engine's own. So a
+    games.json path that points anywhere else ("..", an absolute path, another .hta beside the right one) is
+    refused, and a game added by hand never qualifies, whatever file was picked for it."""
+    if not game.catalog_id or not is_game_record(record) or getattr(record, "launch_from_catalog", False) is not True:
+        return False
+    if not record.launch_path:
+        return False
+    folder = record_folder(record, libraries)
+    if folder is None:
+        return False
+    try:
+        recorded = (folder / record.launch_path).resolve()
+        if not recorded.is_relative_to(folder.resolve()):
+            return False
+        return _same_file(Path(full_path), recorded)
+    except (OSError, ValueError):
+        return False
+
+
+def start_launch_file(full_path: str, game_dir: str, game, record_for: Callable, libraries: list[dict],
+                      start: Callable = start_game):
+    """Start a game's launch file (engine.launch.start_game; returns its Started). This is where an .hta is
+    allowed or not: only the one `may_start_hta` accepts runs. `record_for(game)` gives the game's install
+    record, and is asked only for an .hta."""
+    allowed = is_hta(full_path) and may_start_hta(full_path, game, record_for(game), libraries)
+    return start(full_path, game_dir, hta_allowed=allowed)
 
 
 def uninstall_checkbox_label(title: str, player_files: int) -> str:

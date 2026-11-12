@@ -1,9 +1,12 @@
+import os
 from types import SimpleNamespace
+
+import pytest
 
 from engine import messages
 from library_actions import (EXTRAS, LINK, REPAIR, UNDO, UNINSTALL, UPDATE, catalog_menu_items, delete_kind,
                              is_editable, is_tracked, is_uninstall_unfinished, is_uninstallable, launch_problem,
-                             may_start_hta,
+                             may_start_hta, start_launch_file,
                              library_row_name, remove_library_checkbox_label, remove_library_text, undo_item,
                              uninstall_checkbox_label)
 from models import Game
@@ -162,12 +165,83 @@ def test_an_unfinished_uninstall_can_be_finished():
     assert not is_uninstallable(runtime) and delete_kind(catalog_game(), runtime) == "delete"
 
 
-def test_an_hta_may_start_only_when_the_catalog_named_it():
-    hta = catalog_game(launch_path="Jump/jumpgame.hta")
-    assert may_start_hta(hta, record(launch_from_catalog=True))
-    assert not may_start_hta(hta, record(launch_from_catalog=False))  # a guessed path is never an .hta
-    assert not may_start_hta(hta, None)  # no record: nothing says the catalog named it
-    assert not may_start_hta(hta, record(launch_from_catalog=True, kind="runtime"))  # not a game's record
-    by_hand = Game(title="Hand", launch_path="C:/Games/hand.hta")  # picked in the Locate dialog, say
-    assert not may_start_hta(by_hand, None)
-    assert not may_start_hta(by_hand, record(launch_from_catalog=True))
+# ---- .hta: Windows' mshta.exe is given only the file the catalog named as this game's program ----
+
+def _hta_install(tmp_path, **record_fields):
+    """A catalog game installed into a library: its game, its record, the libraries and its .hta on disk."""
+    folder = tmp_path / "Lib" / "Jump"
+    folder.mkdir(parents=True)
+    hta = folder / "jumpgame.hta"
+    hta.write_text("<html></html>")
+    fields = dict(kind="game", library_id="lib1", folder="Jump", launch_path="jumpgame.hta", launch_from_catalog=True)
+    fields.update(record_fields)
+    game = catalog_game(title="Jump", launch_path="Jump/jumpgame.hta", catalog_id="jump")
+    return game, record(**fields), [{"id": "lib1", "path": str(tmp_path / "Lib")}], hta
+
+
+def test_the_hta_the_catalog_named_may_start(tmp_path):
+    game, rec, libraries, hta = _hta_install(tmp_path)
+    assert may_start_hta(str(hta), game, rec, libraries)
+    # the same file, spelled another way
+    assert may_start_hta(str(tmp_path / "Lib" / "Other" / ".." / "Jump" / "jumpgame.hta"), game, rec, libraries)
+    if os.name == "nt":
+        assert may_start_hta(str(hta).upper(), game, rec, libraries)
+
+
+def test_an_hta_the_catalog_did_not_name_may_not_start(tmp_path):
+    game, rec, libraries, hta = _hta_install(tmp_path)
+    other = hta.with_name("other.hta")  # another .hta in the game's own folder
+    other.write_text("<html></html>")
+    assert not may_start_hta(str(other), game, rec, libraries)
+    outside = tmp_path / "Lib" / "names" / "-x.hta"  # games.json saying "../names/-x.hta"
+    outside.parent.mkdir()
+    outside.write_text("<html></html>")
+    assert not may_start_hta(str(tmp_path / "Lib" / "Jump" / ".." / "names" / "-x.hta"), game, rec, libraries)
+    elsewhere = tmp_path / "Elsewhere" / "jumpgame.hta"  # an absolute path in games.json
+    elsewhere.parent.mkdir()
+    elsewhere.write_text("<html></html>")
+    assert not may_start_hta(str(elsewhere), game, rec, libraries)
+
+
+def test_an_hta_may_not_start_when_the_record_does_not_vouch_for_it(tmp_path):
+    game, rec, libraries, hta = _hta_install(tmp_path)
+    assert not may_start_hta(str(hta), game, None, libraries)  # no record
+    assert not may_start_hta(str(hta), game, record(**{**vars(rec), "launch_from_catalog": False}), libraries)
+    assert not may_start_hta(str(hta), game, record(**{**vars(rec), "kind": "runtime"}), libraries)
+    assert not may_start_hta(str(hta), game, record(**{**vars(rec), "launch_path": "game.exe"}), libraries)
+    assert not may_start_hta(str(hta), game, record(**{**vars(rec), "launch_path": ""}), libraries)
+    assert not may_start_hta(str(hta), game, rec, [])  # the record's library is not configured
+    by_hand = Game(title="Hand", launch_path=str(hta))  # picked in the Locate dialog, say
+    assert not may_start_hta(str(hta), by_hand, None, libraries)
+    assert not may_start_hta(str(hta), by_hand, rec, libraries)
+
+
+def test_an_hta_installed_outside_every_library_may_start(tmp_path):
+    game, rec, libraries, hta = _hta_install(tmp_path, library_id="", folder=str(tmp_path / "Lib" / "Jump"))
+    assert may_start_hta(str(hta), game, rec, libraries)
+    assert not may_start_hta(str(hta.with_name("other.hta")), game, rec, libraries)
+
+
+def test_start_launch_file_lets_only_the_catalogs_hta_run(tmp_path):
+    game, rec, libraries, hta = _hta_install(tmp_path)
+    other = hta.with_name("other.hta")
+    other.write_text("<html></html>")
+    calls = []
+
+    def start(path, cwd, hta_allowed):
+        calls.append((path, cwd, hta_allowed))
+        return "started"
+
+    folder = str(hta.parent)
+    assert start_launch_file(str(hta), folder, game, lambda g: rec, libraries, start=start) == "started"
+    start_launch_file(str(other), folder, game, lambda g: rec, libraries, start=start)
+    start_launch_file(str(hta), folder, game, lambda g: None, libraries, start=start)
+    assert calls == [(str(hta), folder, True), (str(other), folder, False), (str(hta), folder, False)]
+
+
+def test_start_launch_file_reads_no_record_for_a_file_that_is_not_an_hta(tmp_path):
+    calls = []
+    exe = str(tmp_path / "game.exe")
+    start_launch_file(exe, str(tmp_path), catalog_game(), lambda g: pytest.fail("only an .hta needs the record"),
+                      [], start=lambda path, cwd, hta_allowed: calls.append((path, cwd, hta_allowed)))
+    assert calls == [(exe, str(tmp_path), False)]

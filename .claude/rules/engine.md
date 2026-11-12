@@ -66,8 +66,11 @@ kind "program" and return the started process's ID.
 
 - **`.hta` (HTML Application)**: a catalog game with no exe, started only when the catalog's launch path names the
   file (`_recorded_launch_exe` accepts any real file inside the game, so the install and Status need nothing
-  special). `start_game` gives it the host only with `hta_allowed=True`, which `MainFrame` sets from
-  `library_actions.may_start_hta(game, record)`: a catalog game whose record has `launch_from_catalog`. Without it
+  special). `start_game` gives it the host only with `hta_allowed=True`, which
+  `library_actions.start_launch_file` (the one caller, used by `MainFrame`) sets from
+  `library_actions.may_start_hta(full_path, game, record, libraries)`: a catalog game whose record has
+  `launch_from_catalog`, and the file being launched is exactly `record_folder(record) / record.launch_path`
+  (resolved; case ignored on Windows), so a games.json path pointing anywhere else is refused. Without it
   an `.hta` goes to `start_program` like any other file, and Windows refuses to run it (as before this existed).
   `start_hta` runs `mshta.exe` with the file's full path as its one argument and the game's folder as
   working directory. `hta_host` builds the host's path from the folders Windows reports (`GetSystemWow64DirectoryW`,
