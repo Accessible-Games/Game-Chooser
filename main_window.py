@@ -772,8 +772,9 @@ class MainFrame(wx.Frame):
         # Get full path to game
         full_path = self.library_manager.get_full_path(game)
         if not full_path or not Path(full_path).exists():
-            wx.MessageBox("Game folder not found.",
-                        "Folder Not Found", wx.OK | wx.ICON_ERROR)
+            with self.modal_dialog():
+                wx.MessageBox("Game folder not found.",
+                            "Folder Not Found", wx.OK | wx.ICON_ERROR)
             return
 
         # Get the game directory
@@ -789,8 +790,9 @@ class MainFrame(wx.Frame):
                 # macOS - just open the folder
                 subprocess.Popen(['open', game_dir])
         except Exception as e:
-            wx.MessageBox(f"Failed to open folder: {e}",
-                        "Error", wx.OK | wx.ICON_ERROR)
+            with self.modal_dialog():
+                wx.MessageBox(f"Failed to open folder: {e}",
+                            "Error", wx.OK | wx.ICON_ERROR)
 
     def launch_game(self, game):
         """Launch a specific game"""
@@ -813,11 +815,12 @@ class MainFrame(wx.Frame):
                 supported = ", ".join(game.platforms) if game.platforms else "no platforms"
 
                 # Show error dialog
-                wx.MessageBox(
-                    f"You're trying to run {game.title} on {current_platform}, but it only supports {supported}.",
-                    "Uh-oh",
-                    wx.OK | wx.ICON_ERROR
-                )
+                with self.modal_dialog():
+                    wx.MessageBox(
+                        f"You're trying to run {game.title} on {current_platform}, but it only supports {supported}.",
+                        "Uh-oh",
+                        wx.OK | wx.ICON_ERROR
+                    )
                 return
 
         if game.launch_path.startswith("http"):
@@ -882,8 +885,9 @@ class MainFrame(wx.Frame):
             except LaunchCancelled:
                 pass  # the player declined the administrator prompt: nothing started, nothing to say
             except Exception as e:
-                wx.MessageBox(f"Failed to launch game: {e}",
-                            "Launch Error", wx.OK | wx.ICON_ERROR)
+                with self.modal_dialog():
+                    wx.MessageBox(f"Failed to launch game: {e}",
+                                "Launch Error", wx.OK | wx.ICON_ERROR)
 
     def _launch_problem(self, game, problem):
         """A launch found no executable: the library is unreachable, or a catalog game's files are missing (a
