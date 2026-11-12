@@ -175,3 +175,25 @@ def test_root_by_exe_prefers_a_start_after_the_launch_call():
     t.update([LiveProc(700, 4, 10 * s - s // 2, EXE), LiveProc(701, 4, 10 * s + s, EXE)])
     t.update([LiveProc(700, 4, 10 * s - s // 2, EXE)])
     assert t.running() == set()  # the root was 701, which has exited
+
+
+def test_running_processes_lists_the_live_members_of_each_session():
+    t = tree()
+    t.add_session("s2", 50, 500, None, 500)
+    root = LiveProc(10, 1, 100, r"C:\Games\Foo\a.exe")
+    child = LiveProc(11, 10, 110, r"C:\Windows\helper.exe")
+    other = LiveProc(99, 1, 50, r"C:\Windows\notepad.exe")
+    t.update([root, child, other])
+    assert t.running_processes() == {"s1": [root, child]}
+    # the root has gone: the child it left behind is still the session's
+    t.update([child, other, LiveProc(50, 1, 500, None)])
+    assert t.running_processes() == {"s1": [child], "s2": [LiveProc(50, 1, 500, None)]}
+    t.update([other])
+    assert t.running_processes() == {}
+
+
+def test_running_processes_skips_a_reused_pid():
+    t = tree()
+    t.update([LiveProc(10, 1, 100, None)])
+    t.update([LiveProc(10, 1, 999, r"C:\Other\x.exe")])
+    assert t.running_processes() == {}

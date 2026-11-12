@@ -33,6 +33,7 @@ class _Session:
         self.game_dir = os.path.normcase(os.path.normpath(game_dir)) if game_dir else None
         self.started_at = started_at
         self.members: set[tuple[int, int]] = set()
+        self.live: list[LiveProc] = []  # the members in the last snapshot
         self.alive = False
         self.seen = False
 
@@ -71,7 +72,8 @@ class _Session:
                     self.members.add(key)
                     member_pids.setdefault(p.pid, []).append(p.start)
                     changed = True
-        self.alive = any(alive_start.get(pid) == start for pid, start in self.members)
+        self.live = [p for p in procs if (p.pid, p.start) in self.members]
+        self.alive = bool(self.live)
         if self.members:
             self.seen = True
 
@@ -116,6 +118,10 @@ class LiveTree:
 
     def running(self):
         return {sid for sid, s in self._sessions.items() if s.alive}
+
+    def running_processes(self):
+        """Each running session's members that were in the last snapshot, in snapshot order."""
+        return {sid: list(s.live) for sid, s in self._sessions.items() if s.live}
 
     def forget_ended(self):
         for sid in [sid for sid, s in self._sessions.items() if s.seen and not s.alive]:

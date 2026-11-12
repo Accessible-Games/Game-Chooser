@@ -46,6 +46,15 @@ def _atomic_write(path: Path, text: str) -> None:
         raise
 
 
+def _read_dict(path: Path) -> dict | None:
+    """The JSON object in a file; None when it is missing, unreadable or not an object."""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
 class RunDir:
     def __init__(self, path: Path):
         self.path = Path(path)
@@ -74,6 +83,16 @@ class RunDir:
     def split_path(self) -> Path:
         return self.path / "split.json"
 
+    @property
+    def stop_request_path(self) -> Path:
+        """Written by --trace-stop: asks the recorder to end the run."""
+        return self.path / "stop-request.json"
+
+    @property
+    def stop_path(self) -> Path:
+        """Written by the recorder when it takes a stop request: what the stop did."""
+        return self.path / "stop.json"
+
     def capture_files(self) -> list[Path]:
         found = []
         try:
@@ -95,11 +114,19 @@ class RunDir:
         _atomic_write(self.status_path, json.dumps(status))
 
     def read_status(self) -> dict | None:
-        try:
-            data = json.loads(self.status_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return None
-        return data if isinstance(data, dict) else None
+        return _read_dict(self.status_path)
+
+    def write_stop_request(self, request: dict) -> None:
+        _atomic_write(self.stop_request_path, json.dumps(request))
+
+    def read_stop_request(self) -> dict | None:
+        return _read_dict(self.stop_request_path)
+
+    def write_stop(self, record: dict) -> None:
+        _atomic_write(self.stop_path, json.dumps(record))
+
+    def read_stop(self) -> dict | None:
+        return _read_dict(self.stop_path)
 
     def write_session(self, info: SessionInfo) -> None:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)

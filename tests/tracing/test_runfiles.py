@@ -136,3 +136,24 @@ def test_capture_files_ignore_case(tmp_path):
     for name in ("Capture.PML", "CAPTURE-1.pml", "capture-2.Pml", "capture-x.pml", "notes.pml"):
         (tmp_path / name).write_bytes(b"x")
     assert [p.name for p in RunDir(tmp_path).capture_files()] == ["Capture.PML", "CAPTURE-1.pml", "capture-2.Pml"]
+
+
+def test_stop_request_round_trip(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    assert run.read_stop_request() is None
+    run.write_stop_request({"requested": FT, "close_games": True})
+    assert run.stop_request_path.name == "stop-request.json"
+    assert run.read_stop_request() == {"requested": FT, "close_games": True}
+    assert not list(run.path.glob("*.tmp"))
+
+
+def test_stop_record_round_trip_and_unreadable_is_none(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    assert run.read_stop() is None
+    run.write_stop({"time": FT, "close_games": False, "sessions": {}})
+    assert run.stop_path.name == "stop.json"
+    assert run.read_stop() == {"time": FT, "close_games": False, "sessions": {}}
+    run.stop_path.write_text("[1]", encoding="utf-8")
+    assert run.read_stop() is None
+    run.stop_request_path.write_text("{cut", encoding="utf-8")
+    assert run.read_stop_request() is None
