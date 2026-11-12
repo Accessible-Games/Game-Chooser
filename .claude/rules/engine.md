@@ -1,0 +1,63 @@
+---
+paths:
+  - "engine/**/*.py"
+  - "tests/engine/**/*.py"
+  - "/exception_manager.py"
+---
+
+# Install Engine (`engine/`)
+
+A wx-free package that installs, updates, repairs, undoes and uninstalls games from the catalog, with tests in
+`tests/engine/`. Its rules on importing wx, running elevated and player-owned files are in CLAUDE.md (Testing
+Strategy, and Install engine under Rules that hold everywhere).
+
+Installs are Windows-focused (registry, UAC, `bin/*.exe`).
+
+## Modules
+
+- **jobs.py** - `InstallEngine.run(InstallRequest)` routes install/update/repair/undo/extras/uninstall; raises
+  `InstallFailed` (plain words from `messages.py`) or `Cancelled` for what the player can act on, and `ValueError`
+  for an unknown action or a library that is not configured, which the queue reports as an unexpected error.
+- **index.py**, **entries.py** - catalog index fetch/cache (`CatalogIndex`, `IndexState`) and entry helpers.
+  `platform_sources` skips sources whose `arch` this machine can't run (`runs_on`, `current_arch`: x86 runs on x64
+  Windows and Linux; Windows on Arm runs x64 and x86; an Apple Silicon Mac runs x64; pass `machine` in tests).
+  **pricing.py** - how `pricing` reads, the Price filter values and the install confirmation's price warning.
+- **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
+  in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
+- **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
+  refused); **run_installer.py** / **run_actions.py** / **installer_watch.py** - installers that run.
+- **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain
+  when the runtime has an elevated step, marker `.gamechooser-runtime.json`), or private COM copies
+  (`comfree.py`). By default every runtime the game depends on that has a folder (not an installer that runs)
+  also gets its `.dll`/`.ocx` files copied beside the game's launch exe (layout kept; the game's own file of that
+  name wins; hash-checked from a trusted folder or the private staging copy; recorded with owner `runtime:<id>`,
+  ids in the record's `runtime_copies`), so a game that loads a runtime DLL by name finds it; **steps.py**,
+  **registry.py**, **elevation.py** - catalog steps and the one program that runs elevated.
+- **Extras**: an extra's `extends` is a list of one or more game ids (there is no `install_into`), and the index
+  lists it in the `extras` ({id, required}) of each of those games, so one extra id can be in several games'
+  `extras`. The app never reads `extends`: `entries.extras_of` and the install plan go by the game's own `extras`.
+  An extra installs into the folder of whichever game it is added to (a required one with each game), and each
+  game's install record holds its own copy (`InstallRecord.extras`, its files owned by the extra's id); an extra
+  never has a record of its own, so updating, repairing, undoing or uninstalling one game leaves another game's
+  copy alone (`tests/engine/test_shared_extras.py`).
+- **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
+  confirmation plan (the entry's `warning`, the price warning on installs, `first_run_download_size` added to the
+  size), and target-folder naming (`<library>/<Title>`).
+
+## Bundled tools requirement
+
+`engine/extract.py` runs `7z.exe` and `innoextract.exe` from the `bin/` folder beside the executable; `7z.dll`
+sits beside them. `scripts/fetch_tools.py` downloads them (SHA256-pinned) into `bin/` with their licenses in
+`bin/licenses/`. Without `bin/`, every zip, 7z, cab, Inno and NSIS install fails.
+
+## Temporary launch fallback
+
+`engine.launch.select_best_executable` (prefers `game`/`launch`/`play`, then an exe named like the folder, then
+the first) plus `ExceptionManager.should_auto_exclude` (skips setup/uninstall-style exes) guess a launch exe when
+the catalog records no launch path, or the path it records is not a real file inside the game. It is temporary
+until the catalog records launch paths; `adopt_catalog_launch` switches a guessed path to the catalog's once one
+exists. **Nothing new may call it.** `launch_kind` / `start_game` decide how a launch file starts:
+`.html`/`.htm` open in the browser, anything else runs through `start_program`; the guess above never picks a
+page.
+
+- **exception_manager.py** - filename filter used only by the temporary launch fallback
