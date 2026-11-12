@@ -159,6 +159,24 @@ def is_hta(path: str) -> bool:
     return Path(path).suffix.lower() == HTA_SUFFIX
 
 
+def _windows_folder(function: Callable) -> str | None:
+    """The folder a GetSystemDirectoryW-style function names, or None when Windows names none: it returns 0 (the
+    32-bit twin on 32-bit Windows), or it writes no text.
+
+    The buffer starts at MAX_PATH and grows when Windows says how much it needs. Not 32768: on 64-bit Windows 11
+    GetSystemWow64DirectoryW given exactly that size returned 20 and wrote nothing."""
+    import ctypes
+
+    size = 260
+    for _ in range(3):
+        buffer = ctypes.create_unicode_buffer(size)
+        length = function(buffer, size)
+        if length < size:
+            return (buffer.value or None) if length else None
+        size = length + 1  # too small: the answer is the size needed
+    return None
+
+
 def _system_dirs() -> tuple[str, str | None]:
     """Windows' system folder and its 32-bit twin (None on 32-bit Windows, which has none), asked of Windows
     itself: never read from the environment or the search path, which a game or another program can change."""
@@ -166,18 +184,13 @@ def _system_dirs() -> tuple[str, str | None]:
     from ctypes import wintypes
 
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
-
-    def folder(function) -> str | None:
+    for function in (kernel32.GetSystemDirectoryW, kernel32.GetSystemWow64DirectoryW):
         function.argtypes = [wintypes.LPWSTR, wintypes.UINT]
         function.restype = wintypes.UINT
-        buffer = ctypes.create_unicode_buffer(32768)
-        length = function(buffer, len(buffer))  # 0: no such folder (the 32-bit twin on 32-bit Windows)
-        return buffer.value if 0 < length < len(buffer) else None
-
-    system = folder(kernel32.GetSystemDirectoryW)
+    system = _windows_folder(kernel32.GetSystemDirectoryW)
     if system is None:
         raise OSError(messages.HTA_HOST_MISSING)
-    return system, folder(kernel32.GetSystemWow64DirectoryW)
+    return system, _windows_folder(kernel32.GetSystemWow64DirectoryW)
 
 
 def hta_host(bits: int | None = None,

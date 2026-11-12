@@ -483,16 +483,56 @@ def test_an_hta_does_not_start_on_another_system():
 
 
 @pytest.mark.windows
-def test_hta_host_asks_windows_for_its_system_folder():
+def test_the_real_hosts_are_syswow64_for_32_bits_and_system32_for_64():
+    # Nothing injected: the answer Windows itself gives. (A 32768-character buffer once got no text back for the
+    # 32-bit folder, and the 64-bit host ran in silence.)
     import sys
     if sys.platform != "win32":
         pytest.skip("Windows' own folders")
-    windows = Path(os.environ["SystemRoot"]).resolve()
-    for bits in (32, 64):
-        host = Path(hta_host(bits))
-        assert host.name.lower() == "mshta.exe" and host.is_absolute()
-        assert host.parent.parent.resolve() == windows
-        assert host.parent.name.lower() in ("system32", "syswow64")
+    windows = Path(os.environ["SystemRoot"])
+    twin = "SysWOW64" if (windows / "SysWOW64").is_dir() else "System32"  # 32-bit Windows has one system folder
+    system, wow64 = launch._system_dirs()
+    assert os.path.normcase(system) == os.path.normcase(str(windows / "System32"))
+    assert (wow64 is None) if twin == "System32" else \
+        os.path.normcase(wow64) == os.path.normcase(str(windows / "SysWOW64"))
+    assert os.path.normcase(hta_host(32)) == os.path.normcase(str(windows / twin / "mshta.exe"))
+    assert os.path.normcase(hta_host(64)) == os.path.normcase(str(windows / "System32" / "mshta.exe"))
+
+
+def _folder_call(*answers):
+    """A stand-in for GetSystemDirectoryW: each call gives the next answer, (the length it returns, the text it
+    writes or None). `sizes` lists the buffer size of each call."""
+    sizes = []
+
+    def function(buffer, size):
+        length, text = answers[len(sizes)]
+        sizes.append(size)
+        if text is not None:
+            assert len(text) < size, "Windows never writes past the buffer"
+            buffer.value = text
+        return length
+
+    function.sizes = sizes
+    return function
+
+
+def test_windows_folder_is_the_text_windows_wrote():
+    assert launch._windows_folder(_folder_call((19, "C:\\WINDOWS\\SysWOW64"))) == "C:\\WINDOWS\\SysWOW64"
+
+
+def test_windows_folder_asks_again_with_a_bigger_buffer_when_told_it_was_too_small():
+    deep = "C:\\" + "w" * 400
+    call = _folder_call((len(deep) + 1, None), (len(deep), deep))
+    assert launch._windows_folder(call) == deep
+    assert len(call.sizes) == 2 and call.sizes[0] <= 260 < len(deep) < call.sizes[1]
+
+
+def test_windows_folder_is_none_when_windows_has_no_such_folder():
+    assert launch._windows_folder(_folder_call((0, None))) is None
+
+
+def test_windows_folder_is_none_when_windows_wrote_nothing():
+    assert launch._windows_folder(_folder_call((20, None))) is None  # an answer with no text is no folder
 
 
 def test_a_catalog_named_hta_is_the_launch_file(tmp_path):
