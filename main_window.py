@@ -36,7 +36,7 @@ from library_manager import GameLibraryManager
 from install_service import InstallService
 from catalog_view import description_text, initial_tab
 from engine.folders import library_label
-from engine.launch import LaunchCancelled, launch_kind, start_game
+from engine.launch import LaunchCancelled, is_hta, launch_kind, start_game
 from game_list import GameListCtrl
 from catalog_panel import CatalogPanel
 from description_field import DescriptionField
@@ -47,7 +47,7 @@ from engine.records import record_folder
 from engine.status import update_available
 from install_dialogs import InstallConfirmDialog, UninstallDialog
 import library_actions
-from library_actions import catalog_menu_items, delete_kind, is_editable, launch_problem
+from library_actions import catalog_menu_items, delete_kind, is_editable, launch_problem, may_start_hta
 from progress_area import ProgressArea
 from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener, run_in_background
 from wx_bridge import call_after as _call_after  # wx.CallAfter that does nothing once the app is gone
@@ -1294,7 +1294,9 @@ class MainFrame(wx.Frame):
                     subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
                 else:
                     # Regular executable (one marked "run as administrator" goes through Windows' prompt)
-                    started = start_game(full_path, game_dir)
+                    # An .hta runs (in Windows' mshta.exe) only when the catalog's launch path named it
+                    hta_allowed = is_hta(full_path) and may_start_hta(game, self.service.record_for(game))
+                    started = start_game(full_path, game_dir, hta_allowed=hta_allowed)
                     if started.kind == "page":
                         return  # a web page opens in the browser; the window stays as it is
                     if observe:

@@ -229,9 +229,13 @@ def page_address(path: str) -> str:
 
 def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = None,
                start: Callable[[str, str], int | None] | None = None,
-               hta_start: Callable[[str, str], int | None] | None = None) -> Started:
+               hta_start: Callable[[str, str], int | None] | None = None, hta_allowed: bool = False) -> Started:
     """Start a game's launch file and return what it started: a page opens in the web browser, an .hta runs in
     Windows' mshta.exe through `start_hta` (a program, like an exe), anything else runs through `start_program`.
+
+    An .hta gets the host only with `hta_allowed`, which the caller sets when the catalog's launch path named the
+    file (`library_actions.may_start_hta`). Without it an .hta goes to `start_program` like any other file, which
+    Windows refuses to run: the host is never handed a file the player or a guess picked.
     Raises OSError if the browser can't be opened; LaunchCancelled and the OSError from `start` or `hta_start`
     pass through."""
     kind = launch_kind(path)
@@ -242,7 +246,7 @@ def start_game(path: str, cwd: str, open_page: Callable[[str], object] | None = 
         if open_page(page_address(path)) is False:
             raise OSError("The web browser couldn't be opened.")
         return Started(kind, None)
-    if is_hta(path):
+    if hta_allowed and is_hta(path):
         return Started(kind, (hta_start or start_hta)(path, cwd))
     return Started(kind, (start or start_program)(path, cwd))
 

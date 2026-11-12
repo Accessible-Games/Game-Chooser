@@ -78,7 +78,9 @@ player has for `.html`, so `launch_kind`'s suffix check is the only gate: never 
 An `.hta` (HTML Application) is not a page: it is a program with the player's full rights, like an exe. It never
 goes into `PAGE_SUFFIXES`, `webbrowser` or the shell's file association. `engine.launch.start_hta` runs Windows'
 own `mshta.exe`, taken from the system folder Windows reports (never PATH, never the game's folder), with the
-file's full path as its one argument. It starts only when the catalog's launch path names it: it is never guessed.
+file's full path as its one argument. It starts only when the catalog's launch path names it
+(`library_actions.may_start_hta`, passed to `start_game` as `hta_allowed`): it is never guessed, and a game added
+by hand never gets the host.
 
 ### Tracing
 Nothing outside `tracing/` and its tests (`tests/tracing/`) imports it; the one exception in app code is

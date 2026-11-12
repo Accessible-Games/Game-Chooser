@@ -3,6 +3,7 @@ from types import SimpleNamespace
 from engine import messages
 from library_actions import (EXTRAS, LINK, REPAIR, UNDO, UNINSTALL, UPDATE, catalog_menu_items, delete_kind,
                              is_editable, is_tracked, is_uninstall_unfinished, is_uninstallable, launch_problem,
+                             may_start_hta,
                              library_row_name, remove_library_checkbox_label, remove_library_text, undo_item,
                              uninstall_checkbox_label)
 from models import Game
@@ -159,3 +160,14 @@ def test_an_unfinished_uninstall_can_be_finished():
         (LINK, "Open Forum", True), (LINK, "Open Homepage", True), (LINK, "Open purchase page", True)]
     runtime = record(kind="runtime", uninstalled=True, files={"x.dll": object()}, vendor_uninstaller=None)
     assert not is_uninstallable(runtime) and delete_kind(catalog_game(), runtime) == "delete"
+
+
+def test_an_hta_may_start_only_when_the_catalog_named_it():
+    hta = catalog_game(launch_path="Jump/jumpgame.hta")
+    assert may_start_hta(hta, record(launch_from_catalog=True))
+    assert not may_start_hta(hta, record(launch_from_catalog=False))  # a guessed path is never an .hta
+    assert not may_start_hta(hta, None)  # no record: nothing says the catalog named it
+    assert not may_start_hta(hta, record(launch_from_catalog=True, kind="runtime"))  # not a game's record
+    by_hand = Game(title="Hand", launch_path="C:/Games/hand.hta")  # picked in the Locate dialog, say
+    assert not may_start_hta(by_hand, None)
+    assert not may_start_hta(by_hand, record(launch_from_catalog=True))

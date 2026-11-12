@@ -117,6 +117,13 @@ def launch_problem(game, library_reachable: bool, record, entry: dict | None) ->
     return "locate"
 
 
+def may_start_hta(game, record) -> bool:
+    """May this game's .hta launch file be run (engine.launch.start_game's `hta_allowed`)? Only when the catalog's
+    launch path named it: a catalog game whose install record says its launch path came from the catalog. A game
+    added by hand never qualifies, whatever file was picked for it."""
+    return bool(game.catalog_id) and is_game_record(record) and getattr(record, "launch_from_catalog", False) is True
+
+
 def uninstall_checkbox_label(title: str, player_files: int) -> str:
     return messages.UNINSTALL_DELETE_FILES.format(title=title, count=player_files)
 

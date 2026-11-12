@@ -386,7 +386,7 @@ def test_an_hta_file_goes_to_the_hta_starter_and_is_a_program(tmp_path, name):
     opened, started, hosted = [], [], []
     result = start_game(hta, str(tmp_path), open_page=lambda a: opened.append(a) or True,
                         start=lambda p, c: started.append((p, c)),
-                        hta_start=lambda p, c: hosted.append((p, c)) or 6001)
+                        hta_start=lambda p, c: hosted.append((p, c)) or 6001, hta_allowed=True)
     assert hosted == [(hta, str(tmp_path))]
     assert opened == [] and started == []  # not the browser or the shell, and not run as if it were an exe
     assert result == Started("program", 6001)  # a program: traced, and the window minimizes
@@ -394,14 +394,35 @@ def test_an_hta_file_goes_to_the_hta_starter_and_is_a_program(tmp_path, name):
 
 def test_a_program_never_goes_to_the_hta_starter(tmp_path):
     start_game(str(tmp_path / "game.exe"), str(tmp_path), start=lambda p, c: 1,
-               hta_start=lambda p, c: pytest.fail("an exe is not an HTML Application"))
+               hta_start=lambda p, c: pytest.fail("an exe is not an HTML Application"), hta_allowed=True)
+
+
+def test_an_hta_the_catalog_did_not_name_is_not_given_to_the_host(tmp_path):
+    # start_game's caller says whether the catalog named the file. Unless it does, an .hta gets no host: it goes
+    # the way of any other file (run directly, which Windows refuses for an .hta), and never to a page.
+    hta = str(tmp_path / "game.hta")
+    opened, started = [], []
+    result = start_game(hta, str(tmp_path), open_page=lambda a: opened.append(a) or True,
+                        start=lambda p, c: started.append((p, c)),
+                        hta_start=lambda p, c: pytest.fail("only a catalog-named .hta gets the host"))
+    assert started == [(hta, str(tmp_path))] and opened == []
+    assert result == Started("program", None)
+
+
+def test_start_game_uses_start_hta_when_no_starter_is_given(tmp_path, monkeypatch):
+    hosted = []
+    monkeypatch.setattr(launch, "start_hta", lambda p, c: hosted.append((p, c)) or 6002)
+    monkeypatch.setattr(launch, "start_program", lambda p, c: pytest.fail("an allowed .hta is not run directly"))
+    hta = str(tmp_path / "game.hta")
+    assert start_game(hta, str(tmp_path), hta_allowed=True) == Started("program", 6002)
+    assert hosted == [(hta, str(tmp_path))]
 
 
 def test_start_game_passes_on_an_hta_that_would_not_start(tmp_path):
     def broken(path, cwd):
         raise OSError("no host")
     with pytest.raises(OSError, match="no host"):
-        start_game(str(tmp_path / "game.hta"), str(tmp_path), hta_start=broken)
+        start_game(str(tmp_path / "game.hta"), str(tmp_path), hta_start=broken, hta_allowed=True)
 
 
 @pytest.mark.parametrize("bits, dirs, host", [

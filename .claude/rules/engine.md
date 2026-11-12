@@ -61,12 +61,15 @@ exists. **Nothing new may call it.** The guess only picks `.exe` and `.bat` file
 ## How a launch file starts (`engine/launch.py`)
 
 `launch_kind` / `start_game` decide: `.html`/`.htm` open in the browser (kind "page"); an `.hta` runs through
-`start_hta`; anything else runs through `start_program`. The last two are kind "program" and return the started
-process's ID.
+`start_hta` when the caller passes `hta_allowed`; anything else runs through `start_program`. The last two are
+kind "program" and return the started process's ID.
 
 - **`.hta` (HTML Application)**: a catalog game with no exe, started only when the catalog's launch path names the
   file (`_recorded_launch_exe` accepts any real file inside the game, so the install and Status need nothing
-  special). `start_hta` runs `mshta.exe` with the file's full path as its one argument and the game's folder as
+  special). `start_game` gives it the host only with `hta_allowed=True`, which `MainFrame` sets from
+  `library_actions.may_start_hta(game, record)`: a catalog game whose record has `launch_from_catalog`. Without it
+  an `.hta` goes to `start_program` like any other file, and Windows refuses to run it (as before this existed).
+  `start_hta` runs `mshta.exe` with the file's full path as its one argument and the game's folder as
   working directory. `hta_host` builds the host's path from the folders Windows reports (`GetSystemWow64DirectoryW`,
   `GetSystemDirectoryW`): never from PATH, the environment or the game's folder. Windows only: elsewhere, or when
   Windows has no `mshta.exe`, it raises `OSError` with words from `messages.py` (`HTA_NEEDS_WINDOWS`,

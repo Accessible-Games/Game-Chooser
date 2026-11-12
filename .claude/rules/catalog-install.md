@@ -86,8 +86,10 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   the page (it is never guessed). The rule against widening `PAGE_SUFFIXES` is in CLAUDE.md (Launch pages).
 - A catalog game whose launch file ends in `.hta` (an HTML Application, with no exe) is a program launch:
   `start_game` runs it in Windows' `mshta.exe` (`engine.launch.start_hta`, see `.claude/rules/engine.md`), the
-  tracing observer is called, and the window minimizes, as for an exe. `MainFrame` has no code of its own for it.
-  The catalog must name the file (it is never guessed). Windows only: on another system the platform check
-  refuses first, and failing that `start_hta` raises, shown as "Failed to launch game: This game only runs on
-  Windows." `PathManager.is_executable` and `GameDialog` do not accept an `.hta` for a game added by hand.
+  tracing observer is called, and the window minimizes, as for an exe. `MainFrame`'s only code for it is the
+  `hta_allowed` it passes to `start_game`: `library_actions.may_start_hta(game, record)`, true for a catalog game
+  whose record says its launch path came from the catalog (it is never guessed). Windows only: on another system
+  the platform check refuses first, and failing that `start_hta` raises, shown as "Failed to launch game: This game
+  only runs on Windows." A game added by hand never runs an `.hta`: `PathManager.is_executable` and `GameDialog` do
+  not accept one, and one picked in the Locate dialog fails to start as any file that is not a program does.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.
