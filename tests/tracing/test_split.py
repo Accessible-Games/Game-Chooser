@@ -206,9 +206,21 @@ def test_a_session_with_no_root_has_no_ended_by_unless_the_stop_names_it():
 
 def test_a_stop_record_of_the_wrong_shape_is_no_stop():
     for bad in ({}, {"time": 40 * S}, {"time": "soon", "sessions": {"s": LISTS}}, {"time": 40 * S, "sessions": ["s"]},
-                {"time": 40 * S, "sessions": {"s": "yes"}}):
+                {"time": True, "sessions": {"s": LISTS}}, [], "stop"):
         [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()], bad)
         assert r.ended_by == "capture_end" and r.stop is None, bad
     [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()],
                     {"time": 40 * S, "sessions": {"s": {"ended": [1, "x", True], "asked_to_close": "no"}}})
     assert r.stop == {"time": 40 * S, "close_games": False, "asked_to_close": [], "ended": [1], "not_closed": []}
+
+
+def test_a_session_the_stop_did_not_list_but_the_capture_shows_running_is_ended_by_the_stop():
+    # launched after the request was taken, or held by a process the recorder's live view missed
+    [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()], stop_record({}, close_games=True))
+    assert r.ended_by == "stop" and r.still_running is True
+    assert r.stop == {"time": 40 * S, "close_games": True, **LISTS}
+
+
+def test_an_unlisted_session_whose_processes_all_exited_is_ended_by_exit():
+    [r] = split_run([proc(100, 50, 10 * S, end=20 * S)], iter([]), [info()], stop_record({}))
+    assert (r.ended_by, r.stop) == ("exit", None)

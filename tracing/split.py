@@ -129,13 +129,18 @@ def normalize_stop(stop) -> dict | None:
 
 
 def _ended(result: SessionResult, stop: dict | None) -> None:
-    """How the session ended: by the stop when the recorder counted it as running then, whatever the capture
-    holds; else by its last process exiting, or by the capture ending under it."""
-    lists = stop["sessions"].get(result.info.session_id) if stop else None
-    if lists is not None:
-        result.ended_by = "stop"
-        result.stop = {"time": stop["time"], "close_games": stop["close_games"], **lists}
-    elif result.root is not None:
+    """How the session ended. In a stopped run, by the stop when the recorder counted the session as running
+    then (whatever the capture holds) or the capture shows a process of it still running (a game launched after
+    the request was taken, or one the recorder's live view missed: its lists are empty). Otherwise by its last
+    process exiting, or by the capture ending under it."""
+    if stop is not None:
+        lists = stop["sessions"].get(result.info.session_id)
+        if lists is not None or result.still_running:
+            result.ended_by = "stop"
+            result.stop = {"time": stop["time"], "close_games": stop["close_games"],
+                           **(lists or {name: [] for name in STOP_LISTS})}
+            return
+    if result.root is not None:
         result.ended_by = "capture_end" if result.still_running else "exit"
 
 

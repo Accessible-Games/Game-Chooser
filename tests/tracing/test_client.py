@@ -224,3 +224,17 @@ def test_a_failure_during_a_stop_is_announced(tmp_path):
     state = client.poll()
     assert state.reason == messages.RECORDER_FAILED.format(error=messages.PROCMON_STOP_SLOW)
     assert state.phase == "off" and state.announce is True
+
+
+def test_no_mark_is_made_once_tracing_is_off(tmp_path):
+    procs = [LiveProc(10, 1, 77, None)]
+    client, _, _ = make(tmp_path, snapshot=lambda: list(procs))
+    client.start()
+    status(client, "capturing")
+    client.poll()
+    sid = client.game_launched(10, 1, 2, {"title": "A"})
+    assert client.mark() == [sid]
+    client._run.write_stop(STOP)
+    status(client, "done")
+    assert client.mark() == []  # the game is still open, but the run has ended: nothing would hold the mark
+    assert client._run.read_sessions()[0].marks == (NOW,)

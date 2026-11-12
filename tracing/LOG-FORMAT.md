@@ -70,10 +70,11 @@ closest to the call. A process of the same exe that started outside that window 
   null; the processes that did exit still have their `process_exit` lines).
 - `ended_by`: how the session ended.
   - `"exit"`: every process of the session exited by itself (`end` is the last exit).
-  - `"stop"`: the run was ended with `--trace-stop` while the recorder still counted this session as running. `stop`
-    says more.
-  - `"capture_end"`: a process was still running when the capture ended for any other reason (the recorder failed
-    or was killed, or the capture is being split after a crash).
+  - `"stop"`: the run was ended with `--trace-stop` while this session was still going: the recorder counted it as
+    running when it took the request, or the capture shows a process of it still running at the end. `stop` says
+    more.
+  - `"capture_end"`: a process was still running when the capture ended and the run was not stopped with
+    `--trace-stop` (the recorder failed or was killed, or the capture is being split after a crash).
   - null: the game's first process isn't in the capture (see `problem`) and no stop named the session.
 - `stop`: null unless `ended_by` is `"stop"`. Then an object:
   - `time` (UTC text) and `t`: when the recorder took the stop request. Events after it are still recorded, up to
@@ -87,6 +88,8 @@ closest to the call. A process of the same exe that started outside that window 
     made.
   - `not_closed`: pids of the session still running after all that (the end failed, or the process is one the stop
     never touches: see "Ending a run with --trace-stop").
+  - A session the recorder did not count as running (a game launched after the request was taken, or one whose
+    processes its live view missed) has three empty lists even with `close_games` true: it was not touched.
   - With `close_games` true and everything closed, `end` is set and `still_running_at_capture_end` is false, as for
     a game that exited by itself; `ended_by` is what tells the two apart.
 - `time_zero_source`: see Times. `root_pid`: pid of the game's first process (as found in the

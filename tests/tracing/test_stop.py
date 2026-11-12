@@ -331,5 +331,6 @@ def test_command_and_recorder_with_no_game_open(s, plain_stamp):
     assert s.stop() == 0
     assert "No traced game was running when the run was stopped." in s.lines
     session = json.loads((s.traces / "c-stamp" / "session.json").read_text(encoding="utf-8"))
-    assert session["ended_by"] == "capture_end" and session["stop"] is None  # by the capture: CHILD never exits
+    # the recorder saw no process, but in the capture CHILD never exits: cut off by the stop all the same
+    assert session["ended_by"] == "stop" and session["stop"]["asked_to_close"] == []
     assert json.loads(run.split_path.read_text(encoding="utf-8"))["stop"]["sessions"] == []

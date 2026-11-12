@@ -127,7 +127,8 @@ class TraceClient:
 
     def mark(self) -> list[str]:
         now = self._clock()
-        self.poll()
+        if self.poll().phase != "on":
+            return []  # the run has ended (or never began): a game still open is no longer being traced
         with self._lock:
             run = self._run
         marked = []

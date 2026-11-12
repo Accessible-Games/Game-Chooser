@@ -46,8 +46,9 @@ Build: see `.claude/rules/build.md`.
   into its folder (atomic), then waits and prints what the recorder did (`Wrote <folder>`, `Problem: ...`). The
   recorder polls for the request in its loop (`Recorder._take_stop`): it writes `stop.json` (the sessions its live
   tree counts as running), sets the status to `stopping`, takes no more sessions, and goes on as at a normal end
-  (Process Monitor stopped, capture split, `done`). The split marks those sessions `ended_by: "stop"`
-  (`split.normalize_stop`; LOG-FORMAT.md). A stop is not a failure and not a split problem.
+  (Process Monitor stopped, capture split, `done`). The split marks those sessions `ended_by: "stop"`, and any
+  other session the capture shows still running (`split.normalize_stop`, `split._ended`; LOG-FORMAT.md). A stop is
+  not a failure and not a split problem. Once tracing is off, `TraceClient.mark` records nothing.
   - Recorder already gone: nothing is written; "the recorder is no longer running, so there is nothing to stop",
     plus the advice to run `--trace-split` when its capture is unsplit; exit 1. A dead run beside a live one is
     left to the live recorder, which splits leftovers at its end.
