@@ -332,9 +332,10 @@ class GamesPanel(wx.Panel):
         self._show_selection()
 
     def _select(self, index):
-        """Select a row and make it the list's focused item too, so the arrow keys start from it"""
+        """Select a row and make it the list's focused item too, so the arrow keys start from it. A row that is
+        both already is left as it is: no event, and no scrolling back to it during a background refresh."""
         self.list.control.Select(index, True)
-        if not self.list.control.use_dataview:
+        if not self.list.control.use_dataview and self.list_ctrl.GetFocusedItem() != index:
             self.list_ctrl.Focus(index)  # also scrolls it into view
 
     def _show_selection(self):
