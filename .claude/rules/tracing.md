@@ -52,8 +52,12 @@ Build: see `.claude/rules/build.md`.
   - Recorder already gone: nothing is written; "the recorder is no longer running, so there is nothing to stop",
     plus the advice to run `--trace-split` when its capture is unsplit; exit 1. A dead run beside a live one is
     left to the live recorder, which splits leftovers at its end.
-  - No answer within `ACK_SECONDS` (30 s, counted only while the status says `capturing`): the request is removed
-    and the run goes on. After the request is taken there is no time limit while the recorder lives.
+  - The recorder takes a request by renaming it to `stop-request.taken.json` (`RunDir.claim_stop_request`). No
+    answer within `ACK_SECONDS` (30 s, counted only while the status says `capturing`): the command removes the
+    request (`withdraw_stop_request`) and the run goes on. Rename and removal are atomic and exclusive, so the
+    command reports a withdrawal only when its own removal succeeded; a request already gone was taken (it waits
+    for the result), and one it can't remove is tried again at each poll. After the request is taken there is no
+    time limit while the recorder lives.
   - A run that is already ending is waited for; its request is never overwritten.
   - `--close-games` (opt-in; without it no process is touched): the recorder, before stopping Process Monitor, asks
     each running process of those sessions to close (`closing.WindowsCloser.ask_close`: WM_CLOSE to its visible
@@ -75,8 +79,9 @@ Build: see `.claude/rules/build.md`.
 - **Where logs go:** `traces/` beside the exe (from source: beside `game-chooser.py`; git-ignored). One folder per
   play session, `<catalog id or title>-<YYYYMMDD-HHMMSS>`, holding `session.json` and `events.jsonl`. The recorder's
   working files live in `traces/_runs/<YYYYMMDD-HHMMSS>-<pid>/`: `status.json`, `sessions/<id>.json`, `filter.pmc`,
-  `capture.pml` (and `capture-N.pml`), `recorder.log`, `stop-request.json` and `stop.json` (only for a run ended
-  with `--trace-stop`), `split.json` (`folders`, `problems`, `capture_kept`, `stop`). The
+  `capture.pml` (and `capture-N.pml`), `recorder.log`, `stop-request.json` (`stop-request.taken.json` once taken)
+  and `stop.json` (only for a run ended with `--trace-stop`), `split.json` (`folders`, `problems`, `capture_kept`,
+  `stop`). The
   capture and `filter.pmc` are removed after a split with no problems, and kept (`capture_kept: true`) when any
   session has a problem or a session file can't be read. Atomic writes retry `os.replace` while Windows says the
   file is held (`runfiles.replace_with_retry`).
@@ -86,9 +91,10 @@ Build: see `.claude/rules/build.md`.
   shell handed back no process) is recorded with `root_pid` 0 and no start time; its root is then the process whose
   image is the game's exe that started from 2 s before the launch call to 2 s after it returned, never one another
   session holds (pid-known sessions are matched first), preferring the earliest that started at or after the call,
-  else the closest to it (`attribution.find_root_by_exe`; the live tree uses the same rule). A launch that gave a pid but whose start
-  time couldn't be read: the live tree takes the process with that pid only if it started within the same 2 s
-  window, and then keeps to that one process (a later program given the pid is never the root). `process_exit` lines
+  else the closest to it (`attribution.find_root_by_exe`; the live tree uses the same rule). A launch that gave a
+  pid but whose start time couldn't be read: the live tree takes the process with that pid only if it started
+  within the same 2 s window, and then keeps to that one process (a later program given the pid is never the
+  root). `process_exit` lines
   are written for every process whose exit is in the capture. `session.json` env carries `app_build` (short git
   commit from source, else null).
 - **Capture filter** (`procmon.filter_config`; destructive, so dropped events never reach the file): drops every

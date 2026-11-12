@@ -201,7 +201,11 @@ The command runs without administrator rights and touches no process itself. It 
 files in the run folder (both written whole, then moved into place):
 
 - `stop-request.json`, written by the command: `requested` (FILETIME), `close_games` (true or false) and
-  `requester_pid`. The recorder looks for it every half second while it is capturing.
+  `requester_pid`. The recorder looks for it every half second while it is capturing, and takes it by renaming it
+  to `stop-request.taken.json`. If the recorder has not answered after 30 seconds of capturing, the command removes
+  the request and says it was withdrawn; the run goes on. The rename and the removal can't both succeed, so a
+  request is either taken or withdrawn, never both: when the command finds the request already gone it waits for
+  the result instead, and when it can't remove the file it keeps waiting and tries again.
 - `stop.json`, written by the recorder when it takes the request: `requested` (copied from the request), `time`
   (FILETIME, when it was taken), `close_games`, and `sessions`: one entry per session the recorder counted as
   running at that moment, each with the lists `asked_to_close`, `ended` and `not_closed` (see `stop` under

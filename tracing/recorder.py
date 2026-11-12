@@ -188,7 +188,7 @@ class Recorder:
             if not self.procmon.running():
                 self._failure(messages.PROCMON_STOPPED)
                 return
-            request = self.run_dir.read_stop_request()
+            request = self._claim_stop()
             if request is not None:
                 self._take_stop(request)
                 return
@@ -207,6 +207,15 @@ class Recorder:
             self.sleep(POLL_SECONDS)
 
     # --- a stop request (--trace-stop) ---
+
+    def _claim_stop(self) -> dict | None:
+        """The stop request, once this recorder has claimed it (from then on the command waits for the result
+        instead of withdrawing it). A claim that fails is tried again at the next poll."""
+        try:
+            return self.run_dir.claim_stop_request()
+        except OSError as exc:
+            log.warning("could not take the stop request: %s", exc)
+            return None
 
     def _take_stop(self, request: dict) -> None:
         """End the run now, while traced programs may still be open. From here on no new session joins the run.

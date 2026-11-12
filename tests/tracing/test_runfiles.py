@@ -157,3 +157,57 @@ def test_stop_record_round_trip_and_unreadable_is_none(tmp_path):
     assert run.read_stop() is None
     run.stop_request_path.write_text("{cut", encoding="utf-8")
     assert run.read_stop_request() is None
+
+
+REQUEST = {"requested": FT, "close_games": True}
+
+
+def test_the_recorder_claims_a_request_and_the_command_then_sees_it_taken(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    run.write_stop_request(REQUEST)
+    assert run.claim_stop_request() == REQUEST
+    assert not run.stop_request_path.exists() and run.stop_taken_path.name == "stop-request.taken.json"
+    assert run.read_stop_request() is None and run.stop_taken_path.exists()
+    assert run.withdraw_stop_request() == "taken"
+    assert run.claim_stop_request() is None  # claimed once only
+
+
+def test_a_request_the_command_withdrew_first_can_no_longer_be_claimed(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    run.write_stop_request(REQUEST)
+    assert run.withdraw_stop_request() == "withdrawn"
+    assert run.claim_stop_request() is None
+    assert not run.stop_taken_path.exists() and not run.stop_request_path.exists()
+
+
+def test_a_request_withdrawn_between_the_recorders_look_and_its_claim_is_not_claimed(tmp_path, monkeypatch):
+    run = new_run(tmp_path, FT, 5)
+    run.write_stop_request(REQUEST)
+    real = runfiles.replace_with_retry
+
+    def withdrawn_just_before(src, dst, **kwargs):
+        assert run.withdraw_stop_request() == "withdrawn"
+        real(src, dst, **kwargs)
+
+    monkeypatch.setattr(runfiles, "replace_with_retry", withdrawn_just_before)
+    assert run.claim_stop_request() is None
+    assert not run.stop_taken_path.exists()
+
+
+def test_an_unreadable_request_is_not_claimed_and_can_be_withdrawn(tmp_path):
+    run = new_run(tmp_path, FT, 5)
+    run.stop_request_path.write_text("{cut off", encoding="utf-8")
+    assert run.claim_stop_request() is None
+    assert run.stop_request_path.exists() and not run.stop_taken_path.exists()
+    assert run.withdraw_stop_request() == "withdrawn"
+
+
+def test_a_request_that_cannot_be_removed_is_held_not_withdrawn(tmp_path, monkeypatch):
+    run = new_run(tmp_path, FT, 5)
+    run.write_stop_request(REQUEST)
+
+    def denied(self, missing_ok=False):
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(runfiles.Path, "unlink", denied)
+    assert run.withdraw_stop_request() == "held"

@@ -336,3 +336,46 @@ def test_command_and_recorder_with_no_game_open(s, plain_stamp):
     # the recorder saw no process, but in the capture CHILD never exits: cut off by the stop all the same
     assert session["ended_by"] == "stop" and session["stop"]["asked_to_close"] == []
     assert json.loads(run.split_path.read_text(encoding="utf-8"))["stop"]["sessions"] == []
+
+
+# --- the request is withdrawn only when the recorder can no longer take it ---
+
+def test_a_request_the_recorder_claimed_at_the_last_moment_is_waited_for_not_withdrawn(s):
+    run = s.run()
+    polls = int(stop.ACK_SECONDS / stop.POLL_SECONDS)
+
+    def claim():  # the recorder has taken the request but not yet written stop.json
+        assert run.claim_stop_request() is not None
+
+    s.script = [lambda: None] * (polls - 1) + [claim, lambda: None, finish(run, {"s001-9": LISTS})]
+    assert s.stop(close_games=True) == 0
+    assert not any("withdrawn" in line for line in s.lines) and "The run has ended." in s.lines
+
+
+def test_a_request_that_cannot_be_removed_is_not_reported_as_withdrawn(s, monkeypatch):
+    run = s.run()
+    answers = ["held", "held", "withdrawn"]
+    asked = []
+    monkeypatch.setattr(RunDir, "withdraw_stop_request", lambda self: asked.append(1) or answers.pop(0))
+    assert s.stop() == 1
+    assert len(asked) == 3 and s.clock.t == stop.ACK_SECONDS + 2 * stop.POLL_SECONDS
+    assert [line for line in s.lines if "withdrawn" in line] == [
+        "Problem: the recorder didn't answer within 30 seconds, so the request was withdrawn and the run goes on."]
+
+
+def test_a_held_request_the_recorder_then_takes_ends_the_run(s, monkeypatch):
+    run = s.run()
+    monkeypatch.setattr(RunDir, "withdraw_stop_request", lambda self: "held")
+    polls = int(stop.ACK_SECONDS / stop.POLL_SECONDS)
+    s.script = [lambda: None] * (polls + 3) + [finish(run)]
+    assert s.stop() == 0
+    assert not any("withdrawn" in line for line in s.lines)
+
+
+def test_no_second_request_is_written_while_a_claimed_one_is_being_taken(s):
+    run = s.run()
+    run.write_stop_request({"requested": 1, "close_games": False})
+    assert run.claim_stop_request() is not None  # claimed; stop.json and the status change are still to come
+    s.script = [finish(run)]
+    assert s.stop(close_games=True) == 0
+    assert run.read_stop_request() is None and s.lines[0] == f"The run {run.path} is already ending; waiting for it."

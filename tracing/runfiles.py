@@ -89,6 +89,11 @@ class RunDir:
         return self.path / "stop-request.json"
 
     @property
+    def stop_taken_path(self) -> Path:
+        """The request once the recorder has claimed it (renamed, so it can be claimed or withdrawn, never both)."""
+        return self.path / "stop-request.taken.json"
+
+    @property
     def stop_path(self) -> Path:
         """Written by the recorder when it takes a stop request: what the stop did."""
         return self.path / "stop.json"
@@ -121,6 +126,32 @@ class RunDir:
 
     def read_stop_request(self) -> dict | None:
         return _read_dict(self.stop_request_path)
+
+    def claim_stop_request(self) -> dict | None:
+        """The recorder's side: take the request by renaming it, and return it; None when there is none, it can't
+        be read, or the command withdrew it first. The rename and the command's removal are each atomic and only
+        one of them can succeed, so a request is never both taken and reported withdrawn. Raises OSError when the
+        file is held; the caller tries again."""
+        request = _read_dict(self.stop_request_path)
+        if request is None:
+            return None
+        try:
+            replace_with_retry(self.stop_request_path, self.stop_taken_path)
+        except FileNotFoundError:
+            return None
+        return _read_dict(self.stop_taken_path) or request
+
+    def withdraw_stop_request(self) -> str:
+        """The command's side, when the recorder didn't answer: remove the request. "withdrawn" when it was removed
+        (the recorder can no longer take it), "taken" when it had already gone (the recorder claimed it), "held"
+        when it couldn't be removed (nothing is known yet)."""
+        try:
+            self.stop_request_path.unlink()
+        except FileNotFoundError:
+            return "taken"
+        except OSError:
+            return "held"
+        return "withdrawn"
 
     def write_stop(self, record: dict) -> None:
         _atomic_write(self.stop_path, json.dumps(record))

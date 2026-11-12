@@ -90,7 +90,8 @@ def stop_command(traces_dir: Path, run_path: Path | None, close_games: bool, *, 
 def _stop(run: RunDir, close_games: bool, is_alive, clock, sleep, now, out) -> int:
     status = run.read_status() or {}
     capturing = status.get("state") in ("starting", "capturing")
-    if capturing and run.read_stop_request() is None and run.read_stop() is None:
+    asked = run.read_stop_request() is not None or run.stop_taken_path.exists() or run.read_stop() is not None
+    if capturing and not asked:
         try:
             run.write_stop_request({"requested": now(), "close_games": close_games, "requester_pid": os.getpid()})
         except OSError as error:
@@ -126,12 +127,15 @@ def _wait(run: RunDir, is_alive, clock, sleep, out) -> int:
             elif state == "starting":
                 deadline = clock() + ACK_SECONDS  # the request is seen once Process Monitor is capturing
             elif clock() >= deadline:
-                run.stop_request_path.unlink(missing_ok=True)
-                if run.read_stop() is None:
+                # Only a request this command removed itself is withdrawn. One that has gone was claimed by the
+                # recorder (it renames it), so the stop is under way; one that can't be removed may still be
+                # claimed, so it is tried again at the next poll.
+                answer = run.withdraw_stop_request()
+                if answer == "withdrawn":
                     out(f"Problem: the recorder didn't answer within {ACK_SECONDS:g} seconds, so the request was "
                         "withdrawn and the run goes on.")
                     return 1
-                taken = True
+                taken = answer == "taken"
         sleep(POLL_SECONDS)
     return _report(run, out)
 

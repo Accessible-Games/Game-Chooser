@@ -420,3 +420,29 @@ def test_a_game_started_through_the_administrator_prompt_is_not_closed_and_says_
     assert run.read_stop()["sessions"]["s2"] == {"asked_to_close": [], "ended": [],
                                                  "not_closed": left(closing.REFUSED_RIGHTS, 200)}
     assert "administrator prompt" in run.log_path.read_text(encoding="utf-8")
+
+
+def test_the_recorder_claims_the_request_it_takes(tmp_path):
+    rec, run, pm, states, world, clock = make(tmp_path)
+    run.write_stop_request({"requested": NOW, "close_games": False})
+    assert rec.run() == 0
+    assert not run.stop_request_path.exists() and run.stop_taken_path.exists()
+    assert run.withdraw_stop_request() == "taken"
+
+
+def test_a_claim_that_fails_is_tried_again_at_the_next_poll(tmp_path):
+    rec, run, pm, states, world, clock = make(tmp_path)
+    run.write_stop_request({"requested": NOW, "close_games": False})
+    real = run.claim_stop_request
+    calls = []
+
+    def flaky():
+        calls.append(clock.t)
+        if len(calls) < 3:
+            raise PermissionError("held")
+        return real()
+
+    run.claim_stop_request = flaky
+    assert rec.run() == 0
+    assert pm.stopped_at == 1.0 and run.read_stop() is not None
+    assert "stop request" in run.log_path.read_text(encoding="utf-8")
