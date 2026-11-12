@@ -299,8 +299,6 @@ class MainFrame(wx.Frame):
         self.library_manager.config["SavedState"]["last_tab"] = self.active_tab()
         self.views[self.active_tab()].save_config()  # a save that fails is logged; the menus and focus still follow
         self.update_tab_menus()
-        if self.active_tab() == "catalog":
-            self.catalog_panel.refresh_rows()  # Library changes may have changed what is installed
         wx.CallAfter(self.focus_active_list)
 
     def update_tab_menus(self):
@@ -937,7 +935,7 @@ class MainFrame(wx.Frame):
     def on_random_install(self, event):
         """Pick a random game to install from the Catalog tab's filtered list (switching to that tab first)"""
         if self.active_tab() != "catalog":
-            self.notebook.SetSelection(TABS.index("catalog"))  # on_tab_changed refreshes the catalog rows
+            self.notebook.SetSelection(TABS.index("catalog"))
         self.catalog_panel.on_random_install()
 
     def on_edit_game(self, event):
