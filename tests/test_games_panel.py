@@ -334,15 +334,16 @@ def test_rows_that_tie_in_the_sorted_column_are_in_title_order(make_view):
     assert titles(view) == ["Amy", "Zed", "Old"]
 
 
-def test_a_sort_key_whose_values_changed_sorts_again_on_apply_filters(make_view):
-    """The Library's Status column: the statuses arrive later, from a worker thread"""
+def test_a_sort_key_whose_values_changed_sorts_again_on_refill(make_view):
+    """The Library's Status column: the statuses arrive later, from a worker thread, and the main window then
+    calls refill()"""
     status = {}
     view = make_view(sort_keys=[lambda r: r.title.lower(), lambda r: status.get(r.id, "")])
     view.set_rows(rows(ANT, BEE, CAT))
     click_header(view, 1)
     assert titles(view) == ["Ant", "Bee", "Cat"] and selected(view) == 0
     status.update(ant="Ready", bee="Executable not found", cat="Ready")
-    view.apply_filters()
+    view.refill()
     assert titles(view) == ["Bee", "Ant", "Cat"]
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (1, 1, "Install Ant")
 
