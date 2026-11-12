@@ -228,6 +228,12 @@ program on the list of processes the capture drops (first list at the top of thi
 program path can't be read. They show up in `not_closed`. A game launched after the request was taken is not part
 of the stop. If Process Monitor dies during the wait, nothing is ended.
 
+What the live view holds, and so what `--close-games` closes, is everything a traced game started that is still
+running: its helpers, the console host (`conhost.exe`) Windows gives a console program, a browser or an editor the
+game opened as its own child process, and orphans inside the game's folder.
+
+After a stop the mark key records nothing (the error beep), even for a game that is still open.
+
 ## The run folder's split.json
 
 The recorder's working files are in `traces/_runs/<YYYYMMDD-HHMMSS>-<pid>/`. After the capture is split, that
