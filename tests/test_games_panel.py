@@ -912,3 +912,23 @@ def test_space_in_a_text_never_moves_the_selection(make_view):
     now[0] += 4
     type_text(view, "a h")  # a Space only extends the text; the next character does the jump
     assert view.selected_row().title == "A Hero's Call" and acted == ["Alpha"]
+
+
+@pytest.mark.parametrize("key", [
+    "ESCAPE", "BACK", "UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN",
+    "NUMPAD_UP", "NUMPAD_DOWN", "NUMPAD_HOME", "NUMPAD_END", "NUMPAD_PAGEUP", "NUMPAD_PAGEDOWN"])  # Num Lock off
+def test_a_typed_text_ends_on_a_key_that_ends_a_thought(make_view, key):
+    """Escape, Backspace and the keys that move through the list: what is typed next is a new text, and Space
+    acts at once on the row the player moved to"""
+    key = getattr(wx, f"WXK_{key}")
+    acted = []
+    view, _ = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
+    type_text(view, "t")
+    assert selected(view) == 3
+    assert not press(view.list_ctrl, key)  # the key itself is left to the list
+    type_text(view, "a")  # "a", not "ta", which no title starts with
+    assert view.selected_row().title == "Alpha"
+    press(view.list_ctrl, key)
+    player_selects(view, 2)  # where an arrow key takes the player
+    type_text(view, " ")
+    assert acted == ["Bravo"]

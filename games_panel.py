@@ -58,6 +58,12 @@ from progress_area import ProgressArea
 
 log = logging.getLogger(__name__)
 
+# The keys that end a text being typed in the list: Escape, Backspace and the keys that move through the list
+# (with Num Lock off the number pad sends its own codes for those)
+ENDS_TYPED_TEXT = frozenset(getattr(wx, f"WXK_{prefix}{name}") for prefix in ("", "NUMPAD_")
+                            for name in ("UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN")
+                            ) | {wx.WXK_ESCAPE, wx.WXK_BACK}
+
 
 class GamesPanel(wx.Panel):
     """Tab order: Search, games list, filter tree, action button, install progress, description.
@@ -528,6 +534,8 @@ class GamesPanel(wx.Panel):
     def on_list_key(self, event):
         key = event.GetKeyCode()
         plain = not event.HasAnyModifiers()
+        if key in ENDS_TYPED_TEXT:  # the key itself goes on to the list as before
+            self.type_ahead.clear()
         if key == wx.WXK_SPACE and plain and self.type_ahead.takes_space():
             # Part of the text being typed ("temple of"), for 3 seconds after its last character: a player
             # waits for the screen reader to finish the row. Taken here, never skipped on to on_char: wx turns

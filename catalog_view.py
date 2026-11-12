@@ -233,6 +233,10 @@ class TypeAhead:
             self._text, self._last_key = self._text + " ", now
         return self._text
 
+    def clear(self):
+        """End the text now: the player has moved on (an arrow key, Escape)"""
+        self._text = ""
+
 
 def type_ahead_index(titles, text: str, current: int) -> int:
     """The row a typed text jumps to, as in a Windows list: the first title at or after row `current` that starts

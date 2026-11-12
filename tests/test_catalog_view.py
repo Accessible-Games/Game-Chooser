@@ -142,6 +142,13 @@ def test_type_ahead_gives_a_space_three_seconds_and_any_other_character_one():
     assert typed.add("a") == "t   a"  # a character counts from the key before it: the last Space taken, 0.8 s ago
 
 
+def test_type_ahead_text_can_be_ended_at_once():
+    typed = TypeAhead(clock=lambda: 50.0)
+    typed.add("t")
+    typed.clear()
+    assert not typed.typing() and not typed.takes_space() and typed.add("a") == "a"
+
+
 def test_price_sort_key_puts_free_first_then_orders_by_the_amount_shown():
     """As text, "Buy once, $10" would come before "Buy once, $5\""""
     def priced(id, **pricing):
