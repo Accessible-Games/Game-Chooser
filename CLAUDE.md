@@ -26,8 +26,8 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   `description_field.py`) are not unit-tested; `wx_bridge.py` takes injectable `post` functions so its threading
   is tested without a running wx app (the test skips when wxPython is not installed). `games_panel.py` (the games
   view both tabs are built from) is tested on a frame that is never shown (`tests/test_games_panel.py`, which
-  skips when wxPython is not installed or there is no display); so is one part of `catalog_panel.py`, what its
-  action button does while a job runs (`tests/test_catalog_panel.py`).
+  skips when wxPython is not installed or there is no display); so are two parts of `catalog_panel.py`, what its
+  action button does while a job runs and how its columns sort (`tests/test_catalog_panel.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
