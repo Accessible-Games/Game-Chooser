@@ -1,6 +1,7 @@
 from catalog_view import (action_kind, action_label, build_rows, link_items, description_text, entry_links, filter_rows,
-                          homepage_item, initial_tab, link_at_line, install_candidates, markdown_to_text,
-                          pick_index, tree_categories, tree_values)
+                          homepage_item, initial_tab, library_rows, link_at_line, install_candidates,
+                          markdown_to_text, pick_index, tree_categories, tree_values)
+from models import Game
 
 SRC = [{"platform": "windows", "install": {"method": "zip"}, "url": "https://x/e.zip"}]
 entombed = {"id": "entombed", "kind": "game", "title": "Entombed", "developer": ["Driftwood Entertainment"],
@@ -207,3 +208,56 @@ def test_pick_index_finds_the_wanted_game_else_the_clamped_fallback_row():
     assert pick_index(rows, "gone", 7) == 2  # clamped to the last row
     assert pick_index(rows, "gone", -1) == 0 and pick_index(rows, None, -1) == 0  # nothing was selected before
     assert pick_index([], "troopanum", 3) == -1  # an empty list selects nothing
+
+
+def _library():
+    by_hand = Game(title="Alpha", genre="Action", developer="Ann Dev, Bob Dev", year="2001",
+                   platforms=["Windows", "macOS"], launch_path="C:/games/alpha.exe")
+    bare = Game(title="Bare Web", launch_path="https://bare.example/play", platforms=["Web"])
+    installed = Game(title="Entombed", genre="Adventure", developer="Driftwood Entertainment", year="2004",
+                     platforms=["Windows"], launch_path="Entombed/entombed.exe", library_id="lib1",
+                     catalog_id="entombed")
+    games = [by_hand, bare, installed]
+    return games, library_rows(games, lambda game: {"entombed": entombed}.get(game.catalog_id))
+
+
+def test_library_rows_are_catalog_rows_that_hold_their_game():
+    games, rows = _library()
+    assert [r.game for r in rows] == games and all(r.installed for r in rows)
+    assert [(r.title, r.genre, r.developer, r.year, r.platforms) for r in rows] == [
+        ("Alpha", "Action", "Ann Dev, Bob Dev", "2001", ["Windows", "macOS"]),
+        ("Bare Web", "", "", "", ["Web"]),
+        ("Entombed", "Adventure", "Driftwood Entertainment", "2004", ["Windows"])]
+    assert [r.entry for r in rows] == [None, None, entombed]
+    assert not any(r.tags or r.languages or r.contains or r.price or r.price_values or r.unsupported for r in rows)
+    assert all(r.game is None for r in build_rows([entombed], set()))  # a Catalog row holds no game
+
+
+def test_library_row_id_survives_the_game_object_being_replaced():
+    games, rows = _library()
+    assert [r.id for r in rows] == ["C:/games/alpha.exe", "https://bare.example/play", "entombed"]
+    replaced = [Game.from_dict(game.to_dict()) for game in games]  # as an index take or a finished job does
+    assert [r.id for r in library_rows(replaced, lambda game: None)] == [r.id for r in rows]
+
+
+def test_library_rows_show_what_the_library_tree_showed():
+    _, rows = _library()
+    cats = tree_categories(rows)
+    assert cats["platform"] == {"Windows", "macOS", "Web"}
+    assert cats["genre"] == {"Action", "Adventure", "Unknown Genre"}
+    # the developer text is one tree value, also when it names several people
+    assert cats["developer"] == {"Ann Dev, Bob Dev", "Driftwood Entertainment", "Unknown Developer"}
+    assert cats["year"] == {"2001", "2004", "Unknown Year"}
+    assert cats["tag"] == cats["price"] == cats["language"] == cats["support"] == set()
+
+
+def test_library_rows_filter_search_label_and_describe_like_any_row():
+    _, rows = _library()
+    assert [r.title for r in filter_rows(rows, "", {"platform": {"macOS", "Web"}})] == ["Alpha", "Bare Web"]
+    assert [r.title for r in filter_rows(rows, "", {"developer": {"Ann Dev, Bob Dev"}})] == ["Alpha"]
+    assert [r.title for r in filter_rows(rows, "", {"genre": {"Unknown Genre"}, "year": {"Unknown Year"}})] == \
+        ["Bare Web"]
+    assert [r.title for r in filter_rows(rows, "BOB", {})] == ["Alpha"]  # title and developer are searched
+    assert filter_rows(rows, "action", {}) == [] and filter_rows(rows, "unknown", {}) == []
+    assert [action_label(r, "windows") for r in rows] == ["Launch Alpha", "Launch Bare Web", "Launch Entombed"]
+    assert [description_text(r.entry) for r in rows] == ["", "", description_text(entombed)]

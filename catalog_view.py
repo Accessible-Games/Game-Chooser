@@ -1,4 +1,5 @@
-"""Catalog tab helpers: turn catalog index entries into list rows, filter-tree categories and description text.
+"""What both tabs' games views show: catalog index entries (the Catalog tab) and the player's games (the Library
+tab) as list rows, with their filter-tree categories and description text.
 
 Never imports wx and never fetches anything (an agarchive link is shown like any other link, never fetched).
 Entries follow catalog schema v2; a saved version 1 index may still be shown, so old shapes (links as an object,
@@ -31,13 +32,14 @@ class CatalogRow:
     year: str
     platforms: list[str]
     installed: bool
-    entry: dict
+    entry: dict | None  # None for a Library game the catalog doesn't list
     tags: list[str]
     languages: list[str]  # names, such as "French"
     contains: list[str]
     unsupported: bool
     price: str  # how the price reads; empty when not recorded
     price_values: set[str]  # the Price branch values this row is under
+    game: object = None  # a Library row's Game (library_rows); a Catalog row has none
 
     @property
     def genre(self) -> str:
@@ -114,6 +116,29 @@ def build_rows(entries: list[dict], installed_ids: set[str]) -> list[CatalogRow]
     return rows
 
 
+def library_rows(games, entry_for) -> list[CatalogRow]:
+    """The player's games as rows, so the Library tab filters, labels and describes them as the Catalog tab does.
+    `entry_for(game)` gives a catalog game's index entry (None for a game added by hand, or one the catalog no
+    longer lists).
+
+    The id is the catalog id, else the launch path: it stays the same when the Game object is replaced. The
+    values are the game's own (games.json): one genre, the developer text as one value, even when it names
+    several people."""
+    return [CatalogRow(
+        id=game.catalog_id or game.launch_path,
+        title=game.title,
+        developer=game.developer,
+        developers=[game.developer] if game.developer else [],
+        genres=[game.genre] if game.genre else [],
+        year=game.year,
+        platforms=list(game.platforms),
+        installed=True,
+        entry=entry_for(game),
+        tags=[], languages=[], contains=[], unsupported=False, price="", price_values=set(),
+        game=game,
+    ) for game in games]
+
+
 def _row_values(row: CatalogRow) -> dict[str, set[str]]:
     """Each filter-tree category's values for a row. Tags, price, language and support have no "unknown" value:
     a row that doesn't record them is simply not under them."""
@@ -150,7 +175,7 @@ def tree_values(key: str, values) -> list[str]:
 def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[CatalogRow]:
     """OR within a criterion, AND across criteria; an empty or missing criterion matches everything.
     Search matches the title, the developer and the titles of the games a collection contains, case-insensitively;
-    a search containing "unknown" matches nothing (as in the Library's FilterWorker)."""
+    a search containing "unknown" matches nothing."""
     term = (search or "").strip().lower()
     if "unknown" in term:
         return []

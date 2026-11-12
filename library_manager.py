@@ -162,7 +162,8 @@ class GameLibraryManager:
                 "last_tab": None,
                 "catalog_last_selected": None,
                 "catalog_last_search": "",
-                "catalog_tree_selections": []
+                "catalog_tree_selections": [],
+                "catalog_column_widths": None
             },
             "install": {
                 "catalog_url": DEFAULT_CATALOG_URL,

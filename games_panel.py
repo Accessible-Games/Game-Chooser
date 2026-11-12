@@ -15,11 +15,21 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""The games view a tab is built from: Search, the games list with the filter tree to its right, the action
-button (the install progress takes its place while a job runs or waits) and the description.
+"""The games view both tabs are built from: Search, the games list with the filter tree to its right, the action
+button with the install progress, and the description.
 
-UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`); what a row's action does and what
-its context menu holds are the tab's.
+UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: `build_rows` on the Catalog tab,
+`library_rows` on the Library tab). Its rules, which hold for both tabs:
+- After every refill or sort the action label and the description are set directly, never left to a selection
+  event: wx fires none when the selected row number stays the same and another game moves into it.
+- Every programmatic select also sets the list's focused item, so the arrow keys start from the selected game.
+- Every change to the games comes in through `set_rows`, which also brings the tree up to date: it is rebuilt
+  only when what it shows changed, and the player's tree selections are kept.
+- When the games change and the selected game is no longer listed, the selection keeps its row number; a filter
+  the player changes goes to the first row instead.
+- A filter is applied first and saved second, and a save that fails is logged, never raised.
+What differs between the tabs is a setting of `GamesPanel` or lives in the tab's own code (what a row's action
+does, its context menu, the Catalog's status line).
 """
 
 import logging
@@ -36,26 +46,54 @@ log = logging.getLogger(__name__)
 
 
 class GamesPanel(wx.Panel):
-    """Tab order: Search, games list, filter tree, action button, description.
+    """Tab order: Search, games list, filter tree, action button, install progress, description.
 
-    `columns`: the list's smart_list columns. `categories`: (criteria key, tree category label) in tree order.
-    `state_prefix`: what this tab's SavedState keys start with. `on_action()`: Enter, Space, double-click or the
-    button. `context_menu(row)`: the wx.Menu for the selected row (None for no menu); the view shows and
-    destroys it."""
+    Each tab's settings:
+    - `name`: the list's accessible name.
+    - `columns`: the list's smart_list columns.
+    - `categories`: (criteria key, tree category label) in tree order.
+    - `state_prefix`: what this tab's SavedState keys start with.
+    - `idle_label`: the action button's text while no game is selected.
+    - `progress_replaces_action`: while a job runs or waits, the install progress takes the action button's
+      place (True) or shows beside it (False).
+    - `on_action()`: Enter, Space, double-click or the button.
+    - `context_menu(row)`: the wx.Menu for the selected row (None for no row); None shows no menu. The view
+      shows the menu and destroys it.
+    - `sort_keys`: one sort key per column, for a list the player can sort (header click, digit keys, an arrow
+      in the header, the sort saved); None for a list that is always in title order.
+    - `tree_keys`: the categories the tree shows now (`set_tree_keys` changes them); None for all of them.
+    - `row_filter(row)`: False for a row the list leaves out while the tree still shows its values.
+    - `on_key(event)`: the tab's own keys in the list; it returns True for a key it took.
+    - `on_shown()`: called after the action label and the description were set."""
 
-    def __init__(self, parent, frame, *, name, columns, categories, state_prefix, on_action, context_menu):
+    def __init__(self, parent, frame, *, name, columns, categories, state_prefix, idle_label,
+                 progress_replaces_action, on_action, context_menu, sort_keys=None, tree_keys=None,
+                 row_filter=None, on_key=None, on_shown=None):
         super().__init__(parent)
         self.frame = frame
         self.categories = categories
         self.state_prefix = state_prefix
+        self.idle_label = idle_label
+        self.progress_replaces_action = progress_replaces_action
         self.on_action = on_action
         self.context_menu = context_menu
+        self.sort_keys = sort_keys
+        self.tree_keys = list(tree_keys) if tree_keys is not None else [key for key, _ in categories]
+        self.row_filter = row_filter
+        self.on_key = on_key
+        self.on_shown = on_shown
         self._all_rows = []
         self.displayed = []  # the rows in the list now (filtered and sorted)
-        self._categories = None  # the tree's categories; None until the tree is first built
-        self._tree_has_values = False  # until it is, the saved tree selections wait (offline start, no cache)
+        self._tree_nodes = None  # what the tree shows: (key, label, values) per category; None until first built
         self._populating = False
         self.restoring_tree = False
+        # Read here, not by the main window later: the list is filled before the rest of the saved state loads
+        self.sort_column, self.sort_ascending = 0, True
+        if sort_keys:
+            column = self._saved()[self._key("sort_column")]
+            if isinstance(column, int) and 0 <= column < len(sort_keys):
+                self.sort_column = column
+                self.sort_ascending = bool(self._saved()[self._key("sort_ascending")])
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -67,12 +105,16 @@ class GamesPanel(wx.Panel):
         search_sizer.Add(self.search_combo, 1, wx.EXPAND)
         sizer.Add(search_sizer, 0, wx.EXPAND | wx.ALL, 5)
 
-        splitter = wx.SplitterWindow(self)
+        self.splitter = splitter = wx.SplitterWindow(self)
         self.list = VirtualSmartList(parent=splitter, get_virtual_item=self._get_virtual_item,
                                      style=wx.LC_REPORT | wx.LC_SINGLE_SEL)
         self.list.set_columns(columns)
         self.list.SetLabel(name)
         self.list_ctrl.SetName(name)
+        widths = self._saved()[self._key("column_widths")]
+        if widths and not self.list.control.use_dataview:  # a DataViewCtrl (macOS) keeps its own widths
+            for column, width in enumerate(widths[:len(columns)]):
+                self.list_ctrl.SetColumnWidth(column, width)
 
         tree_panel = wx.Panel(splitter)
         tree_sizer = wx.BoxSizer(wx.VERTICAL)
@@ -88,15 +130,16 @@ class GamesPanel(wx.Panel):
         splitter.SetMinimumPaneSize(100)
         sizer.Add(splitter, 1, wx.EXPAND)
 
-        # The action button, or while an install job runs or waits, the install progress in its place
-        # (created next, so it takes the button's place in tab order too)
+        # The action button and, while an install job runs or waits, the install progress: in the button's place
+        # or beside it (created next, so it follows the button in tab order, or takes its place there too)
         self.action_sizer_slot = wx.BoxSizer(wx.HORIZONTAL)
-        self.action_btn = wx.Button(self, label=action_label(None))
+        self.action_btn = wx.Button(self, label=idle_label)
         self.action_btn.Bind(wx.EVT_BUTTON, lambda event: self.on_action())
         self.action_sizer_slot.Add(self.action_btn, 0, wx.ALIGN_CENTER)
         self.progress_area = ProgressArea(self)
         self.progress_area.Hide()
-        self.action_sizer_slot.Add(self.progress_area, 0, wx.ALIGN_CENTER)
+        self.action_sizer_slot.Add(self.progress_area, 0, wx.ALIGN_CENTER | wx.LEFT,
+                                   0 if progress_replaces_action else 10)
         sizer.Add(self.action_sizer_slot, 0, wx.ALIGN_CENTER | wx.ALL, 5)
 
         self.description = DescriptionField(self, "Description")
@@ -113,6 +156,10 @@ class GamesPanel(wx.Panel):
         self.tree_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_tree_key)
         self.search_combo.Bind(wx.EVT_TEXT, lambda event: self.apply_filters())
         self.search_combo.Bind(wx.EVT_COMBOBOX, lambda event: self.apply_filters())
+        if sort_keys:
+            self.list_ctrl.Bind(wx.EVT_LIST_COL_CLICK, lambda event: self.sort_by(event.GetColumn()))
+            self.list_ctrl.Bind(wx.EVT_CHAR, self.on_char)
+            self._show_sort()
 
     # ---- small helpers ----------------------------------------------------------------------------------------
 
@@ -153,29 +200,35 @@ class GamesPanel(wx.Panel):
         self._sync_tree()
         self._fill(stay=True)
 
-    def _sync_tree(self):
-        categories = tree_categories(self._all_rows)
-        if categories == self._categories:
-            return
-        paths = self._selected_paths() if self._tree_has_values else self._saved()[self._key("tree_selections")]
-        self._categories = categories
-        self._build_tree(categories)
-        self._restore_tree(paths)
-        self._tree_has_values = any(categories.values())
+    def set_tree_keys(self, keys):
+        """Show only these categories in the tree. A selection under a category that goes no longer filters."""
+        self.tree_keys = list(keys)
+        self._sync_tree()
+        self.on_tree_selection()
 
-    def _build_tree(self, categories):
+    def _sync_tree(self):
+        """Rebuild the tree only when what it shows changed, keeping the player's selections"""
+        values = tree_categories(self._all_rows)
+        nodes = [(key, label, tree_values(key, values[key])) for key, label in self.categories
+                 if key in self.tree_keys and values.get(key)]
+        if nodes == self._tree_nodes:
+            return
+        # Until the tree has values, the saved selections wait (the catalog offline with no saved copy)
+        paths = self._selected_paths() if self._tree_nodes else self._saved()[self._key("tree_selections")]
+        self._tree_nodes = nodes
+        self._build_tree(nodes)
+        self._restore_tree(paths)
+
+    def _build_tree(self, nodes):
         tree = self.tree_ctrl
         self.restoring_tree = True
         try:
             tree.DeleteAllItems()
             root = tree.AddRoot("Filters")
-            for key, label in self.categories:
-                values = categories.get(key)
-                if not values:
-                    continue
+            for key, label, values in nodes:
                 node = tree.AppendItem(root, label)
                 tree.SetItemData(node, key)
-                for value in tree_values(key, values):
+                for value in values:
                     child = tree.AppendItem(node, value)
                     tree.SetItemData(child, value)
             tree.Expand(root)  # the categories stay collapsed
@@ -244,8 +297,9 @@ class GamesPanel(wx.Panel):
         event.Skip()
 
     def apply_filters(self):
-        """The player changed the search or the tree: refill the list. The selected game stays selected; when
-        the new filter leaves it out, the selection goes to the first row."""
+        """A filter or the sort order changed (the search, the tree, what `row_filter` leaves out, a sort key's
+        values): refill the list. The selected game stays selected; when the new filter leaves it out, the
+        selection goes to the first row."""
         self._fill(stay=False)
 
     def _fill(self, stay: bool):
@@ -254,7 +308,11 @@ class GamesPanel(wx.Panel):
         goes to the first row. The action label and the description are set here, never left to a selection
         event: wx fires none when the selected row number stays the same and another game moves into it."""
         rows = filter_rows(self._all_rows, self.search_combo.GetValue(), self._criteria())
-        rows.sort(key=lambda r: (r.title.lower(), r.id))
+        if self.row_filter is not None:
+            rows = [row for row in rows if self.row_filter(row)]
+        rows.sort(key=lambda r: (r.title.lower(), r.id))  # title order, also among rows that tie below
+        if self.sort_keys:
+            rows.sort(key=self.sort_keys[self.sort_column], reverse=not self.sort_ascending)
         old, old_index = self.selected_row(), self.list.get_selected_index()
         wanted = old.id if old is not None else self._saved()[self._key("last_selected")]
         self._populating = True  # the selection chosen here is not the player's, so it isn't saved
@@ -264,7 +322,7 @@ class GamesPanel(wx.Panel):
             index = pick_index(rows, wanted, old_index if stay else 0)
             if index >= 0:
                 self._select(index)
-            if rows:
+            if rows and not self.list.control.use_dataview:  # a DataViewCtrl (macOS) redraws on the new count
                 self.list.refresh()
         finally:
             self._populating = False
@@ -281,18 +339,62 @@ class GamesPanel(wx.Panel):
 
     def _show_selection(self):
         row = self.selected_row()
-        self.action_btn.SetLabel(action_label(row))
+        self.action_btn.SetLabel(action_label(row) if row else self.idle_label)
         self.action_btn.Enable(row is not None)
         self.description.set_text(description_text(row.entry) if row else "")
         self.action_sizer_slot.Layout()
+        if self.on_shown is not None:
+            self.on_shown()
+
+    # ---- sorting (a list with sort keys) -----------------------------------------------------------------------
+
+    def sort_by(self, column):
+        """A header click or a digit key: sort by that column; the same column again, the other way round.
+        The selected game stays selected."""
+        if column == self.sort_column:
+            self.sort_ascending = not self.sort_ascending
+        else:
+            self.sort_column, self.sort_ascending = column, True
+        self._show_sort()
+        self.apply_filters()
+        self._saved()[self._key("sort_column")] = self.sort_column
+        self._saved()[self._key("sort_ascending")] = self.sort_ascending
+        self.save_config()
+
+    def on_char(self, event):
+        """Digit keys sort by that column"""
+        column = event.GetKeyCode() - ord("1")
+        if 0 <= column < len(self.sort_keys):
+            self.sort_by(column)
+        else:
+            event.Skip()
+
+    def _show_sort(self):
+        """An arrow in the sorted column's header (a DataViewCtrl, on macOS, has none)"""
+        if self.list.control.use_dataview:
+            return
+        for column in range(self.list_ctrl.GetColumnCount()):
+            info = self.list_ctrl.GetColumn(column)
+            text = info.GetText().rstrip(" ▲▼")
+            if column == self.sort_column:
+                text += " ▲" if self.sort_ascending else " ▼"
+            info.SetText(text)
+            self.list_ctrl.SetColumn(column, info)
+
+    # ---- the install progress, selection and focus ---------------------------------------------------------------
 
     def set_busy(self, busy: bool):
-        """While an install job runs or waits, the progress area takes the action button's place.
-        Focus never moves into the progress area; if it was on the control that hides, it goes to the list."""
+        """Show the install progress while a job runs or waits: in the action button's place, or beside it
+        (`progress_replaces_action`). Focus never moves into the progress area; if it was on a control that
+        hides, it goes to the list."""
         if self.progress_area.IsShown() == busy:
             return
-        lost_focus = self.action_btn.HasFocus() if busy else self.progress_area.has_focus_inside()
-        self.action_btn.Show(not busy)
+        if busy:
+            lost_focus = self.progress_replaces_action and self.action_btn.HasFocus()
+        else:
+            lost_focus = self.progress_area.has_focus_inside()
+        if self.progress_replaces_action:
+            self.action_btn.Show(not busy)
         self.progress_area.Show(busy)
         self.action_sizer_slot.Layout()
         self.Layout()
@@ -317,7 +419,7 @@ class GamesPanel(wx.Panel):
 
     def focus_list(self):
         """Put keyboard focus in the games list (screen reader pattern: Select, Focus, SetFocus).
-        Not while the app is starting up (a scan dialog may own focus) or a dialog is open."""
+        Not while the app is starting up (the first-run dialog may own focus) or a dialog is open."""
         if not self or self.frame.initializing or self.frame.dialog_active:
             return
         index = self.list.get_selected_index()
@@ -333,7 +435,7 @@ class GamesPanel(wx.Panel):
             self.on_action()
         elif key == wx.WXK_WINDOWS_MENU or (key == wx.WXK_F10 and event.ShiftDown()):
             self.on_context(event)
-        else:
+        elif self.on_key is None or not self.on_key(event):
             event.Skip()
 
     def on_context(self, event):
@@ -355,10 +457,14 @@ class GamesPanel(wx.Panel):
     # ---- saving ----------------------------------------------------------------------------------------------------
 
     def save_state(self):
-        """Search text and tree filters (on close). Nothing is saved while there are no rows (the catalog offline
-        with no saved copy), so the player's last filters survive until the games load."""
+        """On close, into SavedState (the caller writes the config): the column widths, the search text and the
+        tree filters. The last two are not saved while there are no rows (the catalog offline with no saved
+        copy), so the player's last filters survive until the games load."""
+        state = self._saved()
+        if not self.list.control.use_dataview:
+            state[self._key("column_widths")] = [self.list_ctrl.GetColumnWidth(column)
+                                                 for column in range(self.list_ctrl.GetColumnCount())]
         if not self._all_rows:
             return
-        state = self._saved()
         state[self._key("last_search")] = self.search_combo.GetValue()
         state[self._key("tree_selections")] = self._selected_paths()

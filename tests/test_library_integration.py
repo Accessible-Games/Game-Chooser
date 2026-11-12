@@ -35,6 +35,7 @@ def test_config_defaults_merge(isolated_manager_factory):
     assert state["catalog_last_selected"] is None
     assert state["catalog_last_search"] == ""
     assert state["catalog_tree_selections"] == []
+    assert state["column_widths"] is None and state["catalog_column_widths"] is None  # each tab's games view
 
 
 def test_config_defaults_merge_into_partial_old_config(isolated_manager_factory):
