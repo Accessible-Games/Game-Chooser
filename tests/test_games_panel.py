@@ -588,6 +588,22 @@ def test_a_tree_rebuild_keeps_the_open_categories_and_the_focused_item(make_view
     assert tree.GetItemText(tree.GetFocusedItem()) == "Genre" and view._selected_paths() == ["Genre/Puzzle"]
 
 
+def test_a_tree_rebuild_keeps_the_focus_on_the_root(make_view):
+    """"Filters", the root, is where the tree's focus starts; it has no category or value of its own"""
+    view = make_view()
+    view.set_rows(rows(ALPHA, BRAVO))
+    tree = view.tree_ctrl
+    tree.SelectItem(tree_nodes(view)["Genre"]["Puzzle"], True)
+    tree.SetFocusedItem(tree.GetRootItem())
+    assert view._selected_paths() == ["Genre/Puzzle"]
+    before = saves(view).count
+    view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))  # a refresh that adds a tree value
+    root = tree.GetRootItem()
+    assert tree.GetFocusedItem() == root and tree.GetItemText(root) == "Filters"
+    assert not tree.IsSelected(root) and view._selected_paths() == ["Genre/Puzzle"]
+    assert titles(view) == ["Alpha"] and saves(view).count == before
+
+
 def test_only_values_are_selected_from_the_saved_tree_selections(make_view):
     """A category's own name in a hand-edited config.json selects nothing"""
     view = make_view({"tree_selections": ["Genre", "Genre/Action", "Genre/Gone"]})

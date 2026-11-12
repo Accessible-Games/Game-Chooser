@@ -232,29 +232,32 @@ class GamesPanel(wx.Panel):
         # Until the tree has values, the saved selections wait (the catalog offline with no saved copy)
         paths = self._selected_paths() if self._tree_nodes else self._saved()[self._key("tree_selections")]
         tree = self.tree_ctrl
-        opened = [path for path, item in self._tree_items().items() if tree.IsExpanded(item)]
+        opened = [path for path, item in self._tree_items().items() if path and tree.IsExpanded(item)]
         focused = self._tree_path(tree.GetFocusedItem())
         self._tree_nodes = nodes
         self._build_tree(nodes)
         self._restore_tree(paths, opened, focused)
 
     def _tree_path(self, item) -> str | None:
-        """"Category/Value" for a value's item, "Category" for a category's; None for the root or no item"""
+        """"Category/Value" for a value's item, "Category" for a category's, "" for the root; None for no item"""
         tree = self.tree_ctrl
         root = tree.GetRootItem()
-        if not item or not item.IsOk() or item == root:
+        if not item or not item.IsOk():
             return None
+        if item == root:
+            return ""
         parent = tree.GetItemParent(item)
         text = tree.GetItemText(item)
         return text if parent == root else f"{tree.GetItemText(parent)}/{text}"
 
     def _tree_items(self) -> dict:
-        """Every category's and value's item, by its path"""
+        """The root's, every category's and every value's item, by its path"""
         tree = self.tree_ctrl
         items = {}
         root = tree.GetRootItem()
         if not root or not root.IsOk():
             return items
+        items[""] = root
         category, cookie = tree.GetFirstChild(root)
         while category.IsOk():
             items[self._tree_path(category)] = category
@@ -295,7 +298,8 @@ class GamesPanel(wx.Panel):
 
     def _restore_tree(self, selected, opened, focused):
         """In the tree just built: select the values that were selected, open the categories that were open and
-        put the tree's focus back on its item (on its category when the value is gone)"""
+        put the tree's focus back on its item: the root, a category, or a value (its category when the value is
+        gone)"""
         tree = self.tree_ctrl
         items = self._tree_items()
         self.restoring_tree = True
@@ -306,7 +310,7 @@ class GamesPanel(wx.Panel):
             for path in selected if isinstance(selected, list) else ():  # a hand-edited config.json may hold
                 if isinstance(path, str) and "/" in path and path in items:  # anything; a category selects nothing
                     tree.SelectItem(items[path], True)
-            item = focused and (items.get(focused) or items.get(focused.split("/")[0]))
+            item = None if focused is None else items.get(focused) or items.get(focused.split("/")[0])
             if item:
                 tree.SetFocusedItem(item)
         finally:
