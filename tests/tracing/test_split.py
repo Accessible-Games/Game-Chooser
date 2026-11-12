@@ -152,3 +152,63 @@ def test_a_session_found_by_exe_never_takes_another_sessions_root():
     assert ra.root is a_root and rb.root is b_root
     assert set(ra.tree) == {a_root.key, a_child.key} and set(rb.tree) == {b_root.key}
     assert [line["path"] for line in rb.lines if line["op"] == "file_write"] == ["C:\\g\\b.sav"]
+
+
+def stop_record(sessions, close_games=False):
+    return {"requested": 39 * S, "time": 40 * S, "close_games": close_games, "sessions": sessions}
+
+
+LISTS = {"asked_to_close": [], "ended": [], "not_closed": []}
+
+
+def test_ended_by_exit_when_every_process_exited_and_no_stop():
+    [r] = run([], procs=[proc(100, 50, 10 * S, end=20 * S)])
+    assert r.ended_by == "exit" and r.stop is None
+
+
+def test_ended_by_capture_end_when_still_running_and_no_stop():
+    [r] = run([], procs=[proc(100, 50, 10 * S)])
+    assert r.ended_by == "capture_end" and r.stop is None
+    [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()], None)
+    assert r.ended_by == "capture_end"
+
+
+def test_ended_by_stop_for_a_session_the_stop_found_running():
+    [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()], stop_record({"s": LISTS}))
+    assert r.ended_by == "stop" and r.still_running is True and r.end is None
+    assert r.stop == {"time": 40 * S, "close_games": False, **LISTS}
+
+
+def test_ended_by_stop_keeps_the_end_when_the_stop_closed_the_game():
+    root = proc(100, 50, 10 * S, end=42 * S)
+    child = proc(200, 100, 11 * S, end=55 * S)
+    lists = {"asked_to_close": [100], "ended": [200], "not_closed": []}
+    [r] = split_run([root, child], iter([ev(root, 41)]), [info()], stop_record({"s": lists}, close_games=True))
+    assert r.ended_by == "stop" and r.still_running is False and r.end == 55 * S
+    assert r.stop == {"time": 40 * S, "close_games": True, **lists}
+    assert [x["t"] for x in r.lines if x["op"] == "file_write"] == [31.0]  # writes after the stop are kept
+
+
+def test_a_session_that_ended_before_the_stop_is_ended_by_exit():
+    other = SessionInfo("other", 300, None, int(29.9 * S), int(30.1 * S), info().game, info().env, ())
+    procs = [proc(100, 50, 10 * S, end=20 * S), proc(300, 50, 30 * S)]
+    first, second = split_run(procs, iter([]), [info(), other], stop_record({"other": LISTS}))
+    assert (first.ended_by, first.stop) == ("exit", None)
+    assert second.ended_by == "stop"
+
+
+def test_a_session_with_no_root_has_no_ended_by_unless_the_stop_names_it():
+    [r] = run([], [info(root_pid=999)])
+    assert r.ended_by is None and r.stop is None
+    [r] = split_run(PROCS, iter([]), [info(root_pid=999)], stop_record({"s": LISTS}))
+    assert r.ended_by == "stop" and r.problem == PROBLEM_NO_ROOT
+
+
+def test_a_stop_record_of_the_wrong_shape_is_no_stop():
+    for bad in ({}, {"time": 40 * S}, {"time": "soon", "sessions": {"s": LISTS}}, {"time": 40 * S, "sessions": ["s"]},
+                {"time": 40 * S, "sessions": {"s": "yes"}}):
+        [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()], bad)
+        assert r.ended_by == "capture_end" and r.stop is None, bad
+    [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()],
+                    {"time": 40 * S, "sessions": {"s": {"ended": [1, "x", True], "asked_to_close": "no"}}})
+    assert r.stop == {"time": 40 * S, "close_games": False, "asked_to_close": [], "ended": [1], "not_closed": []}

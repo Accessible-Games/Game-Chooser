@@ -26,6 +26,8 @@ class SessionResult:
     end: int | None
     still_running: bool
     problem: str | None
+    ended_by: str | None = None  # "exit", "stop" or "capture_end"; None when the root wasn't found and no stop
+    stop: dict | None = None  # for a session the stop found running: time (FILETIME), close_games and the pid lists
 
 
 def _name(path: str) -> str:
@@ -102,8 +104,45 @@ def _process_lines(tree: dict[tuple[int, int], ProcInfo], zero: int) -> list[dic
     return lines
 
 
-def split_run(processes: list[ProcInfo], events: Iterable[RawEvent],
-              sessions: list[SessionInfo]) -> list[SessionResult]:
+STOP_LISTS = ("asked_to_close", "ended", "not_closed")
+
+
+def _is_int(value) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def normalize_stop(stop) -> dict | None:
+    """The recorder's stop record (the run folder's stop.json) in a known shape, or None when the run wasn't
+    stopped or the record can't be used: `requested` (FILETIME or None), `time` (FILETIME), `close_games` and
+    `sessions`, the sessions that were running, each with its three pid lists."""
+    if not isinstance(stop, dict) or not _is_int(stop.get("time")) or not isinstance(stop.get("sessions"), dict):
+        return None
+    sessions = {}
+    for session_id, entry in stop["sessions"].items():
+        if isinstance(entry, dict):
+            sessions[session_id] = {
+                name: [pid for pid in entry[name] if _is_int(pid)] if isinstance(entry.get(name), list) else []
+                for name in STOP_LISTS}
+    requested = stop.get("requested")
+    return {"requested": requested if _is_int(requested) else None, "time": stop["time"],
+            "close_games": stop.get("close_games") is True, "sessions": sessions}
+
+
+def _ended(result: SessionResult, stop: dict | None) -> None:
+    """How the session ended: by the stop when the recorder counted it as running then, whatever the capture
+    holds; else by its last process exiting, or by the capture ending under it."""
+    lists = stop["sessions"].get(result.info.session_id) if stop else None
+    if lists is not None:
+        result.ended_by = "stop"
+        result.stop = {"time": stop["time"], "close_games": stop["close_games"], **lists}
+    elif result.root is not None:
+        result.ended_by = "capture_end" if result.still_running else "exit"
+
+
+def split_run(processes: list[ProcInfo], events: Iterable[RawEvent], sessions: list[SessionInfo],
+              stop: dict | None = None) -> list[SessionResult]:
+    """`stop` is the run's stop record when the run was ended by --trace-stop (see normalize_stop)."""
+    stop = normalize_stop(stop)
     results: list[SessionResult | None] = [None] * len(sessions)
     owner: dict[tuple[int, int], int] = {}
     # Sessions whose pid is known first; then those found by exe, never taking a process another session owns.
@@ -135,6 +174,7 @@ def split_run(processes: list[ProcInfo], events: Iterable[RawEvent],
         result.lines.append(_write_line(kind, event, proc, result.time_zero, result.info))
 
     for result in results:
+        _ended(result, stop)
         if result.root is None:
             continue
         zero = result.time_zero

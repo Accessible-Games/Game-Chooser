@@ -106,3 +106,24 @@ def test_lone_surrogate_path_round_trips_and_other_lines_stay_raw(tmp_path):
     assert json.loads(second)["path"] == good and "\u00eb" in second
     data = json.loads((folder / "session.json").read_text(encoding="utf-8"))
     assert data["game"]["title"] == "Zo\u00eb \ud800"
+
+
+def test_session_json_says_how_the_session_ended(tmp_path):
+    data = json.loads((write_session(make_result(), tmp_path) / "session.json").read_text(encoding="utf-8"))
+    assert data["ended_by"] is None and data["stop"] is None
+    result = make_result()
+    result.ended_by = "capture_end"
+    data = json.loads((write_session(result, tmp_path) / "session.json").read_text(encoding="utf-8"))
+    assert data["ended_by"] == "capture_end" and data["stop"] is None
+
+
+def test_session_json_stop_fields(tmp_path):
+    result = make_result()
+    result.ended_by = "stop"
+    result.stop = {"time": T0 + 30 * S, "close_games": True, "asked_to_close": [100], "ended": [200],
+                   "not_closed": []}
+    data = json.loads((write_session(result, tmp_path) / "session.json").read_text(encoding="utf-8"))
+    assert data["ended_by"] == "stop"
+    assert data["stop"] == {"time": filetime_to_iso(T0 + 30 * S), "t": 30.0, "close_games": True,
+                            "asked_to_close": [100], "ended": [200], "not_closed": []}
+    assert data["format"] == 1
