@@ -32,26 +32,11 @@ class FakeListener:
     def __init__(self):
         self.events = []
 
-    def job_started(self, job):
-        self.events.append(("started", job))
-
-    def job_progress(self, job, progress):
-        pass
-
-    def job_finished(self, job, result):
-        self.events.append(("finished", job, result))
-
-    def job_failed(self, job, message):
-        self.events.append(("failed", job, message))
-
-    def job_cancelled(self, job):
-        self.events.append(("cancelled", job))
-
-    def queue_changed(self, waiting):
-        pass
+    def __getattr__(self, name):  # each queue event (job_started, job_finished, ...) is kept as (name, *args)
+        return lambda *args: self.events.append((name, *args))
 
     def result_for(self, job):
-        found = [e[2] for e in self.events if e[1] is job and e[0] in ("finished", "failed")]
+        found = [e[2] for e in self.events if e[1] is job and e[0] in ("job_finished", "job_failed")]
         assert found and not isinstance(found[0], str), found
         return found[0]
 
