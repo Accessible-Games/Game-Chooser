@@ -621,9 +621,13 @@ class MainFrame(wx.Frame):
                 log.exception("Couldn't refresh after the games changed")
 
     def _save_games(self):
-        """The player changed a game (Add, Edit, Delete, Locate): write games.json, then show the change"""
-        self.library_manager.save_games()
+        """The player changed a game (Add, Edit, Delete, Locate): write games.json and show the change. A save that
+        fails says so; the change stays in memory for the next save."""
+        manager = self.library_manager
+        saved = manager.save_or_keep(manager.save_games, "games.json")
         self.games_changed()
+        if not saved:
+            self._tell(messages.GAMES_NOT_SAVED.format(path=manager.games_file), "Game Chooser")
 
     def _run_job_done_hooks(self, job):
         for hook in list(self.job_done_hooks):

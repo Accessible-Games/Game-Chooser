@@ -441,6 +441,8 @@ EDIT_GAME_TITLE = "Edit Game"
 LIBRARY_NOT_FOUND_TITLE = "Library Not Found"
 GAME_BUSY = "Game Chooser is still working on {title}. Wait for it to finish, then try again."
 ACTION_NOT_STARTED = "Game Chooser couldn't start that for {title}. Try again."
+GAMES_NOT_SAVED = ("Game Chooser couldn't save your games list ({path}). Your change is kept for now; Game Chooser "
+                   "tries to save it again with your next change and when it closes.")
 
 # games.json or config.json couldn't be read at startup (told once, after the window opens)
 FILE_DAMAGED_TITLE = "Game Chooser"

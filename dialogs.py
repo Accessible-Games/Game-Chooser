@@ -98,7 +98,7 @@ class FirstTimeSetupDialog(wx.Dialog):
         with GameDialog(self, self.library_manager) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.library_manager.games.append(dlg.game)
-                self.library_manager.save_games()
+                self.parent_frame._save_games()
 
     def on_preferences(self, event):
         """Open preferences dialog"""

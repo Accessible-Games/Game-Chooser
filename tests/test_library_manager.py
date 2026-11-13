@@ -302,3 +302,13 @@ def test_a_saved_value_is_read_only_when_it_has_the_right_kind(isolated_manager_
     assert m.saved("x", kind, item=item) == expected
     assert m.saved("x", kind, "default", item=item) == ("default" if expected is None else expected)
     assert m.saved("not there", kind) is None
+
+
+
+def test_save_or_keep_says_whether_it_saved(isolated_manager, caplog):
+    def full_disk():
+        raise OSError("the disk is full")
+
+    assert isolated_manager.save_or_keep(isolated_manager.save_games, "games.json") is True
+    assert isolated_manager.save_or_keep(full_disk, "games.json") is False
+    assert "Couldn't save games.json" in caplog.text

@@ -11,6 +11,7 @@ if not wx.App.IsDisplayAvailable():
 
 import main_window  # noqa: E402
 from main_window import MainFrame  # noqa: E402
+from engine import messages  # noqa: E402
 from models import Game  # noqa: E402
 from tests.test_games_panel import app, key_event as key_down  # noqa: E402,F401  (app is a fixture)
 
@@ -80,3 +81,17 @@ def test_a_message_box_shown_while_a_game_is_held_is_inside_modal_dialog(frame, 
     would replace the game the handler holds"""
     step(frame, monkeypatch)
     assert frame.boxes == [(caption, wx.OK | wx.ICON_ERROR, frame, True)] and not frame.dialog_active
+
+
+
+@pytest.mark.parametrize("saves", [True, False])
+def test_a_games_list_that_cannot_be_saved_is_told_and_the_change_still_shows(isolated_manager, saves):
+    """Add, Edit, Delete and Locate: games.json beside the app may be read-only, or the disk full"""
+    shown, told = [], []
+    if not saves:
+        isolated_manager.save_games = lambda: (_ for _ in ()).throw(OSError("read-only"))
+    frame = SimpleNamespace(library_manager=isolated_manager, games_changed=lambda: shown.append(True),
+                            _tell=lambda text, caption: told.append(text))
+    MainFrame._save_games(frame)
+    assert shown == [True]
+    assert told == ([] if saves else [messages.GAMES_NOT_SAVED.format(path=isolated_manager.games_file)])

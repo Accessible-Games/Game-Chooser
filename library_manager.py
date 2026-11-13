@@ -189,11 +189,14 @@ class GameLibraryManager:
         _write_json_atomic(self.config_file, self.config)
 
     def save_or_keep(self, save, what):
-        """Run a save; one that fails (OSError) is logged, and the change stays in memory for the next save."""
+        """Run a save; one that fails (OSError) is logged, and the change stays in memory for the next save.
+        Returns whether it saved."""
         try:
             save()
         except OSError as e:
             log.warning("Couldn't save %s, so the change waits for the next save: %s", what, e)
+            return False
+        return True
 
     def saved(self, key, kind, default=None, item=None):
         """SavedState[key] when it is a `kind` (a list keeps only its `item`s), else `default`: a hand-edited
