@@ -68,6 +68,14 @@ def setup(tmp_path, entries, routes, **ctx):
     return eng, tmp_path / "Games"
 
 
+def dx8vb_catalog(tmp_path, **ctx):
+    """Entombed and the runtime it needs, DirectX 8 for Visual Basic: the engine, the library and both entries."""
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, **ctx)
+    return eng, lib, rt, g
+
+
 def run(eng, action, id="entombed", seen=None, **req):
     return eng.run(InstallRequest(action, id, "Games", **req), seen.append if seen is not None else quiet, never)
 
@@ -149,9 +157,7 @@ def test_is_com_runtime():
 
 
 def test_runtime_present_by_record_or_detect(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry)
     eng.ctx.registry.set("HKLM", DX8VB_KEY, "", "REG_SZ", "DirectX8")
     assert runtime_present(rt, eng.ctx.records, eng.ctx.registry)
@@ -241,9 +247,7 @@ def test_runtime_steps_run_before_the_game_is_downloaded(tmp_path):
 
 
 def test_present_runtime_is_skipped(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     eng.ctx.registry.set("HKLM", DX8VB_KEY, "", "REG_SZ", "DirectX8")
     r = run(eng, "install")
     assert eng.ctx.fetcher.requests == [g["sources"][0]["url"]]
@@ -252,9 +256,7 @@ def test_present_runtime_is_skipped(tmp_path):
 
 
 def test_uninstall_never_removes_runtimes(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     runtime = eng.ctx.records.load("dx8vb")
     run(eng, "uninstall")
@@ -265,9 +267,7 @@ def test_uninstall_never_removes_runtimes(tmp_path):
 
 
 def test_declined_elevation_fails_install_plainly(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(decline=True))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(decline=True))
     assert fails(run, eng, "install").message == messages.ELEVATION_DECLINED.format(what=DX8VB_TITLE)
     assert eng.ctx.records.load("dx8vb") is None and eng.ctx.records.load("entombed") is None
     assert not (eng.ctx.runtimes_root / "dx8vb").exists() and not (lib / "Entombed").exists()
@@ -275,9 +275,7 @@ def test_declined_elevation_fails_install_plainly(tmp_path):
 
 
 def test_failed_register_fails_install_and_leaves_no_record_and_the_locked_folder(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
     folder = eng.ctx.runtimes_root / "dx8vb"
     assert fails(run, eng, "install").message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
     assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
@@ -315,9 +313,7 @@ def test_installed_runtime_leaves_a_marker_other_accounts_read(tmp_path):
 
 
 def test_existing_marker_counts_as_present_only_while_its_files_are_there(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     put_marker(folder, {"dx8vb.dll": DX8VB})
     sec = eng.ctx.security
@@ -384,9 +380,7 @@ def test_sealed_folder_marker_is_a_checksum_line_and_counts_only_under_administr
 
 
 def test_player_owned_folder_is_refused_for_a_registering_runtime_and_left_alone(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     folder.mkdir(parents=True)  # owned by the player (FakeSecurity's default): matching files aren't enough
     (folder / "dx8vb.dll").write_bytes(DX8VB)
@@ -435,9 +429,7 @@ def test_empty_folder_without_marker_is_adopted_and_filled_for_a_runtime_with_no
 
 
 def test_folder_that_doesnt_match_is_refused_and_left_alone(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     folder.mkdir(parents=True)
     (folder / "dx8vb.dll").write_bytes(b"a different dx8vb")
@@ -465,9 +457,7 @@ def test_failed_install_removes_only_what_it_added_to_a_folder_it_found(tmp_path
 
 
 def test_after_a_failed_register_the_locked_folder_stays_and_a_retry_adopts_it(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
     folder = eng.ctx.runtimes_root / "dx8vb"
     assert fails(run, eng, "install").message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
     assert snapshot(folder) == {"dx8vb.dll": DX8VB}  # sealed: nothing the player could remove; no marker
@@ -483,9 +473,7 @@ def test_after_a_failed_register_the_locked_folder_stays_and_a_retry_adopts_it(t
 
 
 def test_found_folder_with_an_extra_file_isnt_adopted_for_a_lock_down(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     folder.mkdir(parents=True)
     (folder / "dx8vb.dll").write_bytes(DX8VB)
@@ -498,9 +486,7 @@ def test_found_folder_with_an_extra_file_isnt_adopted_for_a_lock_down(tmp_path):
 
 
 def test_found_folder_holding_a_player_owned_matching_file_isnt_adopted_for_a_lock_down(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     folder.mkdir(parents=True)
     (folder / "dx8vb.dll").write_bytes(DX8VB)  # the right bytes, but the player's file (FakeSecurity's default)
@@ -511,9 +497,7 @@ def test_found_folder_holding_a_player_owned_matching_file_isnt_adopted_for_a_lo
 
 
 def test_found_folder_with_a_stale_marker_isnt_adopted_for_a_lock_down(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     put_marker(folder, {"dx8vb.dll": DX8VB})
     (folder / "dx8vb.dll").unlink()  # the marker lists a file that is gone: it would say "installed" again
@@ -691,8 +675,6 @@ def test_long_lock_down_is_split_into_few_invocations_each_parent_first():
 
 
 def test_folder_is_made_and_filled_by_the_elevated_command_then_hashed_again_before_regsvr32(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
     seen = []
 
     def watch(exe, args, elevated):
@@ -701,7 +683,7 @@ def test_folder_is_made_and_filled_by_the_elevated_command_then_hashed_again_bef
         seen.append((what, folder.exists(), (folder / "dx8vb.dll").read_bytes() if (folder / "dx8vb.dll").exists() else None,
                      (folder / MARKER_NAME).exists()))
 
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=watch))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(on_start=watch))
     run(eng, "install")
     folder = eng.ctx.runtimes_root / "dx8vb"
     assert eng.ctx.elevator.calls == [*lock_down(eng, folder), regsvr32(eng, folder)]
@@ -711,9 +693,7 @@ def test_folder_is_made_and_filled_by_the_elevated_command_then_hashed_again_bef
 
 
 def test_marker_is_written_by_the_registering_command_only_once_regsvr32_has_succeeded(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     folder = eng.ctx.runtimes_root / "dx8vb"
     [lock, (exe, args, elevated)] = eng.ctx.elevator.calls
@@ -730,9 +710,7 @@ def test_marker_is_written_by_the_registering_command_only_once_regsvr32_has_suc
 
 
 def test_failed_register_writes_no_marker(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 5}))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(exit_codes={"regsvr32.exe": 5}))
     folder = eng.ctx.runtimes_root / "dx8vb"
     assert fails(run, eng, "install").message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
     assert eng.ctx.elevator.calls[1] == regsvr32(eng, folder) and not (folder / MARKER_NAME).exists()
@@ -789,14 +767,12 @@ def test_runtime_whose_last_step_isnt_a_register_step_gets_its_marker_in_one_mor
 
 
 def test_staging_file_swapped_during_the_prompt_is_caught_and_nothing_is_registered(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
 
     def swap(exe, args, elevated):
         if exe == "cmd.exe":  # code running as the player replaces the file the elevated command will copy
             next(p for p in tmp_path.rglob("dx8vb.dll") if "unpacked" in p.parts).write_bytes(b"MZ planted")
 
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=swap))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(on_start=swap))
     folder = eng.ctx.runtimes_root / "dx8vb"
     error = fails(run, eng, "install")
     # The elevated chain checks each copy against the download's checksum before anyone may read the folder
@@ -809,9 +785,7 @@ def test_staging_file_swapped_during_the_prompt_is_caught_and_nothing_is_registe
 
 def test_swapped_staging_file_is_still_caught_unelevated_if_the_chains_check_let_it_through(tmp_path):
     """Defence in depth: the unelevated walk and re-hash after the lock-down still refuse a wrong file."""
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     real_start = eng.ctx.elevator.start
 
@@ -827,14 +801,12 @@ def test_swapped_staging_file_is_still_caught_unelevated_if_the_chains_check_let
 
 
 def test_folder_planted_during_the_prompt_stops_the_elevated_command_and_registers_nothing(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
 
     def plant(exe, args, elevated):
         if exe == "cmd.exe":  # the folder appears between the engine's check and the elevated mkdir
             (tmp_path / "runtimes" / "dx8vb").mkdir()
 
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=plant))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(on_start=plant))
     folder = eng.ctx.runtimes_root / "dx8vb"
     error = fails(run, eng, "install")
     assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
@@ -846,8 +818,6 @@ def test_folder_planted_during_the_prompt_stops_the_elevated_command_and_registe
 @pytest.mark.parametrize("swapped", ["id", "runtimes"])
 def test_junction_planted_at_the_folder_or_a_parent_during_the_prompt_stops_the_elevated_command(tmp_path, swapped):
     import _winapi
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
     root = tmp_path / "GameChooser" / "runtimes"
     victim = tmp_path / "victim"
     victim.mkdir()
@@ -862,7 +832,7 @@ def test_junction_planted_at_the_folder_or_a_parent_during_the_prompt_stops_the_
             path.rename(path.with_name(path.name + "-moved"))
         _winapi.CreateJunction(str(victim), str(path))
 
-    eng, lib = setup(tmp_path, [rt, g], routes, runtimes_root=root, elevator=FakeElevator(on_start=swap))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, runtimes_root=root, elevator=FakeElevator(on_start=swap))
     error = fails(run, eng, "install")
     assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=root / "dx8vb")
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
@@ -905,12 +875,10 @@ def adoptable_folder(eng, files: dict[str, bytes] | None = None) -> Path:
                                            ("planted", "RUNTIME_FOLDER_CHANGED")])
 def test_junction_planted_inside_a_found_folder_during_the_prompt_is_refused(tmp_path, name, outcome):
     import _winapi
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
     victim = tmp_path / "victim"
     victim.mkdir()
     (victim / "dx8vb.dll").write_bytes(b"the victim's own file")
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     # Under the expected name, the file is missing and would be copied: the elevated command refuses to copy
     # onto something that appeared. Under another name, the post-lock walk refuses the folder.
     folder = adoptable_folder(eng, files={} if name == "dx8vb.dll" else None)
@@ -923,9 +891,7 @@ def test_junction_planted_inside_a_found_folder_during_the_prompt_is_refused(tmp
 
 
 def test_unexpected_file_planted_in_a_found_folder_during_the_prompt_is_refused(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = adoptable_folder(eng)
     eng.ctx.elevator.on_start = lambda exe, args, elevated: (
         (folder / "dx8vbhelper.dll").write_bytes(b"MZ extra") if exe == "cmd.exe" else None)
@@ -934,9 +900,7 @@ def test_unexpected_file_planted_in_a_found_folder_during_the_prompt_is_refused(
 
 
 def test_hard_linked_file_in_a_found_folder_is_refused(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = adoptable_folder(eng)
     eng.ctx.elevator.on_start = lambda exe, args, elevated: (
         os.link(folder / "dx8vb.dll", tmp_path / "elsewhere.dll") if exe == "cmd.exe" else None)
@@ -947,8 +911,6 @@ def test_hard_linked_file_in_a_found_folder_is_refused(tmp_path):
 def test_hard_link_in_staging_is_copied_and_its_other_name_is_left_alone(tmp_path):
     """R41's case: the player's staging file is a hard link to another file. The elevated command copies
     its bytes into a new file, so the other file is never touched, and the install goes through."""
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
     victim = tmp_path / "victim.dll"
     victim.write_bytes(DX8VB)
 
@@ -958,7 +920,7 @@ def test_hard_link_in_staging_is_copied_and_its_other_name_is_left_alone(tmp_pat
             staged.unlink()
             os.link(victim, staged)
 
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=link))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(on_start=link))
     run(eng, "install")
     folder = eng.ctx.runtimes_root / "dx8vb"
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB and os.stat(folder / "dx8vb.dll").st_nlink == 1
@@ -988,17 +950,13 @@ def test_runtime_with_a_subfolder_is_made_and_sealed_parent_first(tmp_path):
 
 
 def test_declined_lock_down_fails_plainly(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(decline=True))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(decline=True))
     assert fails(run, eng, "install").message == messages.ELEVATION_DECLINED.format(what=DX8VB_TITLE)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
 def test_failed_lock_down_registers_nothing(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"cmd.exe": 5}))
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(exit_codes={"cmd.exe": 5}))
     folder = eng.ctx.runtimes_root / "dx8vb"
     error = fails(run, eng, "install")
     assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
@@ -1016,9 +974,7 @@ def test_runtime_with_no_elevated_step_isnt_locked_down(tmp_path):
 @pytest.mark.windows
 def test_junction_at_the_runtime_folder_is_refused(tmp_path):
     import _winapi
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     real = tmp_path / "attacker"
     real.mkdir()
     eng.ctx.runtimes_root.mkdir(parents=True)
@@ -1031,22 +987,18 @@ def test_junction_at_the_runtime_folder_is_refused(tmp_path):
 @pytest.mark.windows
 def test_junction_at_a_parent_folder_is_refused(tmp_path):
     import _winapi
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
     real = tmp_path / "attacker"
     real.mkdir()
     root = tmp_path / "GameChooser" / "runtimes"
     root.parent.mkdir()
     _winapi.CreateJunction(str(real), str(root))
-    eng, lib = setup(tmp_path, [rt, g], routes, runtimes_root=root)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, runtimes_root=root)
     assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_LINKED.format(title=DX8VB_TITLE, path=root)
     assert list(real.iterdir()) == [] and eng.ctx.elevator.calls == []
 
 
 def test_folder_owned_by_another_account_is_refused_and_left_alone(tmp_path):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     folder.mkdir(parents=True)  # empty, as another account could leave it
     (folder / "readme.txt").write_bytes(b"theirs")
@@ -1175,9 +1127,7 @@ def test_update_installs_missing_runtime_first(tmp_path):
 
 
 def test_preference_off_private_copy_and_manifest(tmp_path, private_com):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     r = run(eng, "install")
     folder = lib / "Entombed"
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB
@@ -1205,9 +1155,7 @@ def test_preference_off_private_copy_goes_beside_an_exe_in_a_subfolder(tmp_path,
 
 def test_preference_off_embedded_manifest_notes_and_installs(tmp_path, private_com, monkeypatch):
     monkeypatch.setattr(comfree, "has_embedded_manifest", lambda exe: True)
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     r = run(eng, "install")
     folder = lib / "Entombed"
     assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Entombed", component=DX8VB_TITLE)]
@@ -1220,9 +1168,7 @@ def test_preference_off_embedded_manifest_notes_and_installs(tmp_path, private_c
 
 def test_preference_off_private_com_not_supported_notes_and_installs(tmp_path, private_com, monkeypatch):
     monkeypatch.setattr(comfree, "PRIVATE_COM_SUPPORTED", False)
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     r = run(eng, "install")
     assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Entombed", component=DX8VB_TITLE)]
     assert not (lib / "Entombed" / "entombed.exe.manifest").exists() and eng.ctx.elevator.calls == []
@@ -1304,9 +1250,7 @@ def test_full_disk_while_unpacking_a_runtime_gets_plain_words(tmp_path, private_
                 raise OSError(errno.ENOSPC, "No space left on device")
             return super().extract(archive, dest, install, cancel)
 
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=shared, extractor=FullDisk())
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=shared, extractor=FullDisk())
     assert fails(run, eng, "install").message == messages.DISK_FULL.format(title="Entombed")
 
 
@@ -1315,8 +1259,7 @@ def test_full_disk_while_copying_a_private_runtime_into_the_game_gets_plain_word
     def full_disk(root, tree, copy):
         raise OSError(errno.ENOSPC, "No space left on device")
     monkeypatch.setattr(runtimes, "_copy_into", full_disk)
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb(routes), game(routes)], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     assert fails(run, eng, "install").message == messages.DISK_FULL.format(title="Entombed")
 
 
@@ -1459,9 +1402,7 @@ def test_preference_off_repair_and_update_keep_the_private_copy(tmp_path, privat
 
 
 def test_repair_keeps_a_private_copy_after_the_preference_is_turned_on(tmp_path, private_com):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     run(eng, "install")
     assert eng.ctx.records.load("entombed").private_runtimes == ["dx8vb"]
     eng.ctx.register_shared_components = True
@@ -1503,9 +1444,7 @@ def test_rebuild_that_cant_make_the_private_copy_again_says_the_game_needs_the_c
 
 
 def test_repair_of_a_game_installed_shared_never_adds_a_private_copy(tmp_path, private_com):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     assert eng.ctx.records.load("entombed").private_runtimes == []
     # The runtime has gone missing since (its record and folder lost), and the preference is now off.
@@ -1538,9 +1477,7 @@ def test_undo_makes_the_previous_versions_private_copies(tmp_path, private_com):
 
 
 def test_older_record_without_the_field_is_read_from_its_files(tmp_path, private_com):
-    routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     run(eng, "install")
 
     def older(rec):
