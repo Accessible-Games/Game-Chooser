@@ -768,8 +768,9 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     leaves it as it is); it is saved with the installer's files, before the system steps run.
     Applied steps the installer's source no longer has are undone once it has run, before Undo removes
     their files, so a failed or cancelled run leaves every step alone; those in `spare_steps` (the
-    extras' steps, for extras the caller applies next) aren't. The new steps run after the installer. The record's extras are left as they are: the caller applies and
-    records them next, so if that fails, a retry still knows which extras the game has.
+    extras' steps, for extras the caller applies next) aren't. The new steps run after the installer.
+    The record's extras are left as they are: the caller applies and records them next, so if that
+    fails, a retry still knows which extras the game has.
 
     For Undo, `undo_of` is the undo point being undone. A file the newer version recorded that this
     run didn't claim, and that is unchanged, is removed, unless the older version recorded that path
