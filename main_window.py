@@ -96,7 +96,7 @@ class MainFrame(wx.Frame):
         self.initializing = True  # Flag to prevent focus stealing during startup
         # Libraries hidden via View > Libraries. Storing hidden (not shown) names means
         # newly added libraries are visible by default and stale names are harmless.
-        self.hidden_libraries = self._load_hidden_libraries()
+        self.hidden_libraries = set(self.library_manager.saved("hidden_libraries", list, [], str))
         self.library_menu_items = []  # (library name, menu item) pairs in the Libraries submenu
 
         # Set up UI
@@ -129,9 +129,8 @@ class MainFrame(wx.Frame):
         self.notebook = wx.Notebook(self)
         self.create_menu_bar()
 
-        tree_keys = self.library_manager.config["SavedState"].get("tree_filters")
-        if not isinstance(tree_keys, list):  # an empty list is a valid saved choice
-            tree_keys = [key for key, _ in LIBRARY_TREE]
+        # None (nothing saved) shows every category; an empty list is a valid saved choice
+        tree_keys = self.library_manager.saved("tree_filters", list, item=str)
         self.library_view = GamesPanel(
             self.notebook, self, name="Games", categories=LIBRARY_TREE, tree_keys=tree_keys, state_prefix="",
             idle_label="Launch",
@@ -1073,12 +1072,6 @@ class MainFrame(wx.Frame):
         for key, item in self.filter_items.items():
             item.Check(key in self.library_view.tree_keys)
 
-    def _load_hidden_libraries(self):
-        """The ids of the libraries the player has hidden"""
-        state = self.library_manager.config["SavedState"]
-        state.setdefault("hidden_libraries", [])
-        return set(state["hidden_libraries"])
-
     def build_libraries_menu(self):
         """Build/rebuild the libraries submenu with current libraries"""
         # Clear existing items and their handlers
@@ -1158,19 +1151,14 @@ class MainFrame(wx.Frame):
     
     def load_saved_state(self):
         """Load saved window state"""
-        state = self.library_manager.config["SavedState"]
-
-        # Window size and position
-        if state["window_size"]:
-            self.SetSize(state["window_size"])
-        else:
-            # Default to 50% of screen
-            display = wx.Display()
-            rect = display.GetClientArea()
+        size, position = (self.library_manager.saved(key, list, [], int) for key in ("window_size", "window_position"))
+        if len(size) == 2:
+            self.SetSize(size)
+        else:  # half the screen
+            rect = wx.Display().GetClientArea()
             self.SetSize(rect.width // 2, rect.height // 2)
-
-        if state["window_position"]:
-            self.SetPosition(state["window_position"])
+        if len(position) == 2:
+            self.SetPosition(position)
         else:
             self.Centre()
 
@@ -1187,7 +1175,7 @@ class MainFrame(wx.Frame):
 
         # Opening tab: the saved one, else Catalog on a first run and Library otherwise.
         # ChangeSelection, not SetSelection: no page-changed event (and no focus move) during startup.
-        tab = initial_tab(state.get("last_tab"), self.library_manager.is_first_run)
+        tab = initial_tab(self.library_manager.saved("last_tab", str), self.library_manager.is_first_run)
         self.notebook.ChangeSelection(TABS.index(tab))
         self.update_tab_menus()
 

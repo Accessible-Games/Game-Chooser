@@ -731,6 +731,15 @@ def test_the_tree_is_rebuilt_only_when_what_it_shows_changed(make_view):
     assert len(builds) == 2
 
 
+def test_a_view_starts_from_any_hand_edited_saved_state(make_view):
+    """config.json may hold anything; what isn't the right kind is ignored and the view builds as on a first run"""
+    view = make_view(saved={"column_widths": 5, "last_search": 5, "tree_selections": 5, "last_selected": [1],
+                            "splitter_position": "middle", "sort_column": "2"})
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.restore_sash()
+    assert view.search_combo.GetValue() == "" and titles(view) == ["Alpha", "Bravo"] and selected(view) == 0
+
+
 def test_a_config_save_that_fails_is_logged_and_never_raised(make_view, caplog):
     """Called directly: an exception inside a wx event handler is swallowed by wx and would prove nothing"""
     view = make_view(sort_keys=SORT_KEYS)

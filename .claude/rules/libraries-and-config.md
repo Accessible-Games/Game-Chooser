@@ -43,7 +43,9 @@ paths:
   `last_search`, `tree_selections` (path strings such as `Platform/Windows`), `sort_column`, `sort_ascending`,
   `column_widths` and `splitter_position`: the Library under those names, the Catalog under the same names with
   `catalog_` in front. Library only: `tree_filters` (subset of platform/genre/developer/year);
-  `hidden_libraries` is added when the main window starts, if it is not there yet.
+  `hidden_libraries` is written when the player first hides or shows a library. Every `SavedState` value is read
+  through `GameLibraryManager.saved(key, kind, default, item)`: a value of the wrong kind (a hand-edited file) is
+  ignored and the default used, and a list keeps only its items of the right kind.
 - A missing config starts from defaults (first run); missing keys (also inside `SavedState` and `install`) are
   filled in.
 
