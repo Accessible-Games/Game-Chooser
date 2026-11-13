@@ -47,6 +47,10 @@ def is_engine_dir(name: str) -> bool:
     return name == STAGING_DIR_NAME or name.startswith(BACKUP_PREFIX)
 
 
+def is_code(path) -> bool:
+    return PurePosixPath(str(path).replace("\\", "/")).suffix.lower() in EXECUTABLE_CODE_SUFFIXES
+
+
 def norm_key(rel: str) -> str:
     return rel.replace("\\", "/").lower()
 

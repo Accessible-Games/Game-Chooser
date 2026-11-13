@@ -28,11 +28,11 @@ from typing import Protocol
 
 from . import messages
 from .elevation import RunningProcess
-from .errors import Cancelled, ElevationDeclined, InstallFailed, StepError, UnsafePath
+from .errors import Cancelled, ElevationDeclined, InstallFailed, StepError, UnsafePath, check_cancel
 from .installer_watch import ProcessWatch, watch_process  # noqa: F401  (re-exported)
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import EXECUTABLE_CODE_SUFFIXES, STAGING_DIR_NAME, is_engine_dir, norm_key, unique_path
+from .paths import STAGING_DIR_NAME, is_code, is_engine_dir, norm_key, unique_path
 from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is_runtime_owner, record_folder
 from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link
 from .sources import hash_file
@@ -269,11 +269,6 @@ class _Outcome:
     tree_done: bool  # the installer and everything it started were seen to finish
 
 
-def _check(cancel: Callable[[], bool]) -> None:
-    if cancel():
-        raise Cancelled()
-
-
 def _interactive(ctx, installer: dict, title: str) -> bool:
     """True when the player drives the installer; refuses if no one can."""
     if silent_args_for(installer) is not None:
@@ -503,7 +498,7 @@ def install(ctx, item: RunItem, target: Path, library_id: str, library_path: Pat
     """
     title = item.title
     interactive = _interactive(ctx, item.installer, title)
-    _check(cancel)
+    check_cancel(cancel)
     if interactive:
         ctx.installer_ui.announce_target(title, target)
     keys_before = snapshot_uninstall_keys(ctx.uninstall_reader)
@@ -670,10 +665,6 @@ def _apply_system_steps(ctx, record: InstallRecord, steps: list[dict], notes: li
 # ---- the player's files, set aside ---------------------------------------------------------------------
 
 
-def _is_code(rel: str) -> bool:
-    return os.path.splitext(rel)[1].lower() in EXECUTABLE_CODE_SUFFIXES
-
-
 def _player_files(record: InstallRecord, game_dir: Path) -> dict[str, str]:
     """rel -> sha256 of the files in the game folder the record doesn't cover: not recorded, or
     changed since install. Game Chooser's backup folders are the player's too. Links are never entered."""
@@ -800,10 +791,10 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     """
     title = item.title
     interactive = _interactive(ctx, item.installer, title)
-    _check(cancel)
+    check_cancel(cancel)
     player = _player_files(record, game_dir)
-    aside = _SetAside.copy(ctx, item.catalog_id, game_dir, [r for r in player if not _is_code(r)], title)
-    player_code = {rel: sha for rel, sha in player.items() if _is_code(rel)}
+    aside = _SetAside.copy(ctx, item.catalog_id, game_dir, [r for r in player if not is_code(r)], title)
+    player_code = {rel: sha for rel, sha in player.items() if is_code(rel)}
     # Applied steps not wanted any more are undone now, while the files they name are still there.
     kept_steps, unwanted, new_steps = split_steps(record.steps, item.steps, spare_steps)
     step_notes = undo_steps(unwanted, _step_ctx(ctx, record))
@@ -955,7 +946,7 @@ def run_vendor_uninstaller(ctx, record: InstallRecord, game_dir: Path, title: st
         return [messages.VENDOR_UNINSTALLER_MISSING.format(title=title)]
     exe, args = split_command(command)
     installer = ((record.source.install or {}).get("installer") or {})
-    _check(cancel)
+    check_cancel(cancel)
     aside = _SetAside.copy(ctx, record.catalog_id, game_dir, list(_player_files(record, game_dir)), title)
     progress(Progress("vendor_uninstaller"))
     try:

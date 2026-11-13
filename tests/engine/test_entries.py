@@ -26,6 +26,7 @@ def test_minimal_entry_is_visible():
     e = {"id": "g", "kind": "game", "title": "G", "sources": [src()]}
     assert [x["id"] for x in visible_games({"g": e}, "windows")] == ["g"]
     assert game_fields(e) == {"title": "G", "developer": "", "genre": "", "year": "", "platforms": ["Windows"]}
+    assert game_fields({"id": "g", "kind": "game", "sources": [src()]})["title"] == "g"  # no title: the id
 
 
 def test_game_fields_full():

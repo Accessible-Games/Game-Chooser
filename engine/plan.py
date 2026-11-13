@@ -8,11 +8,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import messages
-from .entries import extras_of, platform_sources
+from .entries import extras_of, platform_sources, runs_installer, title_of
 from .errors import InstallFailed
 from .pricing import install_warning, pricing_of
 from .run_installer import silent_args_for
-from .runtimes import _has_elevated_steps, _is_installer_runtime, _runs_installer, is_com_runtime, missing_runtimes
+from .runtimes import _has_elevated_steps, _is_installer_runtime, is_com_runtime, missing_runtimes
 
 @dataclass
 class ExtraChoice:
@@ -69,15 +69,11 @@ def _first_run_size(entry: dict, platform: str | None) -> int:
     return size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else 0
 
 
-def _title(entry: dict) -> str:
-    return entry.get("title") or entry["id"]
-
-
 def _installer_only(runtime: dict, platform: str | None) -> bool:
     if platform:
         return _is_installer_runtime(runtime, platform)
     sources = runtime.get("sources") or []
-    return bool(sources) and all(_runs_installer(s) for s in sources)
+    return bool(sources) and all(runs_installer(s) for s in sources)
 
 
 def _needs_administrator(runtime: dict, platform: str | None) -> bool:
@@ -94,7 +90,7 @@ def dependency_line(runtime: dict, register_shared_components: bool, platform: s
     Without a `platform`, every source of the runtime is considered. A shared install is said to need
     administrator permission only when it will ask for it.
     """
-    title = _title(runtime)
+    title = title_of(runtime)
     size = _size(runtime, platform)
     if not register_shared_components:
         if _installer_only(runtime, platform):
@@ -129,7 +125,7 @@ def _extra_choices(entry: dict, entries: dict, platform: str, installed: set[str
     for info in extras_of(entry, entries, platform):
         if info.entry["id"] in installed or (optional_only and info.required):
             continue
-        choices.append(ExtraChoice(info.entry["id"], _title(info.entry), info.required,
+        choices.append(ExtraChoice(info.entry["id"], title_of(info.entry), info.required,
                                    _size(info.entry, platform)))
     return choices
 
@@ -169,7 +165,7 @@ def build_install_plan(entry_id: str, entries: dict, libraries: list[dict], reco
     count as "present", as the install itself does.
     """
     entry = entries[entry_id]
-    plan = InstallPlan(entry_id, _title(entry), action, is_web=_is_web(entry, platform))
+    plan = InstallPlan(entry_id, title_of(entry), action, is_web=_is_web(entry, platform))
     record = records.load(entry_id)
     installed = set(record.extras) if record is not None and not record.uninstalled else set()
     if action == "extras":

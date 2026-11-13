@@ -218,6 +218,16 @@ def extras_of(entry: dict, entries: dict, platform: str) -> list[ExtraInfo]:
     return result
 
 
+def title_of(entry: dict) -> str:
+    return entry.get("title") or entry["id"]
+
+
+def runs_installer(source: dict) -> bool:
+    """True for a source that is an installer that must run."""
+    install = source.get("install") or {}
+    return install.get("method") == "installer" and (install.get("installer") or {}).get("mode") == "run"
+
+
 def first_developer(entry: dict) -> str:
     developers = entry.get("developer") or []
     return developers[0] if developers else ""
@@ -239,7 +249,7 @@ def game_fields(entry: dict, platform: str | None = None) -> dict:
     genres = [g for g in entry.get("genres") or [] if isinstance(g, str) and g.strip()]
     year = entry.get("year")
     return {
-        "title": entry.get("title", ""),
+        "title": title_of(entry),
         "developer": ", ".join(entry.get("developer") or []),
         "genre": genres[0].strip() if genres else "",  # the main genre
         "year": str(year) if year is not None else "",

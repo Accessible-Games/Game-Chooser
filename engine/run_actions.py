@@ -15,6 +15,7 @@ import shutil
 from pathlib import Path
 
 from . import jobs, messages, run_installer, runtimes
+from .entries import title_of
 from .errors import InstallFailed, NoVerifiedSource, UnsafePath
 from .records import InstalledSource, InstallRecord
 from .run_installer import KEEP_UNDO_POINT, RunItem
@@ -25,7 +26,7 @@ from .sources import Fetched, hash_file
 def repair(engine, entry: dict, rec: InstallRecord, game_dir: Path, progress, cancel) -> "jobs.JobResult":
     """Run the recorded installer again over the game's folder, then put its recorded extras back.
     The record keeps its source and extras, and its undo point stays as it was: Repair isn't one."""
-    game_id, title = entry["id"], jobs._title(entry)
+    game_id, title = entry["id"], title_of(entry)
     extra_sources = dict(rec.extras)
     if extra_sources:  # applied by Game Chooser after the installer, so checked before it runs
         engine._require_writable(rec, game_dir, title)
@@ -55,7 +56,7 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
     put its extras back, then put back the player's copies the update moved aside, where the update's
     file is untouched."""
     ctx = engine.ctx
-    game_id, title = entry["id"], jobs._title(entry)
+    game_id, title = entry["id"], title_of(entry)
     previous = rec.previous
     extra_sources = {k: jobs._source_from(v) for k, v in (previous.get("extras") or {}).items()}
     if extra_sources or rec.extras:  # changed by Game Chooser after the installer, so checked before it runs
@@ -161,6 +162,6 @@ def _fetch_recorded(engine, entry: dict, source: InstalledSource, extra_sources:
 def _run_item(engine, entry: dict, fetched: Fetched, source: InstalledSource) -> RunItem:
     """The downloaded installer, set up as recorded, with the recorded source kept exactly."""
     install = fetched.source.get("install") or {}
-    return RunItem(entry["id"], entry.get("kind", "game"), jobs._title(entry), fetched.path,
+    return RunItem(entry["id"], entry.get("kind", "game"), title_of(entry), fetched.path,
                    dict(install.get("installer") or {}), jobs._steps(fetched), source,
                    jobs._recorded_launch(source, entry, engine.ctx.platform))

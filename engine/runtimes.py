@@ -62,14 +62,14 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from . import comfree, messages
-from .entries import platform_sources
-from .errors import Cancelled, ElevationDeclined, ExtractError, InstallFailed, StepError, UnsafePath
+from .entries import platform_sources, runs_installer, title_of
+from .errors import Cancelled, ElevationDeclined, ExtractError, InstallFailed, StepError, UnsafePath, check_cancel
 from .messages import Progress
 from .paths import norm_key, safe_join
 from .records import (RUNTIME_OWNER_PREFIX, InstalledSource, InstallRecord, RecordedFile, hash_tree,
                       is_runtime_owner, runtime_owner)
 from .run_installer import run_installer_untracked
-from .safety import _prune_empty_dirs, _resolve_game_path, is_link
+from .safety import _has_link_component, _prune_empty_dirs, _resolve_game_path, is_link
 from .sources import hash_file
 from .steps import StepContext, _existing_file, run_file_steps, run_system_steps, undo_steps
 
@@ -409,16 +409,12 @@ def _write_marker(folder: Path, marker: dict) -> None:
         log.warning("Couldn't write the runtime marker in %s", folder, exc_info=True)
 
 
-def _title(entry: dict) -> str:
-    return entry.get("title") or entry["id"]
-
-
 def dependency_order(entry: dict, entries: dict) -> list[dict]:
     """Every runtime `entry` depends on, recursively, each once, deepest first.
 
     Raises InstallFailed (plain words) on a cycle, or on a dependency that isn't a runtime in the catalog.
     """
-    title = _title(entry)
+    title = title_of(entry)
     order: list[dict] = []
     done: set[str] = set()
     path = [entry["id"]]
@@ -452,18 +448,13 @@ def missing_runtimes(entry: dict, entries: dict, records, registry, root: Path |
 # ---- what to do about them --------------------------------------------------------------------------------
 
 
-def _runs_installer(source: dict) -> bool:
-    install = source.get("install") or {}
-    return install.get("method") == "installer" and (install.get("installer") or {}).get("mode") == "run"
-
-
 def _is_installer_runtime(entry: dict, platform: str) -> bool:
     sources = platform_sources(entry, platform)
-    return bool(sources) and all(_runs_installer(s) for s in sources)
+    return bool(sources) and all(runs_installer(s) for s in sources)
 
 
 def needs_shared_notes(title: str, runtimes: list[dict]) -> list[str]:
-    return [messages.NEEDS_SHARED_COMPONENT.format(title=title, component=_title(r)) for r in runtimes]
+    return [messages.NEEDS_SHARED_COMPONENT.format(title=title, component=title_of(r)) for r in runtimes]
 
 
 @dataclass
@@ -527,17 +518,12 @@ def private_runtimes(rec: InstallRecord, entry: dict, ctx, ids: list[str] | None
     for runtime_id in recorded_private(rec, entry, ctx.entries) if ids is None else ids:
         runtime = ctx.entries.get(runtime_id)
         if runtime is None or runtime.get("kind") != "runtime":
-            raise InstallFailed(messages.DEPENDENCY_UNAVAILABLE.format(title=_title(entry)))
+            raise InstallFailed(messages.DEPENDENCY_UNAVAILABLE.format(title=title_of(entry)))
         entries.append(runtime)
     return entries
 
 
 # ---- shared installs --------------------------------------------------------------------------------------
-
-
-def _check(cancel) -> None:
-    if cancel():
-        raise Cancelled()
 
 
 def _clear(path: Path) -> None:
@@ -552,13 +538,13 @@ def _clear_or_fail(path: Path) -> None:
 
 def unpack(ctx, fetched, dest: Path, progress, cancel) -> Path:
     """Unpack a downloaded catalog item (a game, an extra or a runtime) into `dest`; returns its content root."""
-    _check(cancel)
+    check_cancel(cancel)
     progress(Progress("extracting"))
     try:
         root = ctx.extractor.extract(fetched.path, dest, fetched.source.get("install") or {}, cancel)
     except ExtractError as e:
         raise InstallFailed(str(e)) from e
-    _check(cancel)
+    check_cancel(cancel)
     return root
 
 
@@ -576,16 +562,16 @@ def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cance
     for the player: the downloads' (the developer changed a file) and the installers' (a restart)."""
     notes = []
     for runtime in runtimes:
-        _check(cancel)
-        progress(Progress("installing_dependency", detail=_title(runtime)))
+        check_cancel(cancel)
+        progress(Progress("installing_dependency", detail=title_of(runtime)))
         work_dir = work / runtime["id"]
         _clear_or_fail(work_dir)
         try:
             fetched = fetch(runtime, work_dir)
-            _check(cancel)
+            check_cancel(cancel)
             _make_root(ctx, runtime)
             target = ctx.runtimes_root / runtime["id"]
-            if _runs_installer(fetched.source):
+            if runs_installer(fetched.source):
                 notes += _run_installer(ctx, runtime, fetched, target, progress, cancel)
             else:
                 _unpack(ctx, runtime, fetched, target, work_dir / "unpacked", progress, cancel)
@@ -601,15 +587,17 @@ def _make_root(ctx, runtime: dict) -> None:
         ctx.runtimes_root.mkdir(parents=True, exist_ok=True)
     except OSError as e:
         raise InstallFailed(messages.RUNTIME_FOLDER_NOT_CREATED.format(path=ctx.runtimes_root,
-                                                                       title=_title(runtime))) from e
+                                                                       title=title_of(runtime))) from e
 
 
-def _source(runtime: dict, fetched) -> InstalledSource:
+def installed_source(entry: dict, fetched, launch: str | None = None) -> InstalledSource:
+    """How a downloaded catalog item is recorded (a game's with its `launch` hint)."""
     return InstalledSource(
         url=fetched.source["url"], sha256=fetched.sha256, size=fetched.size,
         catalog_sha256=fetched.source.get("sha256"), catalog_size=fetched.source.get("size"),
-        position=fetched.position, version=runtime.get("version"),
-        install=dict(fetched.source.get("install") or {}), steps=list(fetched.source.get("steps") or []))
+        position=fetched.position, version=entry.get("version"),
+        install=dict(fetched.source.get("install") or {}), steps=list(fetched.source.get("steps") or []),
+        launch=launch)
 
 
 def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) -> list[str]:
@@ -618,7 +606,7 @@ def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) 
 
     The record (untracked, no files) only stops the installer being run again for the next game.
     """
-    title = _title(runtime)
+    title = title_of(runtime)
     installer = dict((fetched.source.get("install") or {}).get("installer") or {})
     # A failed or cancelled run removes only the files it added to `target`.
     notes = run_installer_untracked(fetched.path, installer, target, ctx, progress, cancel, title=title)
@@ -628,7 +616,7 @@ def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) 
     try:
         ctx.records.save(InstallRecord(
             catalog_id=runtime["id"], kind="runtime", library_id="", folder=str(target), launch_path="",
-            source=_source(runtime, fetched), extras={}, files={}, steps=[], method="run", tracked=False))
+            source=installed_source(runtime, fetched), extras={}, files={}, steps=[], method="run", tracked=False))
     except OSError as e:
         raise InstallFailed(messages.FAILED.format(title=title)) from e
     return notes
@@ -655,7 +643,7 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, progres
     player filled is removed if this run made it, else just the files it added; a sealed folder stays as
     it is (without a marker it counts as absent, and a retry adopts it).
     """
-    title = _title(runtime)
+    title = title_of(runtime)
     install = fetched.source.get("install") or {}
     steps = list(fetched.source.get("steps") or [])
     elevated = _elevated_steps(steps)
@@ -670,7 +658,7 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, progres
     try:
         root = unpack(ctx, fetched, unpack_dir, progress, cancel)
         run_file_steps(steps, root)
-        _check(cancel)
+        check_cancel(cancel)
         incoming = hash_tree(root)
         if found and not _adoptable(ctx, target, incoming, elevated):
             raise InstallFailed(messages.RUNTIME_FOLDER_NOT_OURS.format(title=title, path=target))
@@ -699,7 +687,7 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, progres
         files = {key: RecordedFile(display, sha, runtime["id"]) for key, (display, sha) in incoming.items()}
         record = InstallRecord(
             catalog_id=runtime["id"], kind="runtime", library_id="", folder=str(target), launch_path="",
-            source=_source(runtime, fetched), extras={}, files=files, steps=applied,
+            source=installed_source(runtime, fetched), extras={}, files=files, steps=applied,
             method=install.get("method", ""))
         if elevated and (target / MARKER_NAME).is_file():
             # Installed for every account now, whatever happens to this account's record (R45).
@@ -916,14 +904,14 @@ def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
     A runtime whose downloaded file is an installer that must run can't be copied: it is marked unusable."""
     copies = []
     for runtime in runtimes:
-        _check(cancel)
-        progress(Progress("installing_dependency", detail=_title(runtime)))
+        check_cancel(cancel)
+        progress(Progress("installing_dependency", detail=title_of(runtime)))
         work_dir, unpacked = work / "private" / runtime["id"], staging / "runtimes" / runtime["id"]
         _clear_or_fail(work_dir)
         _clear_or_fail(unpacked)
         try:
             fetched = fetch(runtime, work_dir)
-            if _runs_installer(fetched.source) or (fetched.source.get("install") or {}).get("method") == "url":
+            if runs_installer(fetched.source) or (fetched.source.get("install") or {}).get("method") == "url":
                 copies.append(PrivateCopy(runtime, [], [], [], usable=False))
                 continue
             root = unpack(ctx, fetched, unpacked, progress, cancel)
@@ -931,10 +919,10 @@ def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
             run_file_steps_or_fail(steps, root)
             hashes = hash_tree(root)
         except ValueError as e:
-            raise InstallFailed(messages.FAILED.format(title=_title(runtime))) from e
+            raise InstallFailed(messages.FAILED.format(title=title_of(runtime))) from e
         finally:
             _clear(work_dir)
-        _check(cancel)
+        check_cancel(cancel)
         copies.append(PrivateCopy(runtime, [], [], [s.get("path") for s in steps if s.get("action") == "register"],
                                   root=root, hashes=hashes, note=fetched.note))
     return copies
@@ -948,19 +936,9 @@ def _copy_into(root: Path, tree: Path, copy: PrivateCopy) -> None:
             dest = tree / src.relative_to(root)
             if is_link(src) or os.path.lexists(dest):
                 continue
-            _make_dirs(dest.parent, copy)
+            _make_folders(dest.parent, copy.dirs)
             shutil.copy2(src, dest)
             copy.files.append(dest)
-
-
-def _make_dirs(folder: Path, copy: PrivateCopy) -> None:
-    missing = []
-    while not os.path.lexists(folder):
-        missing.append(folder)
-        folder = folder.parent
-    for made in reversed(missing):
-        made.mkdir()
-        copy.dirs.append(made)
 
 
 def _remove_copy(copy: PrivateCopy, tree: Path) -> None:
@@ -1019,7 +997,7 @@ def _move_beside(copy: PrivateCopy, tree: Path, beside: Path) -> None:
             path.unlink()
             copy.files.remove(path)
             continue
-        _make_dirs(dest.parent, copy)
+        _make_folders(dest.parent, copy.dirs)
         os.replace(path, dest)
         copy.files[copy.files.index(path)] = dest  # kept true to disk, so a failure removes what moved
     copy.dirs = [*old_dirs, *copy.dirs]
@@ -1163,7 +1141,7 @@ def _shared_source(ctx, runtime: dict, title: str) -> CopySource:
     administrator can have put there (see _sealed_files)."""
     folder = Path(ctx.runtimes_root) / runtime["id"]
     untrusted = CopySource(runtime, note=messages.RUNTIME_FILES_NOT_COPIED.format(title=title,
-                                                                                  component=_title(runtime)))
+                                                                                  component=title_of(runtime)))
     try:
         if not os.path.lexists(folder):
             return CopySource(runtime)  # present some other way (its detect hint): nothing of ours to copy
@@ -1231,16 +1209,6 @@ def _make_folders(folder: Path, made: list[Path]) -> None:
         made.append(path)
 
 
-def _link_on_the_way(path: Path, root: Path) -> bool:
-    """True if a folder between `root` and `path` is a link (checked lexically, as the planner does)."""
-    current = Path(path).parent
-    while current != root and root in current.parents:
-        if is_link(current):
-            return True
-        current = current.parent
-    return False
-
-
 def place_copies(sources: list[CopySource], exe_dir: Path, root: Path, title: str,
                  ours=lambda path: None) -> tuple[dict[Path, tuple[str, str]], dict[str, str]]:
     """Copy each source's files into `exe_dir` (inside `root`), keeping their layout, and check each copy's
@@ -1255,12 +1223,12 @@ def place_copies(sources: list[CopySource], exe_dir: Path, root: Path, title: st
         if source.folder is None:
             continue
         runtime_id = source.runtime["id"]
-        note = messages.RUNTIME_FILES_NOT_COPIED.format(title=title, component=_title(source.runtime))
+        note = messages.RUNTIME_FILES_NOT_COPIED.format(title=title, component=title_of(source.runtime))
         for rel, sha in sorted(source.files.items()):
             try:
                 src, src_linked = _resolve_game_path(source.folder, rel)
                 dest, dest_linked = _resolve_game_path(exe_dir, rel)
-                if src_linked or dest_linked or _link_on_the_way(dest, root):
+                if src_linked or dest_linked or _has_link_component(dest.parent, root):
                     raise UnsafePath(rel)
             except (UnsafePath, TypeError, ValueError, OSError):
                 notes[runtime_id] = note
@@ -1358,7 +1326,7 @@ def copies_after_installer(ctx, entry: dict, rec: InstallRecord, game_dir: Path,
     rec.runtime_copies = [s.runtime["id"] for s in sources]
     if not rec.launch_path:
         ctx.records.save(rec)
-        return [messages.RUNTIME_FILES_NO_PROGRAM.format(title=title, component=_title(s.runtime))
+        return [messages.RUNTIME_FILES_NO_PROGRAM.format(title=title, component=title_of(s.runtime))
                 for s in sources if s.files or s.note]
     recorded = {key: f for key, f in rec.files.items() if is_runtime_owner(f.owner)}
 
@@ -1387,5 +1355,5 @@ def copies_skipped_notes(ctx, entry: dict, copies: list[PrivateCopy], title: str
     """The notes for a game whose folder gets no copies (untracked, or needing administrator permission): one
     for each runtime that has files to copy, except those its private copies already have a note for."""
     private = {c.runtime["id"] for c in copies}
-    return [text.format(title=title, component=_title(s.runtime), **values)
+    return [text.format(title=title, component=title_of(s.runtime), **values)
             for s in copy_sources(ctx, entry, [], title) if (s.files or s.note) and s.runtime["id"] not in private]

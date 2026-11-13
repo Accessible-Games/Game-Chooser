@@ -9,6 +9,11 @@ class Cancelled(EngineError):
     pass
 
 
+def check_cancel(cancel) -> None:
+    if cancel():
+        raise Cancelled()
+
+
 class BlockedHost(EngineError):
     pass
 
