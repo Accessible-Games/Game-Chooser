@@ -875,20 +875,17 @@ def test_junction_planted_inside_a_found_folder_during_the_prompt_is_refused(tmp
     assert eng.ctx.records.load("dx8vb") is None
 
 
-def test_unexpected_file_planted_in_a_found_folder_during_the_prompt_is_refused(tmp_path):
+@pytest.mark.parametrize("during_prompt", [
+    pytest.param(lambda folder, tmp_path: (folder / "dx8vbhelper.dll").write_bytes(b"MZ extra"),
+                 id="an unexpected file planted"),
+    pytest.param(lambda folder, tmp_path: os.link(folder / "dx8vb.dll", tmp_path / "elsewhere.dll"),
+                 id="a file hard-linked elsewhere"),
+])
+def test_found_folder_changed_during_the_prompt_is_refused(tmp_path, during_prompt):
     eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = adoptable_folder(eng)
     eng.ctx.elevator.on_start = lambda exe, args, elevated: (
-        (folder / "dx8vbhelper.dll").write_bytes(b"MZ extra") if exe == "cmd.exe" else None)
-    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
-    assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
-
-
-def test_hard_linked_file_in_a_found_folder_is_refused(tmp_path):
-    eng, lib, rt, g = dx8vb_catalog(tmp_path)
-    folder = adoptable_folder(eng)
-    eng.ctx.elevator.on_start = lambda exe, args, elevated: (
-        os.link(folder / "dx8vb.dll", tmp_path / "elsewhere.dll") if exe == "cmd.exe" else None)
+        during_prompt(folder, tmp_path) if exe == "cmd.exe" else None)
     assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
