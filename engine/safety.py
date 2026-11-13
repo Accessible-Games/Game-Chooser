@@ -21,7 +21,7 @@ from typing import Sequence
 
 from . import messages
 from .errors import EngineError, UnsafePath
-from .paths import STAGING_DIR_NAME, backup_dir_name, is_code, norm_key, safe_join, unique_path
+from .paths import STAGING_DIR_NAME, backup_dir_name, is_code, is_link, norm_key, safe_join, unique_path
 from .records import RecordedFile
 from .sources import hash_file
 
@@ -139,11 +139,6 @@ class ApplyResult:
 
 def _rel(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
-
-
-def is_link(path) -> bool:
-    """True for symlinks and NTFS junctions. The engine never follows or removes these."""
-    return os.path.islink(path) or os.path.isjunction(path)
 
 
 def _resolve_game_path(game_dir: Path, rel: str) -> tuple[Path, bool]:

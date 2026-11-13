@@ -32,7 +32,7 @@ from .errors import Cancelled, ElevationDeclined, InstallFailed, StepError, Unsa
 from .installer_watch import ProcessWatch, watch_process  # noqa: F401  (re-exported)
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import STAGING_DIR_NAME, is_code, same_folder, is_engine_dir, norm_key, unique_path
+from .paths import STAGING_DIR_NAME, is_code, same_folder, walk_files, is_engine_dir, norm_key, unique_path
 from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is_runtime_owner, record_folder
 from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link, remove_unchanged
 from .sources import hash_file
@@ -97,12 +97,9 @@ def _walk(root: Path) -> Iterator[tuple[str, Path]]:
 
     Never enters links or Game Chooser's own folders, the way hash_tree walks.
     """
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not is_engine_dir(d) and not is_link(Path(dirpath) / d)]
-        for name in filenames:
-            full = Path(dirpath) / name
-            if not is_link(full):
-                yield full.relative_to(root).as_posix(), full
+    for full in walk_files(root, is_engine_dir):
+        if not is_link(full):
+            yield full.relative_to(root).as_posix(), full
 
 
 def snapshot_folder(root: Path) -> set[str]:
@@ -667,17 +664,14 @@ def _player_files(record: InstallRecord, game_dir: Path) -> dict[str, str]:
     found = {}
     if not game_dir.is_dir():
         return found
-    for dirpath, dirnames, filenames in os.walk(game_dir):
-        dirnames[:] = [d for d in dirnames if d != STAGING_DIR_NAME and not is_link(Path(dirpath) / d)]
-        for name in filenames:
-            full = Path(dirpath) / name
-            if is_link(full):
-                continue
-            rel = full.relative_to(game_dir).as_posix()
-            recorded = record.files.get(norm_key(rel))
-            sha = hash_file(full)
-            if recorded is None or sha != recorded.sha256:
-                found[rel] = sha
+    for full in walk_files(game_dir, lambda name: name == STAGING_DIR_NAME):
+        if is_link(full):
+            continue
+        rel = full.relative_to(game_dir).as_posix()
+        recorded = record.files.get(norm_key(rel))
+        sha = hash_file(full)
+        if recorded is None or sha != recorded.sha256:
+            found[rel] = sha
     return found
 
 

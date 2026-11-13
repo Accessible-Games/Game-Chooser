@@ -65,7 +65,7 @@ from . import comfree, messages
 from .entries import dependency_order, platform_sources, runs_installer, title_of
 from .errors import Cancelled, ElevationDeclined, ExtractError, InstallFailed, StepError, UnsafePath, check_cancel
 from .messages import Progress
-from .paths import norm_key, safe_join, same_folder
+from .paths import norm_key, safe_join, same_folder, walk_files
 from .records import (RUNTIME_OWNER_PREFIX, InstalledSource, InstallRecord, RecordedFile, hash_tree,
                       is_runtime_owner, runtime_owner)
 from .run_installer import run_installer_untracked
@@ -893,16 +893,13 @@ def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
 
 
 def _copy_into(root: Path, tree: Path, copy: PrivateCopy) -> None:
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not is_link(Path(dirpath) / d)]
-        for name in filenames:
-            src = Path(dirpath) / name
-            dest = tree / src.relative_to(root)
-            if is_link(src) or os.path.lexists(dest):
-                continue
-            _make_folders(dest.parent, copy.dirs)
-            shutil.copy2(src, dest)
-            copy.files.append(dest)
+    for src in walk_files(root):
+        dest = tree / src.relative_to(root)
+        if is_link(src) or os.path.lexists(dest):
+            continue
+        _make_folders(dest.parent, copy.dirs)
+        shutil.copy2(src, dest)
+        copy.files.append(dest)
 
 
 def _remove_copy(copy: PrivateCopy, tree: Path) -> None:

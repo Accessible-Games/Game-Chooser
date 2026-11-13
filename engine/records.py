@@ -11,7 +11,7 @@ import typing
 from dataclasses import MISSING, asdict, dataclass, fields
 from pathlib import Path
 
-from .paths import is_engine_dir, norm_key, same_folder
+from .paths import is_engine_dir, norm_key, same_folder, walk_files
 from .sources import hash_file
 
 log = logging.getLogger(__name__)
@@ -93,14 +93,9 @@ def hash_tree(root: Path) -> dict[str, tuple[str, str]]:
     """Map norm_key -> (display path with forward slashes, sha256) for every file under root."""
     root = Path(root)
     result: dict[str, tuple[str, str]] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        # Never follow a symlink or junction out of the folder.
-        dirnames[:] = [d for d in dirnames if not is_engine_dir(d)
-                       and not (os.path.islink(Path(dirpath) / d) or os.path.isjunction(Path(dirpath) / d))]
-        for name in filenames:
-            full = Path(dirpath) / name
-            rel = full.relative_to(root).as_posix()
-            result[norm_key(rel)] = (rel, hash_file(full))
+    for full in walk_files(root, is_engine_dir):
+        rel = full.relative_to(root).as_posix()
+        result[norm_key(rel)] = (rel, hash_file(full))
     return result
 
 

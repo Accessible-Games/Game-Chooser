@@ -53,14 +53,14 @@ from .errors import EngineError, InstallFailed, NoVerifiedSource, StepError, Uns
 from .folders import library_label, target_folder
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key, safe_join, same_folder
+from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key, safe_join, same_folder, walk_files
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
 from .recycle import send_to_recycle_bin
 from .installer_watch import ProcessWatch, watch_process
 from .run_installer import InstallerUI, RunItem
 from .runtimes import _clear, _clear_or_fail
 from .uninstall_keys import UninstallReader, _winreg_reader
-from .safety import (ApplyResult, UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall, is_link,
+from .safety import (ApplyResult, UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall,
                      plain_file, plan_uninstall, plan_update, preflight, restore_backups)
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
 from .steps import StepContext, _bare, run_system_steps, split_steps, undo_steps
@@ -171,12 +171,9 @@ def _hide(path: Path) -> None:
 def _file_states(root: Path) -> dict[str, tuple[int, int, int]]:
     """norm_key -> (file id, size, mtime) for every file under `root`, walked the way hash_tree walks."""
     states = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not is_engine_dir(d) and not is_link(Path(dirpath) / d)]
-        for name in filenames:
-            full = Path(dirpath) / name
-            st = full.stat()
-            states[norm_key(full.relative_to(root).as_posix())] = (st.st_ino, st.st_size, st.st_mtime_ns)
+    for full in walk_files(root, is_engine_dir):
+        st = full.stat()
+        states[norm_key(full.relative_to(root).as_posix())] = (st.st_ino, st.st_size, st.st_mtime_ns)
     return states
 
 
