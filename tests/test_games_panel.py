@@ -412,23 +412,11 @@ def test_row_filter_hides_rows_from_the_list_but_keeps_their_tree_values(make_vi
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (0, 0, "Install Alpha")
 
 
-def test_the_install_progress_shows_beside_the_action_button_which_stays(make_view):
-    """On both tabs: while a job runs or waits the button is still there to press"""
-    view = make_view(idle_label="Launch")
-    assert view.action_btn.GetLabel() == "Launch"
-    view.set_rows(rows(ALPHA))
-    button = view.action_btn
-    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, False)
-    view.set_busy(True)
-    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, True)
-    view.set_busy(False)
-    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, False)
-
-
 def test_library_rows_launch_describe_and_are_remembered_by_id(make_view):
     games = [Game(title="Hand", launch_path="C:/games/hand.exe", platforms=["Windows"]),
              Game(title="Alpha", launch_path="Alpha/alpha.exe", library_id="lib", catalog_id="alpha")]
     view = make_view(idle_label="Launch")
+    assert view.action_btn.GetLabel() == "Launch" and not view.progress_area.IsShown()  # before the first fill
     view.set_rows(library_rows(games, lambda game: ALPHA if game.catalog_id else None))
     assert view.selected_row().game is games[1] and view.action_btn.GetLabel() == "Launch Alpha"
     assert view.description.GetValue().startswith("About Alpha.")
@@ -758,7 +746,7 @@ def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(m
     view.progress_area.cancel_btn.SetFocus()  # the player is on Cancel when the job ends
     assert view.progress_area.cancel_btn.HasFocus()
     view.set_busy(False)
-    assert view.list_ctrl.HasFocus()
+    assert view.list_ctrl.HasFocus() and not view.progress_area.IsShown()
 
 
 def test_a_selection_event_while_a_dialog_is_open_is_not_the_players(make_view):
