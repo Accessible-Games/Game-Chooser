@@ -175,6 +175,21 @@ def test_snapshot_error_is_logged_and_run_continues(tmp_path):
     assert "live tree update failed" in run.log_path.read_text(encoding="utf-8")
 
 
+def test_a_process_list_that_cannot_be_read_keeps_the_last_membership(tmp_path):
+    clock = Clock()
+
+    def snap():  # the game runs, then the list can't be read for 30 s, then the game is gone
+        if clock.t == 0:
+            return [LiveProc(100, 1, 1000, "C:/g/x.exe")]
+        if clock.t < 30:
+            raise OSError("nope")
+        return []
+
+    rec, run, pm, *_ = make(tmp_path, snapshot=snap, with_session=True, clock=clock)
+    assert rec.run() == 0
+    assert 40.0 <= pm.stopped_at <= 41.0
+
+
 def test_sessions_added_once(tmp_path):
     rec, run, *_ = make(tmp_path, with_session=True)
     added = []
