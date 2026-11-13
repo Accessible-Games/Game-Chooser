@@ -321,9 +321,9 @@ def test_start_game_opens_a_page_in_the_browser(tmp_path):
 def test_start_game_starts_a_program(tmp_path):
     exe = tmp_path / "game.exe"
     opened, started = [], []
-    kind = start_game(str(exe), str(tmp_path), open_page=lambda a: opened.append(a) or True,
-                      start=lambda p, c: started.append((p, c)))
-    assert kind == Started("program", None)
+    result = start_game(str(exe), str(tmp_path), open_page=lambda a: opened.append(a) or True,
+                        start=lambda p, c: started.append((p, c)) or 4321)  # what the program start returned
+    assert result == Started("program", 4321) and result.kind == "program" and result.pid == 4321
     assert started == [(str(exe), str(tmp_path))]
     assert opened == []
 
@@ -340,12 +340,6 @@ def test_start_game_passes_on_a_declined_prompt(tmp_path):
         raise LaunchCancelled()
     with pytest.raises(LaunchCancelled):
         start_game(str(tmp_path / "game.exe"), str(tmp_path), start=declined)
-
-
-def test_start_game_passes_on_what_the_program_start_returned(tmp_path):
-    result = start_game(str(tmp_path / "game.exe"), str(tmp_path), start=lambda p, c: 4321)
-    assert result == Started("program", 4321)
-    assert result.kind == "program" and result.pid == 4321
 
 
 # ---- .hta games (HTML Applications): run by Windows' own mshta.exe, never opened as a page, never guessed ----

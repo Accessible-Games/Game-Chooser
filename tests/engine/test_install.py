@@ -11,7 +11,7 @@ from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
 from engine.messages import DEFENDER_NOTE
 from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, ZipExtractor, fails, make_engine, never,
-                                served_source, zip_bytes)
+                                reg_step, served_source, zip_bytes)
 
 
 
@@ -57,7 +57,6 @@ def test_fresh_install(tmp_path):
     assert (lib / "Entombed" / "entombed.exe").exists() and not (lib / ".gamechooser-staging" / "entombed").exists()
     rec = records.load("entombed")
     assert rec.files["entombed.exe"].owner == "entombed" and rec.folder == "Entombed"
-    assert r.game["launch_path"] == "Entombed/entombed.exe" and r.game["catalog_id"] == "entombed"
     assert not any(ctx.work_root.rglob("*.zip"))            # download deleted
     assert isinstance(r, JobResult) and r.action == "install" and r.title == "Entombed" and r.notes == []
     assert r.game == {
@@ -150,10 +149,8 @@ def test_extra_file_steps_run_on_the_game_tree_and_tag_their_output(tmp_path):
 
 def test_system_steps_run_after_rename_with_final_paths(tmp_path):
     routes = {}
-    reg_step = {"action": "registry", "hive": "HKCU", "key": r"Software\Entombed", "name": "Path",
-                "type": "REG_SZ", "value": "x"}
     e = game(routes, files={"entombed.exe": b"exe", "dx.dll": b"dll"},
-             steps=[{"action": "register", "path": "dx.dll"}, reg_step])
+             steps=[{"action": "register", "path": "dx.dll"}, reg_step("Path", "x", r"Software\Entombed")])
     lib = tmp_path / "Games"
     placed_when_run = []
 
@@ -165,7 +162,6 @@ def test_system_steps_run_after_rename_with_final_paths(tmp_path):
     fake_elev = WatchingElevator()
     engine, ctx, lib = setup(tmp_path, [e], routes, elevator=fake_elev)
     engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert fake_elev.calls[0][1] == f'/s "{lib / "Entombed" / "dx.dll"}"'
     assert fake_elev.calls[0] == ("regsvr32.exe", f'/s "{lib / "Entombed" / "dx.dll"}"', True)
     assert placed_when_run == [True]
     assert ctx.registry.get("HKCU", r"Software\Entombed", "Path") == (True, "x", "REG_SZ")
@@ -178,9 +174,7 @@ def test_failing_system_step_rolls_back(tmp_path):
     routes = {}
     lib = tmp_path / "Games"
     e = game(routes, files={"entombed.exe": b"exe", "fix.exe": b"fix"},
-             steps=[{"action": "registry", "hive": "HKCU", "key": r"Software\Entombed", "name": "Path",
-                     "type": "REG_SZ", "value": "x"},
-                    {"action": "run", "path": "fix.exe"}])
+             steps=[reg_step("Path", "x", r"Software\Entombed"), {"action": "run", "path": "fix.exe"}])
     fake_elev = FakeElevator(exit_codes={str(lib / "Entombed" / "fix.exe"): 1})
     engine, ctx, lib = setup(tmp_path, [e], routes, elevator=fake_elev)
     fake_reg, records = ctx.registry, ctx.records
@@ -193,8 +187,7 @@ def test_failing_system_step_rolls_back(tmp_path):
 def test_failing_extra_system_step_undoes_the_games_steps(tmp_path):
     routes = {}
     lib = tmp_path / "Games"
-    e = game(routes, steps=[{"action": "registry", "hive": "HKCU", "key": r"Software\Entombed", "name": "Path",
-                             "type": "REG_SZ", "value": "x"}],
+    e = game(routes, steps=[reg_step("Path", "x", r"Software\Entombed")],
              extras=[{"id": "entombed-patch", "required": True}])
     x = extra(routes, "entombed-patch", {"patch.exe": b"p"}, steps=[{"action": "run", "path": "patch.exe"}])
     fake_elev = FakeElevator(exit_codes={str(lib / "Entombed" / "patch.exe"): 3})
@@ -394,8 +387,7 @@ def test_default_exclude_is_the_scanners_rules(tmp_path):
 
 def test_record_save_failure_undoes_steps_and_removes_folder(tmp_path):
     routes = {}
-    e = game(routes, steps=[{"action": "registry", "hive": "HKCU", "key": r"Software\Entombed", "name": "Path",
-                             "type": "REG_SZ", "value": "x"}])
+    e = game(routes, steps=[reg_step("Path", "x", r"Software\Entombed")])
     engine, ctx, lib = setup(tmp_path, [e], routes)
 
     def broken_save(record):
@@ -569,24 +561,20 @@ def _install_entombed(tmp_path, files, launch=None):
     return ctx.records.load("entombed")
 
 
-def test_install_with_hint_is_from_catalog(tmp_path):
-    rec = _install_entombed(tmp_path, {"entombed.exe": b"a", "bin/other.exe": b"b"},
-                            {"windows": {"path": "bin/other.exe"}})
-    assert rec.launch_path == "bin/other.exe" and rec.launch_from_catalog is True
-
-
-def test_install_without_hint_is_guessed(tmp_path):
-    rec = _install_entombed(tmp_path, {"entombed.exe": b"a"})
-    assert rec.launch_path == "entombed.exe" and rec.launch_from_catalog is False
-
-
-def test_garbled_hint_falls_back_and_is_guessed(tmp_path):
-    rec = _install_entombed(tmp_path, {"entombed.exe": b"a"}, {"windows": {"path": "nope/missing.exe"}})
-    assert rec.launch_path == "entombed.exe" and rec.launch_from_catalog is False
-
-
 PAGE_FILES = {"index.html": b"<a href='page2.html'>next</a>", "page2.html": b"<a href='index.html'>back</a>"}
 HTA_FILES = {"jumpgame.hta": b"<html><hta:application applicationname='Jump'></html>", "jump1.wav": b"RIFF"}
+
+
+@pytest.mark.parametrize("files, hint, launch_path, from_catalog", [
+    ({"entombed.exe": b"a", "bin/other.exe": b"b"}, "bin/other.exe", "bin/other.exe", True),
+    ({"entombed.exe": b"a"}, None, "entombed.exe", False),
+    ({"entombed.exe": b"a"}, "nope/missing.exe", "entombed.exe", False),
+    ({**HTA_FILES, "tools/helper.exe": b"MZ"}, None, "tools/helper.exe", False),
+], ids=["install_with_hint_is_from_catalog", "install_without_hint_is_guessed",
+        "garbled_hint_falls_back_and_is_guessed", "an_hta_beside_an_exe_is_not_the_guess"])
+def test_launch_path_from_the_catalog_or_guessed(tmp_path, files, hint, launch_path, from_catalog):
+    rec = _install_entombed(tmp_path, files, {"windows": {"path": hint}} if hint else None)
+    assert rec.launch_path == launch_path and rec.launch_from_catalog is from_catalog
 
 
 @pytest.mark.parametrize("files, launch", [(PAGE_FILES, "index.html"), (HTA_FILES, "jumpgame.hta")],
@@ -606,11 +594,6 @@ def test_pages_or_an_hta_alone_without_a_launch_path_fail_as_no_program(tmp_path
     error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert error.message.startswith(messages.NO_EXE.format(title="Entombed"))
     assert ctx.records.load("entombed") is None
-
-
-def test_an_hta_beside_an_exe_is_not_the_guess(tmp_path):
-    rec = _install_entombed(tmp_path, {**HTA_FILES, "tools/helper.exe": b"MZ"})
-    assert rec.launch_path == "tools/helper.exe" and rec.launch_from_catalog is False
 
 
 def _tar_gz(files: dict[str, bytes]) -> bytes:

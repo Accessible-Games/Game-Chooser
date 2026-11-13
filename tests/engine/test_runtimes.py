@@ -22,6 +22,7 @@ from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present,
 from tests.engine.fakes import (ADMINISTRATORS, MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
                                 FakeSecurity, ZipExtractor, fails, make_engine, never, quiet, served_source, sha, snapshot,
                                 split_chain, zip_bytes)
+from tests.engine.test_run_installer import run_game
 
 DX8VB = b"MZ fake dx8vb.dll"
 DX8VB_TITLE = "DirectX 8 for Visual Basic"
@@ -443,7 +444,7 @@ def test_administrators_owned_folder_is_adopted_and_only_missing_files_are_copie
     files = ["vbx.ocx", "lib/helper.dll", "lib/deep/more.dll"]
     assert eng.ctx.elevator.calls == [*lock_down(eng, folder, files, existing={"vbx.ocx", "lib"}),
                                       regsvr32(eng, folder, "vbx.ocx", source_sha=sha(data))]
-    commands = icacls_commands(eng.ctx.elevator.calls[0][1])
+    commands = split_chain(eng.ctx.elevator.calls[0][1])
     assert f'mkdir "{folder}"' not in commands and f'mkdir "{folder / "lib"}"' not in commands
     assert f'mkdir "{folder / "lib" / "deep"}"' in commands
     assert [c for c in commands if c.startswith("copy ")] == [
@@ -491,7 +492,7 @@ def test_after_a_failed_register_the_locked_folder_stays_and_a_retry_adopts_it(t
     run(eng, "install")
     retry = eng.ctx.elevator.calls[2:]
     assert retry == [*lock_down(eng, folder, existing={"dx8vb.dll"}), regsvr32(eng, folder)]
-    assert not any(c.startswith(("mkdir ", "copy ")) for c in icacls_commands(retry[0][1]))  # nothing was missing
+    assert not any(c.startswith(("mkdir ", "copy ")) for c in split_chain(retry[0][1]))  # nothing was missing
     assert (folder / MARKER_NAME).read_bytes() == marker_bytes(sha(DX8VB))
     assert set(eng.ctx.records.load("dx8vb").files) == {"dx8vb.dll"} and (lib / "Entombed" / "entombed.exe").exists()
 
@@ -511,11 +512,6 @@ def hashed(files) -> dict[str, str]:
 def lock_down(eng, folder: Path, files=("dx8vb.dll",), existing=None, game: str = "entombed"):
     return [(exe, args, True) for exe, args in lock_down_commands(
         folder, eng.ctx.security.current_user(), staging_of(eng, folder, game), hashed(files), existing)]
-
-
-def icacls_commands(args: str) -> list[str]:
-    """The elevated chain's commands, in order (icacls and the rest)."""
-    return split_chain(args)
 
 
 BASE_GRANTS = "*S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX"
@@ -547,7 +543,7 @@ def test_lock_down_command_is_exact():
     [(exe, args)] = lock_down_commands(folder, USER_SID, staging, {"dx8vb.dll": sha(DX8VB)})
     assert exe == "cmd.exe"
     gc, rt = r"C:\ProgramData\GameChooser", r"C:\ProgramData\GameChooser\runtimes"
-    assert icacls_commands(args) == [
+    assert split_chain(args) == [
         f'icacls "{gc}" /setowner *S-1-5-32-544 /L /Q',
         f'icacls "{gc}" /inheritance:r /grant:r {BASE_GRANTS} /L /Q',
         not_a_reparse_point(gc),
@@ -572,7 +568,7 @@ def test_users_may_read_the_folder_only_as_the_chains_last_act_after_every_copy_
     files = {"vbx.ocx": "a" * 64, "lib/a.dll": "b" * 64, "lib/deep/b.dll": "c" * 64}
     for existing in (None, {"lib", "lib/a.dll"}):
         [(exe, args)] = lock_down_commands(folder, USER_SID, Path(r"C:\staging"), files, existing)
-        commands = icacls_commands(args)
+        commands = split_chain(args)
         inside = [folder, folder / "lib", folder / "lib" / "deep"]
         tail = commands[-len(inside):]
         assert sorted(tail) == sorted(opened(d) for d in inside)  # the runtime's folders, Users RX, last of all
@@ -594,7 +590,7 @@ def test_adoption_command_makes_nothing_that_exists_and_copies_only_missing_file
     staging = Path(r"C:\Users\p\AppData\Local\Temp\GameChooser\entombed\runtimes\vbx\unpacked")
     files = {"vbx.ocx": "a" * 64, "lib/a.dll": "b" * 64, "lib/deep/b.dll": "c" * 64}
     [(exe, args)] = lock_down_commands(folder, USER_SID, staging, files, existing={"vbx.ocx", "lib"})
-    commands = icacls_commands(args)
+    commands = split_chain(args)
     lib, deep = folder / "lib", folder / "lib" / "deep"
     assert commands[7:] == [
         f'icacls "{folder}" /setowner *S-1-5-32-544 /L /Q',
@@ -625,7 +621,7 @@ def test_lock_down_never_recurses_and_touches_no_file_with_icacls():
     files = {"vbx.ocx": "a" * 64, "lib/a.dll": "b" * 64, "lib/deep/b.dll": "c" * 64, "z.txt": "d" * 64}
     for existing in (None, {"lib", "lib/a.dll"}):
         [(exe, args)] = lock_down_commands(folder, USER_SID, staging, files, existing)
-        commands = icacls_commands(args)
+        commands = split_chain(args)
         assert all(" /T" not in c and "*\"" not in c and "\\*" not in c for c in commands)  # no recursion, no wildcard
         assert all(USER_SID not in c for c in commands)  # no grant to the installing user (R42)
         icacls = [c for c in commands if c.startswith("icacls ")]
@@ -651,16 +647,16 @@ def test_long_lock_down_is_split_into_few_invocations_each_parent_first():
     files = {f"data/file-{i:04}.dat": f"{i:064x}" for i in range(120)}
     invocations = lock_down_commands(folder, USER_SID, Path(r"C:\staging\big"), files)
     assert 1 < len(invocations) <= 8 and all(len(args) <= 8000 for _, args in invocations)
-    first = icacls_commands(invocations[0][1])
+    first = split_chain(invocations[0][1])
     assert f'icacls "{folder}" /inheritance:r /grant:r {ADMIN_ONLY} /L /Q' in first
-    commands = [c for _, args in invocations for c in icacls_commands(args)]
+    commands = [c for _, args in invocations for c in split_chain(args)]
     data = folder / "data"
     sealed = next(i for i, c in enumerate(commands) if f'icacls "{data}" /inheritance:r' in c)
     assert all(i > sealed for i, c in enumerate(commands) if f'"{data}\\' in c)
     # Users may read the folder only once the last invocation has checked the last file: a declined or failed
     # later prompt leaves a sealed folder nobody but administrators can read.
-    assert all("S-1-5-32-545" not in c for _, args in invocations[:-1] for c in icacls_commands(args)[7:])
-    assert icacls_commands(invocations[-1][1])[-2:] == [opened(folder), opened(data)]
+    assert all("S-1-5-32-545" not in c for _, args in invocations[:-1] for c in split_chain(args)[7:])
+    assert split_chain(invocations[-1][1])[-2:] == [opened(folder), opened(data)]
 
 
 def test_folder_is_made_and_filled_by_the_elevated_command_then_hashed_again_before_regsvr32(tmp_path):
@@ -687,7 +683,7 @@ def test_marker_is_written_by_the_registering_command_only_once_regsvr32_has_suc
     folder = eng.ctx.runtimes_root / "dx8vb"
     [lock, (exe, args, elevated)] = eng.ctx.elevator.calls
     assert (exe, elevated) == ("cmd.exe", True)
-    assert icacls_commands(args) == [f'regsvr32.exe /s "{folder / "dx8vb.dll"}"',
+    assert split_chain(args) == [f'regsvr32.exe /s "{folder / "dx8vb.dll"}"',
                                      f'((echo {sha(DX8VB)}) > "{folder / MARKER_NAME}" || type nul)']
     # The marker holds the download's checksum, which the engine computed: no bytes the player supplied are
     # read by the elevated command, and nothing from the work folder appears in it (R44).
@@ -919,7 +915,7 @@ def test_runtime_with_a_subfolder_is_made_and_sealed_parent_first(tmp_path):
     run(eng, "install")
     folder = eng.ctx.runtimes_root / "vbx"
     [(exe, args, elevated), register] = eng.ctx.elevator.calls
-    commands = icacls_commands(args)
+    commands = split_chain(args)
     sub = folder / "lib"
     seal_sub = commands.index(f'icacls "{sub}" /inheritance:r /grant:r {ADMIN_ONLY} /L /Q')
     assert commands.index(f'mkdir "{sub}"') < commands.index(f'icacls "{sub}" /setowner *S-1-5-32-544 /L /Q') < seal_sub
@@ -1041,22 +1037,8 @@ def test_installer_runtime_still_missing_fails(tmp_path, monkeypatch):
 
 def test_run_mode_game_installs_runtime_first(tmp_path):
     routes = {}
-    rt = dx8vb(routes)
-    setup_exe = b"MZ fake game setup"
-    source = served_source(routes, f"{MIRROR}{sha(setup_exe)}/setup.exe", setup_exe, method="installer",
-                           installer={"type": "other", "mode": "run", "silent_args": "/S"})
-    g = {"id": "lightcars", "kind": "game", "title": "Light Cars", "developer": ["Draconis"], "genres": ["Racing"],
-         "year": 2007, "version": "1.0", "sources": [source], "dependencies": ["dx8vb"]}
-    lib = tmp_path / "Games"
-
-    def installs(exe, args, elevated):
-        if exe.endswith("setup.exe"):
-            time.sleep(0.05)
-            (lib / "Light Cars").mkdir(parents=True, exist_ok=True)
-            (lib / "Light Cars" / "lightcars.exe").write_bytes(b"lc")
-            time.sleep(0.05)
-
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=installs))
+    on_start = writes_game(tmp_path / "Games" / "Light Cars", {"lightcars.exe": b"lc"})
+    eng, lib = setup(tmp_path, [dx8vb(routes), run_mode_game(routes)], routes, elevator=FakeElevator(on_start=on_start))
     run(eng, "install", id="lightcars")
     exes = [c[0] for c in eng.ctx.elevator.calls]
     assert exes[:2] == ["cmd.exe", "cmd.exe"] and exes[2].endswith("setup.exe")  # lock-down, regsvr32, then the game
@@ -1209,13 +1191,10 @@ def test_full_disk_while_copying_a_private_runtime_into_the_game_gets_plain_word
     assert fails(run, eng, "install").message == messages.DISK_FULL.format(title="Entombed")
 
 
-def run_mode_game(routes, setup_exe=b"MZ fake game setup", silent=True, version="1.0", **fields):
-    installer = {"type": "other", "mode": "run", **({"silent_args": "/S"} if silent else {})}
-    source = served_source(routes, f"{MIRROR}{sha(setup_exe)}/setup.exe", setup_exe, method="installer",
-                           installer=installer)
-    return {"id": "lightcars", "kind": "game", "title": "Light Cars", "developer": ["Draconis"],
-            "genres": ["Racing"], "year": 2007, "version": version, "sources": [source],
-            "dependencies": ["dx8vb"], **fields}
+def run_mode_game(routes, setup_exe=b"MZ fake game setup", silent=True, **fields):
+    """test_run_installer's Light Cars, needing dx8vb; its installer is silent unless `silent` is false."""
+    fields.setdefault("dependencies", ["dx8vb"])
+    return run_game(routes, {"silent_args": "/S"} if silent else None, setup_exe, **fields)
 
 
 def writes_game(folder: Path, files: dict[str, bytes] | None = None):

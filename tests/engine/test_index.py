@@ -77,33 +77,29 @@ def test_newer_schema_in_gz_only_keeps_cache(tmp_path):
     assert s.newer_app_needed and s.entries == old and s.from_cache
 
 
-def test_bad_gz_hash_keeps_cache(tmp_path):
+def serve(fetcher, gz, sha256):
+    """Serve `gz` as the index, with `sha256` in its meta."""
+    fetcher.routes[GZ] = gz
+    meta = json.loads(fetcher.routes[META])
+    meta["sha256"] = sha256
+    fetcher.routes[META] = json.dumps(meta).encode()
+
+
+@pytest.mark.parametrize("server_breaks", [
+    lambda fetcher: serve(fetcher, publish(fetcher, BASE, [{"id": "z"}]), "0" * 64),
+    lambda fetcher: fetcher.routes.update({META: b"not json"}),
+    lambda fetcher: fetcher.routes.clear(),
+    lambda fetcher: serve(fetcher, _bad_body_gz(), sha(_bad_body_gz())),
+], ids=["bad_gz_hash_keeps_cache", "garbage_meta_keeps_cache", "offline_with_cache",
+        "corrupt_deflate_body_from_server_keeps_cache"])
+def test_a_refresh_that_fails_keeps_the_cache(tmp_path, server_breaks):
     fetcher, idx = make(tmp_path)
     idx.refresh()
     before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
-    publish(fetcher, BASE, [{"id": "z"}])
-    meta = json.loads(fetcher.routes[META])
-    meta["sha256"] = "0" * 64
-    fetcher.routes[META] = json.dumps(meta).encode()
+    server_breaks(fetcher)
     s = idx.refresh()
     assert s.error and set(s.entries) == {"a", "b"} and s.from_cache
     assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
-
-
-def test_garbage_meta_keeps_cache(tmp_path):
-    fetcher, idx = make(tmp_path)
-    idx.refresh()
-    fetcher.routes[META] = b"not json"
-    s = idx.refresh()
-    assert s.error and set(s.entries) == {"a", "b"}
-
-
-def test_offline_with_cache(tmp_path):
-    fetcher, idx = make(tmp_path)
-    idx.refresh()
-    fetcher.routes.clear()
-    s = idx.refresh()
-    assert set(s.entries) == {"a", "b"} and s.from_cache and s.error
 
 
 def test_offline_without_cache(tmp_path):
@@ -145,18 +141,6 @@ def test_normalize_catalog_url():
     assert normalize_catalog_url("http://localhost:8765") == "http://localhost:8765/"
     assert normalize_catalog_url("ftp://x/") is None and normalize_catalog_url("http://example.com/") is None
     assert normalize_catalog_url("") is None
-
-
-def test_corrupt_deflate_body_from_server_keeps_cache(tmp_path):
-    fetcher, idx = make(tmp_path)
-    idx.refresh()
-    bad = _bad_body_gz()
-    fetcher.routes[GZ] = bad
-    meta = json.loads(fetcher.routes[META])
-    meta["sha256"] = sha(bad)
-    fetcher.routes[META] = json.dumps(meta).encode()
-    s = idx.refresh()
-    assert s.error and set(s.entries) == {"a", "b"}
 
 
 def test_a_cache_that_cant_be_replaced_leaves_no_temp_file(tmp_path):

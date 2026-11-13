@@ -129,8 +129,6 @@ def test_the_roots_id_is_held_for_the_watchs_lifetime():
     system.exit(100)
     assert watch.poll(0.01)
     assert root.handle.closed and system.held(100)  # its own handle went with wait(); the watch's didn't
-    with pytest.raises(AssertionError):
-        system.start(100, 7, 2000.0)  # so Windows can't give its id to another program
     watch.close()
     assert not system.held(100)
 

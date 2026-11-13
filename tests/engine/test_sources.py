@@ -57,17 +57,11 @@ def test_dev_mismatch_falls_back_to_verified_mirror(tmp_path):
     assert files(tmp_path) == [f.path.name]
 
 
-def test_dev_mismatch_without_mirror_installs_dev_file_with_note(tmp_path):
-    ff = FakeFetcher({DEV: BAD})
-    f = run(entry(src(DEV)), ff, tmp_path)
-    assert f.note == DEVELOPER_CHANGED_UNVERIFIED and f.sha256 == sha(BAD) and f.size == len(BAD)
-    assert f.path.read_bytes() == BAD
-
-
 def test_later_dev_mismatches_are_deleted(tmp_path):
     ff = FakeFetcher({DEV: BAD, DEV2: b"yet another"})
     f = run(entry(src(DEV), src(DEV2)), ff, tmp_path)
-    assert f.position == 0 and f.note == DEVELOPER_CHANGED_UNVERIFIED
+    assert f.position == 0 and f.note == DEVELOPER_CHANGED_UNVERIFIED  # the first, installed with the note
+    assert f.sha256 == sha(BAD) and f.size == len(BAD) and f.path.read_bytes() == BAD
     assert files(tmp_path) == [f.path.name]
 
 

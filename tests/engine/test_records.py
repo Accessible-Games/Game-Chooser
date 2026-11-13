@@ -31,18 +31,13 @@ def test_round_trip(tmp_path):
     store = RecordStore(tmp_path)
     rec = make_record(previous={"source": {"url": "u"}, "extras": {}, "backups": []},
                       vendor_uninstaller="unins000.exe")
-    store.save(rec)
-    assert (tmp_path / "entombed.json").exists()
+    store.save(make_record(tracked=False))
+    store.save(rec)  # replaces the first, atomically
+    assert [p.name for p in tmp_path.iterdir()] == ["entombed.json"]  # no temp file left
     assert store.load("entombed") == rec
     assert isinstance(store.load("entombed").files["entombed.exe"], RecordedFile)
     assert isinstance(store.load("entombed").extras["patch"], InstalledSource)
     assert store.all() == {"entombed": rec}
-
-
-def test_atomic_save_leaves_no_temp(tmp_path):
-    RecordStore(tmp_path).save(make_record())
-    RecordStore(tmp_path).save(make_record(tracked=False))
-    assert [p.name for p in tmp_path.iterdir()] == ["entombed.json"]
 
 
 def test_unknown_fields_ignored_and_corrupt_kept(tmp_path, caplog):

@@ -6,7 +6,7 @@ import pytest
 from engine import safety
 from engine.errors import EngineError
 from engine.records import RecordedFile
-from engine.safety import (ApplyResult, FileOp, Op, UpdatePlan, apply_plan, plain_file, remove_unchanged,
+from engine.safety import (ABSENT, ApplyResult, FileOp, Op, UpdatePlan, apply_plan, plain_file, remove_unchanged,
                            restore_backups)
 from tests.engine.fakes import BK, put, sha
 
@@ -198,64 +198,37 @@ def make_op_plan(path, op, expected, new=b"new"):
     return plan
 
 
-def test_write_over_file_that_appeared_since_planning_is_backed_up(dirs):
-    from engine.safety import ABSENT
+@pytest.mark.parametrize("path, op, expected, new, on_disk, after, backup", [
+    ("save.dat", Op.WRITE, ABSENT, b"new", b"game made this", b"new", b"game made this"),
+    ("a.txt", Op.WRITE, sha(b"old"), b"new", b"changed later", b"new", b"changed later"),
+    ("g.exe", Op.WRITE, sha(b"old"), b"new", b"changed later", b"new", None),
+    ("a.txt", Op.WRITE, sha(b"old"), b"new", None, b"new", None),
+    ("p.ini", Op.WRITE, ABSENT, None, b"player", b"player", None),
+    ("d/x.txt", Op.DELETE, sha(b"old"), None, b"changed later", b"changed later", None),
+    ("d/x.txt", Op.DELETE, sha(b"same"), None, b"same", None, None),
+], ids=["write_over_file_that_appeared_since_planning_is_backed_up",
+        "write_over_file_changed_since_planning_is_backed_up", "changed_exe_is_replaced_without_copy",
+        "write_when_file_vanished_just_writes", "persist_default_that_appeared_is_kept",
+        "delete_of_changed_file_is_kept", "delete_of_unchanged_file_still_deletes"])
+def test_last_moment_recheck(dirs, path, op, expected, new, on_disk, after, backup):
     game, inc = dirs
-    put(inc, "save.dat", b"new")
-    put(game, "save.dat", b"game made this")
-    r = apply_plan(make_op_plan("save.dat", Op.WRITE, ABSENT), game, inc, DAY)
-    assert (game / BK / "save.dat").read_bytes() == b"game made this"
-    assert (game / "save.dat").read_bytes() == b"new" and len(r.backups) == 1
-
-
-def test_write_over_file_changed_since_planning_is_backed_up(dirs):
-    game, inc = dirs
-    put(inc, "a.txt", b"new")
-    put(game, "a.txt", b"changed later")
-    apply_plan(make_op_plan("a.txt", Op.WRITE, sha(b"old")), game, inc, DAY)
-    assert (game / BK / "a.txt").read_bytes() == b"changed later"
-
-
-def test_changed_exe_is_replaced_without_copy(dirs):
-    game, inc = dirs
-    put(inc, "g.exe", b"new")
-    put(game, "g.exe", b"changed later")
-    r = apply_plan(make_op_plan("g.exe", Op.WRITE, sha(b"old")), game, inc, DAY)
-    assert (game / "g.exe").read_bytes() == b"new" and r.backups == [] and not (game / BK).exists()
-
-
-def test_write_when_file_vanished_just_writes(dirs):
-    game, inc = dirs
-    put(inc, "a.txt", b"new")
-    apply_plan(make_op_plan("a.txt", Op.WRITE, sha(b"old")), game, inc, DAY)
-    assert (game / "a.txt").read_bytes() == b"new" and not (game / BK).exists()
-
-
-def test_persist_default_that_appeared_is_kept(dirs):
-    from engine.safety import ABSENT
-    game, inc = dirs
-    put(inc, "p.ini", b"default")
-    put(game, "p.ini", b"player")
-    apply_plan(make_op_plan("p.ini", Op.WRITE, ABSENT, new=None), game, inc, DAY)
-    assert (game / "p.ini").read_bytes() == b"player"
-
-
-def test_delete_of_changed_file_is_kept(dirs):
-    game, inc = dirs
-    put(game, "d/x.txt", b"changed later")
-    apply_plan(make_op_plan("d/x.txt", Op.DELETE, sha(b"old"), new=None), game, inc, DAY)
-    assert (game / "d/x.txt").read_bytes() == b"changed later"
-
-
-def test_delete_of_unchanged_file_still_deletes(dirs):
-    game, inc = dirs
-    put(game, "d/x.txt", b"same")
-    apply_plan(make_op_plan("d/x.txt", Op.DELETE, sha(b"same"), new=None), game, inc, DAY)
-    assert not (game / "d").exists()
+    if op == Op.WRITE:
+        put(inc, path, b"new")
+    if on_disk is not None:
+        put(game, path, on_disk)
+    r = apply_plan(make_op_plan(path, op, expected, new=new), game, inc, DAY)
+    if after is None:
+        assert not (game / "d").exists()  # the emptied folder goes too
+    else:
+        assert (game / path).read_bytes() == after
+    if backup is None:
+        assert r.backups == [] and not (game / BK).exists()
+    else:
+        assert (game / BK / path).read_bytes() == backup and len(r.backups) == 1
 
 
 def test_plan_update_fills_expected():
-    from engine.safety import ABSENT, plan_update
+    from engine.safety import plan_update
     plan = plan_update({}, {"a.txt": ("a.txt", "h")}, {"a.txt": RecordedFile("a.txt", "n", "g"),
                                                        "b.txt": RecordedFile("b.txt", "n", "g")})
     assert {o.path: o.expected for o in plan.ops} == {"a.txt": "h", "b.txt": ABSENT}

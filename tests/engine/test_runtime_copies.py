@@ -324,12 +324,17 @@ def test_private_mode_copies_a_runtime_installed_shared_earlier(tmp_path, privat
 # ---- games whose installer runs ----------------------------------------------------------------------------
 
 
-def test_installer_run_game_gets_the_copy_once_its_exe_is_known(tmp_path):
+def light_cars(tmp_path, files=None, **ctx):
+    """dx8vb and Light Cars, whose installer writes `files` (writes_game's by default) into its folder."""
     routes = {}
-    rt, g = dx8vb_entry(routes), run_mode_game(routes, setup_exe=b"MZ setup")
     folder = tmp_path / "Games" / "Light Cars"
-    eng, lib = setup(tmp_path, [rt, g], routes,
-                     elevator=FakeElevator(on_start=writes_game(folder, {"bin/lightcars.exe": b"lc"})))
+    eng, lib = setup(tmp_path, [dx8vb_entry(routes), run_mode_game(routes)], routes,
+                     elevator=FakeElevator(on_start=writes_game(folder, files)), **ctx)
+    return eng, folder
+
+
+def test_installer_run_game_gets_the_copy_once_its_exe_is_known(tmp_path):
+    eng, folder = light_cars(tmp_path, {"bin/lightcars.exe": b"lc"})
     r = run(eng, "install", id="lightcars")
     assert r.notes == [] and (folder / "bin" / "dx8vb.dll").read_bytes() == DX8VB
     rec = eng.ctx.records.load("lightcars")
@@ -346,10 +351,7 @@ def test_installer_run_game_gets_the_copy_once_its_exe_is_known(tmp_path):
 
 
 def test_installer_run_game_update_drops_the_copy_when_it_no_longer_needs_the_runtime(tmp_path):
-    routes = {}
-    rt, g = dx8vb_entry(routes), run_mode_game(routes)
-    folder = tmp_path / "Games" / "Light Cars"
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=writes_game(folder)))
+    eng, folder = light_cars(tmp_path)
     run(eng, "install", id="lightcars")
     assert (folder / "dx8vb.dll").exists()
     eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=b"MZ setup v2", version="2.0",
@@ -361,11 +363,7 @@ def test_installer_run_game_update_drops_the_copy_when_it_no_longer_needs_the_ru
 
 
 def test_installer_run_game_ships_its_own_copy(tmp_path):
-    routes = {}
-    rt, g = dx8vb_entry(routes), run_mode_game(routes)
-    folder = tmp_path / "Games" / "Light Cars"
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=writes_game(
-        folder, {"lightcars.exe": b"lc", "dx8vb.dll": b"its own"})))
+    eng, folder = light_cars(tmp_path, {"lightcars.exe": b"lc", "dx8vb.dll": b"its own"})
     run(eng, "install", id="lightcars")
     assert (folder / "dx8vb.dll").read_bytes() == b"its own"
     assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == "lightcars"
@@ -422,11 +420,7 @@ def test_untracked_installer_run_game_gets_a_note_instead(tmp_path, monkeypatch)
 def test_installer_run_game_in_private_mode_with_an_unusable_copy_still_gets_the_dll(tmp_path, private_com,
                                                                                       monkeypatch):
     monkeypatch.setattr(comfree, "has_embedded_manifest", lambda exe: True)
-    routes = {}
-    rt, g = dx8vb_entry(routes), run_mode_game(routes)
-    folder = tmp_path / "Games" / "Light Cars"
-    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False,
-                     elevator=FakeElevator(on_start=writes_game(folder)))
+    eng, folder = light_cars(tmp_path, register_shared_components=False)
     r = run(eng, "install", id="lightcars")
     assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Light Cars", component=DX8VB_TITLE)]
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB and not (folder / "lightcars.exe.manifest").exists()

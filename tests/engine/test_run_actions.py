@@ -12,8 +12,8 @@ from engine import jobs, messages, run_actions, run_installer
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from tests.engine import test_update_flows as archive
-from tests.engine.fakes import (MIRROR, FakeUninstallKeys, fails, never, put, quiet, served_source, sha, snapshot,
-                                zip_bytes)
+from tests.engine.fakes import (MIRROR, FakeUninstallKeys, fails, never, put, quiet, reg_step, served_source, sha,
+                                snapshot, zip_bytes)
 from tests.engine.test_run_installer import (SETUP, install, installed_run_game, publish_v2, run_game,
                                              run_game_with_patch, setaside, setup_engine, writes)
 
@@ -164,10 +164,8 @@ def test_undo_whose_previous_download_is_gone_changes_nothing(tmp_path, kind, se
 
 
 def test_repair_runs_the_recorded_system_steps_under_the_update_rules(tmp_path):
-    step = {"action": "registry", "hive": "HKCU", "key": r"Software\LightCars", "name": "Path", "type": "REG_SZ",
-            "value": "{dir}"}
     routes = {}
-    e = run_game(routes, installer={"type": "inno"}, steps=[step])
+    e = run_game(routes, installer={"type": "inno"}, steps=[reg_step("Path", "{dir}", r"Software\LightCars")])
     target = tmp_path / "Games" / "Light Cars"
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, V1))
     install(eng)
@@ -286,10 +284,8 @@ def test_undo_whose_installer_failed_keeps_the_undo_point_and_can_be_retried(tmp
 
 def test_undo_whose_step_failed_after_the_installer_still_puts_the_backups_back_on_retry(tmp_path):
     eng, routes, folder = installed_outside(tmp_path)
-    step = {"action": "registry", "hive": "HKCU", "key": r"Software\LightCars", "name": "Path", "type": "REG_SZ",
-            "value": "{dir}"}
     rec = record(eng)
-    rec.source.steps = [step]  # v1's installer came with a registry step
+    rec.source.steps = [reg_step("Path", "{dir}", r"Software\LightCars")]  # v1's installer came with a registry step
     eng.ctx.records.save(rec)
     publish_archive(eng, routes, {"lc.exe": b"exe v2", "cfg.ini": b"volume=7"})
     run(eng, "update")
@@ -557,7 +553,7 @@ def test_an_untracked_run_record_still_refuses(tmp_path, action):
     assert len(eng.ctx.elevator.calls) == 1
 
 
-# ---- fix round 1 -----------------------------------------------------------------------------------------------
+# ---- a phase that fails partway ------------------------------------------------------------------------------
 
 
 def fails_once(monkeypatch, module, name):

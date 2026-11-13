@@ -15,8 +15,8 @@ from engine import messages
 from engine.entries import mirror_url_for
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord, RecordedFile
-from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, fails, make_engine, never, put, quiet, served_source, sha,
-                                snapshot, zip_bytes)
+from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, fails, make_engine, never, put, quiet, reg_step,
+                                served_source, sha, snapshot, zip_bytes)
 
 DEV_URL = "https://dev.example.com/pawprints.zip"
 
@@ -84,42 +84,40 @@ def record(eng, id="pawprints") -> InstallRecord:
     return eng.ctx.records.load(id)
 
 
+def failing_write(monkeypatch, name):
+    """Make writing the file called `name` fail, as if it were in use; returns a function that stops it."""
+    real_write = engine.safety._write_file
+
+    def write_file(source, target, backup_to, game_dir):
+        if Path(target).name == name:
+            raise PermissionError("in use")
+        return real_write(source, target, backup_to, game_dir)
+
+    monkeypatch.setattr(engine.safety, "_write_file", write_file)
+    return lambda: monkeypatch.setattr(engine.safety, "_write_file", real_write)
+
+
 # ---- update ------------------------------------------------------------------
 
 
-def test_update_keeps_every_save_byte_for_byte(tmp_path):
-    eng, game = install_v1(tmp_path)
-    publish(eng, V2)
-    run(eng, "update")
-    for rel, data in PLAYER_FILES.items():
-        assert (game / rel).read_bytes() == data
-
-
-def test_update_backs_up_edited_config_and_counts_it(tmp_path):
+def test_update_keeps_saves_backs_up_edited_config_replaces_code_and_drops_removed_files(tmp_path):
     eng, game = install_v1(tmp_path)
     publish(eng, V2)
     r = run(eng, "update")
+    for rel, data in PLAYER_FILES.items():  # every save, byte for byte
+        assert (game / rel).read_bytes() == data
+    # The edited config is backed up and counted.
     assert r.action == "update" and r.backups == 1
     assert messages.update_summary(r.title, r.backups) == "Updated Pawprints. Kept a backup of 1 file you'd changed."
     assert (game / BK / "pawprints.ini").read_bytes() == EDITED_INI
     assert (game / "pawprints.ini").read_bytes() == V2["pawprints.ini"]
     assert record(eng).previous["backups"] == [
         {"original": "pawprints.ini", "backup": f"{BK}/pawprints.ini", "installed_sha256": sha(V2["pawprints.ini"])}]
-
-
-def test_update_replaces_changed_dll_and_exe_without_copy(tmp_path):
-    eng, game = install_v1(tmp_path)
-    publish(eng, V2)
-    run(eng, "update")
+    # The changed dll and exe are replaced without a copy.
     assert (game / "bass.dll").read_bytes() == V2["bass.dll"]
     assert (game / "pawprints.exe").read_bytes() == V2["pawprints.exe"]
     assert sorted(snapshot(game / BK)) == ["pawprints.ini"]
-
-
-def test_update_deletes_removed_unchanged_file_and_adds_new(tmp_path):
-    eng, game = install_v1(tmp_path)
-    publish(eng, V2)
-    r = run(eng, "update")
+    # A removed file the player didn't change is deleted; a new one is added.
     assert not (game / "sounds" / "a.wav").exists()
     assert (game / "sounds" / "b.wav").read_bytes() == b"b"
     rec = record(eng)
@@ -191,13 +189,9 @@ def test_update_records_previous_and_new_source(tmp_path):
 
 
 def test_update_swaps_changed_system_steps_and_keeps_unchanged_ones(tmp_path):
-    def reg(name, value):
-        return {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": name,
-                "type": "REG_SZ", "value": value}
-
-    eng, game = install_v1(tmp_path, steps=[reg("Path", "here"), reg("Mode", "old")])
+    eng, game = install_v1(tmp_path, steps=[reg_step("Path", "here"), reg_step("Mode", "old")])
     fake_reg = eng.ctx.registry
-    publish(eng, V2, steps=[reg("Path", "here"), reg("Mode", "new")])
+    publish(eng, V2, steps=[reg_step("Path", "here"), reg_step("Mode", "new")])
     run(eng, "update")
     assert fake_reg.get("HKCU", r"Software\Pawprints", "Mode") == (True, "new", "REG_SZ")
     assert fake_reg.get("HKCU", r"Software\Pawprints", "Path") == (True, "here", "REG_SZ")
@@ -212,14 +206,7 @@ def test_update_swaps_changed_system_steps_and_keeps_unchanged_ones(tmp_path):
 def test_failed_apply_keeps_old_version_and_records_backups(tmp_path, monkeypatch):
     eng, game = install_v1(tmp_path)
     v2 = publish(eng, V2)
-    real_write = engine.safety._write_file
-
-    def write_file(source, target, backup_to, game_dir):
-        if Path(target).name == "b.wav":
-            raise PermissionError("in use")
-        return real_write(source, target, backup_to, game_dir)
-
-    monkeypatch.setattr(engine.safety, "_write_file", write_file)
+    stop = failing_write(monkeypatch, "b.wav")
     assert fails(run, eng, "update").message == messages.FILES_NOT_CHANGED.format(title="Pawprints")
     rec = record(eng)
     assert rec.source.version == "1.0"                                       # not claimed as v2
@@ -229,7 +216,7 @@ def test_failed_apply_keeps_old_version_and_records_backups(tmp_path, monkeypatc
     for rel, data in PLAYER_FILES.items():
         assert (game / rel).read_bytes() == data
 
-    monkeypatch.setattr(engine.safety, "_write_file", real_write)
+    stop()
     r = run(eng, "update")
     assert r.backups == 0 and record(eng).source.sha256 == v2["sources"][0]["sha256"]
     run(eng, "undo")
@@ -403,8 +390,7 @@ def test_add_extras_later_touches_only_extra_paths(tmp_path):
 
 
 def test_added_extra_runs_only_its_own_steps_and_records_them(tmp_path):
-    reg = {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": "Path", "type": "REG_SZ",
-           "value": "x"}
+    reg = reg_step("Path", "x")
     voice_reg = {**reg, "name": "Voices", "value": "on"}
     eng, game = install_v1(tmp_path, optional=(), steps=[reg])
     routes = eng.ctx.fetcher.routes
@@ -452,8 +438,7 @@ def test_uninstall_undoes_system_steps_but_not_runtimes(tmp_path):
     elevator = WatchingElevator()
     eng, game = install_v1(tmp_path, play=False, elevator=elevator, steps=[
         {"action": "register", "path": "bass.dll"},
-        {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": "Path", "type": "REG_SZ",
-         "value": "x"}])
+        reg_step("Path", "x")])
     runtime_dir = eng.ctx.runtimes_root / "dx8vb"
     put(runtime_dir, "dx8vb.dll", b"runtime")
     runtime = InstallRecord(
@@ -492,28 +477,10 @@ def test_uninstall_after_keeping_data_can_remove_it_later(tmp_path):
     assert r.kept_player_files == 0 and not game.exists() and record(eng) is None
 
 
-# ---- fix round 1 ---------------------------------------------------------------
+# ---- failures, retries and catalog changes -------------------------------------
 
 V3 = {"pawprints.exe": b"exe v3", "pawprints.ini": b"volume=8", "bass.dll": b"bass v3", "sounds/b.wav": b"b",
       "sounds/c.wav": b"c"}
-
-
-def failing_write(monkeypatch, name):
-    """Make writing the file called `name` fail, as if it were in use; returns a function that stops it."""
-    real_write = engine.safety._write_file
-
-    def write_file(source, target, backup_to, game_dir):
-        if Path(target).name == name:
-            raise PermissionError("in use")
-        return real_write(source, target, backup_to, game_dir)
-
-    monkeypatch.setattr(engine.safety, "_write_file", write_file)
-    return lambda: monkeypatch.setattr(engine.safety, "_write_file", real_write)
-
-
-def reg_step(name, value):
-    return {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": name, "type": "REG_SZ",
-            "value": value}
 
 
 def test_failed_update_backup_survives_a_retry_after_an_earlier_update(tmp_path, monkeypatch):
@@ -585,17 +552,13 @@ def test_repair_works_after_an_optional_extra_left_the_catalog(tmp_path):
     assert (game / "music" / "theme.ogg").read_bytes() == b"theme"
 
 
-def test_repair_of_a_record_without_specs_falls_back_to_the_catalog(tmp_path):
+def test_repair_of_a_record_without_specs_refuses_and_changes_nothing(tmp_path):
     eng, game = install_v1(tmp_path)
     rec = record(eng)
     for source in [rec.source, *rec.extras.values()]:
         source.install = source.steps = source.launch = None   # as written before specs were recorded
     eng.ctx.records.save(rec)
     (game / "sounds" / "a.wav").unlink()
-    run(eng, "repair")
-    assert (game / "sounds" / "a.wav").read_bytes() == b"a"
-
-    del eng.ctx.entries["pawprints-music"]
     before = snapshot(game)
     assert fails(run, eng, "repair").message == messages.REPAIR_NOT_POSSIBLE.format(title="Pawprints")
     assert snapshot(game) == before
@@ -676,9 +639,6 @@ def test_path_conflict_refuses_before_undoing_dropped_steps(tmp_path):
     assert fails(run, eng, "update").message == messages.UPDATE_PATH_CONFLICT.format(path="sounds/b.wav", kind="folder")
     assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Mode") == (True, "old", "REG_SZ")
     assert record(eng) == before
-
-
-# ---- fix round 2 ---------------------------------------------------------------
 
 
 def test_repair_names_the_extra_whose_download_changed(tmp_path):
