@@ -18,13 +18,14 @@ def session(sid, before):
     return SessionInfo(sid, 1, None, before, before + 1, {"title": "T", "catalog_id": "c"}, {}, ())
 
 
-def test_status_round_trip_and_atomic_keep_pid(tmp_path):
+def test_status_round_trips_atomically_and_keeps_the_recorders_pid_and_start_time(tmp_path):
     run = RunDir(tmp_path)
     assert run.read_status() is None
-    run.write_status("starting", recorder_pid=7)
+    run.write_status("starting", recorder_pid=7, recorder_start=123)
     run.write_status("capturing")
+    run.write_status("failed", error="x")
     status = run.read_status()
-    assert status["recorder_pid"] == 7 and status["state"] == "capturing" and status["error"] is None
+    assert (status["recorder_pid"], status["recorder_start"], status["state"], status["error"]) == (7, 123, "failed", "x")
     assert "updated" in status
     assert [p.name for p in tmp_path.iterdir()] == ["status.json"]
 
@@ -52,12 +53,11 @@ def test_new_run_location(tmp_path, run):
     assert run.log_path.name == "recorder.log" and not run.is_split()
 
 
-def test_capture_files_order(tmp_path):
-    run = RunDir(tmp_path)
-    for name in ("capture-2.pml", "capture.pml", "capture-1.pml", "capture-10.pml"):
+def test_capture_files_in_number_order_ignoring_case(tmp_path):
+    for name in ("capture-2.Pml", "Capture.PML", "CAPTURE-1.pml", "capture-10.pml", "capture-x.pml", "notes.pml"):
         (tmp_path / name).write_bytes(b"x")
-    assert [p.name for p in run.capture_files()] == ["capture.pml", "capture-1.pml", "capture-2.pml",
-                                                     "capture-10.pml"]
+    assert [p.name for p in RunDir(tmp_path).capture_files()] == ["Capture.PML", "CAPTURE-1.pml", "capture-2.Pml",
+                                                                  "capture-10.pml"]
 
 
 def test_leftover_runs(tmp_path):
@@ -131,12 +131,6 @@ def test_status_write_retries_through_the_helper_and_one_that_keeps_failing_leav
     with pytest.raises(PermissionError):
         RunDir(tmp_path).write_status("done")
     assert [p.name for p in tmp_path.iterdir()] == ["status.json"]
-
-
-def test_capture_files_ignore_case(tmp_path):
-    for name in ("Capture.PML", "CAPTURE-1.pml", "capture-2.Pml", "capture-x.pml", "notes.pml"):
-        (tmp_path / name).write_bytes(b"x")
-    assert [p.name for p in RunDir(tmp_path).capture_files()] == ["Capture.PML", "CAPTURE-1.pml", "capture-2.Pml"]
 
 
 def test_stop_request_round_trip(run):
@@ -222,12 +216,3 @@ def test_a_second_stop_request_never_replaces_the_first(run):
     assert run.write_stop_request({"requested": 2, "close_games": True}) is False
     assert run.read_stop_request() == {"requested": 1, "close_games": False}
     assert sorted(p.name for p in run.path.iterdir() if p.is_file()) == ["stop-request.json"]
-
-
-def test_status_keeps_the_recorders_pid_and_start_time(tmp_path):
-    run = RunDir(tmp_path)
-    run.write_status("starting", recorder_pid=7, recorder_start=123)
-    run.write_status("capturing")
-    run.write_status("failed", error="x")
-    status = run.read_status()
-    assert (status["recorder_pid"], status["recorder_start"], status["state"]) == (7, 123, "failed")
