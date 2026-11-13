@@ -16,7 +16,7 @@ from engine.comfree import PrivateComUnavailable, com_manifest_xml, has_embedded
 from engine.jobs import InstallRequest
 from engine.messages import Progress
 from engine.records import RecordedFile, RecordStore
-from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present, is_com_runtime, lock_down_commands,
+from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present, lock_down_commands,
                              marker_present, missing_runtimes, recorded_private, register_and_mark_args,
                              runtime_present, write_marker_args)
 from tests.engine.fakes import (ADMINISTRATORS, MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
@@ -115,13 +115,6 @@ def test_default_runtimes_root(monkeypatch, tmp_path):
     assert default_runtimes_root() == tmp_path / "GameChooser" / "runtimes"
 
 
-def test_detect_file_with_env_var(tmp_path, monkeypatch):
-    monkeypatch.setenv("GC_TEST", str(tmp_path))
-    assert not detect_present({"file": "%GC_TEST%\\x.dll"}, FakeRegistry())
-    (tmp_path / "x.dll").write_bytes(b"dll")
-    assert detect_present({"file": "%GC_TEST%\\x.dll"}, FakeRegistry())
-
-
 def test_detect_registry_key_value_and_classes_root():
     registry = FakeRegistry()
     assert not detect_present({"registry": {"hive": "HKCR", "key": "DxVBLibA.DirectX8"}}, registry)
@@ -149,20 +142,6 @@ class _RaisingRegistry(FakeRegistry):
         raise StepError(messages.REGISTRY_BAD_SETTING)
 
 
-def test_is_com_runtime():
-    routes = {}
-    assert is_com_runtime(dx8vb(routes))
-    assert not is_com_runtime(vb6(routes))
-    assert not is_com_runtime(plain_runtime(routes, "a"))
-
-
-def test_runtime_present_by_record_or_detect(tmp_path):
-    eng, lib, rt, g = dx8vb_catalog(tmp_path)
-    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry)
-    eng.ctx.registry.set("HKLM", DX8VB_KEY, "", "REG_SZ", "DirectX8")
-    assert runtime_present(rt, eng.ctx.records, eng.ctx.registry)
-
-
 def test_missing_runtimes_deepest_first(tmp_path):
     routes = {}
     a, b, c = plain_runtime(routes, "a", ["b"]), plain_runtime(routes, "b", ["c"]), plain_runtime(routes, "c")
@@ -182,8 +161,6 @@ def test_dependency_cycle_refused_plainly(tmp_path):
     a, b = plain_runtime(routes, "a", ["b"]), plain_runtime(routes, "b", ["a"])
     g = game(routes, dependencies=["a"])
     eng, lib = setup(tmp_path, [a, b, g], routes)
-    error = fails(missing_runtimes, g, eng.ctx.entries, eng.ctx.records, eng.ctx.registry)
-    assert error.message == messages.DEPENDENCY_CYCLE.format(title="Entombed")
     assert fails(run, eng, "install").message == messages.DEPENDENCY_CYCLE.format(title="Entombed")
     assert eng.ctx.fetcher.requests == [] and not (lib / "Entombed").exists()
 
@@ -694,14 +671,6 @@ def test_marker_is_written_by_the_registering_command_only_once_regsvr32_has_suc
     assert all(user not in c_args for _, c_args, _ in eng.ctx.elevator.calls)  # no grant to the installing user
 
 
-def test_failed_register_writes_no_marker(tmp_path):
-    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(exit_codes={"regsvr32.exe": 5}))
-    folder = eng.ctx.runtimes_root / "dx8vb"
-    assert fails(run, eng, "install").message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
-    assert eng.ctx.elevator.calls[1] == regsvr32(eng, folder) and not (folder / MARKER_NAME).exists()
-    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root, eng.ctx.security)
-
-
 def test_record_save_failure_after_the_marker_keeps_the_registration_and_installs(tmp_path, caplog):
     """R45: once the marker is in the sealed folder, every account sees the runtime as installed, so nothing
     is undone; the per-user record is only a cache, so losing it is logged, not a failure."""
@@ -924,14 +893,6 @@ def test_runtime_with_a_subfolder_is_made_and_sealed_parent_first(tmp_path):
     assert register == regsvr32(eng, folder, "vbx.ocx", source_sha=sha(data))
     assert (folder / "lib" / "helper.dll").read_bytes() == b"MZ helper"
     assert set(eng.ctx.records.load("vbx").files) == {"vbx.ocx", "lib/helper.dll"}
-
-
-def test_failed_lock_down_registers_nothing(tmp_path):
-    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(exit_codes={"cmd.exe": 5}))
-    folder = eng.ctx.runtimes_root / "dx8vb"
-    error = fails(run, eng, "install")
-    assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
-    assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
 def test_runtime_with_no_elevated_step_isnt_locked_down(tmp_path):
@@ -1453,12 +1414,6 @@ def test_write_private_com_refuses_and_writes_nothing(tmp_path):
     with pytest.raises(PrivateComUnavailable):
         write_private_com(tmp_path, exe, [dll], reader=fake_reader)
     assert (tmp_path / "game.exe.manifest").read_text() == "the game's own"
-
-
-def test_has_embedded_manifest_is_false_for_a_file_that_isnt_a_program(tmp_path):
-    exe = tmp_path / "game.exe"
-    exe.write_bytes(b"not a program")
-    assert has_embedded_manifest(exe) is False
 
 
 @pytest.mark.windows

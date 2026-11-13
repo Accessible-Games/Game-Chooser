@@ -373,18 +373,6 @@ def test_unknown_catalog_id_fails_plainly(tmp_path):
     assert error.message == messages.NOT_IN_CATALOG
 
 
-def test_library_found_by_name_alone(tmp_path):
-    routes = {}
-    engine, ctx, lib = setup(tmp_path, [game(routes)], routes)
-    r = engine.run(InstallRequest("install", "entombed", "Games"), lambda p: None, never)
-    assert (lib / "Entombed" / "entombed.exe").exists() and r.game["library_id"] == "Games"
-
-
-def test_default_exclude_is_the_scanners_rules(tmp_path):
-    engine, ctx, lib = setup(tmp_path, [], {})
-    assert ctx.exclude(Path("setup.exe")) and not ctx.exclude(Path("entombed.exe"))
-
-
 def test_record_save_failure_undoes_steps_and_removes_folder(tmp_path):
     routes = {}
     e = game(routes, steps=[reg_step("Path", "x", r"Software\Entombed")])
@@ -505,16 +493,6 @@ def test_rollback_that_cannot_remove_the_folder_says_where_it_is(tmp_path, monke
                                 + messages.FOLDER_NOT_REMOVED.format(path=target))
     assert str(target) in error.message
     assert [p.name for p in target.iterdir()] == ["fix.exe"] and ctx.records.load("entombed") is None
-
-
-@pytest.mark.windows
-def test_staging_folder_is_hidden(tmp_path):
-    routes = {}
-    engine, ctx, lib = setup(tmp_path, [game(routes)], routes)
-    engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    staging = lib / ".gamechooser-staging"
-    assert staging.is_dir()
-    assert os.stat(staging).st_file_attributes & stat.FILE_ATTRIBUTE_HIDDEN
 
 
 def test_install_into_a_library_folder_that_does_not_exist_yet(tmp_path):

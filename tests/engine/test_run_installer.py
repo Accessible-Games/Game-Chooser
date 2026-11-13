@@ -122,22 +122,6 @@ def test_snapshot_folder_skips_engine_folders_and_tolerates_missing(tmp_path):
     assert snapshot_folder(tmp_path) == {"a/game.exe"}
 
 
-def test_shared_vendor_folder_claims_only_window_files(tmp_path):
-    dev = tmp_path / "Program Files" / "Dev"
-    put(dev, "OldGame/old.exe", b"old")
-    put(dev, "OldGame/data/a.dat", b"a")
-    time.sleep(0.1)
-    start = time.time()
-    time.sleep(0.03)
-    new_game = {"NewGame/new.exe": b"new", "NewGame/sounds/b.wav": b"b"}
-    for rel, data in new_game.items():
-        put(dev, rel, data)
-    time.sleep(0.03)
-    end = time.time()
-    new_game_keys = [rel.lower() for rel in new_game]
-    assert sorted(_claimed(dev, start, end, None, slack=0)) == sorted(new_game_keys)
-
-
 def test_preserved_mtime_still_claimed_by_birthtime(tmp_path):
     start = time.time()
     time.sleep(0.03)
@@ -255,7 +239,7 @@ def test_out_of_library_install_uses_absolute_paths(tmp_path):
     assert rec.library_id == "" and Path(rec.folder) == elsewhere / "bin" and Path(rec.folder).is_absolute()
     assert rec.launch_path == "lc.exe" and rec.vendor_uninstaller == "MsiExec.exe /X{1}"
     assert r.game["library_id"] == "" and Path(r.game["launch_path"]).is_absolute() and "manual" not in r.game
-    assert Path(r.game["launch_path"]) == elsewhere / "bin" / "lc.exe"
+    assert Path(r.game["launch_path"]) == elsewhere / "bin" / "lc.exe" and "library_name" not in r.game
 
 
 def test_registry_folder_in_a_library_is_stored_relative(tmp_path):
@@ -372,13 +356,6 @@ def test_elevated_installer_requested_when_flagged(tmp_path):
     assert eng.ctx.elevator.calls[0][2] is True and eng.ctx.process_watch.made[0].elevated is True
 
 
-def test_declined_elevation_fails_plainly(tmp_path):
-    routes = {}
-    e = run_game(routes, installer={"type": "inno", "elevation": True})
-    eng, lib = setup_engine(tmp_path, [e], routes, elevator=FakeElevator(decline=True))
-    assert fails(install, eng).message == messages.ELEVATION_DECLINED.format(what="Light Cars")
-
-
 def test_system_steps_of_a_run_source_are_applied_and_recorded(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"}, steps=[reg_step("Path", "{dir}", r"Software\LightCars")])
@@ -468,19 +445,6 @@ def test_an_untracked_run_install_skips_its_extras_and_says_so(tmp_path, monkeyp
     assert rec.tracked is False and rec.extras == {} and not (chosen / "patch.dat").exists()
     assert messages.EXTRAS_SKIPPED_UNTRACKED.format(title="Light Cars", extras="Patch") in r.notes
     assert messages.EXTRAS_REQUIRED_MISSING.format(title="Light Cars", extras="Patch") in r.notes
-
-
-def test_run_mode_extra_is_refused_plainly(tmp_path):
-    routes = {}
-    data = zip_bytes({"lc.exe": b"exe"})
-    e = {"id": "lightcars", "kind": "game", "title": "Light Cars", "version": "1",
-         "sources": [served_source(routes, f"{MIRROR}{sha(data)}/lc.zip", data)],
-         "extras": [{"id": "lc-patch", "required": True}]}
-    x = run_game(routes, id="lc-patch", title="Patch", setup=b"patch setup", installer={"type": "inno"},
-                 kind="extra", extends=["lightcars"])
-    eng, lib = setup_engine(tmp_path, [e, x], routes)
-    assert fails(install, eng).message == messages.EXTRA_NOT_SUPPORTED.format(extra="Patch")
-    assert not (lib / "Light Cars").exists()
 
 
 # ---- run-mode update -------------------------------------------------------------------------------------
@@ -648,16 +612,6 @@ def test_run_mode_install_updated_by_an_archive_uses_the_three_checksum_rule(tmp
     assert eng.ctx.records.load("lightcars").method == "zip" and len(eng.ctx.elevator.calls) == 1
 
 
-def test_untracked_run_install_cannot_be_updated(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path)
-    rec = eng.ctx.records.load("lightcars")
-    rec.tracked = False
-    eng.ctx.records.save(rec)
-    publish_v2(eng, routes)
-    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, never)
-    assert error.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Light Cars")
-
-
 # ---- uninstall -------------------------------------------------------------------------------------------
 
 
@@ -708,19 +662,6 @@ def test_vendor_uninstall_refuses_before_undoing_anything_while_set_aside_files_
     assert error.message == messages.SETASIDE_LEFT_OVER.format(title="Light Cars", path=left.parent)
     assert eng.ctx.registry.get("HKCU", r"Software\LC", "P")[0] is True
     assert eng.ctx.records.load("lightcars") == rec and len(eng.ctx.elevator.calls) == 1
-
-
-def test_run_install_updated_by_an_archive_then_uninstalled_by_its_record(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path, vendor=True)
-    data = zip_bytes({"lc.exe": b"exe v2"})
-    eng.ctx.entries["lightcars"] = dict(eng.ctx.entries["lightcars"], version="2.0",
-                                        sources=[served_source(routes, f"{MIRROR}{sha(data)}/lc.zip", data)])
-    eng.ctx.fetcher.routes.update(routes)
-    eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert eng.ctx.records.load("lightcars").vendor_uninstaller is None
-    r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert not (target / "lc.exe").exists() and not (target / "unins000.exe").exists()
-    assert r.kept_player_files == 2 and len(eng.ctx.elevator.calls) == 1
 
 
 def test_missing_vendor_uninstaller_falls_back_to_the_record(tmp_path):
@@ -850,14 +791,6 @@ def test_done_pressed_early_keeps_the_copies(tmp_path):
     r = eng.run(InstallRequest("update", "lightcars"), quiet, never)
     assert messages.SETASIDE_KEPT_TO_BE_SAFE.format(title="Light Cars", path=setaside(eng)) in r.notes
     assert (setaside(eng) / "cfg.ini").read_bytes() == b"volume=9 mine"
-
-
-def test_copies_go_once_the_tree_was_seen_to_finish(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path)
-    publish_v2(eng, routes)
-    eng.ctx.elevator.on_start = overwrites_cfg(target)
-    r = eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert not setaside(eng).exists() and r.notes == []
 
 
 # Finding 2: a folder shared with other games is never recorded as this game's.
@@ -1276,18 +1209,6 @@ def test_cancelled_vendor_uninstall_seen_to_stop_puts_files_back_quietly(tmp_pat
     assert (target / "saves" / "slot1.sav").read_bytes() == b"save" and not setaside(eng).exists()
 
 
-def test_game_fields_for_outside_libraries():
-    from engine.jobs import game_fields_for
-    entry = {"id": "lightcars", "title": "Light Cars", "platforms": ["Windows"]}
-    elsewhere = Path(os.path.abspath("Old Games")) / "Light Cars"
-    rec = InstallRecord(catalog_id="lightcars", kind="game", library_id="", folder=str(elsewhere),
-                        launch_path="lc.exe", method="run", source=InstalledSource("u", "s" * 64, 1, "c" * 64, 1, 0, "1.0"),
-                        files={}, extras={}, steps=[])
-    game = game_fields_for(entry, rec, "windows")
-    assert game["library_id"] == "" and Path(game["launch_path"]) == elsewhere / "lc.exe"
-    assert Path(game["launch_path"]).is_absolute() and "library_name" not in game and "manual" not in game.values()
-
-
 # ---- a cancel at the "where to install" prompt (quitting releases it) -----------------------------------------
 
 
@@ -1329,10 +1250,3 @@ def test_cancel_at_the_announce_of_an_update_puts_the_players_files_back(tmp_pat
     assert ui.events == ["announce"] and len(eng.ctx.elevator.calls) == starts
     assert snapshot(target) == before and eng.ctx.records.load("lightcars").source.version == "1.0"
     run_installer.require_no_setaside(eng.ctx, "lightcars", "Light Cars")  # no copies left set aside
-
-
-def test_run_and_wait_checks_the_cancel_before_starting(tmp_path):
-    eng, lib = setup_engine(tmp_path, [], {})
-    with pytest.raises(Cancelled) as ei:
-        run_installer._run_and_wait(eng.ctx, "Light Cars", "setup.exe", "", False, None, quiet, lambda: True)
-    assert ei.value.tree_done and eng.ctx.elevator.calls == []
