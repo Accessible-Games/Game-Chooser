@@ -28,7 +28,7 @@ from typing import Protocol
 from . import messages
 from .elevation import RunningProcess
 from .errors import Cancelled, ElevationDeclined, InstallFailed, StepError, UnsafePath, check_cancel
-from .installer_watch import ProcessWatch, watch_process  # noqa: F401  (re-exported)
+from .installer_watch import ProcessWatch
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
 from .paths import STAGING_DIR_NAME, is_code, same_folder, walk_files, is_engine_dir, norm_key, unique_path
@@ -36,9 +36,9 @@ from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is
 from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link, remove_unchanged
 from .sources import hash_file
 from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, split_steps, undo_steps
-from .uninstall_keys import (UNINSTALL_KEYS, folder_from_uninstall_entry,  # noqa: F401  (UNINSTALL_KEYS re-exported)
-                             inside, is_missing_program, names_title, new_uninstall_entries, snapshot_uninstall_keys,
-                             split_command, vendor_uninstaller, windows_dir)
+from .uninstall_keys import (folder_from_uninstall_entry, inside, is_missing_program, names_title,
+                             new_uninstall_entries, snapshot_uninstall_keys, split_command, vendor_uninstaller,
+                             windows_dir)
 
 DEFAULT_SILENT_ARGS = {
     "inno": '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="{dir}"',
@@ -129,11 +129,6 @@ def _claimed(folder: Path, start: float, end: float, before: set[str] | None, sl
         if hit:
             found[key] = rel
     return found
-
-
-def files_created_during(folder: Path, start: float, end: float, before: set[str] | None,
-                         slack: float = 2.0) -> list[str]:
-    return sorted(_claimed(folder, start, end, before, slack))
 
 
 def _personal_folders() -> list[str]:

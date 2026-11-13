@@ -10,11 +10,12 @@ import pytest
 
 from engine import messages, run_installer
 from engine.errors import Cancelled, StepError
+from engine.installer_watch import watch_process
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord
-from engine.run_installer import (UNINSTALL_KEYS, files_created_during, folder_from_uninstall_entry,
-                                  installer_command, new_uninstall_entries, silent_args_for, snapshot_folder,
-                                  snapshot_uninstall_keys)
+from engine.run_installer import (_claimed, folder_from_uninstall_entry, installer_command, new_uninstall_entries,
+                                  silent_args_for, snapshot_folder, snapshot_uninstall_keys)
+from engine.uninstall_keys import UNINSTALL_KEYS
 from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeUninstallKeys, fails,
                                 make_engine, never, put, quiet, reg_step, served_source, sha, snapshot, watch_with,
                                 zip_bytes)
@@ -134,7 +135,7 @@ def test_shared_vendor_folder_claims_only_window_files(tmp_path):
     time.sleep(0.03)
     end = time.time()
     new_game_keys = [rel.lower() for rel in new_game]
-    assert files_created_during(dev, start, end, None, slack=0) == sorted(new_game_keys)
+    assert sorted(_claimed(dev, start, end, None, slack=0)) == sorted(new_game_keys)
 
 
 def test_preserved_mtime_still_claimed_by_birthtime(tmp_path):
@@ -145,7 +146,7 @@ def test_preserved_mtime_still_claimed_by_birthtime(tmp_path):
     time.sleep(0.03)
     end = time.time()
     assert old_looking.stat().st_mtime == 0
-    assert files_created_during(tmp_path, start, end, None, slack=0) == ["data/music.ogg"]
+    assert sorted(_claimed(tmp_path, start, end, None, slack=0)) == ["data/music.ogg"]
 
 
 def test_before_snapshot_claims_new_files_whatever_their_times(tmp_path):
@@ -154,7 +155,7 @@ def test_before_snapshot_claims_new_files_whatever_their_times(tmp_path):
     late = put(tmp_path, "new.dat", b"n")
     os.utime(late, (0, 0))
     now = time.time()
-    found = files_created_during(tmp_path, now + 100, now + 200, before, slack=0)
+    found = sorted(_claimed(tmp_path, now + 100, now + 200, before, slack=0))
     assert found == ["new.dat"]
 
 
@@ -758,7 +759,7 @@ def test_job_watch_waits_for_children_of_an_early_exit(tmp_path):
         "subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(1.5)'],\n"
         "                 creationflags=subprocess.CREATE_NO_WINDOW)\n", encoding="utf-8")
     process = WindowsElevator().start(sys.executable, f'"{script}"', False)
-    watch = run_installer.watch_process(process, False)
+    watch = watch_process(process, False)
     started = time.monotonic()
     try:
         while not watch.poll(0.1):
@@ -779,7 +780,7 @@ def test_job_watch_terminate_ends_the_whole_tree(tmp_path):
         "                 creationflags=subprocess.CREATE_NO_WINDOW)\n"
         "import time; time.sleep(30)\n", encoding="utf-8")
     process = WindowsElevator().start(sys.executable, f'"{script}"', False)
-    watch = run_installer.watch_process(process, False)
+    watch = watch_process(process, False)
     try:
         time.sleep(0.5)
         assert not watch.poll(0.05)
@@ -897,7 +898,7 @@ def test_file_written_to_but_created_before_the_window_is_not_claimed(tmp_path):
     settings.write_bytes(b"the other game saved its settings meanwhile")
     put(tmp_path, "NewGame/new.exe", b"n")
     time.sleep(0.03)
-    assert files_created_during(tmp_path, start, time.time(), None, slack=0) == ["newgame/new.exe"]
+    assert sorted(_claimed(tmp_path, start, time.time(), None, slack=0)) == ["newgame/new.exe"]
 
 
 def test_shared_folder_with_other_content_is_untracked(tmp_path, monkeypatch):
@@ -1118,7 +1119,6 @@ def test_tree_watch_follows_children_outside_any_job(tmp_path):
     """The elevated path's watch (no job): children are followed through the process list."""
     import win32process
     from engine.elevation import _ShellProcess
-    from engine.installer_watch import watch_process
     script = tmp_path / "parent.py"
     script.write_text(
         "import subprocess, sys, time\n"
