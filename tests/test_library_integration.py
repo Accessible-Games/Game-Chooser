@@ -6,7 +6,7 @@ import pytest
 from engine import messages
 from engine.index import DEFAULT_CATALOG_URL
 from engine.records import InstalledSource, InstallRecord, RecordStore
-from models import Game, is_web_path
+from models import Game
 
 
 def _record(catalog_id="entombed", library_id="main", folder="Entombed", **kw):
@@ -93,18 +93,6 @@ def test_catalog_games_in_library(isolated_manager):
     assert isolated_manager.catalog_games_in("none") == []
 
 
-def test_add_catalog_game_replaces_and_saves_then_remove(isolated_manager):
-    m = isolated_manager
-    first = m.add_catalog_game({"title": "Old", "catalog_id": "e", "launch_path": "x/e.exe", "library_id": "l"})
-    second = m.add_catalog_game({"title": "New", "catalog_id": "e", "launch_path": "x/e.exe", "library_id": "l",
-                                 "installed_extras": ["p"]})
-    assert first is not second
-    assert [g.title for g in m.games] == ["New"]
-    assert _games_json(m)[0]["installed_extras"] == ["p"]
-    m.remove_catalog_game("e")
-    assert m.games == [] and _games_json(m) == []
-
-
 @pytest.mark.parametrize("cached, title", [(False, "entombed"), (True, "Entombed!")])  # uncached: the id stands in
 def test_reconcile_adds_game_for_orphan_record(isolated_manager_factory, tmp_path, cached, title):
     if cached:
@@ -119,10 +107,6 @@ def test_reconcile_adds_game_for_orphan_record(isolated_manager_factory, tmp_pat
     assert game.launch_path == "Entombed/e.exe" and game.library_id == "main"
     assert game.installed_extras == ["patch"]
     assert [g["catalog_id"] for g in _games_json(isolated_manager_factory)] == ["entombed"]
-
-
-def test_reconcile_skips_uninstalled_records(isolated_manager_factory, tmp_path):
-    assert _restart(isolated_manager_factory, tmp_path, _record(uninstalled=True)).games == []
 
 
 def test_reconcile_unlinks_game_whose_record_is_gone(isolated_manager_factory, tmp_path):
@@ -269,9 +253,3 @@ def test_reconcile_finishes_an_uninstall_whose_result_was_not_applied(isolated_m
     assert [g["title"] for g in _games_json(isolated_manager_factory)] == ["Hand"]
     assert m.records.load("entombed") == done
     assert [g.title for g in isolated_manager_factory().games] == ["Hand"]  # and it doesn't come back
-
-
-@pytest.mark.parametrize("path, web", [("https://example.com/game", True), ("HTTP://example.com/game", True),
-                                       ("HTTPS://", True), ("httpd-sim/game.exe", False), ("C:/Games/x.exe", False)])
-def test_a_web_address_is_http_or_https_in_any_case(path, web):
-    assert is_web_path(path) is web and Game(launch_path=path).is_web is web

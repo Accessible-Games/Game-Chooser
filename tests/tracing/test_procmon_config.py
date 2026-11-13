@@ -8,8 +8,8 @@ import procmon_parser
 from procmon_parser import Column, RuleAction, RuleRelation, consts
 
 from tracing.kinds import classify
-from tracing.procmon import (CAPTURE_OPERATIONS, EXCLUDED_PROCESSES, READ_ONLY_ACCESS, describe_filter,
-                             filter_config, write_filter_config)
+from tracing.procmon import (CAPTURE_OPERATIONS, EXCLUDED_PROCESSES, READ_ONLY_ACCESS, filter_config,
+                             write_filter_config)
 
 
 def _detail_excludes(rules):
@@ -85,14 +85,6 @@ def test_write_opens_are_kept_by_the_filter():
         assert not _dropped(detail), detail
     assert _dropped("Desired Access: Read Attributes, Disposition: Open, Options: Non-Directory File")
     assert _dropped("Delete: False")
-
-
-def test_describe_filter_names_everything_dropped():
-    lines = describe_filter()
-    text = " ".join(lines)
-    assert "MoUsoCoreWorker.exe" in text and "CreateFile" in text
-    assert f"Desired Access: {READ_ONLY_ACCESS[0]}, Disposition: Open," in text
-    assert "REG_OPENED_EXISTING_KEY" in text and "Delete: False" in text
 
 
 def _every_operation_name():

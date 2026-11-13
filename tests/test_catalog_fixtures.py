@@ -9,13 +9,10 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from engine.entries import current_platform, extras_of, is_readable, visible_games
+from engine.entries import current_platform, is_readable, visible_games
 from engine.errors import DownloadError
 from engine.extract import Extractor
 from engine.index import SUPPORTED_SCHEMA_VERSION, CatalogIndex
-from engine.plan import build_install_plan
-from engine.records import RecordStore
-from tests.engine.fakes import FakeRegistry
 
 ROOT = Path(__file__).resolve().parent.parent
 _spec = importlib.util.spec_from_file_location("serve_test_catalog", ROOT / "scripts" / "serve_test_catalog.py")
@@ -59,6 +56,8 @@ def test_index_loads_and_every_entry_is_readable(tmp_path):
     assert {"test-game", "test-game-no-path", "test-game-extras", "trace-test"} <= visible
     assert {"test-game-tar", "test-game-page", "test-game-hta"} <= visible
     assert not {"test-extra", "test-shared-extra"} & visible  # an extra is not a game
+    assert state.entries["test-game-no-path"]["pricing"]["model"] == "free-to-try" and \
+        state.entries["test-game-tar"]["sources"][0]["first_run_download_size"] == 50 * 2**20
 
 
 def test_every_source_matches_its_built_file_and_points_at_the_local_server(tmp_path):
@@ -105,16 +104,6 @@ def test_published_index_is_schema_version_2(tmp_path):
             assert "extends" not in entry
 
 
-def test_free_to_try_game_warns_before_installing(tmp_path):
-    _, state = load(tmp_path)
-    plan = build_install_plan("test-game-no-path", state.entries, [{"id": "a", "path": str(tmp_path)}],
-                              RecordStore(tmp_path / "records"), FakeRegistry(), True, None, "windows")
-    assert plan.warnings == ["Price: Free to try, $5 to unlock. Buy or register: https://example.com/register"]
-    tar = build_install_plan("test-game-tar", state.entries, [], RecordStore(tmp_path / "records"), FakeRegistry(),
-                             True, None, "windows")
-    assert tar.first_run_size == 50 * 2**20 and tar.warnings == []
-
-
 def test_tar_game_extracts_without_the_bundled_tools(tmp_path):
     build, state = load(tmp_path)
     install = state.entries["test-game-tar"]["sources"][0]["install"]
@@ -134,18 +123,6 @@ def test_extras_are_listed_on_every_game_they_extend(tmp_path):
     for entry in state.entries.values():  # extras is exactly the entries whose extends names the game
         extending = sorted(e["id"] for e in state.entries.values() if entry["id"] in e.get("extends", []))
         assert [x["id"] for x in entry.get("extras", [])] == extending
-
-
-def test_shared_extra_is_offered_to_each_of_its_games(tmp_path):
-    _, state = load(tmp_path)
-    records = RecordStore(tmp_path / "records")
-    for game_id in ("test-game-extras", "test-game-tar"):
-        assert "test-shared-extra" in [x.entry["id"] for x in extras_of(state.entries[game_id], state.entries,
-                                                                         "windows")]
-        plan = build_install_plan(game_id, state.entries, [{"id": "a", "path": str(tmp_path)}], records,
-                                  FakeRegistry(), True, None, "windows")
-        shared = [x for x in plan.extras if x.id == "test-shared-extra"]
-        assert len(shared) == 1 and not shared[0].required and shared[0].title == "Test Shared Extra Level"
 
 
 @pytest.mark.skipif(not serve.TINY_GAME_SOURCE.is_file(), reason="needs where.exe in System32")

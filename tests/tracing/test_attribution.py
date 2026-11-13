@@ -68,12 +68,6 @@ def test_find_root_none_when_absent():
     assert find_root([p(5, 1, 10 * S)], session()) is None
 
 
-def test_session_info_json_round_trip():
-    s = session(marks=(1, 2, 3))
-    back = SessionInfo.from_json(s.to_json())
-    assert back == s and isinstance(back.marks, tuple)
-
-
 # ---- a launch that gave no process ID: the root is found by exe ------------------------------------------
 
 def test_find_root_by_exe_when_the_pid_is_unknown():

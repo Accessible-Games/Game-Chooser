@@ -254,6 +254,7 @@ def test_active_filter_is_logged_at_info(tmp_path):
     assert "MoUsoCoreWorker.exe" in text
     assert "Desired Access: Read Attributes, Disposition: Open," in text
     assert "INFO" in text and "CreateFile" in text
+    assert "REG_OPENED_EXISTING_KEY" in text and "Delete: False" in text
 
 
 def test_slow_stop_is_reported_and_split_still_runs(tmp_path):

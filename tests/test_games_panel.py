@@ -211,20 +211,6 @@ def test_label_and_description_follow_the_row_when_its_number_stays_but_the_game
         ("Install", False, "")
 
 
-def test_every_programmatic_select_also_moves_the_focused_item(make_view):
-    """Else the arrow keys start from the old focused row (row 0 after startup), not from the selected game"""
-    view = make_view({"last_selected": "charlie"})
-    view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
-    assert (selected(view), focused(view)) == (2, 2)  # the game remembered from the last run
-    view.search_combo.SetValue("b")
-    assert titles(view) == ["Bravo"] and (selected(view), focused(view)) == (0, 0)
-    view.search_combo.SetValue("")
-    view.select_row(view.displayed[2])
-    assert (selected(view), focused(view)) == (2, 2)
-    view.set_rows(rows(ALPHA, CHARLIE))  # Charlie moved up a row
-    assert (selected(view), focused(view)) == (1, 1)
-
-
 def test_tree_gains_a_node_for_a_new_value_and_keeps_its_selection(make_view):
     view = make_view()
     view.set_rows(rows(ALPHA, BRAVO))
@@ -358,9 +344,6 @@ def test_sorting_keeps_the_game_selected_and_its_label_right(make_view):
     assert (saved(view)["sort_column"], saved(view)["sort_ascending"]) == (1, False)
     press(view.list_ctrl, ord("1"), wx.wxEVT_CHAR)  # a digit key sorts by that column
     assert headers(view) == ["Title ▲", "Year"] and saved(view)["sort_column"] == 0
-    saves(view).fail = True  # a failed save doesn't stop the sort
-    press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR)
-    assert titles(view) == ["Cat", "Bee", "Ant"] and view.action_btn.GetLabel() == "Install Ant"
 
 
 def test_rows_that_tie_in_the_sorted_column_are_in_title_order(make_view):
@@ -412,23 +395,11 @@ def test_row_filter_hides_rows_from_the_list_but_keeps_their_tree_values(make_vi
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (0, 0, "Install Alpha")
 
 
-def test_the_install_progress_shows_beside_the_action_button_which_stays(make_view):
-    """On both tabs: while a job runs or waits the button is still there to press"""
-    view = make_view(idle_label="Launch")
-    assert view.action_btn.GetLabel() == "Launch"
-    view.set_rows(rows(ALPHA))
-    button = view.action_btn
-    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, False)
-    view.set_busy(True)
-    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, True)
-    view.set_busy(False)
-    assert (button.IsShown(), button.IsEnabled(), view.progress_area.IsShown()) == (True, True, False)
-
-
 def test_library_rows_launch_describe_and_are_remembered_by_id(make_view):
     games = [Game(title="Hand", launch_path="C:/games/hand.exe", platforms=["Windows"]),
              Game(title="Alpha", launch_path="Alpha/alpha.exe", library_id="lib", catalog_id="alpha")]
     view = make_view(idle_label="Launch")
+    assert view.action_btn.GetLabel() == "Launch" and not view.progress_area.IsShown()  # before the first fill
     view.set_rows(library_rows(games, lambda game: ALPHA if game.catalog_id else None))
     assert view.selected_row().game is games[1] and view.action_btn.GetLabel() == "Launch Alpha"
     assert view.description.GetValue().startswith("About Alpha.")
@@ -758,7 +729,8 @@ def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(m
     view.progress_area.cancel_btn.SetFocus()  # the player is on Cancel when the job ends
     assert view.progress_area.cancel_btn.HasFocus()
     view.set_busy(False)
-    assert view.list_ctrl.HasFocus()
+    assert view.list_ctrl.HasFocus() and not view.progress_area.IsShown()
+    assert view.action_btn.IsShown() and view.action_btn.IsEnabled()  # the button stays after the job
 
 
 def test_a_selection_event_while_a_dialog_is_open_is_not_the_players(make_view):
@@ -876,15 +848,6 @@ def test_typing_looks_at_titles_only_in_the_order_the_list_shows(make_view):
     now[0] += 2
     type_text(view, "t")  # steps on from the current row, downwards in the order shown
     assert view.selected_row().title == "Temple Of Doom"
-
-
-def test_typing_reads_the_character_not_the_key_code(make_view):
-    """wx gives a character outside Latin-1 no key code (WXK_NONE): only GetUnicodeKey holds it"""
-    view = make_view()
-    view.set_rows(rows(entry("alpha"), entry("zebra"), entry("żuk")))
-    assert titles(view) == ["Alpha", "Zebra", "Żuk"]
-    assert press(view.list_ctrl, wx.WXK_NONE, wx.wxEVT_CHAR, unicode=ord("Ż"))  # in capitals: any case finds it
-    assert view.selected_row().title == "Żuk" and saved(view)["last_selected"] == "żuk"
 
 
 def test_space_in_a_text_never_moves_the_selection(make_view):

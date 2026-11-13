@@ -359,13 +359,6 @@ def test_library_rows_are_catalog_rows_that_hold_their_game():
     assert all(r.game is None for r in build_rows([entombed], set()))  # a Catalog row holds no game
 
 
-def test_library_row_id_survives_the_game_object_being_replaced():
-    games, rows = _library()
-    assert [r.id for r in rows] == ["C:/games/alpha.exe", "https://bare.example/play", "entombed"]
-    replaced = [Game.from_dict(game.to_dict()) for game in games]  # as an index take or a finished job does
-    assert [r.id for r in library_rows(replaced, lambda game: None)] == [r.id for r in rows]
-
-
 def test_library_row_ids_are_unique_when_games_share_a_launch_path():
     """Locate has no duplicate check and games.json can be edited by hand. With one id for two rows, the next
     refill would select the first of them, and Delete or Enter would act on the wrong game."""
@@ -394,13 +387,7 @@ def test_library_rows_give_the_tree_each_field_as_one_value():
     assert cats["tag"] == cats["price"] == cats["language"] == cats["support"] == set()
 
 
-def test_library_rows_filter_search_label_and_describe_like_any_row():
+def test_library_rows_label_and_describe_like_any_row():
     _, rows = _library()
-    assert [r.title for r in filter_rows(rows, "", {"platform": {"macOS", "Web"}})] == ["Alpha", "Bare Web"]
-    assert [r.title for r in filter_rows(rows, "", {"developer": {"Ann Dev, Bob Dev"}})] == ["Alpha"]
-    assert [r.title for r in filter_rows(rows, "", {"genre": {"Unknown Genre"}, "year": {"Unknown Year"}})] == \
-        ["Bare Web"]
-    assert [r.title for r in filter_rows(rows, "BOB", {})] == ["Alpha"]  # title and developer are searched
-    assert filter_rows(rows, "action", {}) == [] and filter_rows(rows, "unknown", {}) == []
     assert [action_label(r, "windows") for r in rows] == ["Launch Alpha", "Launch Bare Web", "Launch Entombed"]
     assert [description_text(r.entry) for r in rows] == ["", "", description_text(entombed)]

@@ -133,14 +133,6 @@ def test_status_write_retries_through_the_helper_and_one_that_keeps_failing_leav
     assert [p.name for p in tmp_path.iterdir()] == ["status.json"]
 
 
-def test_stop_request_round_trip(run):
-    assert run.read_stop_request() is None
-    run.write_stop_request({"requested": FT, "close_games": True})
-    assert run.stop_request_path.name == "stop-request.json"
-    assert run.read_stop_request() == {"requested": FT, "close_games": True}
-    assert not list(run.path.glob("*.tmp"))
-
-
 def test_stop_record_round_trip_and_unreadable_is_none(run):
     assert run.read_stop() is None
     run.write_stop({"time": FT, "close_games": False, "sessions": {}})

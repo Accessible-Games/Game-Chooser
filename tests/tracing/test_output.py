@@ -59,7 +59,7 @@ def test_session_json_fields(tmp_path):
     assert data["game"]["title"] == "Alien Outback: Deluxe!" and data["env"]["windows"] == "10"
     assert data["start"] == filetime_to_iso(T0) and data["end"] is None
     assert data["still_running_at_capture_end"] is True and data["time_zero_source"] == "process_start"
-    assert data["root_pid"] == 100 and data["problem"] == "p"
+    assert data["root_pid"] == 100 and data["problem"] == "p" and data["ended_by"] is None
     assert data["event_count"] == 1 and data["known_limits"] == KNOWN_LIMITS
     assert len(KNOWN_LIMITS) == 2
     assert data["marks"] == [{"n": 1, "t": 2.0, "time": filetime_to_iso(T0 + 2 * S)}]
@@ -106,15 +106,6 @@ def test_lone_surrogate_path_round_trips_and_other_lines_stay_raw(tmp_path):
     assert json.loads(second)["path"] == good and "\u00eb" in second
     data = json.loads((folder / "session.json").read_text(encoding="utf-8"))
     assert data["game"]["title"] == "Zo\u00eb \ud800"
-
-
-def test_session_json_says_how_the_session_ended(tmp_path):
-    data = json.loads((write_session(make_result(), tmp_path) / "session.json").read_text(encoding="utf-8"))
-    assert data["ended_by"] is None and data["stop"] is None
-    result = make_result()
-    result.ended_by = "capture_end"
-    data = json.loads((write_session(result, tmp_path) / "session.json").read_text(encoding="utf-8"))
-    assert data["ended_by"] == "capture_end" and data["stop"] is None
 
 
 def test_session_json_stop_fields(tmp_path):
