@@ -797,7 +797,7 @@ def test_real_uninstall_keys_can_be_read():
     assert isinstance(snapshot, dict) and all(isinstance(v, dict) for v in snapshot.values())
 
 
-# ---- fix round 1 -------------------------------------------------------------------------------------------
+# ---- what is never lost: copies, other games' folders, the player's files ---------------------------------
 
 
 def setaside(eng):
@@ -1136,9 +1136,6 @@ def test_tree_watch_follows_children_outside_any_job(tmp_path):
         assert time.monotonic() - started >= 1.2 and watch.tree_observed()
     finally:
         watch.close()
-
-
-# ---- fix round 2 -------------------------------------------------------------------------------------------
 
 
 # Finding 2(c): claims spanning a folder that was already there can't be told from another program's files.

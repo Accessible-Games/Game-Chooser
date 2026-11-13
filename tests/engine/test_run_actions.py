@@ -553,7 +553,7 @@ def test_an_untracked_run_record_still_refuses(tmp_path, action):
     assert len(eng.ctx.elevator.calls) == 1
 
 
-# ---- fix round 1 -----------------------------------------------------------------------------------------------
+# ---- a phase that fails partway ------------------------------------------------------------------------------
 
 
 def fails_once(monkeypatch, module, name):
