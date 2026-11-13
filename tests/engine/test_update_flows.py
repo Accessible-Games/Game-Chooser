@@ -552,17 +552,13 @@ def test_repair_works_after_an_optional_extra_left_the_catalog(tmp_path):
     assert (game / "music" / "theme.ogg").read_bytes() == b"theme"
 
 
-def test_repair_of_a_record_without_specs_falls_back_to_the_catalog(tmp_path):
+def test_repair_of_a_record_without_specs_refuses_and_changes_nothing(tmp_path):
     eng, game = install_v1(tmp_path)
     rec = record(eng)
     for source in [rec.source, *rec.extras.values()]:
         source.install = source.steps = source.launch = None   # as written before specs were recorded
     eng.ctx.records.save(rec)
     (game / "sounds" / "a.wav").unlink()
-    run(eng, "repair")
-    assert (game / "sounds" / "a.wav").read_bytes() == b"a"
-
-    del eng.ctx.entries["pawprints-music"]
     before = snapshot(game)
     assert fails(run, eng, "repair").message == messages.REPAIR_NOT_POSSIBLE.format(title="Pawprints")
     assert snapshot(game) == before

@@ -186,15 +186,25 @@ def _installed_source(entry: dict, fetched: Fetched, platform: str) -> Installed
 
 
 def _recorded_launch(recorded: InstalledSource, entry: dict, platform: str) -> str | None:
-    """The launch hint the recorded source was installed with (today's, for records that predate it)."""
-    if recorded.install is None:
-        return _launch_hint(entry, platform)
+    """Today's launch hint, else the one the recorded source was installed with."""
     return _launch_hint(entry, platform) or recorded.launch
 
 
+def _recorded_spec(recorded: InstalledSource) -> dict | None:
+    """How a recorded file was unpacked and set up (`install` and `steps`); None if the record doesn't say."""
+    if recorded.install is None:
+        return None
+    return {"install": recorded.install, "steps": list(recorded.steps or [])}
+
+
+def _recorded_runs_installer(recorded: InstalledSource) -> bool:
+    """True if putting back this recorded file means running it: it is an installer that must run."""
+    spec = _recorded_spec(recorded)
+    return spec is not None and runs_installer(spec)
+
+
 class _NoUnpackSpec(Exception):
-    """A recorded file can't be rebuilt: the record predates kept install specs and the catalog
-    no longer lists it."""
+    """A recorded file can't be rebuilt: the record has no install spec."""
 
 
 def _steps(fetched: Fetched) -> list[dict]:
@@ -368,15 +378,14 @@ class InstallEngine:
         """Download exactly the recorded file for an item: its recorded URL, then its mirror path.
 
         Raises NoVerifiedSource if neither serves that file. It is unpacked and set up with the
-        recorded install spec and steps (for older records, those of the catalog's matching source;
-        _NoUnpackSpec if there is none).
+        recorded install spec and steps (_NoUnpackSpec if the record has none).
         """
         ctx = self.ctx
 
         def fetch(item: dict, work_dir: Path) -> Fetched:
             recorded = sources[item["id"]]
             catalog_item = ctx.entries.get(item["id"])
-            spec = self._recorded_spec(item["id"], recorded)
+            spec = _recorded_spec(recorded)
             if spec is None:
                 raise _NoUnpackSpec(item["id"])
             urls = _exact_urls(recorded, platform_sources(catalog_item, ctx.platform) if catalog_item else [])
@@ -388,18 +397,6 @@ class InstallEngine:
             fetched.source = {**spec, **fetched.source}
             return fetched
         return fetch
-
-    def _recorded_spec(self, item_id: str, recorded: InstalledSource) -> dict | None:
-        """How a recorded file was unpacked and set up (`install` and `steps`): as recorded, or for older
-        records, as the catalog's matching source says. None if neither is known."""
-        if recorded.install is not None:
-            return {"install": recorded.install, "steps": list(recorded.steps or [])}
-        return _catalog_source(self.ctx.entries.get(item_id), recorded, self.ctx.platform)
-
-    def _recorded_runs_installer(self, item_id: str, recorded: InstalledSource) -> bool:
-        """True if putting back this recorded file means running it: it is an installer that must run."""
-        spec = self._recorded_spec(item_id, recorded)
-        return spec is not None and runs_installer(spec)
 
     def _fetch_game(self, entry: dict, work: Path, progress, cancel) -> Fetched:
         """Download the catalog's current file for the game, which decides how it is installed.
@@ -857,7 +854,7 @@ class InstallEngine:
         ctx = self.ctx
         game_id = entry["id"]
         title = title_of(entry)
-        if self._recorded_runs_installer(game_id, rec.source):
+        if _recorded_runs_installer(rec.source):
             return run_actions.repair(self, entry, rec, game_dir, progress, cancel)
         self._require_writable(rec, game_dir, title)
         private = runtimes.private_runtimes(rec, entry, ctx)
@@ -896,7 +893,7 @@ class InstallEngine:
         if previous is None:
             raise InstallFailed(messages.NOTHING_TO_UNDO.format(title=title))
         source = _source_from(previous["source"])
-        if self._recorded_runs_installer(game_id, source):
+        if _recorded_runs_installer(source):
             return run_actions.undo(self, entry, rec, game_dir, source, progress, cancel)
         self._require_writable(rec, game_dir, title)
         extra_sources = {k: _source_from(v) for k, v in (previous.get("extras") or {}).items()}
@@ -980,7 +977,7 @@ class InstallEngine:
         self._require_writable(rec, game_dir, title)
         prior = _snapshot(rec)
         with self._workspace(self._staging_root(rec, game_dir), game_id) as (staging, work):
-            if self._recorded_runs_installer(game_id, rec.source):
+            if _recorded_runs_installer(rec.source):
                 tree = run_actions.copy_installed_files(rec, game_dir, staging / "game" / game_dir.name, title)
             else:
                 try:
@@ -1238,20 +1235,6 @@ def _keep_backups(rec: InstallRecord, backups: list[dict], prior: dict | None) -
 
 def _source_from(data: dict) -> InstalledSource:
     return InstalledSource(**{f.name: data.get(f.name) for f in fields(InstalledSource)})
-
-
-def _catalog_source(item: dict | None, recorded: InstalledSource, platform: str) -> dict | None:
-    """The catalog source a recorded file came from: same checksum, else same URL, else same position."""
-    sources = platform_sources(item, platform) if item else []
-    for source in sources:
-        if (source.get("sha256") or "").lower() == recorded.sha256:
-            return source
-    for source in sources:
-        if source.get("url") == recorded.url:
-            return source
-    if 0 <= recorded.position < len(sources):
-        return sources[recorded.position]
-    return sources[0] if sources else None
 
 
 def _exact_urls(recorded: InstalledSource, catalog_sources: list[dict]) -> list[str]:
