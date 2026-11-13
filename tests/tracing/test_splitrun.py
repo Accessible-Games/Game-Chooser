@@ -141,7 +141,7 @@ def test_a_split_json_cut_off_while_written_leaves_the_run_unsplit(tmp_path, mon
     with pytest.raises(KeyboardInterrupt):
         split_run_dir(run, tmp_path, fake_read)
     monkeypatch.undo()
-    assert not run.is_split()
+    assert not run.is_split() and not list(run.path.glob("split.json.*.tmp"))
     assert [r.path for r in leftover_runs(tmp_path, lambda pid, start: False)] == [run.path]
 
 

@@ -45,8 +45,8 @@ def _temp_for(path: Path) -> Path:
 
 def _atomic_write(path: Path, text: str) -> None:
     temp = _temp_for(path)
-    temp.write_text(text, encoding="utf-8")
     try:
+        temp.write_text(text, encoding="utf-8")
         replace_with_retry(temp, path)
     except BaseException:
         temp.unlink(missing_ok=True)
@@ -56,8 +56,8 @@ def _atomic_write(path: Path, text: str) -> None:
 def _atomic_create(path: Path, text: str) -> bool:
     """Write `path` whole, only if it does not exist yet; False (and nothing changed) when it does."""
     temp = _temp_for(path)
-    temp.write_text(text, encoding="utf-8")
     try:
+        temp.write_text(text, encoding="utf-8")
         if sys.platform == "win32":
             os.rename(temp, path)  # on Windows a rename never replaces a file
         else:
