@@ -418,8 +418,6 @@ LIBRARY_NOT_REMOVED = ("Game Chooser couldn't finish removing that library, beca
 LIBRARY_ROW_GONE = ("{title}'s library is no longer in Preferences, so Game Chooser can't find it. Delete it and add "
                     "it again with Add Game.")
 FORGET_FAILED = "Game Chooser couldn't remove {title} from the list. Try again."
-WEB_GAME_NOT_ADDED = ("Game Chooser couldn't add {title} to your games list, because the list couldn't be saved. "
-                      "Try again.")
 COUNTING_FILES = "Checking {title}'s files"
 COUNTING_LIBRARY_FILES = "Checking the files of the games in {label}"
 FORGET_GAME_CONFIRM = ("Remove {title} from the list? Game Chooser didn't keep track of its files, so they stay "

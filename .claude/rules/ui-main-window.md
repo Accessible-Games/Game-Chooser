@@ -40,8 +40,9 @@ description. The Catalog tab has its status line and Retry above these.
   `MainFrame.games_changed()` is the one call after every change to a game, to `manager.games`, to a library or
   to what is installed (Add, Edit, Delete, Locate, a job that ended, an index take, Preferences, F5, a web game
   added from the Catalog): it rebuilds both tabs' rows, the Libraries menu and the statuses. Add (also the
-  first-run dialog's), Edit, Delete and Locate write games.json through `_save_games`: a save that fails says so
-  (`messages.GAMES_NOT_SAVED`), and the change stays in memory and still shows.
+  first-run dialog's), Edit, Delete and Locate write games.json through `_save_games`, and the Catalog's Add of a
+  web game through `save_or_keep` too: a save that fails says so (`messages.GAMES_NOT_SAVED`), and the change stays
+  in memory and still shows.
   Status values (`engine/status.py`): `Ready`, `Update available`, `Executable not found`, `Library not found`.
   A `self_updating` entry never shows `Update available`.
   Statuses are computed on a worker thread (`refresh_statuses`) and applied on the UI thread.
