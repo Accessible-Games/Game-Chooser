@@ -21,7 +21,8 @@ def test_a_web_game_address_is_what_the_catalog_calls_one(url):
 
 
 @pytest.mark.parametrize("url", ["example.com", "ftp://example.com", "https://", "http://", "https:/example.com",
-                                 "https://exa mple.com", "https://example.com/a b", "file:///C:/game.html"])
+                                 "https://exa mple.com", "https://example.com/a b", "file:///C:/game.html",
+                                 "https://example.com\n"])  # the old pattern let a trailing newline through
 def test_anything_else_is_not_a_web_game_address(url):
     assert ValidationService.validate_url(url) == (False, "Invalid URL format")
 
