@@ -384,9 +384,20 @@ def _poll_for(watch: ProcessWatch, seconds: float, never: Callable[[], bool]) ->
     return False
 
 
-def _installer_failed(code: int | None, interactive: bool) -> bool:
-    """A silent installer's non-zero exit is a failure; for an interactive one, the player's Done decides."""
-    return not interactive and code is not None and code != 0 and code not in _RESTART_CODES
+def _run_installer(ctx, title: str, file: Path, installer: dict, target: Path, interactive: bool,
+                   progress, cancel) -> _Outcome:
+    """Run the installer into `target` and wait for it (see _run_and_wait).
+
+    A silent installer's non-zero exit, other than a restart, raises InstallFailed (with `tree_done`);
+    for an interactive one, the player's Done decides.
+    """
+    exe, args = installer_command(file, installer, target)
+    outcome = _run_and_wait(ctx, title, exe, args, _elevated(installer), Path(file).parent, progress, cancel)
+    if not interactive and outcome.code not in (None, 0, *_RESTART_CODES):
+        error = InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code))
+        error.tree_done = outcome.tree_done
+        raise error
+    return outcome
 
 
 def _code_notes(title: str, code: int | None) -> list[str]:
@@ -474,11 +485,8 @@ def run_installer_untracked(file: Path, installer: dict, target: Path, ctx, prog
     before = snapshot_folder(target)
     if interactive:
         ctx.installer_ui.announce_target(title, target)
-    exe, args = installer_command(file, installer, target)
     try:
-        outcome = _run_and_wait(ctx, title, exe, args, _elevated(installer), Path(file).parent, progress, cancel)
-        if _installer_failed(outcome.code, interactive):
-            raise InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code))
+        outcome = _run_installer(ctx, title, file, installer, target, interactive, progress, cancel)
     except _StillRunning as e:
         raise InstallFailed(messages.INSTALLER_STILL_RUNNING.format(title=title)) from e
     except BaseException:
@@ -501,15 +509,10 @@ def install(ctx, item: RunItem, target: Path, library_id: str, library_path: Pat
     keys_before = snapshot_uninstall_keys(ctx.uninstall_reader)
     existed = target.exists()
     before = snapshot_folder(target)
-    exe, args = installer_command(item.file, item.installer, target)
     start = time.time()
     placed = False
     try:
-        outcome = _run_and_wait(ctx, title, exe, args, _elevated(item.installer), item.file.parent,
-                                progress, cancel)
-        code = outcome.code
-        if _installer_failed(code, interactive):
-            raise InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=code))
+        code = _run_installer(ctx, title, item.file, item.installer, target, interactive, progress, cancel).code
         progress(Progress("finishing"))
         found = _find_folder(ctx, item, target, before, start, time.time(), keys_before)
         if found is None:
@@ -811,15 +814,11 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
         ctx.installer_ui.announce_target(title, game_dir)
     keys_before = snapshot_uninstall_keys(ctx.uninstall_reader)
     before = snapshot_folder(game_dir)
-    exe, args = installer_command(item.file, item.installer, game_dir)
     start = time.time()
     tree_done = False
     try:
-        outcome = _run_and_wait(ctx, title, exe, args, _elevated(item.installer), item.file.parent,
-                                progress, cancel)
+        outcome = _run_installer(ctx, title, item.file, item.installer, game_dir, interactive, progress, cancel)
         tree_done = outcome.tree_done
-        if _installer_failed(outcome.code, interactive):
-            raise InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code))
         progress(Progress("finishing"))
         if item.steps:
             theirs_now = {norm_key(r) for r in player}  # never the installer's, whatever their dates
