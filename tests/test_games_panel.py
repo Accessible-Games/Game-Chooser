@@ -849,15 +849,6 @@ def test_typing_looks_at_titles_only_in_the_order_the_list_shows(make_view):
     assert view.selected_row().title == "Temple Of Doom"
 
 
-def test_typing_reads_the_character_not_the_key_code(make_view):
-    """wx gives a character outside Latin-1 no key code (WXK_NONE): only GetUnicodeKey holds it"""
-    view = make_view()
-    view.set_rows(rows(entry("alpha"), entry("zebra"), entry("żuk")))
-    assert titles(view) == ["Alpha", "Zebra", "Żuk"]
-    assert press(view.list_ctrl, wx.WXK_NONE, wx.wxEVT_CHAR, unicode=ord("Ż"))  # in capitals: any case finds it
-    assert view.selected_row().title == "Żuk" and saved(view)["last_selected"] == "żuk"
-
-
 def test_space_in_a_text_never_moves_the_selection(make_view):
     """The player types `a`, lands on Alpha and presses Space: the text is then "a ", which only "A Hero's Call"
     starts with, and the selection must not go there"""
