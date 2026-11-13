@@ -55,7 +55,7 @@ def call(op: Op, data: bytes, trailer: bytes = b"TRAILER"):
     (Op.SetRenameInformationFile, REAL_RENAME_IO, {"FileName": TARGET, "ReplaceIfExists": "True"}),
     (Op.SetRenameInformationEx, REAL_RENAME_EX_IO, {"FileName": REAL_RENAME_EX_TARGET, "ReplaceIfExists": "True"}),
     (Op.SetDispositionInformationEx, REAL_DISPOSITION_EX_IO, {"Delete": "True"}),
-])
+], ids=["rename", "rename-ex", "disposition-ex"])
 def test_details_decoded_from_real_bytes(op, data, expected):
     event, io = call(op, data)
     assert {key: event.details.get(key) for key in expected} == expected

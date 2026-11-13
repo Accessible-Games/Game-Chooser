@@ -75,7 +75,8 @@ def test_cli_import_is_light():
 
 @pytest.mark.parametrize("args", [["--app-pid", "abc", "--procmon", "p"],  # a bad app pid
                                   ["--app-pid", "1", "--procmon", "p"],    # the build fails (patched below)
-                                  []])                                     # missing arguments
+                                  []],                                     # missing arguments
+                         ids=["bad-app-pid", "build-fails", "missing-args"])
 def test_a_recorder_that_cannot_start_records_the_failure(run, monkeypatch, args):
     monkeypatch.setattr("tracing.procmon.WindowsProcmon", None)  # so building the recorder raises
     assert cli.run_command(["--trace-recorder", str(run.path), *args], False) == 2
