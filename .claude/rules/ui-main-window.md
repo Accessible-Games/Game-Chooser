@@ -150,8 +150,8 @@ search, the tree selections, the sort, the column widths and the splitter positi
 ## Modal safety
 The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn, *args)` are in CLAUDE.md
 (Modal safety).
-- `run_when_no_dialog` is used for index takes, job outcomes (`_apply_finished`, `_apply_failed`,
-  `_apply_cancelled`) and the uninstall confirmation.
+- `run_when_no_dialog` is used for index takes, job outcomes (`_apply_outcome`) and the uninstall
+  confirmation.
 - `PreferencesDialog` sets `holds_no_games = True`: it holds library ids only, is **not** opened in
   `modal_dialog()`, and `_modal_open()` ignores it, so job results apply while it is open (through
   `job_done_hooks`). The prompts it opens use the parent's `modal_dialog()` and do defer.

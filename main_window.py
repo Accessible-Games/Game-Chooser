@@ -541,27 +541,21 @@ class MainFrame(wx.Frame):
             area.update(progress, waiting)
 
     def on_job_finished(self, job, result):
-        if not self:
-            return
-        self._job_ended(job)
-        self.run_when_no_dialog(self._apply_finished, job, result)
+        self._job_ended("finished", job, result)
 
     def on_job_failed(self, job, message):
-        if not self:
-            return
-        self._job_ended(job)
-        self.run_when_no_dialog(self._apply_failed, job, message)
+        self._job_ended("failed", job, message)
 
     def on_job_cancelled(self, job):
+        self._job_ended("cancelled", job)
+
+    def _job_ended(self, kind, job, detail=None):
         if not self:
             return
-        self._job_ended(job)
-        self.run_when_no_dialog(self._apply_cancelled, job)
-
-    def _job_ended(self, job):
         if self._cancelling_job_id == job.id:
             self._cancelling_job_id = None
         self._sync_progress()
+        self.run_when_no_dialog(self._apply_outcome, kind, job, detail)
 
     def _sync_progress(self):
         """Show the progress areas while a job runs or waits (and the queue's current job in them); hide them
@@ -614,53 +608,30 @@ class MainFrame(wx.Frame):
             area.hide_done_button()
             area.set_label(messages.JOB_CANCELLING.format(title=job.title))
 
-    def _apply_finished(self, job, result):
-        """A finished job (any action) reaches the library, then the player hears about it. Runs only while
-        no dialog is open (run_when_no_dialog), so no dialog holds a game this replaces."""
+    def _apply_outcome(self, kind, job, detail):
+        """A job's end ("finished", "failed" or "cancelled") reaches the library, then the player hears about it.
+        Runs only while no dialog is open (run_when_no_dialog), so no dialog holds a game this replaces."""
         if self.job_outcomes.take(job):  # not already applied while quitting
-            self._finished(job, result)
+            self._outcome(kind, job, detail)
 
-    def _apply_failed(self, job, message):
-        if self.job_outcomes.take(job):
-            self._failed(job, message)
-
-    def _apply_cancelled(self, job):
-        if self.job_outcomes.take(job):
-            self._cancelled(job)
-
-    def _finished(self, job, result):
-        try:
-            self.service.apply_result(result)
-        except Exception:
-            log.exception("Couldn't apply the result of %s", job.title)
-        if self._quitting:
-            return
-        self.games_changed()
-        self.notify(messages.finished_text(result.action, result.title or job.title, result.notes,
-                                           result.backups))
-        self._run_job_done_hooks(job)
-
-    def _failed(self, job, message):
-        try:
-            self.service.job_failed(job)
-        except Exception:
-            log.exception("Couldn't clean up after %s failed", job.title)
-        if self._quitting:
-            return
-        self.games_changed()
-        self.notify(messages.failed_text(job.request.action, job.title))
-        self._tell(message, messages.INSTALL_PROBLEM_TITLE)  # a second failure waits for this box, never stacks
-        self._run_job_done_hooks(job)
-
-    def _cancelled(self, job):
+    def _outcome(self, kind, job, detail):
         """A cancelled job is a failed one to the service (an uninstall's library stays), without the message"""
         try:
-            self.service.job_failed(job)
+            if kind == "finished":
+                self.service.apply_result(detail)
+            else:
+                self.service.job_failed(job)
         except Exception:
-            log.exception("Couldn't clean up after %s was cancelled", job.title)
+            log.exception("Couldn't apply how %s ended (%s)", job.title, kind)
         if self._quitting:
             return
         self.games_changed()
+        if kind == "finished":
+            self.notify(messages.finished_text(detail.action, detail.title or job.title, detail.notes,
+                                               detail.backups))
+        elif kind == "failed":
+            self.notify(messages.failed_text(job.request.action, job.title))
+            self._tell(detail, messages.INSTALL_PROBLEM_TITLE)  # a second failure waits for this box, never stacks
         self._run_job_done_hooks(job)
 
     def _apply_outcomes_on_quit(self):
@@ -670,12 +641,7 @@ class MainFrame(wx.Frame):
         self._run_deferred()
         for kind, job, detail in self.job_outcomes.drain():
             try:
-                if kind == "finished":
-                    self._finished(job, detail)
-                elif kind == "failed":
-                    self._failed(job, detail)
-                else:
-                    self._cancelled(job)
+                self._outcome(kind, job, detail)
             except Exception:
                 log.exception("Couldn't apply how %s ended while quitting", job.title)
 
