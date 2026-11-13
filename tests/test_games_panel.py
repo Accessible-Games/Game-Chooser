@@ -2,7 +2,6 @@
 fetched. Skips when wxPython is not installed or there is no display."""
 
 import logging
-from contextlib import contextmanager
 
 import pytest
 
@@ -14,6 +13,7 @@ from smart_list import Column  # noqa: E402
 
 from catalog_view import build_rows, library_rows  # noqa: E402
 from games_panel import GamesPanel  # noqa: E402
+from main_window import MainFrame  # noqa: E402
 from models import Game  # noqa: E402
 
 SRC = [{"platform": "windows", "install": {"method": "zip"}, "url": "https://x/e.zip"}]
@@ -50,19 +50,16 @@ class Saves:
 class FakeFrame:
     """What a view uses of MainFrame: the manager, the two flags, modal_dialog() and _tell()"""
 
+    modal_dialog = MainFrame.modal_dialog
+
     def __init__(self, manager):
         self.library_manager = manager
         self.initializing = False
         self.dialog_active = False
         self.told = []
 
-    @contextmanager
-    def modal_dialog(self):
-        was_active, self.dialog_active = self.dialog_active, True
-        try:
-            yield
-        finally:
-            self.dialog_active = was_active
+    def _run_deferred(self):
+        pass
 
     def _tell(self, text, caption, icon=None):
         self.told.append((text, caption))
@@ -137,16 +134,21 @@ def tree_nodes(view):
     return nodes
 
 
-def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False, shift=False):
-    """True when a handler took the key"""
+def key_event(key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False, shift=False, unicode=None):
+    """A key event as wx gives it: a character's unicode key is its key code unless `unicode` is given"""
     event = wx.KeyEvent(event_type)
     event.SetKeyCode(key_code)
     if event_type == wx.wxEVT_CHAR:
-        event.SetUnicodeKey(key_code)  # a character, as wx gives it
+        event.SetUnicodeKey(key_code if unicode is None else unicode)
     event.SetControlDown(ctrl)
     event.SetAltDown(alt)
     event.SetShiftDown(shift)
-    return window.GetEventHandler().ProcessEvent(event)
+    return event
+
+
+def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN, **modifiers):
+    """True when a handler took the key"""
+    return window.GetEventHandler().ProcessEvent(key_event(key_code, event_type, **modifiers))
 
 
 def type_text(view, text):
@@ -914,9 +916,7 @@ def test_typing_reads_the_character_not_the_key_code(make_view):
     view = make_view()
     view.set_rows(rows(entry("alpha"), entry("zebra"), entry("żuk")))
     assert titles(view) == ["Alpha", "Zebra", "Żuk"]
-    event = wx.KeyEvent(wx.wxEVT_CHAR)
-    event.SetUnicodeKey(ord("Ż"))  # typed in capitals: any case finds it
-    assert event.GetKeyCode() == wx.WXK_NONE and view.list_ctrl.GetEventHandler().ProcessEvent(event)
+    assert press(view.list_ctrl, wx.WXK_NONE, wx.wxEVT_CHAR, unicode=ord("Ż"))  # in capitals: any case finds it
     assert view.selected_row().title == "Żuk" and saved(view)["last_selected"] == "żuk"
 
 
@@ -965,11 +965,7 @@ def test_a_character_typed_with_altgr_is_text(make_view):
     that way (\u0119 and \u017c on a Polish layout, under code page 1252), and with no key code"""
     view = make_view()
     view.set_rows(rows(entry("alpha"), entry("zebra"), entry("\u017cuk")))
-    event = wx.KeyEvent(wx.wxEVT_CHAR)
-    event.SetUnicodeKey(ord("\u017c"))
-    event.SetControlDown(True)
-    event.SetAltDown(True)
-    view.list_ctrl.GetEventHandler().ProcessEvent(event)
+    press(view.list_ctrl, wx.WXK_NONE, wx.wxEVT_CHAR, ctrl=True, alt=True, unicode=ord("\u017c"))
     assert view.selected_row().title == "\u017buk"
 
 

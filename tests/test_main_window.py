@@ -12,15 +12,7 @@ if not wx.App.IsDisplayAvailable():
 import main_window  # noqa: E402
 from main_window import MainFrame  # noqa: E402
 from models import Game  # noqa: E402
-from tests.test_games_panel import app  # noqa: E402,F401  (a fixture)
-
-
-def key_down(code, ctrl=False, alt=False):
-    event = wx.KeyEvent(wx.wxEVT_KEY_DOWN)
-    event.SetKeyCode(code)
-    event.SetControlDown(ctrl)
-    event.SetAltDown(alt)
-    return event
+from tests.test_games_panel import app, key_event as key_down  # noqa: E402,F401  (app is a fixture)
 
 
 def test_the_library_lists_own_key_is_del(app):
