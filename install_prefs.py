@@ -21,10 +21,14 @@ def current_catalog_url(install: dict) -> str:
     return normalize_catalog_url(url) or url
 
 
+def register_shared_components(install: dict) -> bool:
+    return bool(install.get("register_shared_components", True))
+
+
 def check_install_prefs(install: dict, address: str, register_shared: bool) -> InstallPrefsResult:
     """Validate the typed address against the stored install section. Never changes `install`."""
     current = current_catalog_url(install)
     normalized = normalize_catalog_url(address)
     if normalized is None:
-        return InstallPrefsResult(False, current, False, bool(install.get("register_shared_components", True)))
+        return InstallPrefsResult(False, current, False, register_shared_components(install))
     return InstallPrefsResult(True, normalized, normalized != current, bool(register_shared))

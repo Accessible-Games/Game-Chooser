@@ -33,7 +33,7 @@ from engine.entries import visible_games as _visible_games
 from engine.errors import EngineError
 from engine.extract import Extractor, default_tools_dir
 from engine.http import Fetcher
-from engine.index import DEFAULT_CATALOG_URL, CatalogIndex, IndexState, normalize_catalog_url
+from engine.index import CatalogIndex, IndexState
 from engine.jobs import EngineContext, InstallEngine, InstallRequest, JobResult, blocked_reason, game_fields_for
 from engine.launch import adopt_catalog_launch
 from engine.paths import same_folder
@@ -44,6 +44,7 @@ from engine.registry import RegistryAccess
 from engine.runtimes import WindowsSecurity, default_runtimes_root
 from engine.safety import count_player_files
 from engine.status import game_status
+from install_prefs import current_catalog_url, register_shared_components
 from library_actions import is_uninstall_unfinished, is_uninstallable
 from library_manager import LibraryError
 
@@ -69,8 +70,8 @@ class InstallService:
     # ---- the catalog index ----------------------------------------------------------------------------------
 
     def _index(self) -> CatalogIndex:
-        url = self.manager.config["install"].get("catalog_url") or DEFAULT_CATALOG_URL
-        return CatalogIndex(self.manager.config_dir / "catalog", normalize_catalog_url(url) or url, self.fetcher)
+        url = current_catalog_url(self.manager.config["install"])
+        return CatalogIndex(self.manager.config_dir / "catalog", url, self.fetcher)
 
     @property
     def entries(self) -> dict[str, dict]:
@@ -164,7 +165,6 @@ class InstallService:
 
     def _new_engine(self) -> InstallEngine:
         """A fresh engine for each job, so the current catalog, libraries and preferences reach it."""
-        install = self.manager.config["install"]
         return InstallEngine(EngineContext(
             entries=self.entries,
             records=self.manager.records,
@@ -175,7 +175,7 @@ class InstallService:
             work_root=Path(tempfile.gettempdir()) / "GameChooser",
             runtimes_root=default_runtimes_root(),
             libraries=[dict(lib) for lib in self.manager.config["libraries"]],
-            register_shared_components=bool(install.get("register_shared_components", True)),
+            register_shared_components=register_shared_components(self.manager.config["install"]),
             platform=current_platform(),
             installer_ui=self.installer_ui,
             security=self.security,
@@ -184,7 +184,7 @@ class InstallService:
     def plan(self, entry_id: str, action: str = "install") -> InstallPlan:
         install = self.manager.config["install"]
         return build_install_plan(entry_id, self.entries, self.manager.config["libraries"], self.manager.records,
-                                  self.registry, bool(install.get("register_shared_components", True)),
+                                  self.registry, register_shared_components(install),
                                   install.get("last_library"), current_platform(), action,
                                   runtimes_root=default_runtimes_root(), security=self.security)
 

@@ -34,6 +34,7 @@ from engine.index import DEFAULT_CATALOG_URL, CatalogIndex
 from engine.jobs import game_fields_for
 from engine.paths import folder_key, write_atomic
 from engine.records import RecordStore
+from install_prefs import current_catalog_url
 from library_actions import is_uninstall_unfinished
 from models import Game
 from path_manager import PathManager
@@ -331,7 +332,7 @@ class GameLibraryManager:
         return self.records.load(catalog_id) is None
 
     def _cached_entries(self):
-        url = self.config.get("install", {}).get("catalog_url", DEFAULT_CATALOG_URL)
+        url = current_catalog_url(self.config.get("install", {}))
         return CatalogIndex(self.config_dir / "catalog", url, fetcher=None).load_cached().entries
 
     def library_by_id(self, library_id):

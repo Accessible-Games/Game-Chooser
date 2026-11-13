@@ -30,7 +30,7 @@ from library_manager import LibraryError
 from engine import messages
 from engine.folders import library_label
 from install_dialogs import RemoveLibraryDialog
-from install_prefs import check_install_prefs, current_catalog_url
+from install_prefs import check_install_prefs, current_catalog_url, register_shared_components
 from library_actions import library_row_name
 from wx_bridge import run_in_background
 from models import Game
@@ -566,7 +566,7 @@ class PreferencesDialog(wx.Dialog):
         tab_sizer = wx.BoxSizer(wx.VERTICAL)
 
         self.shared_check = wx.CheckBox(tab_panel, label=messages.PREFS_REGISTER_SHARED)
-        self.shared_check.SetValue(bool(install.get("register_shared_components", True)))
+        self.shared_check.SetValue(register_shared_components(install))
         tab_sizer.Add(self.shared_check, 0, wx.ALL, 10)
 
         address_label = wx.StaticText(tab_panel, label=messages.PREFS_CATALOG_ADDRESS)
