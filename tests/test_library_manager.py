@@ -265,24 +265,24 @@ def test_damaged_file_is_never_saved_over_while_no_copy_can_be_kept(isolated_man
 
 
 def test_a_failed_write_leaves_the_old_file_whole(isolated_manager_factory, monkeypatch):
-    import library_manager
+    from pathlib import Path
     from models import Game
     m = isolated_manager_factory()
     m.games.append(Game(title="Kept", launch_path="C:/Games/kept.exe"))
     m.save_games()
     m.save_config()
     games_before, config_before = m.games_file.read_bytes(), m.config_file.read_bytes()
-    real_dump = json.dump
 
-    def half_then_full_disk(data, f, **kw):
-        f.write('[{"title": "Ha')
+    def half_then_full_disk(path, data):
+        with open(path, "wb") as f:
+            f.write(data[:10])
         raise OSError(28, "No space left on device")
-    monkeypatch.setattr(library_manager.json, "dump", half_then_full_disk)
     m.games.append(Game(title="Lost", launch_path="C:/Games/lost.exe"))
-    with pytest.raises(OSError):
-        m.save_games()
-    with pytest.raises(OSError):
-        m.save_config()
-    monkeypatch.setattr(library_manager.json, "dump", real_dump)
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "write_bytes", half_then_full_disk)
+        with pytest.raises(OSError):
+            m.save_games()
+        with pytest.raises(OSError):
+            m.save_config()
     assert m.games_file.read_bytes() == games_before and m.config_file.read_bytes() == config_before
     assert not list(m.games_file.parent.glob("*.tmp")) and not list(m.config_file.parent.glob("*.tmp"))

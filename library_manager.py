@@ -32,7 +32,7 @@ from engine import messages
 from engine.folders import library_label
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex
 from engine.jobs import game_fields_for
-from engine.paths import folder_key
+from engine.paths import folder_key, write_atomic
 from engine.records import RecordStore
 from library_actions import is_uninstall_unfinished
 from models import Game
@@ -51,17 +51,7 @@ class LibraryError(Exception):
 
 
 def _write_json_atomic(path, data):
-    """Write JSON to a temporary file beside `path`, then replace `path` with it in one step, so a crash or a full
-    disk mid-write leaves the old file whole (as RecordStore.save does). OSError if it can't be written."""
-    path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)
-    except BaseException:
-        _remove_quietly(tmp)
-        raise
+    write_atomic(Path(path), json.dumps(data, indent=2).encode("utf-8"))
 
 
 def keep_damaged_copy(path):
