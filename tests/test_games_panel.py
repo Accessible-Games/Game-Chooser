@@ -831,6 +831,23 @@ def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_vi
     assert acted == ["Temple Run", "Temple Run", "Temple Of Doom"]
 
 
+@pytest.mark.parametrize("held", [{"shift": True}, {"ctrl": True}, {"ctrl": True, "shift": True},
+                                  {"ctrl": True, "alt": True}, {"alt": True, "shift": True}])
+def test_a_space_with_any_modifier_but_alt_alone_is_a_plain_space(make_view, held):
+    """Passed on, Ctrl+Space made the native list clear the selection while the button still named the game,
+    and Enter then acted on nothing. Only Alt alone passes a Space on (the window menu)."""
+    acted = []
+    view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
+    type_text(view, "temple")
+    now[0] += 1.2
+    assert press(view.list_ctrl, wx.WXK_SPACE, **held) and acted == []  # part of the text
+    type_text(view, "r")  # "temple r"
+    assert selected(view) == 4
+    now[0] += 3.5
+    assert press(view.list_ctrl, wx.WXK_SPACE, **held) and acted == ["Temple Run"]
+    assert not press(view.list_ctrl, wx.WXK_SPACE, alt=True) and acted == ["Temple Run"]
+
+
 def test_a_digit_belongs_to_the_text_while_typing_and_sorts_otherwise(make_view):
     view, now = typing_view(make_view)
     type_text(view, "area 51")

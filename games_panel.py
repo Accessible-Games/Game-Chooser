@@ -35,8 +35,8 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
 - Typing in the list jumps to the next title that starts with what was typed (type-ahead), as the player's own
   move. While a text is being typed, Space and the digit keys belong to it (Space for 3 seconds after the last
   character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. A
-  plain Space never moves the selection (one with a modifier goes on to the list control). Escape, Backspace
-  and the navigation keys end the text. Enter always acts.
+  Space never moves the selection; with any modifier but Alt alone it is a plain Space, and only Alt+Space (the
+  window menu) goes on to the list control. Escape, Backspace and the navigation keys end the text. Enter always acts.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
   unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
   open or the app is starting.
@@ -537,14 +537,17 @@ class GamesPanel(wx.Panel):
     def on_list_key(self, event):
         key = event.GetKeyCode()
         plain = not event.HasAnyModifiers()
+        # Any Space but Alt+Space (the window menu) is a plain one: Ctrl+Space reaching the list control clears
+        # the selection, and the button still names the game
+        space = key == wx.WXK_SPACE and event.GetModifiers() != wx.MOD_ALT
         if key in ENDS_TYPED_TEXT:  # the key itself goes on to the list as before
             self.type_ahead.clear()
-        if key == wx.WXK_SPACE and plain and self.type_ahead.takes_space():
+        if space and self.type_ahead.takes_space():
             # Part of the text being typed ("temple of"), for 3 seconds after its last character: a player
             # waits for the screen reader to finish the row. Taken here, never skipped on to on_char: wx turns
             # a Space key-down that reaches the list control into an activation.
             self._type(" ")
-        elif key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER, wx.WXK_SPACE) and plain:
+        elif space or (key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER) and plain):
             self.on_action()
         elif key == wx.WXK_WINDOWS_MENU or (key == wx.WXK_F10 and event.ShiftDown()):
             self.on_context(event)
