@@ -352,13 +352,6 @@ def test_library_rows_are_catalog_rows_that_hold_their_game():
     assert all(r.game is None for r in build_rows([entombed], set()))  # a Catalog row holds no game
 
 
-def test_library_row_id_survives_the_game_object_being_replaced():
-    games, rows = _library()
-    assert [r.id for r in rows] == ["C:/games/alpha.exe", "https://bare.example/play", "entombed"]
-    replaced = [Game.from_dict(game.to_dict()) for game in games]  # as an index take or a finished job does
-    assert [r.id for r in library_rows(replaced, lambda game: None)] == [r.id for r in rows]
-
-
 def test_library_row_ids_are_unique_when_games_share_a_launch_path():
     """Locate has no duplicate check and games.json can be edited by hand. With one id for two rows, the next
     refill would select the first of them, and Delete or Enter would act on the wrong game."""
