@@ -221,8 +221,7 @@ def test_repair_recreates_a_missing_copy(tmp_path):
 
 
 def test_update_drops_the_copy_when_the_game_no_longer_needs_the_runtime(tmp_path):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0",
                                        dependencies=())
@@ -237,8 +236,7 @@ def test_update_drops_the_copy_when_the_game_no_longer_needs_the_runtime(tmp_pat
 
 
 def test_update_keeps_a_changed_copy_the_game_no_longer_needs(tmp_path):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     (lib / "Entombed" / "dx8vb.dll").write_bytes(b"the player's own dx8vb")
     eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0",
