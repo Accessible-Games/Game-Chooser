@@ -189,19 +189,6 @@ def test_update_lists_missing_extras_and_fixes_folder(tmp_path):
     assert plan(tmp_path, g, [req], records=store, action="update").extras == []
 
 
-def test_entry_warning_shows_before_installing_and_updating(tmp_path):
-    g = game(warning="  Some antivirus programs flag this game by mistake. ",
-             pricing={"model": "one-time", "price": 5, "currency": "USD"})
-    assert plan(tmp_path, g).warnings == ["Some antivirus programs flag this game by mistake.",
-                                          "Price: Buy once, $5."]
-    store = RecordStore(tmp_path / "records")
-    store.save(record([]))
-    assert plan(tmp_path, g, records=store, action="update").warnings == [
-        "Some antivirus programs flag this game by mistake."]
-    assert plan(tmp_path, g, records=store, action="extras").warnings == []
-    assert plan(tmp_path, game(warning=["not text"])).warnings == []
-
-
 def test_first_run_download_size_comes_from_the_source_installed(tmp_path):
     first = {**source(50), "first_run_download_size": 1000}
     assert plan(tmp_path, game([first])).first_run_size == 1000

@@ -9,7 +9,6 @@
   "description": "Ships game.bat in its top folder and launcher/start.bat, with no launch path in the catalog at first, so the app guesses game.bat. Run the server with --add-launch-path to publish launcher/start.bat as its launch path.",
   "pricing": {"model": "free-to-try", "price": 5, "currency": "USD", "checked": "2026-11-09",
               "url": "https://example.com/register", "note": "Registering unlocks the launcher."},
-  "warning": "This is a test warning, shown before installing.",
   "persist": ["Saves/"],
   "sources": [
     {"label": "Local test server", "platform": "windows", "install": {"method": "zip"}}

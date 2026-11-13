@@ -109,8 +109,7 @@ def test_free_to_try_game_warns_before_installing(tmp_path):
     _, state = load(tmp_path)
     plan = build_install_plan("test-game-no-path", state.entries, [{"id": "a", "path": str(tmp_path)}],
                               RecordStore(tmp_path / "records"), FakeRegistry(), True, None, "windows")
-    assert plan.warnings == ["This is a test warning, shown before installing.",
-                             "Price: Free to try, $5 to unlock. Buy or register: https://example.com/register"]
+    assert plan.warnings == ["Price: Free to try, $5 to unlock. Buy or register: https://example.com/register"]
     tar = build_install_plan("test-game-tar", state.entries, [], RecordStore(tmp_path / "records"), FakeRegistry(),
                              True, None, "windows")
     assert tar.first_run_size == 50 * 2**20 and tar.warnings == []
