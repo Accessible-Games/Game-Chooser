@@ -17,7 +17,6 @@ told where.
 """
 
 import os
-import re
 import shutil
 import threading
 import time
@@ -37,7 +36,7 @@ from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is
 from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link, remove_unchanged
 from .sources import hash_file
 from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, split_steps, undo_steps
-from .uninstall_keys import (UNINSTALL_KEYS, UninstallReader, _winreg_reader, folder_from_uninstall_entry,  # noqa: F401
+from .uninstall_keys import (UNINSTALL_KEYS, folder_from_uninstall_entry,  # noqa: F401  (UNINSTALL_KEYS re-exported)
                              inside, is_missing_program, names_title, new_uninstall_entries, snapshot_uninstall_keys,
                              split_command, vendor_uninstaller, windows_dir)
 

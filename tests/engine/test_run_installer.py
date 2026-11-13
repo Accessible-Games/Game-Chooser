@@ -3,7 +3,6 @@ the install window, and the set-aside rule for run-mode updates and vendor unins
 
 import hashlib
 import os
-import subprocess
 import sys
 import time
 from pathlib import Path
@@ -13,7 +12,7 @@ import pytest
 from engine import messages, run_installer
 from engine.errors import Cancelled, InstallFailed
 from engine.jobs import InstallRequest
-from engine.records import InstalledSource, InstallRecord, RecordedFile
+from engine.records import InstalledSource, InstallRecord
 from engine.run_installer import (UNINSTALL_KEYS, files_created_during, folder_from_uninstall_entry,
                                   installer_command, new_uninstall_entries, silent_args_for, snapshot_folder,
                                   snapshot_uninstall_keys)

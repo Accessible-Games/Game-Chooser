@@ -540,7 +540,7 @@ def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cance
             _make_root(ctx, runtime)
             target = ctx.runtimes_root / runtime["id"]
             if runs_installer(fetched.source):
-                notes += _run_installer(ctx, runtime, fetched, target, progress, cancel)
+                notes += _run_runtime_installer(ctx, runtime, fetched, target, progress, cancel)
             else:
                 _unpack(ctx, runtime, fetched, target, work_dir / "unpacked", progress, cancel)
         finally:
@@ -568,7 +568,7 @@ def installed_source(entry: dict, fetched, launch: str | None = None) -> Install
         launch=launch)
 
 
-def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) -> list[str]:
+def _run_runtime_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) -> list[str]:
     """Run the runtime's installer untracked; where it has a `detect` hint, it must find the runtime after.
     Returns the installer's notes (a restart it asked for).
 

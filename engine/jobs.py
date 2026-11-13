@@ -417,18 +417,18 @@ class InstallEngine:
 
     def _install_run(self, entry: dict, fetched: Fetched, unpacked: list[tuple[dict, Fetched, Path]],
                      staging: Path, action: str,
-                     place: Callable[[RunItem, list[dict]], tuple[InstallRecord, list[str]]],
+                     place: Callable[[RunItem], tuple[InstallRecord, list[str]]],
                      cancel, prior: dict | None = None,
                      private: list[runtimes.PrivateCopy] = ()) -> JobResult:
         """Hand a downloaded installer that must run to engine.run_installer, through `place` (given the
-        item and the extras' steps), then apply the already unpacked extras over the game's folder, then
+        item), then apply the already unpacked extras over the game's folder, then
         the already unpacked private COM copies (the preference off) beside its launch exe."""
         title = title_of(entry)
         install = fetched.source.get("install") or {}
         item = RunItem(entry["id"], entry.get("kind", "game"), title, fetched.path,
                        dict(install.get("installer") or {}), _steps(fetched),
                        _installed_source(entry, fetched, self.ctx.platform), _launch_hint(entry, self.ctx.platform))
-        record, notes = place(item, _extra_steps(unpacked))
+        record, notes = place(item)
         extra_notes, backups = self._extras_after_installer(entry, record, unpacked, staging, prior, cancel)
         private_notes = self._private_after_installer(entry, record, list(private))
         copy_notes = self._copies_after_installer(entry, record, list(private))
@@ -642,7 +642,7 @@ class InstallEngine:
                                                   self._catalog_fetch(progress, cancel), progress, cancel)
                 unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
                                                progress, cancel)
-                result = self._install_run(entry, fetched, unpacked, staging, "install", lambda item, spare: (
+                result = self._install_run(entry, fetched, unpacked, staging, "install", lambda item: (
                     run_installer.install(ctx, item, target, library_id, library_path, progress, cancel)), cancel,
                     private=private)
                 result.notes[:0] = notes
@@ -792,9 +792,9 @@ class InstallEngine:
                                                       self._catalog_fetch(progress, cancel), progress, cancel)
                     unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
                                                    progress, cancel)
-                    result = self._install_run(entry, fetched, unpacked, staging, action, lambda item, spare: (
+                    result = self._install_run(entry, fetched, unpacked, staging, action, lambda item: (
                         run_installer.update(ctx, item, rec, game_dir, progress, cancel, previous=prior,
-                                             spare_steps=spare)), cancel, prior, private=private)
+                                             spare_steps=_extra_steps(unpacked))), cancel, prior, private=private)
                     result.notes += [*runtime_notes, *_went_without(title, deps)]
                     return result
             self._require_writable(rec, game_dir, title)
@@ -1138,9 +1138,8 @@ def _require_changeable(rec: InstallRecord, title: str, action: str) -> None:
 
 
 def _blocked(rec: InstallRecord, game_dir: Path | None) -> str | None:
-    """Why Game Chooser may not change the game's folder: "untracked" (no tracked folder), or "admin" for a
-    folder outside the libraries where a file can't be created (and removed again) without administrator
-    permission; else None."""
+    """Why Game Chooser may not change the game's folder: "untracked", "admin" (only an administrator can), or None.
+    "admin" is asked of a folder outside the libraries by creating a file there and removing it again."""
     if not rec.tracked or game_dir is None:
         return "untracked"
     if rec.library_id:
