@@ -13,7 +13,7 @@ paths:
 
 ## Files
 - **library_manager.py** - `GameLibraryManager`: config, games.json, libraries, catalog game bookkeeping
-- **path_manager.py**, **validation_service.py** - library-relative path helpers, executable check,
+- **path_manager.py**, **validation_service.py** - a game's full path from its library, the executable check,
   and title/URL/path/year validation used by `GameDialog`
 
 ## Libraries (install folders)
@@ -58,7 +58,8 @@ paths:
   rule covers `games.json` (`games_load_failed` is set; the list starts empty).
 
 ## Paths and executable detection
-- Paths inside a library use forward slashes internally and are library-relative; `path_manager` converts.
+- Paths inside a library use forward slashes internally and are library-relative; `GameLibraryManager.get_full_path`
+  joins one to its library's folder (a web address or an absolute path is returned as it is).
 - Executable detection (`PathManager.is_executable`, used by `GameDialog`): a file ending in `.exe` or `.bat`, or
   a folder ending in `.app` (a macOS bundle). Nothing else counts: `.cmd` is not accepted, the executable bit is
   not checked and there is no Linux case.
