@@ -39,6 +39,7 @@ def test_backup_keeps_subfolders(dirs):
     r = apply_plan(make_plan(("Data/cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
     assert (game / BK / "Data" / "cfg.ini").read_bytes() == b"mine"
     assert r.backups[0]["backup"] == f"{BK}/Data/cfg.ini"
+    assert [p.name for p in (game / "Data").iterdir()] == ["cfg.ini"]  # no temp left
 
 
 def test_write_creates_dirs_and_delete_prunes_empty_dirs(dirs):
