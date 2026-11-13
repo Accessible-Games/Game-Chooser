@@ -97,11 +97,12 @@ def test_failed_write_keeps_backup_and_cleans_temp(dirs, monkeypatch):
         return real(src, dst)
 
     monkeypatch.setattr(os, "replace", boom)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as info:
         apply_plan(make_plan(("cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
     monkeypatch.setattr(os, "replace", real)
     files = [p for p in game.rglob("*") if p.is_file()]
     assert files == [game / "cfg.ini"] and files[0].read_bytes() == b"mine"  # put back in place, no temp left
+    assert info.value.partial.backups == []  # the backup that was put back is not listed
 
 
 def test_missing_incoming_file_leaves_player_file_alone(dirs):
