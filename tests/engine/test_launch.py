@@ -1,10 +1,12 @@
 import os
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from engine.launch import find_launch_exe, select_best_executable, Started, launch_kind, page_address, start_game
+from engine.launch import (adopt_catalog_launch, find_launch_exe, select_best_executable, Started, launch_kind,
+                           page_address, start_game)
 from engine.paths import STAGING_DIR_NAME
 from exception_manager import ExceptionManager
 
@@ -16,6 +18,16 @@ def touch(root: Path, rel: str) -> Path:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.touch()
     return p
+
+
+def link_to(outside: Path, link: Path) -> None:
+    try:
+        os.symlink(outside, link, target_is_directory=True)
+    except OSError:
+        if os.name != "nt":
+            pytest.skip("cannot create link")
+        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
+                       check=True, capture_output=True)
 
 
 def test_launch_path_used_when_present(tmp_path):
@@ -44,14 +56,7 @@ def test_launch_path_through_junction_is_ignored(tmp_path):
     game = tmp_path / "game"
     game.mkdir()
     touch(game, "Real.exe")
-    link = game / "lnk"
-    try:
-        os.symlink(outside, link, target_is_directory=True)
-    except OSError:
-        if os.name != "nt":
-            pytest.skip("cannot create link")
-        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
-                       check=True, capture_output=True)
+    link_to(outside, game / "lnk")
     assert find_launch_exe(game, "lnk/Evil.exe", EXCL).name == "Real.exe"
 
 
@@ -60,14 +65,7 @@ def test_search_does_not_descend_links(tmp_path):
     touch(outside, "Evil.exe")
     game = tmp_path / "game"
     game.mkdir()
-    link = game / "lnk"
-    try:
-        os.symlink(outside, link, target_is_directory=True)
-    except OSError:
-        if os.name != "nt":
-            pytest.skip("cannot create link")
-        subprocess.run(["cmd", "/c", "mklink", "/J", str(link), str(outside)],
-                       check=True, capture_output=True)
+    link_to(outside, game / "lnk")
     assert find_launch_exe(game, None, EXCL) is None
 
 
@@ -128,8 +126,6 @@ def test_is_catalog_launch(tmp_path):
 
 
 def test_adopt_catalog_launch(tmp_path):
-    from types import SimpleNamespace
-    from engine.launch import adopt_catalog_launch
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin" / "Game.exe").write_bytes(b"x")
     rec = SimpleNamespace(launch_path="old.exe", launch_from_catalog=False)
@@ -143,10 +139,12 @@ def test_adopt_catalog_launch(tmp_path):
     assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False
 
 
-def test_a_catalog_named_page_is_the_launch_file(tmp_path):
-    page = touch(tmp_path, "index.html")
-    touch(tmp_path, "setup.exe")
-    assert find_launch_exe(tmp_path, "index.html", EXCL) == page
+@pytest.mark.parametrize("name, decoy", [("index.html", "game.exe"), ("jumpgame.hta", "game.exe")],
+                         ids=["page", "hta"])
+def test_a_catalog_named_page_or_hta_is_the_launch_file(tmp_path, name, decoy):
+    launch_file = touch(tmp_path, name)
+    touch(tmp_path, decoy)  # even the guess's favourite name loses to the catalog's path
+    assert find_launch_exe(tmp_path, name, EXCL) == launch_file
 
 
 def test_a_page_is_never_guessed(tmp_path):
@@ -155,15 +153,14 @@ def test_a_page_is_never_guessed(tmp_path):
     assert find_launch_exe(tmp_path, None, EXCL) is None
 
 
-def test_adopt_catalog_launch_takes_a_page(tmp_path):
-    from types import SimpleNamespace
-    from engine.launch import adopt_catalog_launch
-    touch(tmp_path, "index.html")
+@pytest.mark.parametrize("name", ["index.html", "jumpgame.hta"], ids=["page", "hta"])
+def test_adopt_catalog_launch_takes_a_page_or_an_hta(tmp_path, name):
+    touch(tmp_path, name)
     touch(tmp_path, "guess.exe")
     rec = SimpleNamespace(launch_path="guess.exe", launch_from_catalog=False)
-    entry = {"launch": {"windows": {"path": "index.html"}}}
+    entry = {"launch": {"windows": {"path": name}}}
     assert adopt_catalog_launch(rec, entry, "windows", tmp_path) is True
-    assert rec.launch_path == "index.html" and rec.launch_from_catalog is True
+    assert rec.launch_path == name and rec.launch_from_catalog is True
 
 
 # ---- start_program: an exe flagged to run as administrator (bug 19) ----------------------------------------
@@ -177,22 +174,30 @@ def _os_error(winerror):
     return e
 
 
-def test_start_program_runs_the_exe_in_its_folder():
+class _Process:
+    def __init__(self, pid):
+        self.pid = pid
+
+
+@pytest.mark.parametrize("process, pid", [(None, None), (_Process(4242), 4242)], ids=["no process", "a process"])
+def test_start_program_runs_the_exe_in_its_folder_and_returns_the_process_id(process, pid):
     calls = []
-    start_program("C:/Games/X/x.exe", "C:/Games/X", popen=lambda args, cwd: calls.append((args, cwd)),
-                  shell_open=lambda *a: pytest.fail("no shell needed"))
-    assert calls == [(["C:/Games/X/x.exe"], "C:/Games/X")]
+    started = start_program("C:/Games/X/x.exe", "C:/Games/X",
+                            popen=lambda args, cwd: calls.append((args, cwd)) or process,
+                            shell_open=lambda *a: pytest.fail("no shell needed"))
+    assert calls == [(["C:/Games/X/x.exe"], "C:/Games/X")] and started == pid
 
 
-def test_start_program_asks_windows_when_the_exe_needs_elevation():
+@pytest.mark.parametrize("shell_gives", [5151, None], ids=["a process", "no process"])
+def test_start_program_asks_windows_when_the_exe_needs_elevation_and_returns_what_it_started(shell_gives):
     opened = []
 
     def popen(args, cwd):
         raise _os_error(740)
 
-    start_program("C:/Games/X/pipe.exe", "C:/Games/X", popen=popen,
-                  shell_open=lambda path, cwd: opened.append((path, cwd)))
-    assert opened == [("C:/Games/X/pipe.exe", "C:/Games/X")]
+    pid = start_program("C:/Games/X/pipe.exe", "C:/Games/X", popen=popen,
+                        shell_open=lambda path, cwd: opened.append((path, cwd)) or shell_gives)
+    assert opened == [("C:/Games/X/pipe.exe", "C:/Games/X")] and pid == shell_gives
 
 
 def test_start_program_passes_on_other_errors():
@@ -213,32 +218,6 @@ def test_start_program_passes_on_a_declined_prompt():
 
     with pytest.raises(LaunchCancelled):
         start_program("C:/Games/X/x.exe", "C:/Games/X", popen=popen, shell_open=shell_open)
-
-
-class _Process:
-    def __init__(self, pid):
-        self.pid = pid
-
-
-def test_start_program_returns_the_process_id():
-    pid = start_program("C:/Games/X/x.exe", "C:/Games/X", popen=lambda args, cwd: _Process(4242),
-                        shell_open=lambda *a: pytest.fail("no shell needed"))
-    assert pid == 4242
-
-
-def test_start_program_returns_the_process_id_from_the_administrator_prompt():
-    def popen(args, cwd):
-        raise _os_error(740)
-
-    pid = start_program("C:/Games/X/pipe.exe", "C:/Games/X", popen=popen, shell_open=lambda path, cwd: 5151)
-    assert pid == 5151
-
-
-def test_start_program_returns_none_when_the_shell_gives_no_process():
-    def popen(args, cwd):
-        raise _os_error(740)
-
-    assert start_program("C:/Games/X/pipe.exe", "C:/Games/X", popen=popen, shell_open=lambda path, cwd: None) is None
 
 
 @pytest.mark.windows
@@ -522,8 +501,13 @@ def _folder_call(*answers):
     return function
 
 
-def test_windows_folder_is_the_text_windows_wrote():
-    assert launch._windows_folder(_folder_call((19, "C:\\WINDOWS\\SysWOW64"))) == "C:\\WINDOWS\\SysWOW64"
+@pytest.mark.parametrize("answer, folder", [
+    pytest.param((19, "C:\\WINDOWS\\SysWOW64"), "C:\\WINDOWS\\SysWOW64", id="the text Windows wrote"),
+    pytest.param((0, None), None, id="Windows has no such folder"),
+    pytest.param((20, None), None, id="an answer with no text is no folder"),
+])
+def test_windows_folder(answer, folder):
+    assert launch._windows_folder(_folder_call(answer)) == folder
 
 
 def test_windows_folder_asks_again_with_a_bigger_buffer_when_told_it_was_too_small():
@@ -533,20 +517,6 @@ def test_windows_folder_asks_again_with_a_bigger_buffer_when_told_it_was_too_sma
     assert len(call.sizes) == 2 and call.sizes[0] <= 260 < len(deep) < call.sizes[1]
 
 
-def test_windows_folder_is_none_when_windows_has_no_such_folder():
-    assert launch._windows_folder(_folder_call((0, None))) is None
-
-
-def test_windows_folder_is_none_when_windows_wrote_nothing():
-    assert launch._windows_folder(_folder_call((20, None))) is None  # an answer with no text is no folder
-
-
-def test_a_catalog_named_hta_is_the_launch_file(tmp_path):
-    hta = touch(tmp_path, "jumpgame.hta")
-    touch(tmp_path, "game.exe")  # even the guess's favourite name loses to the catalog's path
-    assert find_launch_exe(tmp_path, "jumpgame.hta", EXCL) == hta
-
-
 def test_an_hta_is_never_guessed(tmp_path):
     touch(tmp_path, "game.hta")
     touch(tmp_path, "more/play.hta")
@@ -554,14 +524,3 @@ def test_an_hta_is_never_guessed(tmp_path):
     deeper = touch(tmp_path, "tools/helper.exe")
     assert find_launch_exe(tmp_path, None, EXCL) == deeper  # the guess looks past the .hta beside it
     assert find_launch_exe(tmp_path, "missing.hta", EXCL) == deeper  # a path that names no file is not followed
-
-
-def test_adopt_catalog_launch_takes_an_hta(tmp_path):
-    from types import SimpleNamespace
-    from engine.launch import adopt_catalog_launch
-    touch(tmp_path, "jumpgame.hta")
-    touch(tmp_path, "guess.exe")
-    rec = SimpleNamespace(launch_path="guess.exe", launch_from_catalog=False)
-    entry = {"launch": {"windows": {"path": "jumpgame.hta"}}}
-    assert adopt_catalog_launch(rec, entry, "windows", tmp_path) is True
-    assert rec.launch_path == "jumpgame.hta" and rec.launch_from_catalog is True

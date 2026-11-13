@@ -9,11 +9,11 @@ import pytest
 from engine import comfree, messages, run_installer, runtimes
 from engine.records import RecordStore
 from engine.runtimes import MARKER_NAME
-from tests.engine.fakes import (ADMINISTRATORS, FakeElevator, FakeFetcher, FakeInstallerUI, FakeSecurity, make_engine,
-                                served_source, zip_bytes)
+from tests.engine.fakes import (ADMINISTRATORS, MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeSecurity,
+                                make_engine, served_source, sha, zip_bytes)
 from tests.engine.test_runtimes import private_com  # noqa: F401  (a fixture, used by name)
-from tests.engine.test_runtimes import (DX8VB, DX8VB_TITLE, MIRROR, game, plain_runtime, put_marker, run,
-                                        run_mode_game, setup, sha, vb6, writes_game)
+from tests.engine.test_runtimes import (DX8VB, DX8VB_TITLE, dx8vb_catalog, game, plain_runtime, put_marker, run,
+                                        run_mode_game, setup, vb6, writes_game)
 from tests.engine.test_runtimes import dx8vb as dx8vb_entry
 
 OWNER = "runtime:dx8vb"
@@ -36,8 +36,7 @@ def layered_runtime(routes, id="dxlib", files=None):
 
 
 def test_shared_runtime_installed_now_is_copied_beside_the_exe_and_recorded(tmp_path):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     r = run(eng, "install")
     folder = lib / "Entombed"
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB and r.notes == []
@@ -48,9 +47,7 @@ def test_shared_runtime_installed_now_is_copied_beside_the_exe_and_recorded(tmp_
 
 
 def test_shared_runtime_already_present_is_still_copied(tmp_path):
-    routes = {}
-    rt, g = dx8vb_entry(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     put_marker(folder, {"dx8vb.dll": DX8VB})
     eng.ctx.security.set_owner(folder, ADMINISTRATORS)
@@ -75,9 +72,7 @@ def test_sealed_folder_another_account_installed_is_copied_from(tmp_path):
 
 
 def test_file_that_doesnt_match_the_marker_isnt_copied_and_the_install_succeeds(tmp_path):
-    routes = {}
-    rt, g = dx8vb_entry(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     put_marker(folder, {"dx8vb.dll": DX8VB})
     eng.ctx.security.set_owner(folder, ADMINISTRATORS)
@@ -89,9 +84,7 @@ def test_file_that_doesnt_match_the_marker_isnt_copied_and_the_install_succeeds(
 
 
 def test_untrusted_runtime_folder_isnt_copied_from(tmp_path):
-    routes = {}
-    rt, g = dx8vb_entry(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     put_marker(folder, {"dx8vb.dll": DX8VB})
     eng.ctx.security.set_owner(folder, "S-1-5-21-3000-3000-3000-1003")  # another account's folder
@@ -101,9 +94,7 @@ def test_untrusted_runtime_folder_isnt_copied_from(tmp_path):
 
 
 def test_marker_naming_a_path_outside_its_folder_copies_nothing_and_raises_nothing(tmp_path):
-    routes = {}
-    rt, g = dx8vb_entry(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     folder.mkdir(parents=True)
     (folder.parent / "evil.dll").write_bytes(b"MZ evil")
@@ -116,9 +107,7 @@ def test_marker_naming_a_path_outside_its_folder_copies_nothing_and_raises_nothi
 
 
 def test_runtime_present_only_by_its_detect_hint_has_nothing_to_copy(tmp_path):
-    routes = {}
-    rt, g = dx8vb_entry(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     eng.ctx.registry.set("HKLM", r"SOFTWARE\Classes\DxVBLibA.DirectX8", "", "REG_SZ", "DirectX8")
     r = run(eng, "install")
     assert r.notes == [] and not (lib / "Entombed" / "dx8vb.dll").exists()
@@ -187,9 +176,7 @@ def test_installer_runtime_gets_no_copies(tmp_path, monkeypatch):
 
 
 def test_a_locked_file_in_the_runtime_folder_is_a_note_not_a_failure(tmp_path, monkeypatch):
-    routes = {}
-    rt, g = dx8vb_entry(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     folder = eng.ctx.runtimes_root / "dx8vb"
     put_marker(folder, {"dx8vb.dll": DX8VB})
     eng.ctx.security.set_owner(folder, ADMINISTRATORS)
@@ -208,8 +195,7 @@ def test_a_locked_file_in_the_runtime_folder_is_a_note_not_a_failure(tmp_path, m
 
 
 def test_uninstall_removes_an_unchanged_copy(tmp_path):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     run(eng, "uninstall")
     assert not (lib / "Entombed").exists()
@@ -217,8 +203,7 @@ def test_uninstall_removes_an_unchanged_copy(tmp_path):
 
 
 def test_uninstall_keeps_a_changed_copy(tmp_path):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     (lib / "Entombed" / "dx8vb.dll").write_bytes(b"the player's own dx8vb")
     r = run(eng, "uninstall")
@@ -227,8 +212,7 @@ def test_uninstall_keeps_a_changed_copy(tmp_path):
 
 
 def test_repair_recreates_a_missing_copy(tmp_path):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     (lib / "Entombed" / "dx8vb.dll").unlink()
     r = run(eng, "repair")
@@ -237,8 +221,7 @@ def test_repair_recreates_a_missing_copy(tmp_path):
 
 
 def test_update_drops_the_copy_when_the_game_no_longer_needs_the_runtime(tmp_path):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0",
                                        dependencies=())
@@ -253,8 +236,7 @@ def test_update_drops_the_copy_when_the_game_no_longer_needs_the_runtime(tmp_pat
 
 
 def test_update_keeps_a_changed_copy_the_game_no_longer_needs(tmp_path):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     (lib / "Entombed" / "dx8vb.dll").write_bytes(b"the player's own dx8vb")
     eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0",
@@ -290,8 +272,7 @@ def test_extras_never_claim_the_copy(tmp_path):
 
 
 def test_private_copy_is_recorded_as_the_runtimes(tmp_path, private_com):
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     r = run(eng, "install")
     folder = lib / "Entombed"
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / "entombed.exe.manifest").exists()
@@ -300,8 +281,7 @@ def test_private_copy_is_recorded_as_the_runtimes(tmp_path, private_com):
 
 def test_private_copy_that_cant_be_used_still_leaves_the_dll_beside_the_exe(tmp_path, private_com, monkeypatch):
     monkeypatch.setattr(comfree, "has_embedded_manifest", lambda exe: True)
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     r = run(eng, "install")
     folder = lib / "Entombed"
     assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Entombed", component=DX8VB_TITLE)]
@@ -324,8 +304,7 @@ def test_private_staging_copy_changed_after_unpacking_isnt_copied(tmp_path, priv
             (copy.root / "dx8vb.dll").write_bytes(b"MZ swapped in staging")
         return result
     monkeypatch.setattr(runtimes, "finish_private", swap_after)
-    routes = {}
-    eng, lib = setup(tmp_path, [dx8vb_entry(routes), game(routes)], routes, register_shared_components=False)
+    eng, lib, rt, g = dx8vb_catalog(tmp_path, register_shared_components=False)
     r = run(eng, "install")
     assert not_copied() in r.notes and not (lib / "Entombed" / "dx8vb.dll").exists()
 

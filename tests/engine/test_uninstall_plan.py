@@ -1,21 +1,9 @@
 import pytest
-import hashlib
 
 from engine.records import RecordedFile
 from engine.safety import UninstallPlan, apply_uninstall, count_player_files, plan_uninstall
-from tests.engine.fakes import FakeRecycle
+from tests.engine.fakes import BK, FakeRecycle, put, sha
 
-BK = "Game Chooser backup 2026-11-04"
-
-
-def sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def put(root, rel, data=b"x"):
-    p = root / rel
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_bytes(data)
 
 
 class FakeRecord:

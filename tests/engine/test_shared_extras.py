@@ -5,33 +5,20 @@ game it is added to, and each game's install record holds its own copy: the extr
 and nothing done to one game's copy touches another's.
 """
 
-import hashlib
 from dataclasses import asdict
 from pathlib import Path
 
 from engine.entries import extras_of
 from engine.jobs import InstallRequest
 from engine.plan import build_install_plan
-from tests.engine.fakes import FakeFetcher, FakeRegistry, make_engine, served_source, zip_bytes
+from tests.engine.fakes import (MIRROR, FakeFetcher, FakeRegistry, make_engine, never, quiet, served_source, sha, snapshot,
+                                zip_bytes)
 
-MIRROR = "https://files.accessiblegames.net/files/"
 ALPHA_V1 = {"alpha.exe": b"alpha v1", "data/patch.dat": b"alpha's own patch"}
 ALPHA_V2 = {"alpha.exe": b"alpha v2", "data/patch.dat": b"alpha's own patch"}
 BRAVO_V1 = {"bravo.exe": b"bravo v1", "data/patch.dat": b"bravo's own patch"}
 SHARED_V1 = {"data/patch.dat": b"series patch v1", "data/bonus.dat": b"bonus v1"}
 SHARED_V2 = {"data/patch.dat": b"series patch v2", "data/bonus.dat": b"bonus v2"}
-
-
-def never():
-    return False
-
-
-def quiet(p):
-    pass
-
-
-def sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def game(routes, id, title, files, version="1.0", required=False):
@@ -62,10 +49,6 @@ def catalog(tmp_path, required=False):
 
 def run(eng, action, id, **kw):
     return eng.run(InstallRequest(action, id, "Games", **kw), quiet, never)
-
-
-def snapshot(root: Path) -> dict[str, bytes]:
-    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
 def install_both(tmp_path, required=False):

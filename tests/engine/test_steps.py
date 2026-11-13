@@ -17,16 +17,6 @@ HKLM = FakeWinreg.HKEY_LOCAL_MACHINE
 
 
 @pytest.fixture
-def fake_elev():
-    return FakeElevator()
-
-
-@pytest.fixture
-def fake_winreg():
-    return FakeWinreg()
-
-
-@pytest.fixture
 def ctx(tmp_path, fake_elev, fake_winreg):
     return StepContext(dir=tmp_path, elevator=fake_elev, registry=RegistryAccess(fake_elev, hkcu=fake_winreg))
 

@@ -10,13 +10,9 @@ from engine.errors import Cancelled, DownloadWriteError, ExtractError, InstallFa
 from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
 from engine.messages import DEFENDER_NOTE
-from tests.engine.fakes import FakeElevator, FakeFetcher, ZipExtractor, make_engine, served_source, zip_bytes
+from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, ZipExtractor, fails, make_engine, never,
+                                served_source, zip_bytes)
 
-MIRROR = "https://files.accessiblegames.net/files/"
-
-
-def never():
-    return False
 
 
 def game(routes, id="entombed", title="Entombed", files=None, steps=None, developer=("Ghorse",), method="zip",
@@ -40,6 +36,13 @@ def setup(tmp_path, entries, routes, **ctx):
     return engine, engine.ctx, tmp_path / "Games"
 
 
+def entombed_catalog(tmp_path, **overrides):
+    routes = {}
+    e = game(routes)
+    engine, ctx, lib = setup(tmp_path, [e], routes, **overrides)
+    return engine, ctx, lib, e
+
+
 def leftovers(ctx, lib):
     """Anything the install left behind in the library's staging folder or the work folder."""
     staging = lib / ".gamechooser-staging"
@@ -47,9 +50,7 @@ def leftovers(ctx, lib):
 
 
 def test_fresh_install(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     records = ctx.records
     seen = []
     r = engine.run(InstallRequest("install", "entombed", "Games", lib), seen.append, never)
@@ -183,9 +184,8 @@ def test_failing_system_step_rolls_back(tmp_path):
     fake_elev = FakeElevator(exit_codes={str(lib / "Entombed" / "fix.exe"): 1})
     engine, ctx, lib = setup(tmp_path, [e], routes, elevator=fake_elev)
     fake_reg, records = ctx.registry, ctx.records
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.STEP_RUN_FAILED.format(name="fix.exe", code=1)
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.STEP_RUN_FAILED.format(name="fix.exe", code=1)
     assert not (lib / "Entombed").exists() and fake_reg.values == {} and records.load("entombed") is None
     assert leftovers(ctx, lib) == []
 
@@ -199,9 +199,8 @@ def test_failing_extra_system_step_undoes_the_games_steps(tmp_path):
     x = extra(routes, "entombed-patch", {"patch.exe": b"p"}, steps=[{"action": "run", "path": "patch.exe"}])
     fake_elev = FakeElevator(exit_codes={str(lib / "Entombed" / "patch.exe"): 3})
     engine, ctx, lib = setup(tmp_path, [e, x], routes, elevator=fake_elev)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.STEP_RUN_FAILED.format(name="patch.exe", code=3)
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.STEP_RUN_FAILED.format(name="patch.exe", code=3)
     assert ctx.registry.values == {} and not (lib / "Entombed").exists()
     assert ctx.records.load("entombed") is None and leftovers(ctx, lib) == []
 
@@ -211,9 +210,8 @@ def test_declined_elevation_fails_plainly_and_rolls_back(tmp_path):
     e = game(routes, files={"entombed.exe": b"exe", "dx.dll": b"dll"},
              steps=[{"action": "register", "path": "dx.dll"}])
     engine, ctx, lib = setup(tmp_path, [e], routes, elevator=FakeElevator(decline=True))
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.ELEVATION_DECLINED.format(what="dx.dll")
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.ELEVATION_DECLINED.format(what="dx.dll")
     assert not (lib / "Entombed").exists() and ctx.records.load("entombed") is None
 
 
@@ -221,17 +219,14 @@ def test_no_exe_fails_with_defender_note(tmp_path):
     routes = {}
     e = game(routes, files={"readme.txt": b"r", "setup.exe": b"installer"})   # setup.exe is auto-excluded
     engine, ctx, lib = setup(tmp_path, [e], routes)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.NO_EXE.format(title="Entombed") + "\n\n" + DEFENDER_NOTE
-    assert DEFENDER_NOTE in ei.value.message and list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and not any((lib / ".gamechooser-staging").iterdir())
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.NO_EXE.format(title="Entombed") + "\n\n" + DEFENDER_NOTE
+    assert DEFENDER_NOTE in error.message and list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and not any((lib / ".gamechooser-staging").iterdir())
     assert leftovers(ctx, lib) == [] and ctx.records.load("entombed") is None
 
 
 def test_cancel_during_download_leaves_nothing(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     with pytest.raises(Cancelled):
         engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, lambda: True)
     assert list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"])
@@ -239,9 +234,7 @@ def test_cancel_during_download_leaves_nothing(tmp_path):
 
 
 def test_cancel_after_download_leaves_nothing(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     asked = []
 
     def cancel():
@@ -255,37 +248,29 @@ def test_cancel_after_download_leaves_nothing(tmp_path):
 
 
 def test_existing_unrecorded_folder_is_refused_before_download(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     records, libs, fetcher = ctx.records, ctx.libraries, ctx.fetcher
     (lib / "Entombed").mkdir()
     (lib / "Entombed" / "mine.txt").write_text("player")
     assert blocked_reason(e, lib, records, libs).startswith('A folder named "Entombed"')
     assert blocked_reason(e, lib, records, libs) == messages.FOLDER_EXISTS.format(folder="Entombed", library="Games")
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == blocked_reason(e, lib, records, libs)
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == blocked_reason(e, lib, records, libs)
     assert fetcher.requests == []
     assert [p.name for p in (lib / "Entombed").iterdir()] == ["mine.txt"]
 
 
 def test_existing_folder_differing_only_in_case_is_refused(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     (lib / "ENTOMBED").mkdir()
     if not (lib / "Entombed").exists():
         pytest.skip("case-sensitive file system")
-    with pytest.raises(InstallFailed):
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert ctx.fetcher.requests == []
 
 
 def test_own_recorded_folder_is_not_blocked_and_is_installed_over_as_an_update(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert blocked_reason(e, lib, ctx.records, ctx.libraries) is None
     (lib / "Entombed" / "save.dat").write_bytes(b"player")
@@ -312,9 +297,7 @@ def test_duplicate_title_gets_developer_suffix(tmp_path):
 
 
 def test_leftover_staging_is_cleared(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     old = lib / ".gamechooser-staging" / "entombed" / "raw"
     old.mkdir(parents=True)
     (old / "junk.exe").write_bytes(b"junk")
@@ -332,9 +315,8 @@ def test_no_verified_source_fails_plainly(tmp_path):
     e = game(routes)
     del routes[e["sources"][0]["url"]]
     engine, ctx, lib = setup(tmp_path, [e], routes)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.NO_SOURCE.format(title="Entombed", reasons=messages.SOURCE_UNREACHABLE)
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.NO_SOURCE.format(title="Entombed", reasons=messages.SOURCE_UNREACHABLE)
     assert list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and leftovers(ctx, lib) == []
 
 
@@ -354,8 +336,6 @@ def test_changed_developer_files_note_once_and_record_the_real_file(tmp_path):
 
 
 def test_folder_appearing_during_install_is_not_merged(tmp_path):
-    routes = {}
-    e = game(routes)
     lib = tmp_path / "Games"
 
     class RacingExtractor(ZipExtractor):
@@ -364,17 +344,14 @@ def test_folder_appearing_during_install_is_not_merged(tmp_path):
             (lib / "Entombed" / "mine.txt").write_text("player")
             return super().extract(archive, dest, install, cancel)
 
-    engine, ctx, lib = setup(tmp_path, [e], routes, extractor=RacingExtractor())
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.FOLDER_EXISTS.format(folder="Entombed", library="Games")
+    engine, ctx, lib, e = entombed_catalog(tmp_path, extractor=RacingExtractor())
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.FOLDER_EXISTS.format(folder="Entombed", library="Games")
     assert [p.name for p in (lib / "Entombed").iterdir()] == ["mine.txt"]
     assert leftovers(ctx, lib) == [] and ctx.records.load("entombed") is None
 
 
 def test_extract_error_cleans_staging(tmp_path):
-    routes = {}
-    e = game(routes)
 
     class BrokenExtractor(ZipExtractor):
         def extract(self, archive, dest, install, cancel):
@@ -382,10 +359,9 @@ def test_extract_error_cleans_staging(tmp_path):
             (Path(dest) / "half.dat").write_bytes(b"half")
             raise ExtractError(messages.EXTRACT_FAILED)
 
-    engine, ctx, lib = setup(tmp_path, [e], routes, extractor=BrokenExtractor())
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.EXTRACT_FAILED
+    engine, ctx, lib, e = entombed_catalog(tmp_path, extractor=BrokenExtractor())
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.EXTRACT_FAILED
     assert list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and leftovers(ctx, lib) == []
 
 
@@ -393,17 +369,15 @@ def test_unsafe_file_step_fails_before_anything_is_placed(tmp_path):
     routes = {}
     e = game(routes, steps=[{"action": "delete", "path": "../outside.txt"}])
     engine, ctx, lib = setup(tmp_path, [e], routes)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.STEP_UNSAFE_PATH
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.STEP_UNSAFE_PATH
     assert list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and leftovers(ctx, lib) == []
 
 
 def test_unknown_catalog_id_fails_plainly(tmp_path):
     engine, ctx, lib = setup(tmp_path, [], {})
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "nope", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.NOT_IN_CATALOG
+    error = fails(engine.run, InstallRequest("install", "nope", "Games", lib), lambda p: None, never)
+    assert error.message == messages.NOT_IN_CATALOG
 
 
 def test_library_found_by_name_alone(tmp_path):
@@ -452,9 +426,8 @@ def test_disk_full_during_download_says_so_and_tries_no_other_source(tmp_path):
     e["sources"].append({**e["sources"][0], "url": "https://dev.example.com/entombed.zip"})
     engine = make_engine(tmp_path, [e], fetcher=FullDiskFetcher(routes))
     ctx, lib = engine.ctx, tmp_path / "Games"
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.DISK_FULL.format(title="Entombed")
     assert ctx.fetcher.requests == [e["sources"][0]["url"]]  # a second address won't help a full drive
     assert not (lib / "Entombed").exists() and leftovers(ctx, lib) == []
 
@@ -474,9 +447,8 @@ def test_file_errors_escaping_a_job_get_plain_words(tmp_path, monkeypatch, error
     def failing(*args, **kwargs):
         raise error
     monkeypatch.setattr(jobs, "find_launch_exe", failing)  # deep inside the install, after the download
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == text.format(title="Entombed")
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == text.format(title="Entombed")
     assert not (lib / "Entombed").exists() and leftovers(ctx, lib) == []
 
 
@@ -487,17 +459,14 @@ def test_other_file_error_names_the_file_and_the_systems_words(tmp_path, monkeyp
     def failing(*args, **kwargs):
         raise OSError(errno.EIO, "Input/output error", str(lib / "Entombed" / "sounds" / "a.wav"))
     monkeypatch.setattr(jobs, "find_launch_exe", failing)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.FILE_ERROR.format(
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.FILE_ERROR.format(
         title="Entombed", path=lib / "Entombed" / "sounds" / "a.wav", detail="Input/output error")
 
 
 @pytest.mark.parametrize("stuck", ["staging", "work"])
 def test_temp_folder_that_cannot_be_emptied_stops_the_install(tmp_path, monkeypatch, stuck):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     folder = lib / ".gamechooser-staging" / "entombed" if stuck == "staging" else ctx.work_root / "entombed"
     (folder / "raw").mkdir(parents=True)
     (folder / "raw" / "locked.exe").write_bytes(b"stale")
@@ -508,9 +477,8 @@ def test_temp_folder_that_cannot_be_emptied_stops_the_install(tmp_path, monkeypa
             real_clear(path)
 
     monkeypatch.setattr(runtimes, "_clear", clear)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == messages.TEMP_FOLDER_NOT_CLEARED.format(path=folder)
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.TEMP_FOLDER_NOT_CLEARED.format(path=folder)
     assert ctx.fetcher.requests == [] and ctx.records.load("entombed") is None
     assert not (lib / "Entombed").exists()
     assert [p.name for p in (folder / "raw").iterdir()] == ["locked.exe"]
@@ -540,11 +508,10 @@ def test_rollback_that_cannot_remove_the_folder_says_where_it_is(tmp_path, monke
 
     monkeypatch.setattr(os, "replace", replace)
     monkeypatch.setattr(jobs, "_clear", clear)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message == (messages.STEP_RUN_FAILED.format(name="fix.exe", code=1) + "\n\n"
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == (messages.STEP_RUN_FAILED.format(name="fix.exe", code=1) + "\n\n"
                                 + messages.FOLDER_NOT_REMOVED.format(path=target))
-    assert str(target) in ei.value.message
+    assert str(target) in error.message
     assert [p.name for p in target.iterdir()] == ["fix.exe"] and ctx.records.load("entombed") is None
 
 
@@ -577,9 +544,8 @@ def test_library_folder_that_cannot_be_created_fails_plainly(tmp_path):
     bad_lib = tmp_path / "blocker" / "Games"
     engine, ctx, _ = setup(tmp_path, [game(routes)], routes,
                            libraries=[{"id": "Games", "path": str(bad_lib)}])
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", bad_lib), lambda p: None, never)
-    assert ei.value.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=bad_lib)
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", bad_lib), lambda p: None, never)
+    assert error.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=bad_lib)
     assert ctx.fetcher.requests == []
 
 
@@ -620,43 +586,25 @@ def test_garbled_hint_falls_back_and_is_guessed(tmp_path):
 
 
 PAGE_FILES = {"index.html": b"<a href='page2.html'>next</a>", "page2.html": b"<a href='index.html'>back</a>"}
-
-
-def test_install_with_a_page_launch_path(tmp_path):
-    rec = _install_entombed(tmp_path, PAGE_FILES, {"windows": {"path": "index.html"}})
-    assert rec.launch_path == "index.html" and rec.launch_from_catalog is True
-    assert set(rec.files) == {"index.html", "page2.html"}
-    folder = tmp_path / "Games" / "Entombed"
-    assert (folder / "index.html").is_file() and (folder / "page2.html").is_file()
-
-
-def test_pages_alone_without_a_launch_path_fail_as_no_program(tmp_path):
-    routes = {}
-    e = game(routes, files=PAGE_FILES)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message.startswith(messages.NO_EXE.format(title="Entombed"))
-    assert ctx.records.load("entombed") is None
-
-
 HTA_FILES = {"jumpgame.hta": b"<html><hta:application applicationname='Jump'></html>", "jump1.wav": b"RIFF"}
 
 
-def test_install_with_an_hta_launch_path(tmp_path):
-    rec = _install_entombed(tmp_path, HTA_FILES, {"windows": {"path": "jumpgame.hta"}})
-    assert rec.launch_path == "jumpgame.hta" and rec.launch_from_catalog is True
-    assert set(rec.files) == {"jumpgame.hta", "jump1.wav"}
-    assert (tmp_path / "Games" / "Entombed" / "jumpgame.hta").is_file()
+@pytest.mark.parametrize("files, launch", [(PAGE_FILES, "index.html"), (HTA_FILES, "jumpgame.hta")],
+                         ids=["page", "hta"])
+def test_install_with_a_page_or_hta_launch_path(tmp_path, files, launch):
+    rec = _install_entombed(tmp_path, files, {"windows": {"path": launch}})
+    assert rec.launch_path == launch and rec.launch_from_catalog is True
+    assert set(rec.files) == set(files)
+    assert all((tmp_path / "Games" / "Entombed" / name).is_file() for name in files)
 
 
-def test_an_hta_alone_without_a_launch_path_fails_as_no_program(tmp_path):
+@pytest.mark.parametrize("files", [PAGE_FILES, HTA_FILES], ids=["pages", "hta"])
+def test_pages_or_an_hta_alone_without_a_launch_path_fail_as_no_program(tmp_path, files):
     routes = {}
-    e = game(routes, files=HTA_FILES)
+    e = game(routes, files=files)
     engine, ctx, lib = setup(tmp_path, [e], routes)
-    with pytest.raises(InstallFailed) as ei:
-        engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert ei.value.message.startswith(messages.NO_EXE.format(title="Entombed"))
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message.startswith(messages.NO_EXE.format(title="Entombed"))
     assert ctx.records.load("entombed") is None
 
 

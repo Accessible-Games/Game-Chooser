@@ -1,7 +1,10 @@
+import gzip
 import json
 
+import pytest
+
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex, normalize_catalog_url
-from tests.engine.fakes import FakeFetcher, publish
+from tests.engine.fakes import FakeFetcher, publish, sha
 
 BASE = DEFAULT_CATALOG_URL
 GZ = BASE + "index.json.gz"
@@ -108,10 +111,16 @@ def test_offline_without_cache(tmp_path):
     assert s.entries == {} and s.error
 
 
-def test_corrupt_cache_is_ignored(tmp_path):
+def _bad_body_gz():
+    good = gzip.compress(b'{"schema_version": 1, "entries": []}' * 50, mtime=0)
+    return good[:12] + bytes(b ^ 0xFF for b in good[12:-8]) + good[-8:]
+
+
+@pytest.mark.parametrize("garbage", [b"garbage", _bad_body_gz()], ids=["not gzip", "a corrupt deflate body"])
+def test_corrupt_cache_is_ignored(tmp_path, garbage):
     fetcher, idx = make(tmp_path)
     idx.refresh()
-    (tmp_path / "index.json.gz").write_bytes(b"garbage")
+    (tmp_path / "index.json.gz").write_bytes(garbage)
     s = idx.load_cached()
     assert s.entries == {} and s.from_cache
     s = idx.refresh()  # meta unchanged but cache unusable: re-download
@@ -138,28 +147,13 @@ def test_normalize_catalog_url():
     assert normalize_catalog_url("") is None
 
 
-def _bad_body_gz():
-    import gzip as _gzip
-    good = _gzip.compress(b'{"schema_version": 1, "entries": []}' * 50, mtime=0)
-    return good[:12] + bytes(b ^ 0xFF for b in good[12:-8]) + good[-8:]
-
-
-def test_corrupt_deflate_body_in_cache(tmp_path):
-    fetcher, idx = make(tmp_path)
-    idx.refresh()
-    (tmp_path / "index.json.gz").write_bytes(_bad_body_gz())
-    assert idx.load_cached().entries == {}
-    assert set(idx.refresh().entries) == {"a", "b"}
-
-
 def test_corrupt_deflate_body_from_server_keeps_cache(tmp_path):
-    import hashlib
     fetcher, idx = make(tmp_path)
     idx.refresh()
     bad = _bad_body_gz()
     fetcher.routes[GZ] = bad
     meta = json.loads(fetcher.routes[META])
-    meta["sha256"] = hashlib.sha256(bad).hexdigest()
+    meta["sha256"] = sha(bad)
     fetcher.routes[META] = json.dumps(meta).encode()
     s = idx.refresh()
     assert s.error and set(s.entries) == {"a", "b"}

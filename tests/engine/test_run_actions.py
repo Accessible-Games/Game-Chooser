@@ -12,10 +12,10 @@ from engine import jobs, messages, run_actions, run_installer
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from tests.engine import test_update_flows as archive
-from tests.engine.fakes import FakeUninstallKeys, served_source, zip_bytes
-from tests.engine.test_run_installer import (MIRROR, SETUP, install, installed_run_game, never, publish_v2, put,
-                                             quiet, run_game, run_game_with_patch, setaside, setup_engine, sha, tree,
-                                             writes)
+from tests.engine.fakes import (MIRROR, FakeUninstallKeys, fails, never, put, quiet, served_source, sha, snapshot,
+                                zip_bytes)
+from tests.engine.test_run_installer import (SETUP, install, installed_run_game, publish_v2, run_game,
+                                             run_game_with_patch, setaside, setup_engine, writes)
 
 V1 = {"lc.exe": b"exe v1", "cfg.ini": b"volume=5", "sfx/a.wav": b"a"}  # what installed_run_game's installer writes
 SETUP_V2 = b"MZ setup v2"
@@ -138,11 +138,10 @@ def test_repair_whose_download_changed_changes_nothing(tmp_path, kind):
     before = eng.ctx.records.load(game_id)
     eng.ctx.fetcher.routes[before.source.url] = b"MZ a different file"
     eng.ctx.fetcher.requests.clear()
-    files = tree(folder)
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("repair", game_id, "Games"), quiet, never)
-    assert ei.value.message == messages.REPAIR_FILE_CHANGED.format(title=title)
-    assert tree(folder) == files and eng.ctx.records.load(game_id) == before
+    files = snapshot(folder)
+    error = fails(eng.run, InstallRequest("repair", game_id, "Games"), quiet, never)
+    assert error.message == messages.REPAIR_FILE_CHANGED.format(title=title)
+    assert snapshot(folder) == files and eng.ctx.records.load(game_id) == before
     assert eng.ctx.fetcher.requests == [before.source.url]  # the recorded URL is the mirror's copy itself
 
 
@@ -156,13 +155,12 @@ def test_undo_whose_previous_download_is_gone_changes_nothing(tmp_path, kind, se
         del eng.ctx.fetcher.routes[url]
     else:
         eng.ctx.fetcher.routes[url] = served
-    files = tree(folder)
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("undo", game_id, "Games"), quiet, never)
+    files = snapshot(folder)
+    error = fails(eng.run, InstallRequest("undo", game_id, "Games"), quiet, never)
     expected = (messages.UNDO_UNAVAILABLE if served else messages.DOWNLOAD_UNREACHABLE).format(title=title)
     rec = eng.ctx.records.load(game_id)
-    assert ei.value.message == expected and rec.previous is not None
-    assert rec.previous_unavailable == (expected if served else None) and tree(folder) == files
+    assert error.message == expected and rec.previous is not None
+    assert rec.previous_unavailable == (expected if served else None) and snapshot(folder) == files
 
 
 def test_repair_runs_the_recorded_system_steps_under_the_update_rules(tmp_path):
@@ -238,8 +236,7 @@ def test_undo_whose_unregister_and_installer_both_fail_keeps_the_step_recorded(t
             place(exe, args, elevated)
     elevator.on_start = failing
     settle(monkeypatch)
-    with pytest.raises(InstallFailed):
-        run(eng, "undo")
+    fails(run, eng, "undo")
     assert record(eng).steps == steps and (folder / "v2.txt").exists()
 
     elevator.exit_codes.clear()
@@ -274,9 +271,8 @@ def test_undo_whose_installer_failed_keeps_the_undo_point_and_can_be_retried(tmp
         elevator.exit_codes[exe] = 5
         place(exe, args, elevated)
     elevator.on_start = failing
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    assert ei.value.message == "\n\n".join([  # the files the failed installer added were moved aside (M5)
+    error = fails(run, eng, "undo")
+    assert error.message == "\n\n".join([  # the files the failed installer added were moved aside (M5)
         messages.INSTALLER_FAILED.format(title="Light Cars", code=5),
         messages.NEW_FILES_SET_ASIDE.format(title="Light Cars", path=eng.ctx.work_root / ".setaside" / "lightcars.new")])
     assert record(eng).previous is not None and record(eng).method == "zip"
@@ -303,9 +299,8 @@ def test_undo_whose_step_failed_after_the_installer_still_puts_the_backups_back_
     def broken(*args):
         raise OSError("registry unavailable")
     registry.set = broken
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    assert ei.value.message.startswith(messages.REGISTRY_WRITE_FAILED.format(key=r"HKCU\Software\LightCars"))
+    error = fails(run, eng, "undo")
+    assert error.message.startswith(messages.REGISTRY_WRITE_FAILED.format(key=r"HKCU\Software\LightCars"))
     rec = record(eng)
     assert rec.previous is not None and rec.method == "run"  # v1's files are in place and recorded
     assert (folder / "cfg.ini").read_bytes() == b"volume=5"
@@ -368,11 +363,9 @@ def test_archive_update_of_an_unwritable_folder_outside_the_libraries_refuses_pl
     eng, routes, folder = installed_outside(tmp_path)
     publish_archive(eng, routes, {"lc.exe": b"exe v2", "cfg.ini": b"volume=7"})
     unwritable(monkeypatch, folder)
-    before, files = record(eng), tree(folder)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "update")
-    assert ei.value.message == messages.FOLDER_NEEDS_ADMIN.format(title="Light Cars", path=folder)
-    assert tree(folder) == files and record(eng) == before
+    before, files = record(eng), snapshot(folder)
+    assert fails(run, eng, "update").message == messages.FOLDER_NEEDS_ADMIN.format(title="Light Cars", path=folder)
+    assert snapshot(folder) == files and record(eng) == before
 
 
 # ---- extras --------------------------------------------------------------------------------------------------
@@ -400,7 +393,7 @@ def test_extras_on_a_run_record_are_tagged_and_removed_by_uninstall(tmp_path):
     assert rec.files["music/theme.ogg"].owner == "lc-music" and rec.files["music/a.wav"].owner == "lc-music"
     assert rec.files["lc.exe"].owner == "lightcars"
     run(eng, "uninstall")
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
 
 
 def test_extras_on_a_run_record_outside_the_libraries(tmp_path):
@@ -420,9 +413,7 @@ def test_extra_with_its_own_installer_is_refused_on_a_run_record_as_on_any_game(
     target = tmp_path / "Games" / "Light Cars"
     eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, V1))
     install(eng)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "extras", extras=("lc-patch",))
-    assert ei.value.message == messages.EXTRA_NOT_SUPPORTED.format(extra="Patch")
+    assert fails(run, eng, "extras", extras=("lc-patch",)).message == messages.EXTRA_NOT_SUPPORTED.format(extra="Patch")
     assert record(eng).extras == {} and len(eng.ctx.elevator.calls) == 1
 
 
@@ -469,11 +460,9 @@ def test_repair_when_an_extras_download_changed_fails_before_the_installer_start
     eng, target = run_game_with_music(tmp_path)
     run(eng, "extras", extras=("lc-music",))
     eng.ctx.fetcher.routes[eng.ctx.entries["lc-music"]["sources"][0]["url"]] = b"not the music"
-    files = tree(target)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "repair")
-    assert ei.value.message == messages.REPAIR_EXTRA_CHANGED.format(extra="Music", title="Light Cars")
-    assert tree(target) == files and len(eng.ctx.elevator.calls) == 1
+    files = snapshot(target)
+    assert fails(run, eng, "repair").message == messages.REPAIR_EXTRA_CHANGED.format(extra="Music", title="Light Cars")
+    assert snapshot(target) == files and len(eng.ctx.elevator.calls) == 1
 
 
 def test_undo_of_a_run_update_puts_back_the_previous_extras(tmp_path):
@@ -563,9 +552,8 @@ def test_an_untracked_run_record_still_refuses(tmp_path, action):
     rec.tracked = False
     rec.previous = {**jobs._snapshot(rec), "backups": []}
     eng.ctx.records.save(rec)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, action, extras=("lc-music",) if action == "extras" else ())
-    assert ei.value.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Light Cars")
+    error = fails(run, eng, action, extras=("lc-music",) if action == "extras" else ())
+    assert error.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Light Cars")
     assert len(eng.ctx.elevator.calls) == 1
 
 
@@ -592,9 +580,7 @@ def test_a_failed_extras_phase_keeps_the_extras_for_a_retried_update(tmp_path, m
     run(eng, "extras", extras=("lc-music",))
     music_v2(eng, target, clobbers_music=True)
     fails_once(monkeypatch, jobs, "apply_plan")
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "update")
-    assert ei.value.message == messages.FILES_NOT_CHANGED.format(title="Light Cars")
+    assert fails(run, eng, "update").message == messages.FILES_NOT_CHANGED.format(title="Light Cars")
     assert set(record(eng).extras) == {"lc-music"}
     run(eng, "update")
     assert (target / "music" / "theme.ogg").read_bytes() == b"theme" and set(record(eng).extras) == {"lc-music"}
@@ -607,8 +593,7 @@ def test_a_failed_extras_phase_keeps_the_extras_for_a_retried_repair(tmp_path, m
     music = record(eng).extras["lc-music"]
     (target / "music" / "theme.ogg").unlink()
     fails_once(monkeypatch, jobs, "apply_plan")
-    with pytest.raises(InstallFailed):
-        run(eng, "repair")
+    fails(run, eng, "repair")
     assert record(eng).extras == {"lc-music": music}
     run(eng, "repair")
     assert (target / "music" / "theme.ogg").read_bytes() == b"theme" and record(eng).extras == {"lc-music": music}
@@ -629,12 +614,11 @@ def copy_to_staging_fails(monkeypatch):
 
 def test_extras_whose_installed_files_cant_be_copied_fail_plainly(tmp_path, monkeypatch):
     eng, target = run_game_with_music(tmp_path)
-    before, files = record(eng), tree(target)
+    before, files = record(eng), snapshot(target)
     copy_to_staging_fails(monkeypatch)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "extras", extras=("lc-music",))
-    assert ei.value.message == messages.EXTRAS_FILES_NOT_COPIED.format(title="Light Cars")
-    assert tree(target) == files and record(eng) == before
+    error = fails(run, eng, "extras", extras=("lc-music",))
+    assert error.message == messages.EXTRAS_FILES_NOT_COPIED.format(title="Light Cars")
+    assert snapshot(target) == files and record(eng) == before
 
 
 def test_a_run_update_whose_installed_files_cant_be_copied_fails_plainly(tmp_path, monkeypatch):
@@ -642,9 +626,7 @@ def test_a_run_update_whose_installed_files_cant_be_copied_fails_plainly(tmp_pat
     run(eng, "extras", extras=("lc-music",))
     music_v2(eng, target)
     copy_to_staging_fails(monkeypatch)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "update")
-    assert ei.value.message == messages.EXTRAS_FILES_NOT_COPIED.format(title="Light Cars")
+    assert fails(run, eng, "update").message == messages.EXTRAS_FILES_NOT_COPIED.format(title="Light Cars")
     assert set(record(eng).extras) == {"lc-music"}
 
 
@@ -726,7 +708,6 @@ def test_undo_says_so_when_a_newer_file_cant_be_removed(tmp_path, monkeypatch):
 def test_extras_on_a_folder_needing_admin_refuse_with_words_that_fit_any_change(tmp_path, monkeypatch):
     eng, routes, folder = installed_outside(tmp_path)
     unwritable(monkeypatch, folder)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "extras", extras=("lc-music",))
-    assert ei.value.message == messages.FOLDER_NEEDS_ADMIN.format(title="Light Cars", path=folder)
+    error = fails(run, eng, "extras", extras=("lc-music",))
+    assert error.message == messages.FOLDER_NEEDS_ADMIN.format(title="Light Cars", path=folder)
     assert "update" not in messages.FOLDER_NEEDS_ADMIN.lower()

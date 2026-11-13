@@ -29,80 +29,65 @@ def entry(sources, version=None):
     return e
 
 
-def test_hashed_sources_compare_installed_reference():
-    rec = record(sha256="d" * 64, catalog_sha256="c" * 64)
-    assert not update_available(rec, entry([src(sha="c" * 64)]), "windows")
-    assert update_available(rec, entry([src(sha="e" * 64)]), "windows")
+HASHED = record(sha256="d" * 64, catalog_sha256="c" * 64)
+# M3: installed with catalog X and the developer's Z (noted); when the catalog accepts Z, nothing is new.
+DEVELOPER_Z = record(sha256="z" * 64, catalog_sha256="x" * 64)
+HASHLESS = record(url="https://dev/x1.zip", catalog_size=10, version="1.0", position=0)
+SECOND = record(url="https://dev/b.zip", version="1.0", position=1)
+HASHED_V1 = record(catalog_sha256="c" * 64, version="1.0")
+CHANGED = entry([src(sha="e" * 64)], version="2.0")
+EXTRA = InstalledSource("https://dev/e.zip", "1" * 64, 1, None, None, 0, None)
 
 
-def test_any_matching_hashed_source_means_no_update():
-    rec = record(catalog_sha256="c" * 64)
-    assert not update_available(rec, entry([src(sha="e" * 64), src(sha="c" * 64)]), "windows")
-
-
-def test_installed_developer_file_later_accepted_by_the_catalog_is_not_an_update():
-    """M3: installed with catalog X and the developer's Z (noted); when the catalog accepts Z, nothing is new."""
-    rec = record(sha256="z" * 64, catalog_sha256="x" * 64)
-    assert not update_available(rec, entry([src(sha="z" * 64)]), "windows")
-    assert not update_available(rec, entry([src(sha="x" * 64)]), "windows")
-    assert update_available(rec, entry([src(sha="y" * 64)]), "windows")
-
-
-def test_hashes_added_later_compare_actual():
-    assert not update_available(record(sha256="a" * 64, catalog_sha256=None), entry([src(sha="a" * 64)]), "windows")
-
-
-def test_hashless_url_size_version_changes():
-    rec = record(url="https://dev/x1.zip", catalog_size=10, version="1.0", position=0)
-    assert not update_available(rec, entry([src(url="https://dev/x1.zip", size=10)], version="1.0"), "windows")
-    assert update_available(rec, entry([src(url="https://dev/x2.zip")], version="1.0"), "windows")
-    assert update_available(rec, entry([src(url="https://dev/x1.zip", size=10)], version="1.1"), "windows")
-    assert update_available(rec, entry([src(url="https://dev/x1.zip", size=11)], version="1.0"), "windows")
-
-
-def test_size_compared_only_when_both_sides_have_one():
-    rec = record(url="https://dev/x.zip", catalog_size=None, version="1.0")
-    assert not update_available(rec, entry([src(size=99)], version="1.0"), "windows")
-    rec = record(url="https://dev/x.zip", catalog_size=10, version="1.0")
-    assert not update_available(rec, entry([src()], version="1.0"), "windows")
-
-
-def test_hashless_uses_recorded_position_with_fallback_to_first():
-    rec = record(url="https://dev/b.zip", version="1.0", position=1)
-    sources = [src(url="https://dev/a.zip"), src(url="https://dev/b.zip")]
-    assert not update_available(rec, entry(sources, version="1.0"), "windows")
-    assert update_available(rec, entry([src(url="https://dev/a.zip")], version="1.0"), "windows")  # falls back to 0
-    rec = record(url="https://dev/a.zip", version="1.0", position=5)
-    assert not update_available(rec, entry([src(url="https://dev/a.zip")], version="1.0"), "windows")
-
-
-def test_position_indexes_same_platform_sources_only():
-    rec = record(url="https://dev/w.zip", version="1.0", position=0)
-    sources = [src(url="https://dev/m.zip", platform="macos"), src(url="https://dev/w.zip")]
-    assert not update_available(rec, entry(sources, version="1.0"), "windows")
-
-
-def test_entry_gone_or_no_platform_source_is_not_an_update():
-    rec = record(version="1.0")
-    assert not update_available(rec, None, "windows")
-    assert not update_available(rec, entry([]), "windows")
-    assert not update_available(rec, entry([src(sha="e" * 64, platform="macos")], version="2.0"), "windows")
-    assert not update_available(None, entry([src(sha="e" * 64)]), "windows")
-
-
-def test_untracked_record_can_still_have_an_update():
-    assert update_available(record(tracked=False), entry([src(sha="e" * 64)]), "windows")
-
-
-@pytest.mark.parametrize("kw", [{"uninstalled": True}, {"kind": "runtime"}])
-def test_uninstalled_or_runtime_never_updates(kw):
-    assert not update_available(record(**kw), entry([src(sha="e" * 64)]), "windows")
-
-
-def test_extras_do_not_count():
-    extra = InstalledSource("https://dev/e.zip", "1" * 64, 1, None, None, 0, None)
-    rec = record(sha256="a" * 64, extras={"e": extra})
-    assert not update_available(rec, entry([src(sha="a" * 64)]), "windows")
+@pytest.mark.parametrize("rec, ent, expected", [
+    pytest.param(HASHED, entry([src(sha="c" * 64)]), False, id="hashed: the installed catalog checksum"),
+    pytest.param(HASHED, entry([src(sha="e" * 64)]), True, id="hashed: a new checksum"),
+    pytest.param(record(catalog_sha256="c" * 64), entry([src(sha="e" * 64), src(sha="c" * 64)]), False,
+                 id="hashed: any matching source"),
+    pytest.param(DEVELOPER_Z, entry([src(sha="z" * 64)]), False, id="M3: the developer's file, now accepted"),
+    pytest.param(DEVELOPER_Z, entry([src(sha="x" * 64)]), False, id="M3: the catalog's file"),
+    pytest.param(DEVELOPER_Z, entry([src(sha="y" * 64)]), True, id="M3: a third file"),
+    pytest.param(record(sha256="a" * 64, catalog_sha256=None), entry([src(sha="a" * 64)]), False,
+                 id="hashes added later compare the actual file"),
+    pytest.param(HASHLESS, entry([src(url="https://dev/x1.zip", size=10)], version="1.0"), False,
+                 id="hashless: nothing changed"),
+    pytest.param(HASHLESS, entry([src(url="https://dev/x2.zip")], version="1.0"), True, id="hashless: url changed"),
+    pytest.param(HASHLESS, entry([src(url="https://dev/x1.zip", size=10)], version="1.1"), True,
+                 id="hashless: version changed"),
+    pytest.param(HASHLESS, entry([src(url="https://dev/x1.zip", size=11)], version="1.0"), True,
+                 id="hashless: size changed"),
+    pytest.param(record(url="https://dev/x.zip", catalog_size=None, version="1.0"),
+                 entry([src(size=99)], version="1.0"), False, id="size not compared: none recorded"),
+    pytest.param(record(url="https://dev/x.zip", catalog_size=10, version="1.0"), entry([src()], version="1.0"), False,
+                 id="size not compared: none in the catalog"),
+    pytest.param(SECOND, entry([src(url="https://dev/a.zip"), src(url="https://dev/b.zip")], version="1.0"), False,
+                 id="hashless: the recorded position"),
+    pytest.param(SECOND, entry([src(url="https://dev/a.zip")], version="1.0"), True,
+                 id="hashless: a position that is gone falls back to the first"),
+    pytest.param(record(url="https://dev/a.zip", version="1.0", position=5),
+                 entry([src(url="https://dev/a.zip")], version="1.0"), False,
+                 id="hashless: the fallback to the first matches"),
+    pytest.param(record(url="https://dev/w.zip", version="1.0", position=0),
+                 entry([src(url="https://dev/m.zip", platform="macos"), src(url="https://dev/w.zip")], version="1.0"),
+                 False, id="position counts this platform's sources only"),
+    pytest.param(record(version="1.0"), None, False, id="entry gone"),
+    pytest.param(record(version="1.0"), entry([]), False, id="no source"),
+    pytest.param(record(version="1.0"), entry([src(sha="e" * 64, platform="macos")], version="2.0"), False,
+                 id="no source for this platform"),
+    pytest.param(None, entry([src(sha="e" * 64)]), False, id="no record"),
+    pytest.param(record(tracked=False), entry([src(sha="e" * 64)]), True, id="untracked can still update"),
+    pytest.param(record(uninstalled=True), entry([src(sha="e" * 64)]), False, id="uninstalled"),
+    pytest.param(record(kind="runtime"), entry([src(sha="e" * 64)]), False, id="runtime"),
+    pytest.param(record(sha256="a" * 64, extras={"e": EXTRA}), entry([src(sha="a" * 64)]), False,
+                 id="extras do not count"),
+    pytest.param(HASHED_V1, CHANGED, True, id="self-updating: not flagged, a new checksum"),
+    pytest.param(HASHED_V1, {**CHANGED, "self_updating": True}, False, id="self-updating: changed"),
+    pytest.param(record(version="1.0"), {**entry([src()], version="2.0"), "self_updating": True}, False,
+                 id="self-updating: hashless, new version"),
+    pytest.param(HASHED_V1, {**CHANGED, "self_updating": "yes"}, True, id="self-updating: only true counts"),
+])
+def test_update_available(rec, ent, expected):
+    assert update_available(rec, ent, "windows") is expected
 
 
 def test_game_status(tmp_path):
@@ -135,32 +120,13 @@ def test_library_not_found_wins():
     assert game_status("X:/nope.exe", False, None, None, "windows", library_reachable=False) == LIBRARY_NOT_FOUND
 
 
-def test_self_updating_game_never_reports_an_update():
-    rec = record(catalog_sha256="c" * 64, version="1.0")
-    changed = entry([src(sha="e" * 64)], version="2.0")
-    assert update_available(rec, changed, "windows")
-    assert not update_available(rec, {**changed, "self_updating": True}, "windows")
-    assert not update_available(record(version="1.0"), {**entry([src()], version="2.0"), "self_updating": True},
-                                "windows")
-    assert update_available(rec, {**changed, "self_updating": "yes"}, "windows")  # only true counts
-
-
-def test_a_page_game_is_ready(tmp_path):
-    page = tmp_path / "index.html"
-    page.write_text("<p>hi</p>")
+@pytest.mark.parametrize("name", ["index.html", "jumpgame.hta"])
+def test_a_page_or_hta_game_is_ready(tmp_path, name):
+    launch = tmp_path / name
+    launch.write_text("<html></html>")
     rec = record()
     ok = entry([src(sha="a" * 64)])
-    assert game_status(str(page), False, rec, ok, "windows") == READY
-    page.unlink()
-    assert game_status(str(page), False, rec, ok, "windows") == EXE_NOT_FOUND
-
-
-def test_an_hta_game_is_ready(tmp_path):
-    hta = tmp_path / "jumpgame.hta"
-    hta.write_text("<html></html>")
-    rec = record()
-    ok = entry([src(sha="a" * 64)])
-    assert game_status(str(hta), False, rec, ok, "windows") == READY
-    assert game_status(str(hta), False, rec, entry([src(sha="e" * 64)]), "windows") == UPDATE_AVAILABLE
-    hta.unlink()
-    assert game_status(str(hta), False, rec, ok, "windows") == EXE_NOT_FOUND
+    assert game_status(str(launch), False, rec, ok, "windows") == READY
+    assert game_status(str(launch), False, rec, entry([src(sha="e" * 64)]), "windows") == UPDATE_AVAILABLE
+    launch.unlink()
+    assert game_status(str(launch), False, rec, ok, "windows") == EXE_NOT_FOUND

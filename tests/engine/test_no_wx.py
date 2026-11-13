@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+import pytest
+
 REPO_DIR = Path(__file__).resolve().parent.parent.parent
 ENGINE_DIR = REPO_DIR / "engine"
 
@@ -11,8 +13,12 @@ WX_FREE_MODULES = ["library_manager.py", "install_service.py", "catalog_view.py"
 _WX_IMPORT = re.compile(r"^\s*(import wx|from wx)", re.M)
 
 
-def test_engine_never_imports_wx():
-    files = list(ENGINE_DIR.rglob("*.py"))
+@pytest.mark.parametrize("files", [
+    pytest.param(list(ENGINE_DIR.rglob("*.py")), id="engine"),
+    pytest.param([p for p in (REPO_DIR / "tracing").rglob("*.py") if p.name != "app_glue.py"],
+                 id="tracing except app_glue"),
+])
+def test_never_imports_wx(files):
     assert files
     for py in files:
         assert not _WX_IMPORT.search(py.read_text(encoding="utf-8")), py
@@ -23,13 +29,6 @@ def test_wx_free_modules_never_import_wx():
         path = REPO_DIR / name
         assert path.exists(), path
         assert not _WX_IMPORT.search(path.read_text(encoding="utf-8")), path
-
-
-def test_tracing_never_imports_wx_except_glue():
-    files = [p for p in (REPO_DIR / "tracing").rglob("*.py") if p.name != "app_glue.py"]
-    assert files
-    for py in files:
-        assert not _WX_IMPORT.search(py.read_text(encoding="utf-8")), py
 
 
 _TRACING_IMPORT = re.compile(r"^\s*(import tracing|from tracing)", re.M)

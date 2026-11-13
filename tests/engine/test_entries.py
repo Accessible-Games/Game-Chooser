@@ -4,7 +4,7 @@ from engine.entries import (
     current_platform, extras_of, game_fields, is_mirror_url, is_web_game, mirror_url_for, platform_sources,
     dependency_order, visible_games,
 )
-from engine.errors import InstallFailed
+from tests.engine.fakes import fails
 
 MIRROR = "https://files.accessiblegames.net/files/" + "a" * 64 + "/g.zip"
 
@@ -94,8 +94,7 @@ def test_dependencies_resolve_depth_first_and_dedupe():
 def test_cycle_and_missing_dependency_hide_game():
     es = {"g": entry("g", dependencies=["a"]), "a": entry("a", kind="runtime", dependencies=["g2"]),
           "g2": entry("g2", kind="runtime", dependencies=["a"])}
-    with pytest.raises(InstallFailed):
-        dependency_order(es["g"], es)
+    fails(dependency_order, es["g"], es)
     assert visible_games(es, "windows") == []
     assert visible_games({"h": entry("h", dependencies=["nope"])}, "windows") == []
 

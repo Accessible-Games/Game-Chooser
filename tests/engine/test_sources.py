@@ -1,4 +1,3 @@
-import hashlib
 
 import pytest
 
@@ -6,17 +5,13 @@ from engine.entries import is_mirror_url
 from engine.errors import Cancelled, DownloadWriteError, NoVerifiedSource
 from engine.messages import DEVELOPER_CHANGED_UNVERIFIED, DEVELOPER_CHANGED_VERIFIED
 from engine.sources import fetch_exact, fetch_verified, hash_file
-from tests.engine.fakes import FakeFetcher
+from tests.engine.fakes import FakeFetcher, sha
 
 DEV = "https://dev.example.com/files/game.zip"
 DEV2 = "https://other.example.com/game.zip"
 BLOCKED = "https://www.agarchive.net/games/game.zip"
 GOOD = b"good bytes"
 BAD = b"changed bytes!"
-
-
-def sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def mirror(data: bytes = GOOD) -> str:
@@ -84,22 +79,14 @@ def test_mirror_mismatch_is_never_used(tmp_path):
     assert files(tmp_path) == []
 
 
-def test_hashless_sizeless_source_is_accepted(tmp_path):
-    ff = FakeFetcher({DEV: BAD})
-    f = run(entry(src(DEV, data=None)), ff, tmp_path)
-    assert f.note is None and f.sha256 == sha(BAD) and f.size == len(BAD)
-
-
-def test_size_mismatch_without_hash_counts_as_changed(tmp_path):
-    ff = FakeFetcher({DEV: BAD})
-    f = run(entry(src(DEV, data=None, size=3)), ff, tmp_path)
-    assert f.note == DEVELOPER_CHANGED_UNVERIFIED
-
-
-def test_size_match_without_hash_is_accepted(tmp_path):
-    ff = FakeFetcher({DEV: GOOD})
-    f = run(entry(src(DEV, data=None, size=len(GOOD))), ff, tmp_path)
-    assert f.note is None
+@pytest.mark.parametrize("served, fields, note", [
+    pytest.param(BAD, {}, None, id="no size"),
+    pytest.param(BAD, {"size": 3}, DEVELOPER_CHANGED_UNVERIFIED, id="size differs"),
+    pytest.param(GOOD, {"size": len(GOOD)}, None, id="size matches"),
+])
+def test_source_without_a_hash_counts_as_changed_only_when_its_size_differs(tmp_path, served, fields, note):
+    f = run(entry(src(DEV, data=None, **fields)), FakeFetcher({DEV: served}), tmp_path)
+    assert f.note == note and f.sha256 == sha(served) and f.size == len(served)
 
 
 def test_unreachable_dev_then_mirror_has_no_note(tmp_path):
