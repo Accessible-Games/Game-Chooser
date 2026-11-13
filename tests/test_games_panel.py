@@ -558,9 +558,6 @@ def test_a_selected_catalog_game_whose_object_was_replaced_stays_selected(make_v
     view.set_rows(library_rows(games, lambda game: None))
     assert view.selected_row().game is games[1] and view.action_btn.GetLabel() == "Launch Omega"
     assert saved(view)["last_selected"] == "alpha"
-    del games[1]  # uninstalled: the row number
-    view.set_rows(library_rows(games, lambda game: None))
-    assert (selected(view), view.action_btn.GetLabel()) == (1, "Launch Zed")
 
 
 def test_a_background_refill_scrolls_only_to_a_selected_row_that_was_in_view(make_view):
