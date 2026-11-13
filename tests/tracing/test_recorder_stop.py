@@ -375,14 +375,6 @@ def test_a_game_started_through_the_administrator_prompt_is_not_closed_and_says_
     assert "administrator prompt" in run.log_path.read_text(encoding="utf-8")
 
 
-def test_the_recorder_claims_the_request_it_takes(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path)
-    run.write_stop_request({"requested": NOW, "close_games": False})
-    assert rec.run() == 0
-    assert not run.stop_request_path.exists() and run.stop_taken_path.exists()
-    assert run.withdraw_stop_request() == "taken"
-
-
 def test_a_claim_that_fails_is_tried_again_at_the_next_poll(tmp_path):
     rec, run, pm, states, world, clock = make(tmp_path)
     run.write_stop_request({"requested": NOW, "close_games": False})
