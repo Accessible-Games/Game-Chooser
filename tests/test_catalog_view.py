@@ -212,6 +212,8 @@ def test_description_text_details_then_links_on_own_lines():
     for line in t.splitlines()[4:]:
         assert link_at_line(line) == line.split(": ", 1)[1]
     assert link_at_line("Just text") is None and link_at_line("Price: Free to try") is None
+    assert link_at_line("Homepage: HTTPS://h.example") == "HTTPS://h.example"
+    assert link_at_line("Genre: Arcade") is None and link_at_line("Homepage: https://") is None
     assert description_text(None) == "" and description_text({"id": "x"}) == ""
 
 
@@ -402,8 +404,3 @@ def test_library_rows_filter_search_label_and_describe_like_any_row():
     assert filter_rows(rows, "action", {}) == [] and filter_rows(rows, "unknown", {}) == []
     assert [action_label(r, "windows") for r in rows] == ["Launch Alpha", "Launch Bare Web", "Launch Entombed"]
     assert [description_text(r.entry) for r in rows] == ["", "", description_text(entombed)]
-
-
-def test_enter_opens_every_link_the_description_lists():
-    assert link_at_line("Homepage: HTTPS://h.example") == "HTTPS://h.example"
-    assert link_at_line("Genre: Arcade") is None and link_at_line("Homepage: https://") is None

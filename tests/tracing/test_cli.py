@@ -73,32 +73,16 @@ def test_cli_import_is_light():
     assert subprocess.run([sys.executable, "-c", code]).returncode == 0
 
 
-def _failed_status(run):
+@pytest.mark.parametrize("args", [["--app-pid", "abc", "--procmon", "p"],  # a bad app pid
+                                  ["--app-pid", "1", "--procmon", "p"],    # the build fails (patched below)
+                                  []])                                     # missing arguments
+def test_a_recorder_that_cannot_start_records_the_failure(run, monkeypatch, args):
+    monkeypatch.setattr("tracing.procmon.WindowsProcmon", None)  # so building the recorder raises
+    assert cli.run_command(["--trace-recorder", str(run.path), *args], False) == 2
     status = run.read_status()
     assert status["state"] == "failed"
     assert status["error"].startswith("The recorder hit an unexpected error")
     assert run.log_path.exists()
-
-
-def test_recorder_bad_app_pid_records_failure(run):
-    code = cli.run_command(["--trace-recorder", str(run.path), "--app-pid", "abc", "--procmon", "p"], False)
-    assert code not in (0, None)
-    _failed_status(run)
-
-
-def test_recorder_build_failure_records_failure(run, monkeypatch):
-    def boom(exe):
-        raise RuntimeError("no parser")
-
-    monkeypatch.setattr("tracing.procmon.WindowsProcmon", boom)
-    code = cli.run_command(["--trace-recorder", str(run.path), "--app-pid", "1", "--procmon", "p"], False)
-    assert code not in (0, None)
-    _failed_status(run)
-
-
-def test_recorder_missing_args_records_failure(run):
-    assert cli.run_command(["--trace-recorder", str(run.path)], False) == 2
-    _failed_status(run)
 
 
 def test_split_named_run_already_split_does_nothing(tmp_path, run, monkeypatch, capsys):

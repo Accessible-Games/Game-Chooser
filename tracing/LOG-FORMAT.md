@@ -89,7 +89,7 @@ closest to the call. A process of the same exe that started outside that window 
   - `not_closed`: one `{"pid", "reason"}` per process of the session still running after all that. `reason` is a
     short sentence: it runs as another user, it runs with more rights than Game Chooser (a game started through
     the administrator prompt), who it runs as couldn't be read, a stop never closes it, it could not be ended,
-    Process Monitor stopped first, or this recorder can't close games. See "Ending a run with --trace-stop".
+    or Process Monitor stopped first. See "Ending a run with --trace-stop".
   - A session the recorder did not count as running (a game launched after the request was taken, or one whose
     processes its live view missed) has three empty lists even with `close_games` true: it was not touched. The
     lists are also short when the recorder died while closing (see "Ending a run with --trace-stop").

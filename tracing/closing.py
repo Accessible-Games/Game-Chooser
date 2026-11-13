@@ -29,7 +29,6 @@ REFUSED_NO_LIMIT = "who Game Chooser runs as couldn't be read, so nothing was cl
 NOT_CLOSED_PROTECTED = "a stop never closes it"
 NOT_CLOSED_FAILED = "it could not be ended"
 NOT_CLOSED_PROCMON = "Process Monitor stopped first, so nothing was ended"
-NOT_CLOSED_NO_CLOSER = "this recorder can't close games"
 
 
 @dataclass(frozen=True)

@@ -22,18 +22,15 @@ def test_clean_report_passes():
     assert check_no_tracing.find_tracing(report("engine.jobs", "main_window"), CLEAN_FILES) == []
 
 
-def test_tracing_module_fails():
-    problems = check_no_tracing.find_tracing(report("main_window", "tracing.recorder"), CLEAN_FILES)
-    assert len(problems) == 1 and "tracing.recorder" in problems[0]
-
-
-def test_tracing_package_itself_fails():
-    assert check_no_tracing.find_tracing(report("tracing"), CLEAN_FILES)
-
-
-def test_procmon_parser_fails():
-    assert check_no_tracing.find_tracing(report("procmon_parser"), CLEAN_FILES)
-    assert check_no_tracing.find_tracing(report("procmon_parser.logs"), CLEAN_FILES)
+# file names are matched in any case, and a name that starts with tracing or procmon counts
+@pytest.mark.parametrize("module, files, named", [
+    ("tracing.recorder", CLEAN_FILES, "tracing.recorder"), ("tracing", CLEAN_FILES, "tracing"),
+    ("procmon_parser", CLEAN_FILES, "procmon_parser"), ("procmon_parser.logs", CLEAN_FILES, "procmon_parser.logs"),
+    ("a", ["Tracing/x.pyd"], "Tracing/x.pyd"), ("a", ["bin/Procmon64.exe"], "bin/Procmon64.exe"),
+])
+def test_a_tracing_module_or_file_fails(module, files, named):
+    problems = check_no_tracing.find_tracing(report("main_window", module), files)
+    assert len(problems) == 1 and named in problems[0]
 
 
 def test_procmon_or_traces_files_fail():
@@ -42,11 +39,6 @@ def test_procmon_or_traces_files_fail():
     )
     assert any("procmon/Procmon64.exe" in p for p in problems)
     assert any("traces/x/session.json" in p for p in problems)
-
-
-def test_paths_are_case_insensitive_and_file_prefix_counts():
-    assert check_no_tracing.find_tracing(report("a"), ["Tracing/x.pyd"])
-    assert check_no_tracing.find_tracing(report("a"), ["bin/Procmon64.exe"])
 
 
 def test_similar_names_pass():

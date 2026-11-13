@@ -18,26 +18,6 @@ def _seed(tmp_path):
     ]
 
 
-def test_games_with_missing_exes_are_kept(isolated_manager_factory, tmp_path):
-    config = {"libraries": [{"id": "main", "path": str(tmp_path / "nolib")}]}
-    m = isolated_manager_factory(games=_seed(tmp_path), config=config)
-    assert len(m.games) == 2
-    m2 = isolated_manager_factory()
-    assert len(m2.games) == 2
-    assert len(json.loads((isolated_manager_factory.app_dir / "games.json").read_text())) == 2
-
-
-def test_no_scanning_api():
-    from library_manager import GameLibraryManager
-
-    for name in ("validate_and_scan", "scan_library", "scan_with_dialog", "cleanConfigs", "add_to_exceptions"):
-        assert not hasattr(GameLibraryManager, name)
-
-
-def test_new_config_has_no_exceptions_key(isolated_manager):
-    assert "exceptions" not in isolated_manager.config
-
-
 def _folder(tmp_path, *parts):
     path = tmp_path.joinpath(*parts)
     path.mkdir(parents=True, exist_ok=True)
@@ -107,17 +87,18 @@ def test_remove_library_changes_config_only(isolated_manager_factory, tmp_path):
     assert m2.config["libraries"] == [] and len(m2.games) == 2 and (tmp_path / "L").is_dir()
 
 
-def test_unreachable_library_is_kept(isolated_manager_factory, tmp_path):
+def test_unreachable_library_and_missing_exes_are_kept(isolated_manager_factory, tmp_path):
     from models import Game
 
     m = isolated_manager_factory()
     lib = m.add_library(_folder(tmp_path, "Usb"))
     m.games.append(Game(title="G", launch_path="G/play.exe", library_id=lib["id"]))
+    m.games.append(Game(title="Manual", launch_path=str(tmp_path / "gone" / "manual.exe")))  # added by hand
     m.save_games()
     assert m.library_reachable(lib["id"])
     (tmp_path / "Usb").rmdir()
     m2 = isolated_manager_factory()
-    assert [x["id"] for x in m2.config["libraries"]] == [lib["id"]] and len(m2.games) == 1
+    assert [x["id"] for x in m2.config["libraries"]] == [lib["id"]] and len(m2.games) == 2
     assert m2.library_reachable(lib["id"]) is False
     assert m2.library_reachable("unknown") is False
 

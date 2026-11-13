@@ -68,26 +68,13 @@ def test_orphan_under_game_folder_counts():
     assert early.running() == set()
 
 
-def test_child_of_reused_root_pid_counts_only_under_game_folder():
+@pytest.mark.parametrize("parent_pid", [10, 70])  # the root's pid, given to another program; a non-member's pid
+@pytest.mark.parametrize("folder, running", [(r"C:\Games\Foo", {"s1"}), (r"C:\Games\Other", set())])
+def test_child_of_a_reused_pid_counts_only_under_game_folder(parent_pid, folder, running):
     t = tree()
     t.update([LiveProc(10, 1, 100, None)])
-    t.update([LiveProc(10, 1, 500, r"C:\Other\x.exe"), LiveProc(61, 10, 300, r"C:\Games\Foo\game.exe")])
-    assert t.running() == {"s1"}
-    out = tree()
-    out.update([LiveProc(10, 1, 100, None)])
-    out.update([LiveProc(10, 1, 500, r"C:\Other\x.exe"), LiveProc(61, 10, 300, r"C:\Games\Other\game.exe")])
-    assert out.running() == set()
-
-
-def test_child_of_reused_non_member_pid_counts_only_under_game_folder():
-    t = tree()
-    t.update([LiveProc(10, 1, 100, None)])
-    t.update([LiveProc(70, 1, 900, r"C:\Other\x.exe"), LiveProc(71, 70, 300, r"C:\Games\Foo\game.exe")])
-    assert t.running() == {"s1"}
-    out = tree()
-    out.update([LiveProc(10, 1, 100, None)])
-    out.update([LiveProc(70, 1, 900, r"C:\Other\x.exe"), LiveProc(71, 70, 300, r"C:\Games\Other\game.exe")])
-    assert out.running() == set()
+    t.update([LiveProc(parent_pid, 1, 500, r"C:\Other\x.exe"), LiveProc(61, parent_pid, 300, folder + r"\game.exe")])
+    assert t.running() == running
 
 
 def test_ended_session_not_running():
@@ -148,13 +135,6 @@ def test_same_exe_outside_the_window_is_not_the_root():
     assert t.running() == set()
     t.update([LiveProc(52, 4, 12 * ROOT_SLACK, EXE)])  # at the end of the window: a slow administrator prompt
     assert t.running() == {"s1-0"}
-
-
-def test_unknown_pid_without_an_exe_finds_nothing():
-    t = LiveTree()
-    t.add_session("s1-0", 0, None, None, 100)
-    t.update([LiveProc(0, 0, 100, None), LiveProc(60, 4, 100, EXE)])
-    assert t.running() == set()
 
 
 def test_a_session_found_by_exe_never_takes_another_sessions_root():

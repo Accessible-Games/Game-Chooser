@@ -52,8 +52,8 @@ def session(sid="s1", pid=100, start=1000):
 
 def make(tmp_path, *, app_until=0.0, game_until=None, ready=True, dies_at=None, free=None,
          split=None, leftovers=None, capture=True, snapshot=None, with_session=False, sessions=(), clock=None,
-         **options):
-    """`options` go to the Recorder as they are (closer, now, protected_pids)."""
+         closer=None, **options):
+    """`options` go to the Recorder as they are (now, protected_pids). No closer: a run that never closes games."""
     clock = clock or Clock()
     run = RunDir(tmp_path / "run")
     (run.path / "sessions").mkdir(parents=True)
@@ -82,7 +82,8 @@ def make(tmp_path, *, app_until=0.0, game_until=None, ready=True, dies_at=None, 
         return []
 
     rec = recorder.Recorder(run, lambda: clock.t < app_until, pm, snapshot or snap, do_split,
-                            leftovers or (lambda: []), free or (lambda: 10 * GIB), clock, clock.sleep, **options)
+                            leftovers or (lambda: []), free or (lambda: 10 * GIB), clock, clock.sleep,
+                            closer, **options)
     return rec, run, pm, states, splits, clock
 
 

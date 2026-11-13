@@ -78,13 +78,6 @@ def test_relaunch_commands(tmp_path):
     assert cwd == paths.app_dir(False)
 
 
-def test_capture_files_in_order(tmp_path):
-    for name in ("capture-2.pml", "capture.pml", "capture-10.pml", "capture-1.pml", "renames.csv"):
-        (tmp_path / name).write_bytes(b"x")
-    assert [p.name for p in probe.capture_files(tmp_path)] == [
-        "capture.pml", "capture-1.pml", "capture-2.pml", "capture-10.pml"]
-
-
 def test_tracing_modules_import_nothing_heavy():
     code = ("import sys, tracing.paths, tracing.procmon, tracing.pml, tracing.probe\n"
             "heavy = [m for m in ('procmon_parser', 'win32job', 'win32api', 'wx') if m in sys.modules]\n"

@@ -19,13 +19,6 @@ def pytest_collection_modifyitems(config, items):
 
 
 @pytest.fixture
-def tmp_library(tmp_path) -> Path:
-    library = tmp_path / "Games"
-    library.mkdir()
-    return library
-
-
-@pytest.fixture
 def make_zip(tmp_path):
     counter = 0
 

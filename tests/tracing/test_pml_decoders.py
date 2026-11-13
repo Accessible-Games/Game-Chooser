@@ -51,27 +51,18 @@ def call(op: Op, data: bytes, trailer: bytes = b"TRAILER"):
     return event, io
 
 
-def test_rename_target_decoded():
-    event, io = call(Op.SetRenameInformationFile, REAL_RENAME_IO)
-    assert event.details["FileName"] == TARGET
-    assert event.details["ReplaceIfExists"] == "True"
+@pytest.mark.parametrize("op, data, expected", [
+    (Op.SetRenameInformationFile, REAL_RENAME_IO, {"FileName": TARGET, "ReplaceIfExists": "True"}),
+    (Op.SetRenameInformationEx, REAL_RENAME_EX_IO, {"FileName": REAL_RENAME_EX_TARGET, "ReplaceIfExists": "True"}),
+    (Op.SetDispositionInformationEx, REAL_DISPOSITION_EX_IO, {"Delete": "True"}),
+])
+def test_details_decoded_from_real_bytes(op, data, expected):
+    event, io = call(op, data)
+    assert {key: event.details.get(key) for key in expected} == expected
     assert io.tell() == 0
 
 
-def test_rename_ex_target_decoded_from_real_bytes():
-    event, io = call(Op.SetRenameInformationEx, REAL_RENAME_EX_IO)
-    assert event.details["FileName"] == REAL_RENAME_EX_TARGET
-    assert event.details["ReplaceIfExists"] == "True"
-    assert io.tell() == 0
-
-
-def test_disposition_ex_from_real_bytes():
-    event, io = call(Op.SetDispositionInformationEx, REAL_DISPOSITION_EX_IO)
-    assert event.details["Delete"] == "True"
-    assert io.tell() == 0
-
-
-def test_rename_ex_layout_uses_u32_flags():
+def test_rename_ex_and_its_bypass_form_decode_the_name_and_the_replace_flag():
     nt_name = r"\??\C:\Games\g\new.sav"
     for op in (Op.SetRenameInformationEx, Op.SetRenameInformationExBypassAccessCheck):
         event, _ = call(op, rename_record(nt_name, flags=0x3, flags_size=4))

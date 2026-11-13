@@ -12,6 +12,10 @@ from tracing.procmon import (CAPTURE_OPERATIONS, EXCLUDED_PROCESSES, READ_ONLY_A
                              filter_config, write_filter_config)
 
 
+def _detail_excludes(rules):
+    return [(r.relation, r.value) for r in rules if r.action == RuleAction.EXCLUDE and r.column == Column.DETAIL]
+
+
 def test_filter_round_trips(tmp_path):
     path = tmp_path / "filter.pmc"
     write_filter_config(path)
@@ -23,18 +27,7 @@ def test_filter_round_trips(tmp_path):
     assert tuple(include) == CAPTURE_OPERATIONS
     assert tuple(exclude) == EXCLUDED_PROCESSES
     assert config["DestructiveFilter"] == 1
-
-
-def _detail_excludes(rules):
-    return [(r.relation, r.value) for r in rules if r.action == RuleAction.EXCLUDE and r.column == Column.DETAIL]
-
-
-def test_detail_excludes_round_trip(tmp_path):
-    path = tmp_path / "filter.pmc"
-    write_filter_config(path)
-    with open(path, "rb") as f:
-        config = procmon_parser.load_configuration(f)
-    got = _detail_excludes(config["FilterRules"])
+    got = _detail_excludes(rules)
     for acc in READ_ONLY_ACCESS:
         assert (RuleRelation.BEGINS_WITH, f"Desired Access: {acc}, Disposition: Open,") in got
     assert (RuleRelation.CONTAINS, "Disposition: REG_OPENED_EXISTING_KEY") in got
