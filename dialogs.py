@@ -353,26 +353,10 @@ class GameDialog(wx.Dialog):
             # For non-web games, also check resolved absolute paths
             if not is_web_path(path) and not game.is_web:
                 try:
-                    if game.library_id:
-                        # Library game - resolve to absolute path
-                        game_full_path = self.library_manager.get_full_path(game)
-                        if game_full_path:
-                            game_resolved = str(Path(game_full_path).resolve())
-                            if game_resolved == normalized_path:
-                                return {
-                                    'type': 'resolved',
-                                    'game': game,
-                                    'match_path': game_full_path
-                                }
-                    else:
-                        # User-managed game - compare resolved paths
-                        game_resolved = str(Path(game.launch_path).resolve())
-                        if game_resolved == normalized_path:
-                            return {
-                                'type': 'resolved',
-                                'game': game,
-                                'match_path': game.launch_path
-                            }
+                    # A library game's path joined to its library; a game added by hand's as it is
+                    game_full_path = self.library_manager.get_full_path(game)
+                    if game_full_path and str(Path(game_full_path).resolve()) == normalized_path:
+                        return {'type': 'resolved', 'game': game, 'match_path': game_full_path}
                 except (OSError, ValueError):
                     # Path resolution failed, skip this comparison
                     continue
