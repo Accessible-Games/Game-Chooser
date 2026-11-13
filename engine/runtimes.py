@@ -884,9 +884,9 @@ def stage_private(ctx, runtimes: list[dict], tree: Path, staging: Path, work: Pa
             continue
         try:
             _copy_into(copy.root, tree, copy)
-        except OSError as e:
+        except OSError:
             _remove_copy(copy, tree)
-            raise InstallFailed(messages.FAILED.format(title=_title(copy.runtime))) from e
+            raise  # gets its plain words (disk full, locked file) at the engine's boundary
     return copies
 
 
@@ -914,7 +914,7 @@ def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
             hashes = hash_tree(root)
         except (ExtractError, StepError) as e:
             raise InstallFailed(str(e)) from e
-        except (ValueError, OSError) as e:
+        except ValueError as e:
             raise InstallFailed(messages.FAILED.format(title=_title(runtime))) from e
         finally:
             _clear(work_dir)

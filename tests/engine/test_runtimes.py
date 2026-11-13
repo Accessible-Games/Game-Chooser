@@ -1,5 +1,6 @@
 """Dependencies: runtimes installed before the game, shared machine-wide or as a private COM copy."""
 
+import errno
 import hashlib
 import json
 import os
@@ -21,7 +22,7 @@ from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present,
                              marker_present, missing_runtimes, recorded_private, register_and_mark_args,
                              runtime_present, write_marker_args)
 from tests.engine.fakes import (ADMINISTRATORS, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
-                                FakeSecurity, make_engine, served_source, split_chain, zip_bytes)
+                                FakeSecurity, ZipExtractor, make_engine, served_source, split_chain, zip_bytes)
 
 MIRROR = "https://files.accessiblegames.net/files/"
 DX8VB = b"MZ fake dx8vb.dll"
@@ -1305,6 +1306,22 @@ def test_preference_off_non_com_runtime_still_installs_shared(tmp_path):
     eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
     run(eng, "install")
     assert (eng.ctx.runtimes_root / "bass" / "bass.dll").exists() and eng.ctx.records.load("bass") is not None
+
+
+@pytest.mark.parametrize("shared", [True, False], ids=["shared", "private"])
+def test_full_disk_while_unpacking_a_runtime_gets_plain_words(tmp_path, private_com, shared):
+    class FullDisk(ZipExtractor):
+        def extract(self, archive, dest, install, cancel):
+            if Path(archive).name == "dx8vb.dll":
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return super().extract(archive, dest, install, cancel)
+
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=shared, extractor=FullDisk())
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
 
 
 def run_mode_game(routes, setup_exe=b"MZ fake game setup", silent=True, version="1.0", **fields):
