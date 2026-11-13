@@ -50,6 +50,7 @@ def frame(app, monkeypatch, tmp_path):
         library_manager=SimpleNamespace(get_full_path=lambda game: game.launch_path, config={"libraries": []}),
         service=SimpleNamespace(record_for=lambda game: None))
     frame.modal_dialog = lambda: MainFrame.modal_dialog(frame)
+    frame._tell = lambda *args: MainFrame._tell(frame, *args)
     monkeypatch.setattr(wx, "MessageBox", lambda text, caption="", style=0, parent=None:
                         frame.boxes.append((caption, style, parent, frame.dialog_active)))
     monkeypatch.setattr(main_window.platform, "system", lambda: "Windows")
@@ -87,4 +88,4 @@ def test_a_message_box_shown_while_a_game_is_held_is_inside_modal_dialog(frame, 
     """Modal safety: wx runs CallAfter events under the box, and an index take or a job result arriving there
     would replace the game the handler holds"""
     step(frame, monkeypatch)
-    assert frame.boxes == [(caption, wx.OK | wx.ICON_ERROR, None, True)] and not frame.dialog_active
+    assert frame.boxes == [(caption, wx.OK | wx.ICON_ERROR, frame, True)] and not frame.dialog_active

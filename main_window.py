@@ -651,8 +651,7 @@ class MainFrame(wx.Frame):
             return
         self.games_changed()
         self.notify(messages.failed_text(job.request.action, job.title))
-        with self.modal_dialog():  # a second failure waits for this box instead of stacking on it
-            wx.MessageBox(message, messages.INSTALL_PROBLEM_TITLE, wx.OK | wx.ICON_ERROR, self)
+        self._tell(message, messages.INSTALL_PROBLEM_TITLE)  # a second failure waits for this box, never stacks
         self._run_job_done_hooks(job)
 
     def _cancelled(self, job):
@@ -772,9 +771,7 @@ class MainFrame(wx.Frame):
         # Get full path to game
         full_path = self.library_manager.get_full_path(game)
         if not full_path or not Path(full_path).exists():
-            with self.modal_dialog():
-                wx.MessageBox("Game folder not found.",
-                            "Folder Not Found", wx.OK | wx.ICON_ERROR)
+            self._tell("Game folder not found.", "Folder Not Found")
             return
 
         # Get the game directory
@@ -790,9 +787,7 @@ class MainFrame(wx.Frame):
                 # macOS - just open the folder
                 subprocess.Popen(['open', game_dir])
         except Exception as e:
-            with self.modal_dialog():
-                wx.MessageBox(f"Failed to open folder: {e}",
-                            "Error", wx.OK | wx.ICON_ERROR)
+            self._tell(f"Failed to open folder: {e}", "Error")
 
     def launch_game(self, game):
         """Launch a specific game"""
@@ -814,13 +809,8 @@ class MainFrame(wx.Frame):
                 # Build supported platforms string
                 supported = ", ".join(game.platforms) if game.platforms else "no platforms"
 
-                # Show error dialog
-                with self.modal_dialog():
-                    wx.MessageBox(
-                        f"You're trying to run {game.title} on {current_platform}, but it only supports {supported}.",
-                        "Uh-oh",
-                        wx.OK | wx.ICON_ERROR
-                    )
+                self._tell(f"You're trying to run {game.title} on {current_platform}, but it only supports "
+                           f"{supported}.", "Uh-oh")
                 return
 
         if game.is_web:
@@ -836,8 +826,7 @@ class MainFrame(wx.Frame):
                     self._launch_problem(game, problem)
                     return
                 with self.modal_dialog():
-                    wx.MessageBox(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE,
-                                  wx.OK | wx.ICON_ERROR)
+                    self._tell(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE)
 
                     # File dialog to relocate
                     dlg = wx.FileDialog(self, "Locate Game Executable")
@@ -885,9 +874,7 @@ class MainFrame(wx.Frame):
             except LaunchCancelled:
                 pass  # the player declined the administrator prompt: nothing started, nothing to say
             except Exception as e:
-                with self.modal_dialog():
-                    wx.MessageBox(f"Failed to launch game: {e}",
-                                "Launch Error", wx.OK | wx.ICON_ERROR)
+                self._tell(f"Failed to launch game: {e}", "Launch Error")
 
     def _launch_problem(self, game, problem):
         """A launch found no executable: the library is unreachable, or a catalog game's files are missing (a
@@ -898,11 +885,10 @@ class MainFrame(wx.Frame):
         if problem == "catalog":
             self._tell(messages.LAUNCH_NOT_FOUND_CATALOG, messages.LAUNCH_NOT_FOUND_TITLE)
             return
-        with self.modal_dialog():
-            answer = wx.MessageBox(messages.LAUNCH_NOT_FOUND_REPAIR.format(title=game.title),
-                                   messages.LAUNCH_NOT_FOUND_TITLE, wx.YES_NO | wx.ICON_ERROR, self)
+        answer = self._ask(messages.LAUNCH_NOT_FOUND_REPAIR.format(title=game.title), messages.LAUNCH_NOT_FOUND_TITLE,
+                           wx.ICON_ERROR)
         live = self._live_game(game)
-        if answer == wx.YES and live is not None and live.catalog_id and not self._game_busy(live):
+        if answer and live is not None and live.catalog_id and not self._game_busy(live):
             self._submit_catalog("repair", live)
 
     def on_launch(self, event):
@@ -933,7 +919,7 @@ class MainFrame(wx.Frame):
             none_left = (f"No games compatible with {current_platform} in the current filtered list.",
                          "No Compatible Games")
         else:
-            none_left = ("No games available to choose from.", "No Games")
+            none_left = (messages.CATALOG_NO_GAMES, "No Games")
         self.library_view.random_game(compatible, none_left, lambda row: self.launch_game(row.game))
 
     def on_random_install(self, event):
@@ -950,9 +936,8 @@ class MainFrame(wx.Frame):
         if not game:
             return
         if not is_editable(game):  # the catalog owns a catalog game's details; Ctrl+E says so, never silent
-            with self.modal_dialog():
-                wx.MessageBox(messages.CATALOG_NOT_EDITABLE.format(title=game.title), messages.EDIT_GAME_TITLE,
-                              wx.OK | wx.ICON_INFORMATION, self)
+            self._tell(messages.CATALOG_NOT_EDITABLE.format(title=game.title), messages.EDIT_GAME_TITLE,
+                       wx.ICON_INFORMATION)
             self.focus_active_list()
             return
 
@@ -1011,11 +996,9 @@ class MainFrame(wx.Frame):
         if self._game_busy(game):
             self.focus_active_list()
             return
-        with self.modal_dialog():
-            answer = wx.MessageBox(messages.FORGET_GAME_CONFIRM.format(title=game.title), messages.FORGET_GAME_TITLE,
-                                   wx.YES_NO | wx.ICON_QUESTION, self)
+        answer = self._ask(messages.FORGET_GAME_CONFIRM.format(title=game.title), messages.FORGET_GAME_TITLE)
         live = self._live_game(game)
-        if answer != wx.YES or live is None or not live.catalog_id or self._game_busy(live):
+        if not answer or live is None or not live.catalog_id or self._game_busy(live):
             self.focus_active_list()
             return
         try:
@@ -1035,6 +1018,11 @@ class MainFrame(wx.Frame):
     def _tell(self, text, caption, icon=wx.ICON_ERROR):
         with self.modal_dialog():
             wx.MessageBox(text, caption, wx.OK | icon, self)
+
+    def _ask(self, text, caption, style=wx.ICON_QUESTION) -> bool:
+        """Yes or No (True for Yes), inside modal_dialog()"""
+        with self.modal_dialog():
+            return wx.MessageBox(text, caption, wx.YES_NO | style, self) == wx.YES
 
     def _tell_load_problems(self):
         """Once, after startup: games.json or config.json couldn't be read (and where the copy of it was kept)"""
@@ -1392,7 +1380,5 @@ class MainFrame(wx.Frame):
 
     def confirm_quit_while_busy(self, title, action="install"):
         """"<title> is still installing. Cancel it and quit?" (worded by the job's action). True for Yes."""
-        with self.modal_dialog():
-            answer = wx.MessageBox(messages.quit_while_busy_text(action, title), messages.QUIT_WHILE_BUSY_TITLE,
-                                   wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
-        return answer == wx.YES
+        return self._ask(messages.quit_while_busy_text(action, title), messages.QUIT_WHILE_BUSY_TITLE,
+                         wx.NO_DEFAULT | wx.ICON_QUESTION)

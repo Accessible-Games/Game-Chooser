@@ -579,8 +579,7 @@ class PreferencesDialog(wx.Dialog):
         result = check_install_prefs(install, self.address_ctrl.GetValue(), self.shared_check.GetValue())
         if not result.ok:
             self.notebook.SetSelection(self.notebook.FindPage(self.installing_page))
-            wx.MessageBox(messages.PREFS_BAD_CATALOG_ADDRESS, messages.PREFS_BAD_ADDRESS_TITLE,
-                          wx.OK | wx.ICON_ERROR, self)
+            self._tell(messages.PREFS_BAD_CATALOG_ADDRESS, messages.PREFS_BAD_ADDRESS_TITLE)
             self.address_ctrl.SelectAll()
             self.address_ctrl.SetFocus()
             return False
@@ -612,9 +611,9 @@ class PreferencesDialog(wx.Dialog):
         index = self.lib_list.get_selected_index()
         return self.lib_list.find_item_from_index(index) if index >= 0 else None
 
-    def _tell(self, text):
+    def _tell(self, text, caption="Library"):
         with self._modal():
-            wx.MessageBox(text, "Library", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(text, caption, wx.OK | wx.ICON_ERROR, self)
 
     def _change_libraries(self, action, *args):
         """Run a library change, show why it can't be done, and redraw the list"""
