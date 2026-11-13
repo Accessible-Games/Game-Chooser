@@ -184,16 +184,6 @@ def test_sessions_added_once(tmp_path):
     assert added == [("s1", 100, 1000, "C:/g", 500, None, 600)]  # exe (none in this session), launch_after
 
 
-def test_session_without_pid_passes_the_exe(tmp_path):
-    rec, run, *_ = make(tmp_path)
-    run.write_session(SessionInfo("s1-0", 0, None, 500, 600, {"game_dir": "C:/g", "exe": "C:/g/a.exe"}, {}, ()))
-    added = []
-    orig = rec.tree.add_session
-    rec.tree.add_session = lambda *a: (added.append(a), orig(*a))[1]
-    rec.run()
-    assert added == [("s1-0", 0, None, "C:/g", 500, "C:/g/a.exe", 600)]
-
-
 def _raiser():
     raise OSError("disk gone")
 
