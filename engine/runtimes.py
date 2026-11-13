@@ -550,6 +550,26 @@ def _clear_or_fail(path: Path) -> None:
         raise InstallFailed(messages.TEMP_FOLDER_NOT_CLEARED.format(path=path))
 
 
+def unpack(ctx, fetched, dest: Path, progress, cancel) -> Path:
+    """Unpack a downloaded catalog item (a game, an extra or a runtime) into `dest`; returns its content root."""
+    _check(cancel)
+    progress(Progress("extracting"))
+    try:
+        root = ctx.extractor.extract(fetched.path, dest, fetched.source.get("install") or {}, cancel)
+    except ExtractError as e:
+        raise InstallFailed(str(e)) from e
+    _check(cancel)
+    return root
+
+
+def run_file_steps_or_fail(steps: list[dict], tree: Path) -> None:
+    """Run an item's file steps in `tree`; a step that fails stops the install with its own words."""
+    try:
+        run_file_steps(steps, tree)
+    except StepError as e:
+        raise InstallFailed(str(e)) from e
+
+
 def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cancel) -> list[str]:
     """Install each runtime machine-wide, in order. `fetch(item, work_dir)` downloads the catalog's file
     (raising InstallFailed when none verifies); `work` is an empty folder for the downloads. Returns the
@@ -568,7 +588,7 @@ def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cance
             if _runs_installer(fetched.source):
                 _run_installer(ctx, runtime, fetched, target, progress, cancel)
             else:
-                _unpack(ctx, runtime, fetched, target, work_dir / "unpacked", cancel)
+                _unpack(ctx, runtime, fetched, target, work_dir / "unpacked", progress, cancel)
         finally:
             _clear(work_dir)
         if fetched.note:
@@ -612,7 +632,7 @@ def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) 
         raise InstallFailed(messages.FAILED.format(title=title)) from e
 
 
-def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel) -> None:
+def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, progress, cancel) -> None:
     """Unpack into `unpack_dir` and run the file steps there; get the result into `target`, run the system
     steps there, and leave the record and the marker.
 
@@ -646,7 +666,7 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
     made = False  # True once this run (or its elevated command) has created `target`
     added = PrivateCopy(runtime, [], [], [])  # what the player added to a folder it found
     try:
-        root = ctx.extractor.extract(fetched.path, unpack_dir, install, cancel)
+        root = unpack(ctx, fetched, unpack_dir, progress, cancel)
         run_file_steps(steps, root)
         _check(cancel)
         incoming = hash_tree(root)
@@ -703,8 +723,6 @@ def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, cancel)
             if isinstance(e.__cause__, ElevationDeclined):
                 raise InstallFailed(messages.ELEVATION_DECLINED.format(what=title)) from e
             raise InstallFailed("\n\n".join([str(e), *undo_failures])) from e
-        if isinstance(e, ExtractError):
-            raise InstallFailed(str(e)) from e
         if isinstance(e, Exception) and not isinstance(e, (InstallFailed, Cancelled, OSError)):
             raise InstallFailed(messages.FAILED.format(title=title)) from e
         raise  # an OSError gets its plain words (disk full, locked file) at the engine's boundary
@@ -909,17 +927,13 @@ def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
         _clear_or_fail(unpacked)
         try:
             fetched = fetch(runtime, work_dir)
-            install = fetched.source.get("install") or {}
-            if _runs_installer(fetched.source) or install.get("method") == "url":
+            if _runs_installer(fetched.source) or (fetched.source.get("install") or {}).get("method") == "url":
                 copies.append(PrivateCopy(runtime, [], [], [], usable=False))
                 continue
-            _check(cancel)
-            root = ctx.extractor.extract(fetched.path, unpacked, install, cancel)
+            root = unpack(ctx, fetched, unpacked, progress, cancel)
             steps = list(fetched.source.get("steps") or [])
-            run_file_steps(steps, root)
+            run_file_steps_or_fail(steps, root)
             hashes = hash_tree(root)
-        except (ExtractError, StepError) as e:
-            raise InstallFailed(str(e)) from e
         except ValueError as e:
             raise InstallFailed(messages.FAILED.format(title=_title(runtime))) from e
         finally:

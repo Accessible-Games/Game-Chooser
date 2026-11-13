@@ -48,7 +48,7 @@ from exception_manager import ExceptionManager
 
 from . import messages, run_actions, run_installer, runtimes
 from .entries import current_platform, extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources
-from .errors import Cancelled, EngineError, ExtractError, InstallFailed, NoVerifiedSource, StepError, UnsafePath
+from .errors import Cancelled, EngineError, InstallFailed, NoVerifiedSource, StepError, UnsafePath
 from .folders import library_label, target_folder
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
@@ -61,7 +61,7 @@ from .uninstall_keys import UninstallReader, _winreg_reader
 from .safety import (ApplyResult, UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall, is_link,
                      plan_uninstall, plan_update, preflight, restore_backups)
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
-from .steps import StepContext, run_file_steps, run_system_steps, undo_steps
+from .steps import StepContext, run_system_steps, undo_steps
 
 log = logging.getLogger(__name__)
 
@@ -549,15 +549,9 @@ class InstallEngine:
             if _method(fetched.source) == "url" or _runs_installer(fetched.source):
                 # The game itself is routed before it gets here, so this is an extra.
                 raise InstallFailed(messages.EXTRA_NOT_SUPPORTED.format(extra=item.get("title") or item["id"]))
-            _check(cancel)
-            progress(Progress("extracting"))
-            root = self.ctx.extractor.extract(fetched.path, dest, fetched.source.get("install") or {}, cancel)
-        except ExtractError as e:
-            raise InstallFailed(str(e)) from e
+            return fetched, runtimes.unpack(self.ctx, fetched, dest, progress, cancel)
         finally:
             _clear(work_dir)
-        _check(cancel)
-        return fetched, root
 
     def _stage(self, entry: dict, extras: list[dict], folder_name: str, staging: Path, work: Path,
                fetch: Fetch, launch: str | None, progress, cancel, private: list[dict] = (),
@@ -574,7 +568,7 @@ class InstallEngine:
         tree = staging / "game" / folder_name
         tree.parent.mkdir(parents=True)
         os.replace(root, tree)
-        _run_file_steps(_steps(fetched), tree)
+        runtimes.run_file_steps_or_fail(_steps(fetched), tree)
         owners, fetched_extras = self._merge_extras(tree, extras, staging, work, fetch, progress, cancel)
         private_copies = runtimes.stage_private(self.ctx, list(private), tree, staging, work,
                                                 self._catalog_fetch(progress, cancel), progress, cancel)
@@ -619,7 +613,7 @@ class InstallEngine:
             before = _file_states(tree)
             shipped = set(_file_states(x_root))
             shutil.copytree(x_root, tree, dirs_exist_ok=True)
-            _run_file_steps(_steps(x_fetched), tree)
+            runtimes.run_file_steps_or_fail(_steps(x_fetched), tree)
             after = _file_states(tree)
             for key, state in after.items():
                 if key in shipped or before.get(key) != state:
@@ -1203,13 +1197,6 @@ def _can_write(folder: Path) -> bool:
     except OSError:
         pass
     return True
-
-
-def _run_file_steps(steps: list[dict], tree: Path) -> None:
-    try:
-        run_file_steps(steps, tree)
-    except StepError as e:
-        raise InstallFailed(str(e)) from e
 
 
 def _take_back(target: Path, staging: Path) -> bool:
