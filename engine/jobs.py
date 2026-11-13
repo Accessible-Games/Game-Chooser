@@ -38,7 +38,7 @@ import stat
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from dataclasses import asdict, dataclass, field, fields
 from datetime import date
 from pathlib import Path, PurePosixPath
@@ -346,7 +346,7 @@ class InstallEngine:
     def _require_writable(self, rec: InstallRecord, game_dir: Path, title: str) -> None:
         """Refuse, before anything changes, a folder outside the libraries that only an administrator
         can change: Game Chooser never changes files elevated."""
-        if not rec.library_id and not _can_write(game_dir):
+        if _blocked(rec, game_dir) == "admin":
             raise InstallFailed(messages.FOLDER_NEEDS_ADMIN.format(title=title, path=game_dir))
 
     # ---- fetching and staging ------------------------------------------------
@@ -443,11 +443,10 @@ class InstallEngine:
         libraries that needs administrator permission, gets none: the notes say so."""
         title = title_of(entry)
         game_dir = record_folder(rec, self.ctx.libraries)
-        if not rec.tracked or game_dir is None:
-            return runtimes.copies_skipped_notes(self.ctx, entry, copies, title, messages.RUNTIME_FILES_UNTRACKED)
-        if not rec.library_id and not _can_write(game_dir):
-            return runtimes.copies_skipped_notes(self.ctx, entry, copies, title, messages.RUNTIME_FILES_NEED_ADMIN,
-                                                 path=game_dir)
+        blocked = _blocked(rec, game_dir)
+        if blocked:
+            text = messages.RUNTIME_FILES_UNTRACKED if blocked == "untracked" else messages.RUNTIME_FILES_NEED_ADMIN
+            return runtimes.copies_skipped_notes(self.ctx, entry, copies, title, text, path=game_dir)
         return runtimes.copies_after_installer(self.ctx, entry, rec, game_dir, copies, title, ids)
 
     def _private_after_installer(self, entry: dict, rec: InstallRecord,
@@ -459,7 +458,7 @@ class InstallEngine:
         game_dir = record_folder(rec, self.ctx.libraries)
         if not copies and not any(runtimes.is_runtime_owner(f.owner) for f in rec.files.values()):
             notes = []
-        elif not rec.tracked or game_dir is None or (not rec.library_id and not _can_write(game_dir)):
+        elif _blocked(rec, game_dir):
             notes = runtimes.needs_shared_notes(title, [c.runtime for c in copies])
         else:
             return [*(c.note for c in copies if c.note),
@@ -491,10 +490,10 @@ class InstallEngine:
                 self.ctx.records.save(rec)
             return [], 0
         game_dir = record_folder(rec, self.ctx.libraries)
-        if not rec.tracked:
-            return self._extras_skipped(entry, rec, unpacked, messages.EXTRAS_SKIPPED_UNTRACKED), 0
-        if not rec.library_id and not _can_write(game_dir):
-            return self._extras_skipped(entry, rec, unpacked, messages.EXTRAS_SKIPPED_NEEDS_ADMIN, path=game_dir), 0
+        blocked = _blocked(rec, game_dir)
+        if blocked:
+            text = messages.EXTRAS_SKIPPED_UNTRACKED if blocked == "untracked" else messages.EXTRAS_SKIPPED_NEEDS_ADMIN
+            return self._extras_skipped(entry, rec, unpacked, text, path=game_dir), 0
         rec.extras = {x["id"]: (recorded or {}).get(x["id"]) or _installed_source(x, f, self.ctx.platform)
                       for x, f, _ in unpacked}
         self.ctx.records.save(rec)
@@ -1138,18 +1137,22 @@ def _require_changeable(rec: InstallRecord, title: str, action: str) -> None:
         raise InstallFailed(messages.INSTALL_NOT_CHANGEABLE.format(title=title))
 
 
-def _can_write(folder: Path) -> bool:
-    """True if a file can be created (and removed again) in `folder` without administrator permission."""
+def _blocked(rec: InstallRecord, game_dir: Path | None) -> str | None:
+    """Why Game Chooser may not change the game's folder: "untracked" (no tracked folder), or "admin" for a
+    folder outside the libraries where a file can't be created (and removed again) without administrator
+    permission; else None."""
+    if not rec.tracked or game_dir is None:
+        return "untracked"
+    if rec.library_id:
+        return None
     try:
-        fd, name = tempfile.mkstemp(prefix=".gc-", suffix=".tmp", dir=folder)
+        fd, name = tempfile.mkstemp(prefix=".gc-", suffix=".tmp", dir=game_dir)
     except OSError:
-        return False
+        return "admin"
     os.close(fd)
-    try:
+    with suppress(OSError):
         os.unlink(name)
-    except OSError:
-        pass
-    return True
+    return None
 
 
 def _take_back(target: Path, staging: Path) -> bool:
