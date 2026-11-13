@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from engine import messages, run_installer
-from engine.errors import Cancelled
+from engine.errors import Cancelled, StepError
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord
 from engine.run_installer import (UNINSTALL_KEYS, files_created_during, folder_from_uninstall_entry,
@@ -1224,9 +1224,20 @@ def test_update_whose_installer_never_started_leaves_no_copies_and_can_be_retrie
     assert eng.ctx.records.load("lightcars").source.version == "2.0"
 
 
-def test_vendor_uninstall_whose_uninstaller_never_started_puts_files_back_and_can_be_retried(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path, vendor=True, elevation=True)
+def manifest_asks_for_admin(exe, args, elevated):
+    if not elevated:  # what WindowsElevator raises for an exe whose manifest asks for administrator rights
+        error = OSError("The requested operation requires elevation.")
+        error.winerror = 740
+        raise StepError("not started") from error
+
+
+@pytest.mark.parametrize("elevation, on_start", [(True, None), (False, manifest_asks_for_admin)],
+                         ids=["flagged for elevation", "its manifest asks for administrator rights"])
+def test_vendor_uninstall_whose_uninstaller_never_started_puts_files_back_and_can_be_retried(tmp_path, elevation,
+                                                                                             on_start):
+    eng, routes, target = installed_run_game(tmp_path, vendor=True, elevation=elevation)
     eng.ctx.elevator.decline = True
+    eng.ctx.elevator.on_start = on_start
     error = fails(eng.run, InstallRequest("uninstall", "lightcars"), quiet, never)
     assert error.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
     assert not setaside(eng).exists()

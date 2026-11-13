@@ -34,7 +34,7 @@ HASHED = record(sha256="d" * 64, catalog_sha256="c" * 64)
 DEVELOPER_Z = record(sha256="z" * 64, catalog_sha256="x" * 64)
 HASHLESS = record(url="https://dev/x1.zip", catalog_size=10, version="1.0", position=0)
 SECOND = record(url="https://dev/b.zip", version="1.0", position=1)
-SELF_UPDATING = record(catalog_sha256="c" * 64, version="1.0")
+HASHED_V1 = record(catalog_sha256="c" * 64, version="1.0")
 CHANGED = entry([src(sha="e" * 64)], version="2.0")
 EXTRA = InstalledSource("https://dev/e.zip", "1" * 64, 1, None, None, 0, None)
 
@@ -80,11 +80,11 @@ EXTRA = InstalledSource("https://dev/e.zip", "1" * 64, 1, None, None, 0, None)
     pytest.param(record(kind="runtime"), entry([src(sha="e" * 64)]), False, id="runtime"),
     pytest.param(record(sha256="a" * 64, extras={"e": EXTRA}), entry([src(sha="a" * 64)]), False,
                  id="extras do not count"),
-    pytest.param(SELF_UPDATING, CHANGED, True, id="changed"),
-    pytest.param(SELF_UPDATING, {**CHANGED, "self_updating": True}, False, id="self-updating: changed"),
+    pytest.param(HASHED_V1, CHANGED, True, id="self-updating: not flagged, a new checksum"),
+    pytest.param(HASHED_V1, {**CHANGED, "self_updating": True}, False, id="self-updating: changed"),
     pytest.param(record(version="1.0"), {**entry([src()], version="2.0"), "self_updating": True}, False,
                  id="self-updating: hashless, new version"),
-    pytest.param(SELF_UPDATING, {**CHANGED, "self_updating": "yes"}, True, id="self-updating: only true counts"),
+    pytest.param(HASHED_V1, {**CHANGED, "self_updating": "yes"}, True, id="self-updating: only true counts"),
 ])
 def test_update_available(rec, ent, expected):
     assert update_available(rec, ent, "windows") is expected

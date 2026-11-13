@@ -139,7 +139,7 @@ def test_adopt_catalog_launch(tmp_path):
     assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False
 
 
-@pytest.mark.parametrize("name, decoy", [("index.html", "setup.exe"), ("jumpgame.hta", "game.exe")],
+@pytest.mark.parametrize("name, decoy", [("index.html", "game.exe"), ("jumpgame.hta", "game.exe")],
                          ids=["page", "hta"])
 def test_a_catalog_named_page_or_hta_is_the_launch_file(tmp_path, name, decoy):
     launch_file = touch(tmp_path, name)
