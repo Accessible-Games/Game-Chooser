@@ -71,7 +71,7 @@ from .records import (RUNTIME_OWNER_PREFIX, InstalledSource, InstallRecord, Reco
 from .run_installer import run_installer_untracked
 from .safety import _prune_empty_dirs, _resolve_game_path, is_link
 from .sources import hash_file
-from .steps import StepContext, run_file_steps, run_system_steps, undo_steps
+from .steps import StepContext, _existing_file, run_file_steps, run_system_steps, undo_steps
 
 log = logging.getLogger(__name__)
 
@@ -744,7 +744,7 @@ def _run_steps_marking(ctx, steps: list[dict], step_ctx: StepContext, target: Pa
     that can't be written doesn't fail the install: the next install adopts the folder."""
     for i, step in enumerate(steps):
         if i == len(steps) - 1 and step.get("action") == "register":
-            applied.append(_register_and_mark(ctx, step, target, source_sha256))
+            applied.append(_register_and_mark(ctx, step, step_ctx, target, source_sha256))
         else:
             applied += run_system_steps([step], step_ctx)
     if not steps or steps[-1].get("action") != "register":
@@ -757,16 +757,10 @@ def _run_steps_marking(ctx, steps: list[dict], step_ctx: StepContext, target: Pa
             log.warning("The runtime marker couldn't be written into %s", target)
 
 
-def _register_and_mark(ctx, step: dict, target: Path, source_sha256: str) -> dict:
+def _register_and_mark(ctx, step: dict, step_ctx: StepContext, target: Path, source_sha256: str) -> dict:
     """A register step as steps.run_system_steps runs it (same checks, same errors), through
     register_and_mark_args so the marker arrives with a successful registration."""
-    rel = step.get("path")
-    try:
-        path = safe_join(target, str(rel))
-    except (UnsafePath, TypeError) as e:
-        raise StepError(messages.STEP_FILE_MISSING.format(path=rel)) from e
-    if not path.is_file():
-        raise StepError(messages.STEP_FILE_MISSING.format(path=rel))
+    path = _existing_file(step_ctx, step.get("path"))
     try:
         code = ctx.elevator.run("cmd.exe", register_and_mark_args(path, target / MARKER_NAME, source_sha256), True,
                                 show=False)
