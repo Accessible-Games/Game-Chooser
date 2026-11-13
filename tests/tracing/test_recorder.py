@@ -190,6 +190,19 @@ def test_a_process_list_that_cannot_be_read_keeps_the_last_membership(tmp_path):
     assert 40.0 <= pm.stopped_at <= 41.0
 
 
+def test_a_process_list_unreadable_for_a_minute_counts_every_game_as_exited(tmp_path):
+    clock = Clock()
+
+    def snap():
+        if clock.t == 0:
+            return [LiveProc(100, 1, 1000, "C:/g/x.exe")]
+        raise OSError("nope")
+
+    rec, run, pm, *_ = make(tmp_path, snapshot=snap, with_session=True, clock=clock, dies_at=300.0)
+    code = rec.run()
+    assert 70.0 <= pm.stopped_at <= 71.0 and code == 0  # 60 s of failed reads, then the 10 s grace
+
+
 def test_sessions_added_once(tmp_path):
     rec, run, *_ = make(tmp_path, with_session=True)
     added = []

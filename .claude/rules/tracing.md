@@ -140,7 +140,8 @@ Build: see `.claude/rules/build.md`.
     cannot read a capture over 4 GiB
   - `live.py` - live process snapshot (Windows) used for roots and the running tree; the process list is
     `engine.installer_watch.process_parents`, and a list that can't be read raises (the recorder and the
-    client then keep the last membership)
+    client then keep the last membership; the recorder for 60 s at most, `SNAPSHOT_WARNING_SECONDS`, then
+    counts every game as exited, so a run whose app has closed still ends)
   - `runfiles.py` - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` - split a run folder
   - `split.py` - attribute events to sessions and merge writes; `attribution.py` - the process tree
   - `kinds.py` - event to write kind, the write kinds and the rename and delete operation names the other

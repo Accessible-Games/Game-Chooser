@@ -60,6 +60,7 @@ class Recorder:
         self._errors: list[str] = []
         self._snapshot_warned_at: float | None = None
         self._snapshot_unlogged = 0
+        self._snapshot_failing_since: float | None = None
 
     def _status(self, state: str, **kwargs) -> None:
         if self._failed:
@@ -79,7 +80,8 @@ class Recorder:
             log.warning("could not write failed status: %s", exc)
 
     def _update_tree(self) -> None:
-        # Either step failing keeps the last membership; neither may crash the recorder.
+        # Either step failing keeps the last membership (for SNAPSHOT_WARNING_SECONDS at most for the process list);
+        # neither may crash the recorder.
         if self._accept_sessions:
             try:
                 for info in self.run_dir.read_sessions():
@@ -92,12 +94,17 @@ class Recorder:
                 log.warning("live tree update failed reading the session files: %r", exc)
         try:
             self.tree.update(self.snapshot())
+            self._snapshot_failing_since = None
         except Exception as exc:
             self._snapshot_failed(exc)
 
     def _snapshot_failed(self, exc: Exception) -> None:
         """Log the first failure, then at most once per SNAPSHOT_WARNING_SECONDS with how many weren't logged."""
         now = self.clock()
+        if self._snapshot_failing_since is None:
+            self._snapshot_failing_since = now
+        elif now - self._snapshot_failing_since >= SNAPSHOT_WARNING_SECONDS:
+            self.tree.update([])  # stale membership must not keep the run going for ever
         if self._snapshot_warned_at is None:
             log.warning("live tree update failed: %r", exc)
         elif now - self._snapshot_warned_at >= SNAPSHOT_WARNING_SECONDS:
