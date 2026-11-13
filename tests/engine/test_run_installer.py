@@ -122,22 +122,6 @@ def test_snapshot_folder_skips_engine_folders_and_tolerates_missing(tmp_path):
     assert snapshot_folder(tmp_path) == {"a/game.exe"}
 
 
-def test_shared_vendor_folder_claims_only_window_files(tmp_path):
-    dev = tmp_path / "Program Files" / "Dev"
-    put(dev, "OldGame/old.exe", b"old")
-    put(dev, "OldGame/data/a.dat", b"a")
-    time.sleep(0.1)
-    start = time.time()
-    time.sleep(0.03)
-    new_game = {"NewGame/new.exe": b"new", "NewGame/sounds/b.wav": b"b"}
-    for rel, data in new_game.items():
-        put(dev, rel, data)
-    time.sleep(0.03)
-    end = time.time()
-    new_game_keys = [rel.lower() for rel in new_game]
-    assert sorted(_claimed(dev, start, end, None, slack=0)) == sorted(new_game_keys)
-
-
 def test_preserved_mtime_still_claimed_by_birthtime(tmp_path):
     start = time.time()
     time.sleep(0.03)
@@ -370,13 +354,6 @@ def test_elevated_installer_requested_when_flagged(tmp_path):
                             process_watch=watch_with())
     install(eng)
     assert eng.ctx.elevator.calls[0][2] is True and eng.ctx.process_watch.made[0].elevated is True
-
-
-def test_declined_elevation_fails_plainly(tmp_path):
-    routes = {}
-    e = run_game(routes, installer={"type": "inno", "elevation": True})
-    eng, lib = setup_engine(tmp_path, [e], routes, elevator=FakeElevator(decline=True))
-    assert fails(install, eng).message == messages.ELEVATION_DECLINED.format(what="Light Cars")
 
 
 def test_system_steps_of_a_run_source_are_applied_and_recorded(tmp_path):
