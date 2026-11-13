@@ -32,6 +32,7 @@ from engine import messages
 from engine.folders import library_label
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex
 from engine.jobs import game_fields_for
+from engine.paths import folder_key
 from engine.records import RecordStore
 from library_actions import is_uninstall_unfinished
 from models import Game
@@ -95,10 +96,6 @@ def _remove_quietly(path):
         Path(path).unlink(missing_ok=True)
     except OSError:
         pass
-
-
-def _norm(path):
-    return os.path.normcase(os.path.abspath(path))
 
 
 def _is_inside(path, parent):
@@ -363,11 +360,11 @@ class GameLibraryManager:
         """Raise LibraryError unless path can be a library (other than the library `ignoring`)"""
         if not Path(path).is_dir():
             raise LibraryError(messages.LIBRARY_FOLDER_MISSING)
-        new = _norm(path)
+        new = folder_key(path)
         for lib in self.config["libraries"]:
             if lib["id"] == ignoring:
                 continue
-            existing = _norm(lib["path"])
+            existing = folder_key(lib["path"])
             if new == existing:
                 raise LibraryError(messages.LIBRARY_ALREADY_ADDED)
             if _is_inside(new, existing):

@@ -23,7 +23,6 @@ nothing: the UI fetches in the background and hands the state to `take_index` on
 """
 
 import logging
-import os
 import tempfile
 from pathlib import Path
 
@@ -37,6 +36,7 @@ from engine.http import Fetcher
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex, IndexState, normalize_catalog_url
 from engine.jobs import EngineContext, InstallEngine, InstallRequest, JobResult, blocked_reason, game_fields_for
 from engine.launch import adopt_catalog_launch
+from engine.paths import same_folder
 from engine.plan import InstallPlan, build_install_plan
 from engine.queue import InstallQueue, Job, QueueListener
 from engine.records import InstallRecord, record_folder
@@ -190,9 +190,8 @@ class InstallService:
 
     def blocked(self, entry_id: str, library_path: Path) -> str | None:
         """Why the game can't be installed into this library folder right now, or None."""
-        target = os.path.normcase(os.path.abspath(library_path))
         for lib in self.manager.config["libraries"]:
-            if lib["id"] in self.pending_removal and os.path.normcase(os.path.abspath(lib["path"])) == target:
+            if lib["id"] in self.pending_removal and same_folder(lib["path"], library_path):
                 return messages.LIBRARY_BEING_REMOVED
         return blocked_reason(self.entries[entry_id], Path(library_path), self.manager.records,
                               self.manager.config["libraries"])
