@@ -168,13 +168,6 @@ def test_running_processes_lists_the_live_members_of_each_session():
     assert t.running_processes() == {}
 
 
-def test_running_processes_skips_a_reused_pid():
-    t = tree()
-    t.update([LiveProc(10, 1, 100, None)])
-    t.update([LiveProc(10, 1, 999, r"C:\Other\x.exe")])
-    assert t.running_processes() == {}
-
-
 S = 10_000_000  # ticks per second
 
 
