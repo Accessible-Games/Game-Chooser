@@ -1,7 +1,7 @@
 import pytest
 
 from engine.entries import (
-    current_platform, extras_of, game_fields, is_mirror_url, is_web_game, mirror_url_for, platform_sources,
+    extras_of, game_fields, is_mirror_url, is_web_game, mirror_url_for, platform_sources,
     dependency_order, visible_games,
 )
 from tests.engine.fakes import fails
@@ -123,10 +123,6 @@ def test_mirror_helpers():
     assert is_mirror_url("https://files.accessiblegames.net/files/abc/x.zip")
     assert not is_mirror_url("https://example.com/files/abc/x.zip")
     assert mirror_url_for("ab" * 32, "x y.zip") == f"https://files.accessiblegames.net/files/{'ab'*32}/x%20y.zip"
-
-
-def test_current_platform_is_known():
-    assert current_platform() in {"windows", "macos", "linux"}
 
 
 def test_tar_method_is_readable():

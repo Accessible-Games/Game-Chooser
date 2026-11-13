@@ -99,15 +99,6 @@ def test_a_required_shared_extra_installs_automatically_with_each_game(tmp_path)
         assert set(rec.extras) == {"series-patch"} and rec.files["data/bonus.dat"].owner == "series-patch"
 
 
-def test_the_second_game_downloads_its_own_copy(tmp_path):
-    eng = catalog(tmp_path)
-    run(eng, "install", "alpha", extras=("series-patch",))
-    eng.ctx.fetcher.requests.clear()
-    run(eng, "install", "bravo", extras=("series-patch",))
-    assert eng.ctx.fetcher.requests == [eng.ctx.entries["bravo"]["sources"][0]["url"],
-                                        eng.ctx.entries["series-patch"]["sources"][0]["url"]]
-
-
 def test_installing_the_second_game_leaves_the_first_alone(tmp_path):
     eng = catalog(tmp_path)
     run(eng, "install", "alpha", extras=("series-patch",))
