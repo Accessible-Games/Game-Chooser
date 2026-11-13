@@ -76,9 +76,11 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   each tab's action button, all driven by `MainFrame._sync_progress`; the button stays usable. Done appears while
   an installer runs; Cancel cancels the job. Focus: see CLAUDE.md (Focus).
 - **Install while a job runs or waits** (`CatalogPanel._confirm_install`): on a game that itself has a job
-  queued or running it says so (`messages.JOB_ALREADY_RUNNING` / `JOB_ALREADY_WAITING`) and changes nothing;
-  the queue's `submit` would return that same job anyway. Another game is planned, confirmed and queued as
-  usual. An installed row reads Launch, which is the Library's launch and is not held back by a job.
+  queued or running it says so (`messages.JOB_ALREADY_RUNNING` / `JOB_ALREADY_WAITING`) and changes nothing.
+  That includes a running job that is being cancelled (`InstallQueue.job_for` still counts it: it may still be
+  changing the game's files), for which the queue's `submit` would queue a new job; for any other, `submit`
+  would return that same job anyway. Another game is planned, confirmed and queued as usual. An installed row
+  reads Launch, which is the Library's launch and is not held back by a job.
 - **Library catalog actions** (`library_actions.py`): context menu for catalog games (Update, Undo, Extras,
   Repair, Uninstall, plus links). Delete on a tracked catalog install is **Uninstall** (`delete_kind`: "uninstall";
   "forget" for an untracked install, files untouched; else "delete"). An uninstall that stopped partway (record

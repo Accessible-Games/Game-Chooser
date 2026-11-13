@@ -9,6 +9,7 @@ paths:
   - "/description_field.py"
   - "/tests/test_games_panel.py"
   - "/tests/test_catalog_panel.py"
+  - "/tests/test_main_window.py"
 ---
 
 # Main window and dialogs
@@ -93,17 +94,29 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   collection's `contains` titles); a search containing "unknown" matches nothing.
 - Sorting: a header click or the column's digit key sorts by that column, the same again the other way round;
   an arrow in the header shows it and the sort is saved. Rows are put in title order first, so rows that tie in
-  the chosen column stay in title order. A digit sorts only while no text is being typed (next rule).
-- Type-ahead (`on_char`; the virtual list does none by itself): characters typed in the list within a second of
-  each other build one text (`catalog_view.TypeAhead`), and the selection jumps to the first row at or after the
-  selected one whose title starts with it, wrapping round (`catalog_view.type_ahead_index`). One letter, typed
-  once or repeated, steps on to the next title that starts with it. Only the title counts, whatever the sort
-  column, in any case (casefolded); the character is read with `GetUnicodeKey`. No match changes nothing.
+  the chosen column stay in title order. A digit sorts only with neither Ctrl nor Alt held (Shift may be what
+  gives the digit, as on a French layout) and only while no text is being typed (next rule).
+- Type-ahead (`on_char`; the virtual list does none by itself): characters typed in the list build one text
+  (`catalog_view.TypeAhead`), and the selection jumps to the first row at or after the selected one whose title
+  starts with it, wrapping round (`catalog_view.type_ahead_index`). One letter, typed once or repeated, steps on
+  to the next title that starts with it. Only the title counts, whatever the sort column, in any case
+  (casefolded); the character is read with `GetUnicodeKey`. A text no title starts with moves nothing, but it
+  stays the text being typed.
   - The jump is the player's own move: `_select` makes the row the selected and focused item and scrolls to it,
     and the selection event does the rest, as after an arrow key (label, description, the remembered game).
-  - While a text is being typed, Space and the digits extend it ("temple of", "area 51"); otherwise Space is the
-    action and a digit sorts. So a title that starts with a digit can't be reached by typing. Enter always acts.
-  - A key with Ctrl or Alt is never text (a letter typed with AltGr is: wx reports it with neither).
+  - A letter or a digit continues the text when it comes within 1 second of the key before it (a Space
+    included). Later than that a letter starts a new text and a digit sorts, so a title that starts with a
+    digit can't be reached by typing ("area 51" can).
+  - A Space never moves the selection: it only extends the text, and the next character does the jump ("a h"
+    finds "A Hero's Call"). It belongs to the text for 3 seconds after the last character that is not a Space
+    (a player waits for the screen reader to finish the row), and Spaces do not push that limit out. After
+    those 3 seconds Space is the action again. After typing, Enter is the key that always acts.
+  - Escape, Backspace, Up, Down, Home, End, Page Up and Page Down end the text at once (also from the number
+    pad with Num Lock off, which sends its own key codes): what is typed next is a new text, and Space acts on
+    the row the player moved to. The key itself goes on to the list.
+  - A key with Ctrl alone or Alt alone is never text. With both down it is AltGr and is text: wx hands over a
+    letter outside the system code page that way (the Polish e with ogonek under code page 1252), and a letter
+    inside it with neither.
   - Space mid-text is taken in the key-down handler (`on_list_key`), never skipped on to `on_char`: wx turns a
     Space key-down that reaches the list control into an activation.
   - Not on the macOS DataView control: there every key but a sorting digit is left to the control.
@@ -155,11 +168,14 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
   the Catalog tab first, asks, then opens the install confirmation as the Install button does.
 - **Del**: Library only (Uninstall for a tracked catalog install, forget for an untracked one, else delete).
 - **Ctrl+E**: Library only; refuses catalog games and says why (its accelerator stays enabled for that, while the
-  Edit menu item is disabled). Edit and Delete menu items are disabled on the Catalog tab.
+  Edit menu item is disabled). Edit and Delete menu items are disabled on the Catalog tab. AltGr+E (Ctrl and Alt
+  both down) is a letter on several layouts and is not Ctrl+E.
 - **Ctrl+N** add game, **Ctrl+F** the active tab's search box, **Ctrl+Enter** open folder, **Ctrl+,** preferences.
-- In a games list (both tabs; the games-view rules above): **Enter** and **Space** run the row's action (Launch on
-  the Library; Install, Add or Launch on the Catalog), Space only while no text is being typed; **typing** jumps
-  to the title that starts with what was typed; a **digit** sorts by that column while no text is being typed.
+- In a games list (both tabs; the games-view rules above): **Enter** runs the row's action (Launch on the
+  Library; Install, Add or Launch on the Catalog), always. **Space** does too, except for 3 seconds after a typed
+  character, when it belongs to the text. **Typing** jumps to the title that starts with what was typed; Escape,
+  Backspace and the navigation keys end the text. A **digit** sorts by that column, with neither Ctrl nor Alt
+  held and no text being typed.
 
 ## Accessibility and focus
 - Screen reader announcement needs this sequence: select the row, make it the list's focused item, then
@@ -173,8 +189,9 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - `GamesPanel.restoring_tree` is true while the view itself changes the tree (building it, restoring its
   selections, Escape): the tree's change events are then ignored.
 - Filling a list, restoring its selection and the search rule are `GamesPanel`'s (above). A fill calls `SetFocus`
-  in one case only: the list became empty while focus was on its action button. What never moves focus, and the two
-  exceptions (this view's, and `CatalogPanel`'s move to its status line), is in CLAUDE.md (Focus).
+  in one case only: the list became empty while focus was on its action button. What never moves focus, and the three
+  exceptions (this view's, `ProgressArea`'s Done button and `CatalogPanel`'s status line), is in CLAUDE.md
+  (Focus).
 - After a dialog the code calls `focus_active_list()` only in these places. Startup: at the end of
   `check_libraries`, which follows the first-run dialog when there is one. Library: after the message that a
   catalog game can't be edited (Ctrl+E); in the forget flow when nothing was forgotten; after a catalog action

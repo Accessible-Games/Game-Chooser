@@ -52,7 +52,7 @@ TREE_CATEGORIES = [
 
 class CatalogPanel(wx.Panel):
     """Tab order: status line, Retry, then the games view (Search, games list, filter tree, action button,
-    description)."""
+    install progress, description)."""
 
     def __init__(self, parent, frame, service: InstallService):
         super().__init__(parent)

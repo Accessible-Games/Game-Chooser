@@ -34,8 +34,8 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
 - A filter is applied first and saved second, and a save that fails is logged, never raised.
 - Typing in the list jumps to the next title that starts with what was typed (type-ahead), as the player's own
   move. While a text is being typed, Space and the digit keys belong to it (Space for 3 seconds after the last
-  character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. Enter
-  always acts.
+  character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. A
+  Space never moves the selection. Escape, Backspace and the navigation keys end the text. Enter always acts.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
   unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
   open or the app is starting.
@@ -74,7 +74,8 @@ class GamesPanel(wx.Panel):
     - `categories`: (criteria key, tree category label) in tree order.
     - `state_prefix`: what this tab's SavedState keys start with.
     - `idle_label`: the action button's text while no game is selected.
-    - `on_action()`: Enter, Space (while no text is being typed in the list), double-click or the button.
+    - `on_action()`: Enter, Space (unless it belongs to a text being typed in the list), double-click or the
+      button.
     - `context_menu(row)`: the wx.Menu for the selected row (None for no row); None shows no menu. The view
       shows the menu and destroys it.
     - `sort_keys`: one sort key per column (the player sorts by a header click or the column's digit key; an
