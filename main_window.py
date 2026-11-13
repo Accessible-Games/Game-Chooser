@@ -238,46 +238,15 @@ class MainFrame(wx.Frame):
         self.SetMenuBar(menu_bar)
     
     def setup_accelerators(self):
-        """Set up keyboard accelerators"""
-        accel_entries = []
-
-        # Ctrl+F for search
-        search_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, ord('F'), search_id))
-        self.Bind(wx.EVT_MENU, self.on_find, id=search_id)
-
-        # Ctrl+N for new game
-        new_game_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, ord('N'), new_game_id))
-        self.Bind(wx.EVT_MENU, self.on_add_game, id=new_game_id)
-
-        # Ctrl+Enter for open folder
-        open_folder_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, wx.WXK_RETURN, open_folder_id))
-        self.Bind(wx.EVT_MENU, self.on_open_folder, id=open_folder_id)
-
-        # F5 for refresh
-        refresh_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_NORMAL, wx.WXK_F5, refresh_id))
-        self.Bind(wx.EVT_MENU, self.on_refresh, id=refresh_id)
-
-        # Ctrl+R for random game
-        random_game_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, ord('R'), random_game_id))
-        self.Bind(wx.EVT_MENU, self.on_random_game, id=random_game_id)
-
-        # Ctrl+Shift+R for a random game to install from the catalog
-        random_install_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord('R'), random_install_id))
-        self.Bind(wx.EVT_MENU, self.on_random_install, id=random_install_id)
-
-        # Ctrl+E for Edit Game, also while the menu item is disabled for a catalog game: it then says why
-        edit_game_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, ord('E'), edit_game_id))
-        self.Bind(wx.EVT_MENU, self.on_edit_game, id=edit_game_id)
-
-        accel_table = wx.AcceleratorTable(accel_entries)
-        self.SetAcceleratorTable(accel_table)
+        """The shortcuts no menu item carries (a menu item's own shortcut needs no entry): Ctrl+F, Ctrl+Enter, and
+        Ctrl+E for Edit Game also while its menu item is disabled for a catalog game (it then says why)"""
+        entries = []
+        for key, handler in [(ord('F'), self.on_find), (wx.WXK_RETURN, self.on_open_folder),
+                             (ord('E'), self.on_edit_game)]:
+            entry_id = wx.NewIdRef()
+            entries.append((wx.ACCEL_CTRL, key, entry_id))
+            self.Bind(wx.EVT_MENU, handler, id=entry_id)
+        self.SetAcceleratorTable(wx.AcceleratorTable(entries))
     
     def active_tab(self):
         """The notebook page showing now, as a TABS name ("library" or "catalog")"""
@@ -706,15 +675,11 @@ class MainFrame(wx.Frame):
         return catalog_menu_items(game, record, entry, update_available(record, entry, catalog_platform()), extras)
 
     def on_list_key(self, event) -> bool:
-        """The Library list's own keys (the view handles Enter, Space and the context menu keys); True for a key
-        that was taken"""
-        key = event.GetKeyCode()
-        if key == ord('E') and event.ControlDown() and not event.AltDown():  # with Alt it is AltGr+E, a letter
-            self.on_edit_game(None)
-        elif key == wx.WXK_DELETE:
-            self.on_delete_game(None)
-        else:
+        """The Library list's own key, Del (the view handles Enter, Space and the context menu keys; Ctrl+E is the
+        frame's); True for a key that was taken"""
+        if event.GetKeyCode() != wx.WXK_DELETE:
             return False
+        self.on_delete_game(None)
         return True
 
     def on_open_folder(self, event):

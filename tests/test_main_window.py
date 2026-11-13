@@ -23,16 +23,14 @@ def key_down(code, ctrl=False, alt=False):
     return event
 
 
-def test_the_library_lists_own_keys_are_ctrl_e_and_del(app):
-    """AltGr+E is a letter on several layouts (é, ę, €) and reaches the list with Ctrl and Alt both down: it is
-    not Ctrl+E"""
+def test_the_library_lists_own_key_is_del(app):
+    """Ctrl+E is the frame's shortcut; AltGr+E (Ctrl and Alt both down) is a letter on several layouts (é, ę, €)"""
     done = []
-    frame = SimpleNamespace(on_edit_game=lambda event: done.append("edit"),
-                            on_delete_game=lambda event: done.append("delete"))
-    assert MainFrame.on_list_key(frame, key_down(ord("E"), ctrl=True)) and done == ["edit"]
-    assert MainFrame.on_list_key(frame, key_down(wx.WXK_DELETE)) and done == ["edit", "delete"]
-    assert not MainFrame.on_list_key(frame, key_down(ord("E"), ctrl=True, alt=True))
-    assert not MainFrame.on_list_key(frame, key_down(ord("E"))) and done == ["edit", "delete"]
+    frame = SimpleNamespace(on_delete_game=lambda event: done.append("delete"))
+    assert MainFrame.on_list_key(frame, key_down(wx.WXK_DELETE)) and done == ["delete"]
+    for event in (key_down(ord("E"), ctrl=True), key_down(ord("E"), ctrl=True, alt=True), key_down(ord("E"))):
+        assert not MainFrame.on_list_key(frame, event)
+    assert done == ["delete"]
 
 
 # ---- message boxes shown while a game is held -------------------------------------------------------------------

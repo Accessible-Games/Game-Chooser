@@ -138,7 +138,7 @@ What differs between the tabs, each a setting passed to `GamesPanel`:
 | `columns` with one of `sort_keys` each | Title, Genre, Developer, Year, Platform (by how many), Status | Title, Developer, Genre, Price (`catalog_view.price_sort_key`: free first, then by the amount shown), Details |
 | `categories` / `tree_keys` | Platform, Genre, Developer, Release Year; View > Filter Tree picks which show | `catalog_panel.TREE_CATEGORIES`, all shown |
 | `row_filter` | View > Libraries (hidden libraries) | none |
-| `on_key` | Del, Ctrl+E | none |
+| `on_key` | Del | none |
 | `on_shown` | `update_tab_menus` (Edit Game follows the selection) | none |
 | `on_action`, `context_menu` | launch; `build_list_menu` | install, add or launch; the action and links |
 | `random_game` candidates, and what Yes does | the listed games that run on this system; launch | any listed row, its own action (Ctrl+R); the rows that install, the install confirmation (Ctrl+Shift+R) |
