@@ -23,7 +23,6 @@ nothing: the UI fetches in the background and hands the state to `take_index` on
 """
 
 import logging
-import os
 import tempfile
 from pathlib import Path
 
@@ -34,9 +33,10 @@ from engine.entries import visible_games as _visible_games
 from engine.errors import EngineError
 from engine.extract import Extractor, default_tools_dir
 from engine.http import Fetcher
-from engine.index import DEFAULT_CATALOG_URL, CatalogIndex, IndexState, normalize_catalog_url
+from engine.index import CatalogIndex, IndexState
 from engine.jobs import EngineContext, InstallEngine, InstallRequest, JobResult, blocked_reason, game_fields_for
 from engine.launch import adopt_catalog_launch
+from engine.paths import same_folder
 from engine.plan import InstallPlan, build_install_plan
 from engine.queue import InstallQueue, Job, QueueListener
 from engine.records import InstallRecord, record_folder
@@ -44,14 +44,11 @@ from engine.registry import RegistryAccess
 from engine.runtimes import WindowsSecurity, default_runtimes_root
 from engine.safety import count_player_files
 from engine.status import game_status
+from install_prefs import current_catalog_url, register_shared_components
 from library_actions import is_uninstall_unfinished, is_uninstallable
 from library_manager import LibraryError
 
 log = logging.getLogger(__name__)
-
-
-def _is_web(game) -> bool:
-    return game.launch_path.startswith("http")
 
 
 class InstallService:
@@ -73,8 +70,8 @@ class InstallService:
     # ---- the catalog index ----------------------------------------------------------------------------------
 
     def _index(self) -> CatalogIndex:
-        url = self.manager.config["install"].get("catalog_url") or DEFAULT_CATALOG_URL
-        return CatalogIndex(self.manager.config_dir / "catalog", normalize_catalog_url(url) or url, self.fetcher)
+        url = current_catalog_url(self.manager.config["install"])
+        return CatalogIndex(self.manager.config_dir / "catalog", url, self.fetcher)
 
     @property
     def entries(self) -> dict[str, dict]:
@@ -107,7 +104,7 @@ class InstallService:
         UI thread only. A game with a queued or running job is left alone: the job owns its record."""
         changed = 0
         for game in list(self.manager.games):
-            if not game.catalog_id or _is_web(game) or self.queue.job_for(game.catalog_id) is not None:
+            if not game.catalog_id or game.is_web or self.queue.job_for(game.catalog_id) is not None:
                 continue
             try:
                 changed += self._adopt(game.catalog_id)
@@ -133,10 +130,7 @@ class InstallService:
                 changed += 1
         if changed:
             self.manager.games = list(self.manager.games)
-            try:
-                self.manager.save_games()
-            except OSError as e:  # kept in memory; games.json is written with the next change
-                log.warning("Couldn't save games.json: %s", e)
+            self.manager.save_or_keep(self.manager.save_games, "games.json")
         return changed
 
     def _adopt(self, catalog_id: str) -> bool:
@@ -160,7 +154,7 @@ class InstallService:
     def installed_ids(self) -> set[str]:
         """Catalog ids shown as installed: a game's install record that isn't uninstalled, or a catalog web game.
         A shared runtime's record is never a game's."""
-        ids = {g.catalog_id for g in self.manager.games if g.catalog_id and _is_web(g)}
+        ids = {g.catalog_id for g in self.manager.games if g.catalog_id and g.is_web}
         ids |= {cid for cid, rec in self.manager.records.game_records().items() if not rec.uninstalled}
         return ids
 
@@ -168,7 +162,6 @@ class InstallService:
 
     def _new_engine(self) -> InstallEngine:
         """A fresh engine for each job, so the current catalog, libraries and preferences reach it."""
-        install = self.manager.config["install"]
         return InstallEngine(EngineContext(
             entries=self.entries,
             records=self.manager.records,
@@ -179,7 +172,7 @@ class InstallService:
             work_root=Path(tempfile.gettempdir()) / "GameChooser",
             runtimes_root=default_runtimes_root(),
             libraries=[dict(lib) for lib in self.manager.config["libraries"]],
-            register_shared_components=bool(install.get("register_shared_components", True)),
+            register_shared_components=register_shared_components(self.manager.config["install"]),
             platform=current_platform(),
             installer_ui=self.installer_ui,
             security=self.security,
@@ -188,15 +181,14 @@ class InstallService:
     def plan(self, entry_id: str, action: str = "install") -> InstallPlan:
         install = self.manager.config["install"]
         return build_install_plan(entry_id, self.entries, self.manager.config["libraries"], self.manager.records,
-                                  self.registry, bool(install.get("register_shared_components", True)),
+                                  self.registry, register_shared_components(install),
                                   install.get("last_library"), current_platform(), action,
                                   runtimes_root=default_runtimes_root(), security=self.security)
 
     def blocked(self, entry_id: str, library_path: Path) -> str | None:
         """Why the game can't be installed into this library folder right now, or None."""
-        target = os.path.normcase(os.path.abspath(library_path))
         for lib in self.manager.config["libraries"]:
-            if lib["id"] in self.pending_removal and os.path.normcase(os.path.abspath(lib["path"])) == target:
+            if lib["id"] in self.pending_removal and same_folder(lib["path"], library_path):
                 return messages.LIBRARY_BEING_REMOVED
         return blocked_reason(self.entries[entry_id], Path(library_path), self.manager.records,
                               self.manager.config["libraries"])
@@ -214,10 +206,7 @@ class InstallService:
         job = self.queue.submit(request, self._title(entry_id))
         if library_id:  # remembered only once the job is queued (submit raises after shutdown)
             self.manager.config["install"]["last_library"] = library_id
-            try:
-                self.manager.save_config()
-            except OSError as e:
-                log.warning("Couldn't save the last library: %s", e)
+            self.manager.save_or_keep(self.manager.save_config, "the last library in config.json")
         return job
 
     def apply_result(self, result: JobResult) -> None:
@@ -286,7 +275,7 @@ class InstallService:
             reachable = self.manager.library_reachable(game.library_id) if game.library_id else True
             record = records.get(game.catalog_id) if game.catalog_id else None
             result[(game.library_id, game.launch_path)] = game_status(
-                str(full_path) if full_path else None, _is_web(game), record, self.entry_for(game), platform,
+                str(full_path) if full_path else None, game.is_web, record, self.entry_for(game), platform,
                 library_reachable=reachable)
         return result
 
@@ -308,7 +297,7 @@ class InstallService:
         for game in self.manager.catalog_games_in(library_id):
             if is_uninstallable(self.manager.records.load_game(game.catalog_id)):
                 tracked.append(game)
-            elif not _is_web(game):
+            elif not game.is_web:
                 kept.append(game)
         return tracked, kept
 
@@ -355,10 +344,7 @@ class InstallService:
         for game in kept:
             self.manager.unlink_catalog_game(game)
         if kept:
-            try:
-                self.manager.save_games()
-            except OSError as e:
-                log.warning("Couldn't save games.json while removing library %s: %s", library_id, e)
+            self.manager.save_or_keep(self.manager.save_games, f"games.json while removing library {library_id}")
         try:
             for cid, rec in self.manager.records.game_records().items():
                 if rec.uninstalled and rec.library_id == library_id:
@@ -366,7 +352,5 @@ class InstallService:
         except OSError as e:
             log.warning("Couldn't delete an uninstalled game's record while removing library %s: %s", library_id, e)
             raise LibraryError(messages.LIBRARY_NOT_REMOVED) from e
-        try:
-            self.manager.remove_library(library_id)
-        except OSError as e:  # gone from the config in memory; written with the next save
-            log.warning("Couldn't save config.json after removing library %s: %s", library_id, e)
+        self.manager.save_or_keep(lambda: self.manager.remove_library(library_id),
+                                  f"config.json after removing library {library_id}")

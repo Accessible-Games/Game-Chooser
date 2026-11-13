@@ -3,7 +3,6 @@
 import gzip
 import hashlib
 import json
-import os
 import zlib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +10,7 @@ from urllib.parse import urljoin, urlsplit
 
 from engine import messages
 from engine.errors import DownloadError
+from engine.paths import write_atomic
 
 DEFAULT_CATALOG_URL = "https://catalog.accessiblegames.net/"
 SUPPORTED_SCHEMA_VERSION = 2
@@ -155,6 +155,4 @@ class CatalogIndex:
     def _write_cache(self, gz: bytes, meta: bytes) -> None:
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         for path, data in ((self._gz_path, gz), (self._meta_path, meta)):  # gz first, then meta
-            tmp = path.with_name(path.name + ".tmp")
-            tmp.write_bytes(data)
-            os.replace(tmp, path)
+            write_atomic(path, data)

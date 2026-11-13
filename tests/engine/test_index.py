@@ -163,3 +163,10 @@ def test_corrupt_deflate_body_from_server_keeps_cache(tmp_path):
     fetcher.routes[META] = json.dumps(meta).encode()
     s = idx.refresh()
     assert s.error and set(s.entries) == {"a", "b"}
+
+
+def test_a_cache_that_cant_be_replaced_leaves_no_temp_file(tmp_path):
+    fetcher, idx = make(tmp_path)
+    (tmp_path / "index.json.gz").mkdir()  # a file can't replace a folder
+    assert set(idx.refresh().entries) == {"a", "b"}  # still usable this session
+    assert [p.name for p in tmp_path.iterdir()] == ["index.json.gz"]

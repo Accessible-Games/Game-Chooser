@@ -6,12 +6,11 @@ so it round-trips untouched; every other nested value is rebuilt into its datacl
 
 import json
 import logging
-import os
 import typing
 from dataclasses import MISSING, asdict, dataclass, fields
 from pathlib import Path
 
-from .paths import is_engine_dir, norm_key, same_folder, walk_files
+from .paths import is_engine_dir, norm_key, same_folder, walk_files, write_atomic
 from .sources import hash_file
 
 log = logging.getLogger(__name__)
@@ -166,9 +165,7 @@ class RecordStore:
     def save(self, record: InstallRecord) -> None:
         path = self._file(record.catalog_id)
         self.root.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + ".tmp")
-        tmp.write_text(json.dumps(asdict(record), indent=2), encoding="utf-8")
-        os.replace(tmp, path)
+        write_atomic(path, json.dumps(asdict(record), indent=2).encode("utf-8"))
 
     def delete(self, catalog_id: str) -> None:
         self._file(catalog_id).unlink(missing_ok=True)

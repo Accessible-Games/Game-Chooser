@@ -1,9 +1,11 @@
 import json
 
+import pytest
+
 from engine import messages
 from engine.index import DEFAULT_CATALOG_URL
 from engine.records import InstalledSource, InstallRecord, RecordStore
-from models import Game
+from models import Game, is_web_path
 
 
 def _record(catalog_id="entombed", library_id="main", folder="Entombed", **kw):
@@ -52,14 +54,14 @@ def test_plain_games_round_trip_without_catalog_keys(isolated_manager):
     assert "catalog_id" not in game.to_dict()
     assert "installed_source" not in game.to_dict()
     assert "installed_extras" not in game.to_dict()
-    assert not game.is_catalog
+    assert not game.catalog_id
     isolated_manager.games = [game]
     isolated_manager.save_games()
     assert set(_games_json(isolated_manager)[0]) == {
         "title", "genre", "developer", "year", "platforms", "launch_path", "library_id"}
     full = Game(title="C", catalog_id="c", installed_source={"url": "u"}, installed_extras=["x"])
     again = Game.from_dict(full.to_dict())
-    assert again.is_catalog and again.installed_source == {"url": "u"} and again.installed_extras == ["x"]
+    assert again.catalog_id == "c" and again.installed_source == {"url": "u"} and again.installed_extras == ["x"]
 
 
 def test_catalog_game_with_missing_exe_is_kept(isolated_manager_factory, tmp_path):
@@ -139,7 +141,7 @@ def test_reconcile_unlinks_game_whose_record_is_gone(isolated_manager_factory, t
     m = isolated_manager_factory(games=games, config=config)
     assert len(m.games) == 1
     game = m.games[0]
-    assert not game.is_catalog
+    assert not game.catalog_id
     assert game.installed_source is None and game.installed_extras is None
     assert game.library_id == ""
     assert game.launch_path == str(tmp_path / "Entombed" / "e.exe") or \
@@ -293,3 +295,9 @@ def test_reconcile_finishes_an_uninstall_whose_result_was_not_applied(isolated_m
     assert [g["title"] for g in _games_json(isolated_manager_factory)] == ["Hand"]
     assert m.records.load("entombed") == done
     assert [g.title for g in isolated_manager_factory().games] == ["Hand"]  # and it doesn't come back
+
+
+@pytest.mark.parametrize("path, web", [("https://example.com/game", True), ("HTTP://example.com/game", True),
+                                       ("HTTPS://", True), ("httpd-sim/game.exe", False), ("C:/Games/x.exe", False)])
+def test_a_web_address_is_http_or_https_in_any_case(path, web):
+    assert is_web_path(path) is web and Game(launch_path=path).is_web is web

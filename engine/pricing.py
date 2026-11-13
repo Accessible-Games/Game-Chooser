@@ -6,6 +6,7 @@ nothing, and an amount without a currency is left out.
 
 import re
 from datetime import date
+from urllib.parse import urlsplit
 
 from . import messages
 
@@ -143,15 +144,23 @@ def can_play_free(pricing: dict | None) -> bool:
     return kind in ("free", "free-to-try", "free-with-purchases")
 
 
-def _http(url) -> str | None:
-    return url if isinstance(url, str) and url.startswith(("http://", "https://")) else None
+def http_url(url) -> str | None:
+    """`url` when it is an http(s) address with a host (and no spaces), else None."""
+    if not isinstance(url, str) or any(c.isspace() for c in url):
+        return None
+    try:
+        parts = urlsplit(url)
+        host = parts.hostname
+    except ValueError:
+        return None
+    return url if parts.scheme in ("http", "https") and host else None
 
 
 def purchase_link(pricing: dict | None) -> tuple[str, str] | None:
     """(label, url) of pricing.url, labelled by model ("Buy or register", "Buy", ...). None when there is no
     usable address, or when the full version can no longer be bought (there is nothing to pay for)."""
     pricing = _dict(pricing)
-    url = _http(pricing.get("url")) if pricing else None
+    url = http_url(pricing.get("url")) if pricing else None
     if url is None or no_longer_sold(pricing):
         return None
     return messages.PRICE_LINKS.get(pricing["model"], messages.PRICE_LINK_OTHER), url
@@ -159,7 +168,7 @@ def purchase_link(pricing: dict | None) -> tuple[str, str] | None:
 
 def donate_link(pricing: dict | None) -> tuple[str, str] | None:
     pricing = _dict(pricing)
-    url = _http(pricing.get("donate_url")) if pricing else None
+    url = http_url(pricing.get("donate_url")) if pricing else None
     return (messages.DONATE_LINK, url) if url else None
 
 

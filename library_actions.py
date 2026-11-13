@@ -25,10 +25,6 @@ class MenuItem:
     url: str | None = None  # for LINK
 
 
-def is_web(game) -> bool:
-    return game.launch_path.startswith("http")
-
-
 def is_editable(game) -> bool:
     """Edit is for games added by hand only: the catalog owns a catalog game's details (and, defensively, a game
     that belongs to a library is a catalog game)."""
@@ -80,9 +76,9 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
     if not game.catalog_id:
         return []
     links = [MenuItem(LINK, label, url=url) for label, url in link_items(entry)]
-    if not is_web(game) and is_uninstall_unfinished(record):
+    if not game.is_web and is_uninstall_unfinished(record):
         return [MenuItem(UNINSTALL, messages.MENU_UNINSTALL)] + links
-    if is_web(game) or not is_game_record(record) or record.uninstalled:
+    if game.is_web or not is_game_record(record) or record.uninstalled:
         return links
     if not record.tracked:
         items = [MenuItem(UPDATE, messages.MENU_UPDATE_BY_HAND, enabled=False)] if update_available else []
@@ -102,7 +98,7 @@ def delete_kind(game, record) -> str:
     """What Delete does with a game: "uninstall" (a tracked catalog install, or one whose uninstall stopped partway:
     the Uninstall dialog), "forget" (an untracked one: remove it from the list and forget its record, files
     untouched) or "delete" (anything else: the usual confirmation, then it leaves the list)."""
-    if not game.catalog_id or is_web(game):
+    if not game.catalog_id or game.is_web:
         return "delete"
     if is_uninstallable(record):
         return "uninstall"

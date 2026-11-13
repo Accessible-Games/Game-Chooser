@@ -221,6 +221,14 @@ def test_statuses_for_mixed_library(rig):
     }
 
 
+def test_a_web_game_is_told_by_its_scheme_in_any_case(rig):
+    lib = rig.library()
+    rig.manager.games += [Game(title="Loud", launch_path="HTTP://example.com/game"),  # Add Game accepts it
+                          Game(title="Httpd", launch_path="httpd-sim/game.exe", library_id=lib["id"])]
+    assert rig.service.statuses() == {("", "HTTP://example.com/game"): READY,
+                                      (lib["id"], "httpd-sim/game.exe"): EXE_NOT_FOUND}
+
+
 def test_adopt_launch_paths_after_index_load(rig):
     lib = rig.library()
     entry = game_entry(rig.routes, files={"entombed.exe": b"exe", "sub/other.exe": b"other"})

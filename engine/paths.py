@@ -3,6 +3,7 @@
 import os
 import re
 from collections.abc import Iterator
+from contextlib import suppress
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -65,8 +66,24 @@ def is_code(path) -> bool:
     return PurePosixPath(str(path).replace("\\", "/")).suffix.lower() in EXECUTABLE_CODE_SUFFIXES
 
 
+def write_atomic(path: Path, data: bytes) -> None:
+    """Write a temp file beside `path`, then replace `path` with it: a failure leaves the old file whole, no temp."""
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_bytes(data)
+        os.replace(tmp, path)
+    except BaseException:
+        with suppress(OSError):
+            tmp.unlink(missing_ok=True)
+        raise
+
+
+def folder_key(path) -> str:
+    return os.path.normcase(os.path.abspath(path)).lower()
+
+
 def same_folder(a, b) -> bool:
-    return os.path.normcase(os.path.abspath(a)).lower() == os.path.normcase(os.path.abspath(b)).lower()
+    return folder_key(a) == folder_key(b)
 
 
 def norm_key(rel: str) -> str:

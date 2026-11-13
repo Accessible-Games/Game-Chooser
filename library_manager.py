@@ -32,7 +32,9 @@ from engine import messages
 from engine.folders import library_label
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex
 from engine.jobs import game_fields_for
+from engine.paths import folder_key, write_atomic
 from engine.records import RecordStore
+from install_prefs import current_catalog_url
 from library_actions import is_uninstall_unfinished
 from models import Game
 from path_manager import PathManager
@@ -50,17 +52,7 @@ class LibraryError(Exception):
 
 
 def _write_json_atomic(path, data):
-    """Write JSON to a temporary file beside `path`, then replace `path` with it in one step, so a crash or a full
-    disk mid-write leaves the old file whole (as RecordStore.save does). OSError if it can't be written."""
-    path = Path(path)
-    tmp = path.with_name(path.name + ".tmp")
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)
-    except BaseException:
-        _remove_quietly(tmp)
-        raise
+    write_atomic(Path(path), json.dumps(data, indent=2).encode("utf-8"))
 
 
 def keep_damaged_copy(path):
@@ -97,10 +89,6 @@ def _remove_quietly(path):
         pass
 
 
-def _norm(path):
-    return os.path.normcase(os.path.abspath(path))
-
-
 def _is_inside(path, parent):
     try:
         return path != parent and os.path.commonpath([path, parent]) == parent
@@ -135,9 +123,7 @@ class GameLibraryManager:
         if system == "Windows":
             app_data = Path(os.environ.get('APPDATA', ''))
             config_dir = app_data / "GameChooser"
-        elif system == "Darwin":  # macOS
-            config_dir = Path.home() / "Library" / "Application Support" / "GameChooser"
-        else:  # Fallback for other systems - use macOS style
+        else:  # macOS, and other systems the same way
             config_dir = Path.home() / "Library" / "Application Support" / "GameChooser"
         
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -202,11 +188,7 @@ class GameLibraryManager:
                 upgraded = False
                 self._damaged(self.config_file, messages.CONFIG_FILE_DAMAGED, messages.CONFIG_FILE_DAMAGED_NOT_COPIED)
             if upgraded:
-                try:
-                    self.save_config()
-                except OSError as e:
-                    # keep the loaded config; the upgrade is saved with the next change
-                    logging.getLogger(__name__).warning("Couldn't save the upgraded config: %s", e)
+                self.save_or_keep(self.save_config, "the upgraded config.json")
         else:
             self.config = default_config
             self.save_config()
@@ -215,6 +197,13 @@ class GameLibraryManager:
         """Save configuration to JSON file (atomically). OSError if it can't be saved."""
         self._before_writing(self.config_file)
         _write_json_atomic(self.config_file, self.config)
+
+    def save_or_keep(self, save, what):
+        """Run a save; one that fails (OSError) is logged, and the change stays in memory for the next save."""
+        try:
+            save()
+        except OSError as e:
+            log.warning("Couldn't save %s, so the change waits for the next save: %s", what, e)
 
     def load_games(self):
         """Load games from JSON file"""
@@ -305,7 +294,7 @@ class GameLibraryManager:
         changed = False
         finished = []
         for game in self.games:
-            if not game.catalog_id or game.launch_path.startswith("http"):
+            if not game.catalog_id or game.is_web:
                 continue  # web games have no install record by design
             rec = records.get(game.catalog_id)
             if rec is None:
@@ -322,15 +311,11 @@ class GameLibraryManager:
         if missing:
             entries = self._cached_entries()
             for rec in missing:
-                entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id, "title": rec.catalog_id}
+                entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id}  # titled by its id
                 self.games.append(Game.from_dict(game_fields_for(entry, rec)))
             changed = True
         if changed:  # a damaged games.json is copied first, or not written over (save_games)
-            try:
-                self.save_games()
-            except OSError as e:
-                # keep the result in memory; games.json is written with the next change
-                logging.getLogger(__name__).warning("Couldn't save games.json: %s", e)
+            self.save_or_keep(self.save_games, "games.json")
 
     def _record_unreadable(self, catalog_id):
         """True when a record file is there for this id but can't be read, so it may still be the game's. A
@@ -344,7 +329,7 @@ class GameLibraryManager:
         return self.records.load(catalog_id) is None
 
     def _cached_entries(self):
-        url = self.config.get("install", {}).get("catalog_url", DEFAULT_CATALOG_URL)
+        url = current_catalog_url(self.config.get("install", {}))
         return CatalogIndex(self.config_dir / "catalog", url, fetcher=None).load_cached().entries
 
     def library_by_id(self, library_id):
@@ -363,11 +348,11 @@ class GameLibraryManager:
         """Raise LibraryError unless path can be a library (other than the library `ignoring`)"""
         if not Path(path).is_dir():
             raise LibraryError(messages.LIBRARY_FOLDER_MISSING)
-        new = _norm(path)
+        new = folder_key(path)
         for lib in self.config["libraries"]:
             if lib["id"] == ignoring:
                 continue
-            existing = _norm(lib["path"])
+            existing = folder_key(lib["path"])
             if new == existing:
                 raise LibraryError(messages.LIBRARY_ALREADY_ADDED)
             if _is_inside(new, existing):
@@ -399,13 +384,10 @@ class GameLibraryManager:
     
     def get_full_path(self, game):
         """Construct full path from relative path and library"""
+        if game.is_web:
+            return game.launch_path
         return self.path_manager.get_full_path(
             game.launch_path,
             self.config["libraries"],
             game.library_id
         )
-    
-    def is_executable(self, path):
-        """Check if file is an executable based on platform and extension"""
-        path_obj = Path(path)
-        return self.path_manager.is_executable(path_obj)

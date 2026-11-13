@@ -30,10 +30,10 @@ from library_manager import LibraryError
 from engine import messages
 from engine.folders import library_label
 from install_dialogs import RemoveLibraryDialog
-from install_prefs import check_install_prefs, current_catalog_url
+from install_prefs import check_install_prefs, current_catalog_url, register_shared_components
 from library_actions import library_row_name
 from wx_bridge import run_in_background
-from models import Game
+from models import Game, is_web_path
 from validation_service import ValidationService
 from smart_list import SmartList, Column
 
@@ -160,7 +160,7 @@ class GameDialog(wx.Dialog):
         self.platform_ctrl = wx.ComboBox(panel, choices=platforms, style=wx.CB_DROPDOWN | wx.CB_READONLY)
 
         # Determine initial platform
-        if self.game.launch_path.startswith("http"):
+        if self.game.is_web:
             initial_platform = "Web Game"
         elif self.game.platforms:
             initial_platform = self.game.platforms[0]
@@ -175,9 +175,7 @@ class GameDialog(wx.Dialog):
         self.path_label = wx.StaticText(panel, label="Launch Path:")
         sizer.Add(self.path_label, pos=(2, 0), flag=wx.ALIGN_CENTER_VERTICAL)
 
-        # For editing, convert relative path to absolute for display
-        display_path = self._get_display_path()
-        self.path_ctrl = wx.TextCtrl(panel, value=display_path)
+        self.path_ctrl = wx.TextCtrl(panel, value=self.game.launch_path)
         self.browse_btn = wx.Button(panel, label="Browse...")
         self.browse_btn.Bind(wx.EVT_BUTTON, self.on_browse)
 
@@ -227,16 +225,6 @@ class GameDialog(wx.Dialog):
         # Update UI based on initial platform
         self._update_path_ui()
 
-    def _get_display_path(self):
-        """Get the path to display in the field (a hand-added game always has an absolute path)"""
-        if not self.game.launch_path:
-            return ""
-
-        if self.game.launch_path.startswith("http"):
-            return self.game.launch_path
-
-        return self.game.launch_path
-
     def on_platform_change(self, event):
         """Handle platform selection change"""
         self._update_path_ui()
@@ -249,7 +237,7 @@ class GameDialog(wx.Dialog):
             self.path_label.SetLabel("URL:")
             self.browse_btn.Hide()
             # If switching to web game and field is empty, prefill with https://
-            if not self.path_ctrl.GetValue() or not self.path_ctrl.GetValue().startswith("http"):
+            if not is_web_path(self.path_ctrl.GetValue()):
                 self.path_ctrl.SetValue("https://")
         else:
             self.path_label.SetLabel("Launch Path:")
@@ -370,7 +358,7 @@ class GameDialog(wx.Dialog):
                 }
 
             # For non-web games, also check resolved absolute paths
-            if not path.startswith('http') and not game.launch_path.startswith('http'):
+            if not is_web_path(path) and not game.is_web:
                 try:
                     if game.library_id:
                         # Library game - resolve to absolute path
@@ -572,7 +560,7 @@ class PreferencesDialog(wx.Dialog):
         tab_sizer = wx.BoxSizer(wx.VERTICAL)
 
         self.shared_check = wx.CheckBox(tab_panel, label=messages.PREFS_REGISTER_SHARED)
-        self.shared_check.SetValue(bool(install.get("register_shared_components", True)))
+        self.shared_check.SetValue(register_shared_components(install))
         tab_sizer.Add(self.shared_check, 0, wx.ALL, 10)
 
         address_label = wx.StaticText(tab_panel, label=messages.PREFS_CATALOG_ADDRESS)

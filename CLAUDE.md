@@ -112,10 +112,10 @@ No migration (alpha): write no migration code.
 
 ## Data model
 **Game** (`models.py`): `title, genre, developer, year, platforms, launch_path, library_id, catalog_id,
-installed_source, installed_extras`. `is_catalog` is `bool(catalog_id)`. `to_dict()` writes `catalog_id`,
-`installed_source`, `installed_extras` only when set. `launch_path` is library-relative (forward slashes) for
-a desktop game in a library, an absolute path for a desktop game with no `library_id` (one added by hand, or a
-catalog game an installer put outside every library), or an `http...` URL for web games.
+installed_source, installed_extras`. `to_dict()` writes `catalog_id`, `installed_source`, `installed_extras` only
+when set. `launch_path` is library-relative (forward slashes) for a desktop game in a library, an absolute path for
+a desktop game with no `library_id` (one added by hand, or a catalog game an installer put outside every library),
+or an `http://` or `https://` URL (any case) for web games: `is_web`, the one test of that.
 
 ## Where data lives
 - `games.json` - next to the app (the `sys.argv[0]` directory); git-ignored. It and `config.json` are written

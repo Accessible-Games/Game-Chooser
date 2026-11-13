@@ -1,7 +1,7 @@
 import pytest
 
 from engine.entries import (
-    current_platform, extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources,
+    current_platform, extras_of, game_fields, is_mirror_url, is_web_game, mirror_url_for, platform_sources,
     dependency_order, visible_games,
 )
 from engine.errors import InstallFailed
@@ -175,3 +175,8 @@ def test_current_arch_is_known_here():
 def test_game_fields_main_genre_is_the_first_readable_one():
     assert game_fields(entry("g", genres=[5, " ", "Puzzle", "Card"]))["genre"] == "Puzzle"
     assert game_fields(entry("g", genres=[]))["genre"] == ""
+
+
+def test_is_web_game_takes_an_install_that_is_not_an_object_as_no_link():
+    assert is_web_game(entry("w", sources=[src(platform="web", install={"method": "url"})]), "windows")
+    assert not is_web_game(entry("w", sources=[src(platform="web", install="url")]), "windows")
