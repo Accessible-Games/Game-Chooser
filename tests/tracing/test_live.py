@@ -96,11 +96,7 @@ def test_ended_session_not_running():
     t.update([LiveProc(10, 1, 100, None)])
     t.update([])
     assert t.running() == set()
-    t.forget_ended()
-    t.update([LiveProc(10, 1, 100, None)])
-    assert t.running() == set()
     t.add_session("s2", 5, None, None, 0)
-    t.forget_ended()
     t.update([LiveProc(5, 1, 7, None)])
     assert t.running() == {"s2"}
 

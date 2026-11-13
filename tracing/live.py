@@ -40,7 +40,6 @@ class _Session:
         self.members: set[tuple[int, int]] = set()
         self.live: list[LiveProc] = []  # the members in the last snapshot
         self.alive = False
-        self.seen = False
 
     def _inside_game_dir(self, image_path):
         if not self.game_dir or not image_path:
@@ -82,8 +81,6 @@ class _Session:
                     changed = True
         self.live = [p for p in procs if (p.pid, p.start) in self.members]
         self.alive = bool(self.live)
-        if self.members:
-            self.seen = True
 
     def _qualifies(self, p, member_pids, alive_start):
         if self.root_pid != UNKNOWN_PID and p.pid == self.root_pid:
@@ -130,10 +127,6 @@ class LiveTree:
     def running_processes(self):
         """Each running session's members that were in the last snapshot, in snapshot order."""
         return {sid: list(s.live) for sid, s in self._sessions.items() if s.live}
-
-    def forget_ended(self):
-        for sid in [sid for sid, s in self._sessions.items() if s.seen and not s.alive]:
-            del self._sessions[sid]
 
 
 def windows_snapshot() -> list[LiveProc]:

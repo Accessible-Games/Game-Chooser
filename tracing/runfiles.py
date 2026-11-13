@@ -14,8 +14,6 @@ from tracing.model import SessionInfo
 
 log = logging.getLogger(__name__)
 
-STATES = ("starting", "capturing", "failed", "stopping", "splitting", "done")
-
 _CAPTURE_RE = re.compile(r"^capture(?:-(\d+))?\.pml$", re.IGNORECASE)
 
 

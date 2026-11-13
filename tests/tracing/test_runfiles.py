@@ -3,7 +3,7 @@ import pytest
 import tracing.runfiles as runfiles
 from tracing.clock import TICKS_PER_SECOND
 from tracing.model import SessionInfo
-from tracing.runfiles import RunDir, STATES, leftover_runs, new_run, replace_with_retry
+from tracing.runfiles import RunDir, leftover_runs, new_run, replace_with_retry
 
 S = TICKS_PER_SECOND
 FT = 133_000_000_000_000_000
@@ -20,7 +20,7 @@ def test_status_round_trip_and_atomic_keep_pid(tmp_path):
     run.write_status("capturing")
     status = run.read_status()
     assert status["recorder_pid"] == 7 and status["state"] == "capturing" and status["error"] is None
-    assert "updated" in status and "capturing" in STATES
+    assert "updated" in status
     assert [p.name for p in tmp_path.iterdir()] == ["status.json"]
 
 
