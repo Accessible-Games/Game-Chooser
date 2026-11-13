@@ -52,6 +52,18 @@ def writes(root: Path, files: dict[str, bytes], events: list | None = None):
     return on_start
 
 
+def hangs_once_started(eng, then):
+    """The program does `then` and keeps running; returns a cancel that is true once it has started."""
+    started = []
+
+    def program(exe, args, elevated):
+        started.append(exe)
+        eng.ctx.elevator.hang.add(exe)
+        then(exe, args, elevated)
+    eng.ctx.elevator.on_start = program
+    return lambda: bool(started)
+
+
 # ---- commands --------------------------------------------------------------------------------------------
 
 
@@ -330,38 +342,19 @@ def test_cancel_while_waiting_removes_only_new_target_files(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"})
     target = tmp_path / "Games" / "Light Cars"
-    started = []
-    place = writes(target, {"lc.exe": b"exe", "data/a.dat": b"a"})
-
-    def on_start(exe, args, elevated):
-        started.append(exe)
-        elevator.hang.add(exe)
-        place(exe, args, elevated)
-    elevator = FakeElevator(on_start=on_start)
-    eng, lib = setup_engine(tmp_path, [e], routes, elevator=elevator)
-    watches = []
-    eng.ctx.process_watch = lambda p, elevated: watches.append(run_watch(p, elevated)) or watches[-1]
+    eng, lib = setup_engine(tmp_path, [e], routes, process_watch=watch_with())
+    cancel = hangs_once_started(eng, writes(target, {"lc.exe": b"exe", "data/a.dat": b"a"}))
     with pytest.raises(Cancelled):
-        install(eng, cancel=lambda: bool(started))
-    assert watches[0].terminated and watches[0].closed
+        install(eng, cancel=cancel)
+    assert eng.ctx.process_watch.made[0].terminated and eng.ctx.process_watch.made[0].closed
     assert not target.exists() and eng.ctx.records.load("lightcars") is None
-
-
-def run_watch(process, elevated):
-    from tests.engine.fakes import FakeWatch
-    return FakeWatch(process, elevated)
 
 
 def test_cancel_by_the_player_in_the_installer_ui(tmp_path):
     routes = {}
     target = tmp_path / "Games" / "Light Cars"
-    elevator = FakeElevator()
-
-    def on_start(exe, args, elevated):
-        elevator.hang.add(exe)
-        writes(target, {"lc.exe": b"exe"})(exe, args, elevated)
-    elevator.on_start = on_start
-    eng, lib = setup_engine(tmp_path, [run_game(routes)], routes, elevator=elevator, ui=FakeInstallerUI(done=False))
+    eng, lib = setup_engine(tmp_path, [run_game(routes)], routes, ui=FakeInstallerUI(done=False))
+    hangs_once_started(eng, writes(target, {"lc.exe": b"exe"}))
     with pytest.raises(Cancelled):
         install(eng)
     assert not target.exists() and eng.ctx.records.load("lightcars") is None
@@ -371,11 +364,10 @@ def test_elevated_installer_requested_when_flagged(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno", "elevation": True})
     target = tmp_path / "Games" / "Light Cars"
-    watches = []
-    eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.exe": b"exe"}))
-    eng.ctx.process_watch = lambda p, elevated: watches.append(run_watch(p, elevated)) or watches[-1]
+    eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.exe": b"exe"}),
+                            process_watch=watch_with())
     install(eng)
-    assert eng.ctx.elevator.calls[0][2] is True and watches[0].elevated is True
+    assert eng.ctx.elevator.calls[0][2] is True and eng.ctx.process_watch.made[0].elevated is True
 
 
 def test_declined_elevation_fails_plainly(tmp_path):
@@ -578,16 +570,12 @@ def test_cancelled_update_restores_player_files_and_removes_only_new_ones(tmp_pa
     eng, routes, target = installed_run_game(tmp_path)
     publish_v2(eng, routes)
     before = snapshot(target)
-    started = []
 
     def installer(exe, args, elevated):
-        started.append(exe)
-        eng.ctx.elevator.hang.add(exe)
         put(target, "cfg.ini", b"installer's half-written ini")
         put(target, "new.dll", b"new")
         (target / "saves" / "slot1.sav").unlink()
-    eng.ctx.elevator.on_start = installer
-    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, lambda: bool(started))
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, hangs_once_started(eng, installer))
     after = snapshot(target)
     assert after.pop("cfg.ini.new") == b"installer's half-written ini"
     assert after == before
@@ -1059,16 +1047,9 @@ def test_cancel_of_an_installer_that_wont_stop_cleans_nothing(tmp_path, monkeypa
     monkeypatch.setattr(run_installer, "STOP_SECONDS", 0.2)
     routes = {}
     target = tmp_path / "Games" / "Light Cars"
-    started = []
-    place = writes(target, {"lc.exe": b"exe"})
-
-    def on_start(exe, args, elevated):
-        started.append(exe)
-        eng.ctx.elevator.hang.add(exe)
-        place(exe, args, elevated)
     eng, lib = setup_engine(tmp_path, [run_game(routes, installer={"type": "inno", "elevation": True})], routes,
-                            on_start=on_start, process_watch=watch_with(unstoppable=True))
-    error = fails(install, eng, cancel=lambda: bool(started))
+                            process_watch=watch_with(unstoppable=True))
+    error = fails(install, eng, cancel=hangs_once_started(eng, writes(target, {"lc.exe": b"exe"})))
     assert error.message == messages.INSTALLER_STILL_RUNNING.format(title="Light Cars")
     assert (target / "lc.exe").exists()  # not cleaned up under a running installer
     assert eng.ctx.process_watch.made[0].terminated
@@ -1078,15 +1059,9 @@ def test_cancelled_update_that_wont_stop_keeps_the_copies(tmp_path, monkeypatch)
     monkeypatch.setattr(run_installer, "STOP_SECONDS", 0.2)
     eng, routes, target = installed_run_game(tmp_path)
     publish_v2(eng, routes)
-    started = []
-
-    def installer(exe, args, elevated):
-        started.append(exe)
-        eng.ctx.elevator.hang.add(exe)
-        put(target, "cfg.ini", b"volume=7")
-    eng.ctx.elevator.on_start = installer
+    cancel = hangs_once_started(eng, lambda exe, args, elevated: put(target, "cfg.ini", b"volume=7"))
     eng.ctx.process_watch = watch_with(unstoppable=True)
-    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, lambda: bool(started))
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, cancel)
     assert error.message == "\n\n".join([messages.INSTALLER_STILL_RUNNING.format(title="Light Cars"),
                                             messages.SETASIDE_KEPT.format(title="Light Cars", path=setaside(eng))])
     assert (setaside(eng) / "cfg.ini").read_bytes() == b"volume=9 mine"
@@ -1254,17 +1229,6 @@ def test_vendor_uninstall_whose_uninstaller_never_started_puts_files_back_and_ca
 
 
 # Findings C and D: a cancel that keeps the copies says where they are, in words that fit what happened.
-
-def hangs_once_started(eng, then):
-    started = []
-
-    def program(exe, args, elevated):
-        started.append(exe)
-        eng.ctx.elevator.hang.add(exe)
-        then(exe, args, elevated)
-    eng.ctx.elevator.on_start = program
-    return lambda: bool(started)
-
 
 def test_cancelled_update_whose_tree_wasnt_seen_to_finish_says_where_the_copies_are(tmp_path):
     eng, routes, target = installed_run_game(tmp_path)
