@@ -21,25 +21,23 @@ Main window for Game Chooser application
 
 import wx
 import wx.adv
-import os
 import logging
 import subprocess
 import platform
 import webbrowser
 import threading
-import random
 from contextlib import contextmanager
 from pathlib import Path
 
-from models import Game
+from smart_list import Column
+
 from library_manager import GameLibraryManager
 from install_service import InstallService
-from catalog_view import description_text, initial_tab
+from catalog_view import initial_tab, library_rows
 from engine.folders import library_label
 from engine.launch import LaunchCancelled, launch_kind
-from game_list import GameListCtrl
+from games_panel import GamesPanel
 from catalog_panel import CatalogPanel
-from description_field import DescriptionField
 from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
 from engine import messages
 from engine.entries import current_platform as catalog_platform
@@ -48,7 +46,6 @@ from engine.status import update_available
 from install_dialogs import InstallConfirmDialog, UninstallDialog
 import library_actions
 from library_actions import catalog_menu_items, delete_kind, is_editable, launch_problem, start_launch_file
-from progress_area import ProgressArea
 from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener, run_in_background
 from wx_bridge import call_after as _call_after  # wx.CallAfter that does nothing once the app is gone
 
@@ -56,69 +53,8 @@ log = logging.getLogger(__name__)
 
 TABS = ("library", "catalog")  # notebook page order
 QUIT_WAIT_SECONDS = 10  # how long quitting waits for a cancelled install to stop
-
-
-class FilterWorker(threading.Thread):
-    """Background thread for filtering games to prevent UI freezing"""
-
-    def __init__(self, games, search_term, tree_criteria, library_filter, callback):
-        super().__init__(daemon=True)
-        self.games = games
-        self.search_term = search_term.lower().strip() if search_term else ""
-        self.tree_criteria = tree_criteria
-        self.library_filter = library_filter  # Frozen set of hidden library names
-        self.callback = callback
-        self._stop_event = threading.Event()
-
-    def stop(self):
-        """Signal the thread to stop"""
-        self._stop_event.set()
-
-    def run(self):
-        """Filter games in background"""
-        filtered = []
-
-        for game in self.games:
-            # Check if we should stop
-            if self._stop_event.is_set():
-                return
-
-            # Apply library filter
-            # Games outside every library (library_id "") and web games are always included
-            if game.library_id and game.library_id in self.library_filter:
-                continue
-
-            # Apply tree filter
-            if self.tree_criteria:
-                platform_match = not self.tree_criteria["platforms"] or \
-                                any(p in self.tree_criteria["platforms"] for p in game.platforms)
-                genre_match = not self.tree_criteria["genres"] or \
-                             game.genre in self.tree_criteria["genres"] or \
-                             (game.genre == "" and "Unknown Genre" in self.tree_criteria["genres"])
-                dev_match = not self.tree_criteria["developers"] or \
-                           game.developer in self.tree_criteria["developers"] or \
-                           (game.developer == "" and "Unknown Developer" in self.tree_criteria["developers"])
-                year_match = not self.tree_criteria["years"] or \
-                            game.year in self.tree_criteria["years"] or \
-                            (game.year == "" and "Unknown Year" in self.tree_criteria["years"])
-
-                if not (platform_match and genre_match and dev_match and year_match):
-                    continue
-
-            # Apply search filter
-            if self.search_term:
-                # Exclude "unknown" from all searches
-                if "unknown" in self.search_term:
-                    continue
-                if not any(self.search_term in field.lower() for field in
-                          [game.title, game.developer]):
-                    continue
-
-            filtered.append(game)
-
-        # Call the callback with results if not stopped
-        if not self._stop_event.is_set():
-            wx.CallAfter(self.callback, filtered)
+# The Library tree's categories, (criteria key, label) in tree order; View > Filter Tree chooses which show
+LIBRARY_TREE = [("platform", "Platform"), ("genre", "Genre"), ("developer", "Developer"), ("year", "Release Year")]
 
 
 class MainFrame(wx.Frame):
@@ -154,16 +90,10 @@ class MainFrame(wx.Frame):
         self._status_generation = 0  # only the newest status computation is shown
         # Before the list is first filled: using the saved index may adopt catalog launch paths
         self.service.load_cached_index()
-        self.filtered_games = []
-        self.filter_worker = None  # Background filtering thread
-        self._tree_cache = None  # Cache for tree categories
-        self._games_hash = None  # Hash to detect when games list changes
         self.dialog_active = False  # Flag to block spurious events when modal dialogs are open
         self._deferred = []  # callables waiting for every modal dialog to close (run_when_no_dialog)
         self._deferred_retry = False  # a wx.CallLater retry of _run_deferred is pending
-        self.restoring_tree = False  # Flag to block saves during tree restoration
         self.initializing = True  # Flag to prevent focus stealing during startup
-        self.current_tree_filters = ["platform", "genre", "developer", "year"]  # Track active tree filters
         # Libraries hidden via View > Libraries. Storing hidden (not shown) names means
         # newly added libraries are visible by default and stale names are harmless.
         self.hidden_libraries = self._load_hidden_libraries()
@@ -194,101 +124,53 @@ class MainFrame(wx.Frame):
     
     def init_ui(self):
         """Initialize the user interface"""
-        # Notebook: page 0 Library (the player's games), page 1 Catalog
+        # Notebook: page 0 Library (the player's games), page 1 Catalog. Both tabs are built from GamesPanel;
+        # what differs between them is in the settings passed here and in CatalogPanel.
         self.notebook = wx.Notebook(self)
-        self.library_page = wx.Panel(self.notebook)
-        self.catalog_panel = CatalogPanel(self.notebook, self, self.service)
-        self.catalog_page = self.catalog_panel
-        self.notebook.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self.on_tab_changed)
-        panel = self.library_page
-        main_sizer = wx.BoxSizer(wx.VERTICAL)
-        
-        # Menu bar
         self.create_menu_bar()
-        
-        # Library tab order: search, game list, tree, Launch, description
-        # Search combo box
-        search_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        search_label = wx.StaticText(panel, label="Search:")
-        self.search_combo = wx.ComboBox(panel, style=wx.CB_DROPDOWN)
-        self.search_combo.Bind(wx.EVT_TEXT, self.on_search_text)
-        self.search_combo.Bind(wx.EVT_COMBOBOX, self.on_search_select)
-        
-        search_sizer.Add(search_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
-        search_sizer.Add(self.search_combo, 1, wx.EXPAND)
-        
-        main_sizer.Add(search_sizer, 0, wx.EXPAND | wx.ALL, 5)
-        
-        # Splitter for list and tree
-        splitter = wx.SplitterWindow(panel)
-        
-        # Game list
-        self.game_list = GameListCtrl(splitter, self.library_manager, self.status_lookup)
-        self.game_list.SetLabel("Games")
-        self.game_list.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_game_selected)
-        self.game_list.Bind(wx.EVT_LIST_ITEM_ACTIVATED, self.on_game_activated)
-        # Context menu: right-click handled by list event, keyboard shortcuts in on_list_key
-        self.game_list.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_list_context)
-        self.game_list.Bind(wx.EVT_KEY_DOWN, self.on_list_key)
-        
-        # Tree control
-        tree_panel = wx.Panel(splitter)
-        tree_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        # Add hidden label for accessibility
-        tree_label = wx.StaticText(tree_panel, label="Filter games by:")
-        tree_label.Hide()
-        tree_sizer.Add(tree_label, 0, wx.ALL, 0)
+        tree_keys = self.library_manager.config["SavedState"].get("tree_filters")
+        if not isinstance(tree_keys, list):  # an empty list is a valid saved choice
+            tree_keys = [key for key, _ in LIBRARY_TREE]
+        self.library_view = GamesPanel(
+            self.notebook, self, name="Games", categories=LIBRARY_TREE, tree_keys=tree_keys, state_prefix="",
+            idle_label="Launch",
+            columns=[
+                Column(title="Title", model_field=lambda r: r.title, width=200),
+                Column(title="Genre", model_field=lambda r: r.genre, width=150),
+                Column(title="Developer", model_field=lambda r: r.developer, width=150),
+                Column(title="Year", model_field=lambda r: r.year, width=80),
+                Column(title="Platform", model_field=lambda r: ", ".join(r.platforms), width=150),
+                Column(title="Status", model_field=lambda r: self.status_lookup(r.game), width=150),
+            ],
+            sort_keys=[  # one per column
+                lambda r: r.title.lower(),
+                lambda r: r.genre.lower(),
+                lambda r: r.developer.lower(),
+                lambda r: r.year,
+                lambda r: len(r.platforms),
+                lambda r: self.status_lookup(r.game).lower(),
+            ],
+            # View > Libraries: a hidden library's games leave the list. Games outside every library
+            # (library_id "") and web games always show.
+            row_filter=lambda r: r.game.library_id not in self.hidden_libraries,
+            on_action=lambda: self.on_launch(None),
+            context_menu=lambda row: self.build_list_menu(row.game if row else None),
+            on_key=self.on_list_key, on_shown=self.update_tab_menus)
+        self.catalog_panel = CatalogPanel(self.notebook, self, self.service)
+        self.views = {"library": self.library_view, "catalog": self.catalog_panel.view}  # by TABS name
+        for view in self.views.values():
+            view.progress_area.on_cancel = self.cancel_current_job
+        self.notebook.Bind(wx.EVT_NOTEBOOK_PAGE_CHANGED, self.on_tab_changed)
+        self.notebook.AddPage(self.library_view, "Library")
+        self.notebook.AddPage(self.catalog_panel, "Catalog")
 
-        self.tree_ctrl = wx.TreeCtrl(tree_panel,
-                                    style=wx.TR_DEFAULT_STYLE | wx.TR_MULTIPLE)
-        self.tree_ctrl.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_selection)
-        self.tree_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_tree_key)
-
-        tree_sizer.Add(self.tree_ctrl, 1, wx.EXPAND)
-        tree_panel.SetSizer(tree_sizer)
-
-        # Set up splitter - use exposed control property
-        splitter.SplitVertically(self.game_list.control, tree_panel)
-        splitter.SetSashGravity(0.5)
-        
-        main_sizer.Add(splitter, 1, wx.EXPAND)
-        
-        # Launch button, and beside it the install progress while a job runs (it follows Launch in tab order)
-        launch_sizer = wx.BoxSizer(wx.HORIZONTAL)
-        self.launch_btn = wx.Button(panel, label="Launch")
-        self.launch_btn.Bind(wx.EVT_BUTTON, self.on_launch)
-        launch_sizer.Add(self.launch_btn, 0, wx.ALIGN_CENTER_VERTICAL)
-        self.library_progress = ProgressArea(panel)
-        self.library_progress.on_cancel = self.cancel_current_job
-        self.library_progress.Hide()
-        launch_sizer.Add(self.library_progress, 0, wx.ALIGN_CENTER_VERTICAL | wx.LEFT, 10)
-        main_sizer.Add(launch_sizer, 0, wx.ALIGN_CENTER | wx.ALL, 5)
-        self.catalog_panel.progress_area.on_cancel = self.cancel_current_job
-        
-        # Description of the selected catalog game (empty for other games)
-        self.description = DescriptionField(panel, "Description")
-        self.description.SetMinSize((-1, 120))
-        main_sizer.Add(self.description.label_ctrl, 0, wx.LEFT | wx.RIGHT, 5)
-        main_sizer.Add(self.description, 0, wx.EXPAND | wx.ALL, 5)
-        
-        panel.SetSizer(main_sizer)
-
-        self.notebook.AddPage(self.library_page, "Library")
-        self.notebook.AddPage(self.catalog_page, "Catalog")
-        
-        # Store splitter reference
-        self.splitter = splitter
-        
         # Set up keyboard shortcuts
         self.setup_accelerators()
 
-        # Note: Tree will be built after loading saved state
-        # to use the saved filter configuration
+        # Fill the Library list (the view has read its saved search and sort itself)
+        self._refresh_library_rows()
 
-        # Populate initial game list
-        self.refresh_game_list()
-    
     def create_menu_bar(self):
         """Create the menu bar"""
         menu_bar = wx.MenuBar()
@@ -415,10 +297,8 @@ class MainFrame(wx.Frame):
         if event.GetEventObject() is not self.notebook:  # a book control inside a page
             return
         self.library_manager.config["SavedState"]["last_tab"] = self.active_tab()
-        self.library_manager.save_config()
+        self.views[self.active_tab()].save_config()  # a save that fails is logged; the menus and focus still follow
         self.update_tab_menus()
-        if self.active_tab() == "catalog":
-            self.catalog_panel.refresh_rows()  # Library changes may have changed what is installed
         wx.CallAfter(self.focus_active_list)
 
     def update_tab_menus(self):
@@ -426,29 +306,25 @@ class MainFrame(wx.Frame):
         Edit Game is also unavailable while a catalog game is selected; Ctrl+E then still says why (on_edit_game),
         through its own accelerator."""
         on_library = self.active_tab() == "library"
-        game = self.game_list.get_selected_game() if on_library else None
+        game = self.selected_game() if on_library else None
         self.edit_game_item.Enable(on_library and (game is None or is_editable(game)))
         self.delete_game_item.Enable(on_library)
 
     def focus_active_list(self):
-        """Move keyboard focus to the active tab's games list (screen reader pattern: Select, Focus, SetFocus)"""
+        """Move keyboard focus to the active tab's games list (screen reader pattern: select, focused item, SetFocus).
+        Not while the app is starting up or a dialog is open (GamesPanel.focus_list)."""
         if not self:  # the window closed before this ran
             return
-        if self.active_tab() == "library":
-            index = self.game_list.GetFirstSelected()
-            if index < 0 and self.filtered_games:
-                index = 0
-            if index >= 0:
-                self.game_list.Select(index)
-                self.game_list.Focus(index)
-            self.game_list.SetFocus()
-        else:
-            self.catalog_panel.focus_list()
+        self.views[self.active_tab()].focus_list()
+
+    def selected_game(self):
+        """The game selected in the Library list, or None"""
+        row = self.library_view.selected_row()
+        return row.game if row else None
 
     def on_find(self, event):
-        """Ctrl+F: the Library search box"""
-        if self.active_tab() == "library":
-            self.search_combo.SetFocus()
+        """Ctrl+F: the active tab's search box"""
+        self.views[self.active_tab()].search_combo.SetFocus()
 
     def status_lookup(self, game):
         """The Status column's text for a game"""
@@ -474,7 +350,7 @@ class MainFrame(wx.Frame):
         if not self or generation != self._status_generation:  # closed, or a newer result is coming
             return
         self.statuses = statuses
-        self.game_list.refresh_rows()
+        self.library_view.refill()  # the Status column; a list sorted by it is sorted again
 
     def start_index_fetch(self):
         """Fetch the catalog index on a daemon thread (startup, F5 and Retry on the Catalog tab).
@@ -526,30 +402,23 @@ class MainFrame(wx.Frame):
     def _take_index(self, state):
         taken = False
         try:
-            games_before = self.library_manager.games
             self.service.take_index(state)
             taken = True
-            if self.library_manager.games is not games_before:  # a game was adopted (the list is replaced)
-                self.refresh_game_list()
-                self.build_tree(force_rebuild=True)
-            self.refresh_statuses()
-            self.show_description(self.game_list.get_selected_game())
         except Exception:
             log.exception("Couldn't use the fetched catalog index")
         finally:
             self._index_fetching = False
         try:
             if taken:
+                # Always: the index may have replaced games (an adopted launch path), changed a genre, or changed
+                # what a game's description says
+                self.games_changed()
                 self.catalog_panel.set_index_state(state)
         except Exception:
             log.exception("Couldn't show the fetched catalog index")
         finally:
             self.catalog_panel.set_checking(False)  # "Checking for catalog updates" never outlives the fetch
         self._run_pending_refetch()
-
-    def show_description(self, game):
-        """The Library description: the catalog text for a catalog game, empty otherwise"""
-        self.description.set_text(description_text(self.service.entry_for(game)) if game else "")
 
     # ---- work that must wait for modal dialogs ----------------------------------------------------------------
 
@@ -633,249 +502,11 @@ class MainFrame(wx.Frame):
             dlg.Destroy()
 
             # Refresh UI in case they added stuff
-            self.refresh_game_list()
-            self.build_tree(self.current_tree_filters, force_rebuild=True)
-            self.build_libraries_menu()
+            self.games_changed()
 
         # Always continue to main window
         self.initializing = False
         self.focus_active_list()
-    
-    def build_tree(self, filters=None, force_rebuild=False, restore_selections=True):
-        """Build the tree control hierarchy with flat 2-level structure using cache"""
-        # Default to the user's current filter levels so refreshes don't reset them
-        if filters is None:
-            filters = self.current_tree_filters
-
-        # Store the current filters for dialog state
-        self.current_tree_filters = list(filters)
-        filters = self.current_tree_filters
-
-        # Generate a simple hash of games to detect changes
-        current_hash = len(self.library_manager.games)
-        if current_hash > 0:
-            # Include first and last game titles for better change detection
-            current_hash = hash((current_hash,
-                               self.library_manager.games[0].title if self.library_manager.games else "",
-                               self.library_manager.games[-1].title if self.library_manager.games else ""))
-
-        # Check if we can use cached data
-        if not force_rebuild and self._tree_cache is not None and self._games_hash == current_hash:
-            categories = self._tree_cache
-        else:
-            # Collect unique values for each category
-            categories = {
-                "platform": set(),
-                "genre": set(),
-                "developer": set(),
-                "year": set()
-            }
-
-            # Collect every category regardless of active filters, so the cache
-            # stays valid when the user turns a filter level back on
-            for game in self.library_manager.games:
-                for platform in game.platforms:
-                    categories["platform"].add(platform)
-                categories["genre"].add(game.genre or "Unknown Genre")
-                categories["developer"].add(game.developer or "Unknown Developer")
-                categories["year"].add(game.year or "Unknown Year")
-
-            # Cache the results
-            self._tree_cache = categories
-            self._games_hash = current_hash
-
-        # Clear and rebuild tree control
-        self.tree_ctrl.DeleteAllItems()
-        root = self.tree_ctrl.AddRoot("Filters")
-
-        # Category labels and their children
-        category_labels = {
-            "platform": "Platform",
-            "genre": "Genre",
-            "developer": "Developer",
-            "year": "Release Year"
-        }
-
-        for category_key in ["platform", "genre", "developer", "year"]:
-            if category_key in filters and categories[category_key]:
-                # Add category node
-                category_node = self.tree_ctrl.AppendItem(root, category_labels[category_key])
-
-                # Add all values under this category (case-insensitive sort)
-                for value in sorted(categories[category_key], key=str.lower):
-                    self.tree_ctrl.AppendItem(category_node, value)
-
-        # Expand only the root to show categories, but keep all categories collapsed
-        self.tree_ctrl.Expand(root)
-
-        # Restore saved selections (only if requested)
-        if restore_selections:
-            self.restore_tree_selections()
-    
-    def on_tree_selection(self, event):
-        """Handle tree selection changes"""
-        # Save tree selections (skip during restoration to avoid multiple saves)
-        if not self.restoring_tree:
-            self.save_tree_selections()
-        self.apply_filters()
-    
-    def on_tree_key(self, event):
-        """Handle tree keyboard events"""
-        if event.GetKeyCode() == wx.WXK_ESCAPE:
-            # Clear selection
-            self.tree_ctrl.UnselectAll()
-            self.apply_filters()
-        elif event.GetKeyCode() == wx.WXK_DELETE:
-            # Delete selected game if applicable
-            # (Tree doesn't have games anymore, so this might not apply)
-            pass
-        else:
-            event.Skip()
-    
-    def get_tree_selection_criteria(self):
-        """Get filtering criteria from tree selection"""
-        selections = self.tree_ctrl.GetSelections()
-        if not selections:
-            return None
-
-        criteria = {
-            "platforms": set(),
-            "genres": set(),
-            "developers": set(),
-            "years": set()
-        }
-
-        # Category label mapping
-        category_mapping = {
-            "Platform": "platforms",
-            "Genre": "genres",
-            "Developer": "developers",
-            "Release Year": "years"
-        }
-
-        for item in selections:
-            item_text = self.tree_ctrl.GetItemText(item)
-            parent = self.tree_ctrl.GetItemParent(item)
-
-            # Skip root node
-            if parent == self.tree_ctrl.GetRootItem() or not parent:
-                # This is a category node - ignore for now (could add "select all" logic later)
-                continue
-
-            # Get parent category
-            parent_text = self.tree_ctrl.GetItemText(parent)
-            if parent_text in category_mapping:
-                criteria_key = category_mapping[parent_text]
-                criteria[criteria_key].add(item_text)
-
-        return criteria
-
-    def save_tree_selections(self):
-        """Save current tree selections to config"""
-        selections = self.tree_ctrl.GetSelections()
-        paths = []
-
-        for item in selections:
-            item_text = self.tree_ctrl.GetItemText(item)
-            parent = self.tree_ctrl.GetItemParent(item)
-
-            # Skip root node
-            if parent == self.tree_ctrl.GetRootItem() or not parent:
-                continue
-
-            # Build path: "Parent/Child"
-            parent_text = self.tree_ctrl.GetItemText(parent)
-            path = f"{parent_text}/{item_text}"
-            paths.append(path)
-
-        self.library_manager.config["SavedState"]["tree_selections"] = paths
-        self.library_manager.save_config()
-
-    def restore_tree_selections(self):
-        """Restore saved tree selections"""
-        saved_paths = self.library_manager.config["SavedState"]["tree_selections"]
-        if not saved_paths:
-            return
-
-        # Set flag to prevent saving during restoration
-        self.restoring_tree = True
-
-        try:
-            # Clear current selections
-            self.tree_ctrl.UnselectAll()
-
-            # Walk tree to find and select items
-            root = self.tree_ctrl.GetRootItem()
-            if not root:
-                return
-
-            # Iterate through category nodes
-            category_item, cookie = self.tree_ctrl.GetFirstChild(root)
-            while category_item:
-                category_text = self.tree_ctrl.GetItemText(category_item)
-
-                # Iterate through child items
-                child_item, child_cookie = self.tree_ctrl.GetFirstChild(category_item)
-                while child_item:
-                    child_text = self.tree_ctrl.GetItemText(child_item)
-                    path = f"{category_text}/{child_text}"
-
-                    if path in saved_paths:
-                        self.tree_ctrl.SelectItem(child_item, True)
-
-                    child_item, child_cookie = self.tree_ctrl.GetNextChild(category_item, child_cookie)
-
-                category_item, cookie = self.tree_ctrl.GetNextChild(root, cookie)
-        finally:
-            # Always clear the flag
-            self.restoring_tree = False
-
-    def apply_filters(self):
-        """Apply search and tree filters using background thread"""
-        # Stop any existing filter operation
-        if self.filter_worker and self.filter_worker.is_alive():
-            self.filter_worker.stop()
-            self.filter_worker.join(timeout=0.1)  # Brief wait for cleanup
-
-        search_term = self.search_combo.GetValue()
-        tree_criteria = self.get_tree_selection_criteria()
-
-        # Start new filter operation in background
-        self.filter_worker = FilterWorker(
-            self.library_manager.games,
-            search_term,
-            tree_criteria,
-            frozenset(self.hidden_libraries),
-            self.on_filter_complete
-        )
-        self.filter_worker.start()
-
-    def on_filter_complete(self, filtered_games):
-        """Called when background filtering is complete"""
-        self.filtered_games = filtered_games
-        self.game_list.populate(filtered_games)
-
-        # Select and focus item for screen reader accessibility
-        if filtered_games:
-            # Try to restore previously selected game
-            last_selected = self.library_manager.config["SavedState"]["last_selected"]
-            selected_index = 0  # Default to first item
-
-            if last_selected:
-                # Search for the saved game in filtered results
-                for i, game in enumerate(filtered_games):
-                    if game.title == last_selected:
-                        selected_index = i
-                        break
-
-            # Select and focus the item (for screen reader compatibility)
-            # But don't steal keyboard focus - let user stay where they are
-            self.game_list.Select(selected_index)
-            self.game_list.Focus(selected_index)
-            # Removed SetFocus() - was stealing focus from tree control on every filter change
-        else:
-            self.show_description(None)
-        self.update_tab_menus()  # Edit Game follows the selected game
     
     def notify(self, text: str):
         """Tell the player something without a dialog (a Windows notification)"""
@@ -888,9 +519,9 @@ class MainFrame(wx.Frame):
 
     @property
     def progress_areas(self):
-        """Both progress areas (Library, beside Launch; Catalog, in place of its action button). They show the
+        """Both progress areas (each beside its tab's action button). They show the
         same job, whatever is selected."""
-        return [self.library_progress, self.catalog_panel.progress_area]
+        return [view.progress_area for view in self.views.values()]
 
     def on_job_started(self, job):
         if self:
@@ -955,16 +586,10 @@ class MainFrame(wx.Frame):
         self._show_progress(job is not None or waiting > 0)
 
     def _show_progress(self, active):
-        lost_focus = False
-        if self.library_progress.IsShown() != active:
-            lost_focus = not active and self.library_progress.has_focus_inside()
-            self.library_progress.Show(active)
-            self.library_page.Layout()
-        self.catalog_panel.set_busy(active)
+        for view in self.views.values():
+            view.set_busy(active)  # never leaves focus on a control that just hid
         if not active:
             self._shown_job_id = None
-        if lost_focus and not self.dialog_active:  # never leave focus on a control that just hid
-            self.focus_active_list()
 
     def show_installer_wait(self, on_done):
         """WxInstallerUI: "Waiting for the installer", with Done, in both areas (focus stays where it is)"""
@@ -1012,7 +637,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't apply the result of %s", job.title)
         if self._quitting:
             return
-        self._refresh_after_job()
+        self.games_changed()
         self.notify(messages.finished_text(result.action, result.title or job.title, result.notes,
                                            result.backups))
         self._run_job_done_hooks(job)
@@ -1024,7 +649,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't clean up after %s failed", job.title)
         if self._quitting:
             return
-        self._refresh_after_job()
+        self.games_changed()
         self.notify(messages.failed_text(job.request.action, job.title))
         with self.modal_dialog():  # a second failure waits for this box instead of stacking on it
             wx.MessageBox(message, messages.INSTALL_PROBLEM_TITLE, wx.OK | wx.ICON_ERROR, self)
@@ -1038,7 +663,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't clean up after %s was cancelled", job.title)
         if self._quitting:
             return
-        self._refresh_after_job()
+        self.games_changed()
         self._run_job_done_hooks(job)
 
     def _apply_outcomes_on_quit(self):
@@ -1057,15 +682,20 @@ class MainFrame(wx.Frame):
             except Exception:
                 log.exception("Couldn't apply how %s ended while quitting", job.title)
 
-    def _refresh_after_job(self):
-        """Both lists, the Library tree, the Libraries menu and the statuses (a game or a library may have
-        come or gone). None of these moves focus."""
-        for refresh in (self.refresh_game_list, lambda: self.build_tree(force_rebuild=True),
-                        self.build_libraries_menu, self.catalog_panel.refresh_rows, self.refresh_statuses):
+    def games_changed(self):
+        """A game, the games list, a library or what is installed changed, or what the catalog says about a game:
+        bring everything that shows them up to date. Both tabs' rows (each view then brings its tree up to date
+        and keeps its selection), the Libraries menu and the statuses. Every such change calls this, whoever
+        made it. A step that fails is logged and the others still run.
+
+        Focus stays where it is, with one exception that is the view's: when a list becomes empty while focus is
+        on its action button, focus goes to that list (the button is about to be disabled)."""
+        for refresh in (self._refresh_library_rows, self.build_libraries_menu, self.catalog_panel.refresh_rows,
+                        self.refresh_statuses):
             try:
                 refresh()
             except Exception:
-                log.exception("Couldn't refresh after an install job")
+                log.exception("Couldn't refresh after the games changed")
 
     def _run_job_done_hooks(self, job):
         for hook in list(self.job_done_hooks):
@@ -1074,40 +704,12 @@ class MainFrame(wx.Frame):
             except Exception:
                 log.exception("A job-done hook failed")
 
-    def refresh_game_list(self):
-        """Refresh the game list display"""
-        self.apply_filters()
+    def _refresh_library_rows(self):
+        """The Library's part of games_changed(): rebuild its rows from the games and their catalog entries.
+        The view brings its tree up to date, filters again and keeps the selected game selected."""
+        self.library_view.set_rows(library_rows(self.library_manager.games, self.service.entry_for))
         self.update_title()
-    
-    def on_search_text(self, event):
-        """Handle search text changes immediately"""
-        # Apply filters immediately - virtual list makes this fast
-        self.apply_filters()
-    
-    def on_search_select(self, event):
-        """Handle combo box selection"""
-        self.apply_filters()
-    
-    def on_game_selected(self, event):
-        """Handle game selection in list"""
-        # Ignore spurious selection events when modal dialogs are active
-        if self.dialog_active:
-            return
 
-        game = self.game_list.get_selected_game()
-        self.show_description(game)
-        self.update_tab_menus()  # Edit Game is unavailable for a catalog game
-        if game:
-            self.launch_btn.SetLabel(f"Launch {game.title}")
-
-            # Save selected game
-            self.library_manager.config["SavedState"]["last_selected"] = game.title
-            self.library_manager.save_config()
-    
-    def on_game_activated(self, event):
-        """Handle double-click on game"""
-        self.on_launch(None)
-    
     def build_list_menu(self, game):
         """The games list's context menu for a game (or None): Launch, Edit (games added by hand only), Open folder,
         Delete, then a catalog game's actions and links (library_actions decides which), then Add Game.
@@ -1143,51 +745,23 @@ class MainFrame(wx.Frame):
                 log.warning("Couldn't list the extras of %s", game.catalog_id, exc_info=True)
         return catalog_menu_items(game, record, entry, update_available(record, entry, catalog_platform()), extras)
 
-    def on_list_context(self, event):
-        """Show context menu for list (supports both mouse and keyboard)"""
-        game = self.game_list.get_selected_game()
-        menu = self.build_list_menu(game)
-
-        # Determine if this is a mouse event or keyboard event
-        if hasattr(event, 'GetEventType') and event.GetEventType() == wx.wxEVT_LIST_ITEM_RIGHT_CLICK:
-            # Mouse right-click: show at default position (wxPython positions automatically)
-            self.PopupMenu(menu)
-        else:
-            # Keyboard event (Shift+F10, context menu key): show at selected item
-            # Get selected item position
-            selected_index = self.game_list.GetFirstSelected()
-            if selected_index >= 0:
-                # Get item rectangle to position menu near selected item
-                rect = self.game_list.control.GetItemRect(selected_index)
-                pos = wx.Point(rect.x + 10, rect.y + rect.height // 2)
-                self.game_list.control.PopupMenu(menu, pos)
-            else:
-                # No selection, show at default position
-                self.PopupMenu(menu)
-
-        menu.Destroy()
-    
-    def on_list_key(self, event):
-        """Handle list keyboard events"""
+    def on_list_key(self, event) -> bool:
+        """The Library list's own keys (the view handles Enter, Space and the context menu keys); True for a key
+        that was taken"""
         key = event.GetKeyCode()
-
-        if key == ord('E') and event.ControlDown():
+        if key == ord('E') and event.ControlDown() and not event.AltDown():  # with Alt it is AltGr+E, a letter
             self.on_edit_game(None)
         elif key == wx.WXK_DELETE:
             self.on_delete_game(None)
-        elif key in [wx.WXK_RETURN, wx.WXK_SPACE]:
-            self.on_launch(None)
-        elif key == wx.WXK_WINDOWS_MENU or (key == wx.WXK_F10 and event.ShiftDown()):
-            # Applications/context menu key or Shift+F10
-            self.on_list_context(event)
         else:
-            event.Skip()
+            return False
+        return True
 
     def on_open_folder(self, event):
         """Open the game's folder in the file manager"""
         if self.active_tab() != "library":
             return
-        game = self.game_list.get_selected_game()
+        game = self.selected_game()
         if not game:
             return
 
@@ -1198,8 +772,9 @@ class MainFrame(wx.Frame):
         # Get full path to game
         full_path = self.library_manager.get_full_path(game)
         if not full_path or not Path(full_path).exists():
-            wx.MessageBox("Game folder not found.",
-                        "Folder Not Found", wx.OK | wx.ICON_ERROR)
+            with self.modal_dialog():
+                wx.MessageBox("Game folder not found.",
+                            "Folder Not Found", wx.OK | wx.ICON_ERROR)
             return
 
         # Get the game directory
@@ -1215,8 +790,9 @@ class MainFrame(wx.Frame):
                 # macOS - just open the folder
                 subprocess.Popen(['open', game_dir])
         except Exception as e:
-            wx.MessageBox(f"Failed to open folder: {e}",
-                        "Error", wx.OK | wx.ICON_ERROR)
+            with self.modal_dialog():
+                wx.MessageBox(f"Failed to open folder: {e}",
+                            "Error", wx.OK | wx.ICON_ERROR)
 
     def launch_game(self, game):
         """Launch a specific game"""
@@ -1239,11 +815,12 @@ class MainFrame(wx.Frame):
                 supported = ", ".join(game.platforms) if game.platforms else "no platforms"
 
                 # Show error dialog
-                wx.MessageBox(
-                    f"You're trying to run {game.title} on {current_platform}, but it only supports {supported}.",
-                    "Uh-oh",
-                    wx.OK | wx.ICON_ERROR
-                )
+                with self.modal_dialog():
+                    wx.MessageBox(
+                        f"You're trying to run {game.title} on {current_platform}, but it only supports {supported}.",
+                        "Uh-oh",
+                        wx.OK | wx.ICON_ERROR
+                    )
                 return
 
         if game.launch_path.startswith("http"):
@@ -1273,7 +850,7 @@ class MainFrame(wx.Frame):
                             live.launch_path = new_path
                             live.library_id = ""
                             self.library_manager.save_games()
-                            self.refresh_statuses()
+                            self.games_changed()  # the view finds it again by the Game object, under its new id
                     dlg.Destroy()
                 return
 
@@ -1308,8 +885,9 @@ class MainFrame(wx.Frame):
             except LaunchCancelled:
                 pass  # the player declined the administrator prompt: nothing started, nothing to say
             except Exception as e:
-                wx.MessageBox(f"Failed to launch game: {e}",
-                            "Launch Error", wx.OK | wx.ICON_ERROR)
+                with self.modal_dialog():
+                    wx.MessageBox(f"Failed to launch game: {e}",
+                                "Launch Error", wx.OK | wx.ICON_ERROR)
 
     def _launch_problem(self, game, problem):
         """A launch found no executable: the library is unreachable, or a catalog game's files are missing (a
@@ -1329,23 +907,18 @@ class MainFrame(wx.Frame):
 
     def on_launch(self, event):
         """Launch selected game"""
-        game = self.game_list.get_selected_game()
+        game = self.selected_game()
         if not game:
             return
 
         self.launch_game(game)
 
     def on_random_game(self, event):
-        """Pick a random game from filtered list and offer to launch it"""
+        """Ctrl+R: a random game from the active tab's list as shown (GamesPanel.random_game asks, selects its row
+        and acts). Library: among the games that run on this system (web games included); Yes launches it."""
         if self.active_tab() == "catalog":
             self.catalog_panel.on_random_game()
             return
-        if not self.filtered_games:
-            wx.MessageBox("No games available to choose from.",
-                        "No Games", wx.OK | wx.ICON_INFORMATION)
-            return
-
-        # Filter for platform-compatible games only
         current_system = platform.system()
         platform_map = {
             "Windows": "Windows",
@@ -1353,46 +926,27 @@ class MainFrame(wx.Frame):
             "Linux": "Linux"
         }
         current_platform = platform_map.get(current_system, current_system)
-
-        # Get games compatible with current platform (or web games)
-        compatible_games = [
-            game for game in self.filtered_games
-            if game.launch_path.startswith("http") or current_platform in game.platforms
-        ]
-
-        if not compatible_games:
-            wx.MessageBox(
-                f"No games compatible with {current_platform} in the current filtered list.",
-                "No Compatible Games",
-                wx.OK | wx.ICON_INFORMATION
-            )
-            return
-
-        # Pick random game
-        random_game = random.choice(compatible_games)
-
-        # Show dialog (the game object is held until it launches, so no refresh may replace it meanwhile)
-        with self.modal_dialog():
-            response = wx.MessageBox(
-                f"Your game for today is...\n\n{random_game.title}\n\nLaunch now?",
-                "Random Game",
-                wx.YES_NO | wx.ICON_QUESTION
-            )
-
-            if response == wx.YES:
-                self.launch_game(random_game)
+        rows = self.library_view.displayed
+        compatible = [row for row in rows
+                      if row.game.launch_path.startswith("http") or current_platform in row.game.platforms]
+        if rows:
+            none_left = (f"No games compatible with {current_platform} in the current filtered list.",
+                         "No Compatible Games")
+        else:
+            none_left = ("No games available to choose from.", "No Games")
+        self.library_view.random_game(compatible, none_left, lambda row: self.launch_game(row.game))
 
     def on_random_install(self, event):
         """Pick a random game to install from the Catalog tab's filtered list (switching to that tab first)"""
         if self.active_tab() != "catalog":
-            self.notebook.SetSelection(TABS.index("catalog"))  # on_tab_changed refreshes the catalog rows
+            self.notebook.SetSelection(TABS.index("catalog"))
         self.catalog_panel.on_random_install()
 
     def on_edit_game(self, event):
         """Edit selected game"""
         if self.active_tab() != "library":
             return
-        game = self._live_game(self.game_list.get_selected_game())
+        game = self._live_game(self.selected_game())
         if not game:
             return
         if not is_editable(game):  # the catalog owns a catalog game's details; Ctrl+E says so, never silent
@@ -1409,8 +963,7 @@ class MainFrame(wx.Frame):
             try:
                 if dlg.ShowModal() == wx.ID_OK:
                     self.library_manager.save_games()
-                    self.refresh_game_list()
-                    self.refresh_statuses()
+                    self.games_changed()
             finally:
                 dlg.Destroy()
     
@@ -1418,19 +971,16 @@ class MainFrame(wx.Frame):
         """Delete selected game"""
         if self.active_tab() != "library":
             return
-        game = self._live_game(self.game_list.get_selected_game())
+        game = self._live_game(self.selected_game())
         if not game:
             return
-
-        # Remember the current index position to maintain list position after deletion
-        current_index = self.game_list.GetFirstSelected()
 
         kind = delete_kind(game, self.service.record_for(game))
         if kind == "uninstall":  # a catalog install: uninstalled, it leaves the list when that finishes
             self.uninstall_game(game)
             return
         if kind == "forget":
-            self._forget_game(game, current_index)
+            self._forget_game(game)
             return
 
         # Show custom delete dialog
@@ -1452,19 +1002,11 @@ class MainFrame(wx.Frame):
                     del games[i]
                     break
             self.library_manager.save_games()
-            self._after_delete(current_index)
+            # The selection stays on the deleted game's row number, also when another game has the same launch
+            # path and so takes over its row id (catalog_view.pick_index)
+            self.games_changed()
 
-    def _after_delete(self, current_index):
-        """A game left the list: refresh, and select the previous row to stay in the same area of the list"""
-        self.refresh_game_list()
-        self.catalog_panel.refresh_rows()  # a catalog game it was is no longer installed
-        self.refresh_statuses()
-        new_index = max(0, current_index - 1) if current_index > 0 else 0
-        if new_index < len(self.filtered_games):
-            self.game_list.Select(new_index)
-            self.game_list.Focus(new_index)
-
-    def _forget_game(self, game, current_index):
+    def _forget_game(self, game):
         """Delete an untracked catalog install: its record goes and it leaves the list; its files stay"""
         if self._game_busy(game):
             self.focus_active_list()
@@ -1482,11 +1024,11 @@ class MainFrame(wx.Frame):
             log.warning("Couldn't forget %s: %s", live.catalog_id, e)
             self._tell(messages.FORGET_FAILED.format(title=live.title), messages.FORGET_GAME_TITLE)
             if self._live_game(live) is None:  # it left the list after all (games.json couldn't be saved)
-                self._after_delete(current_index)
+                self.games_changed()
             else:  # nothing changed: the selection stays on it
                 self.focus_active_list()
             return
-        self._after_delete(current_index)
+        self.games_changed()
 
     # ---- a catalog game's actions (Library context menu, Delete, a launch that finds no executable) ------------
 
@@ -1556,6 +1098,16 @@ class MainFrame(wx.Frame):
         finally:
             self.focus_active_list()
 
+    def confirm_install(self, plan, fixed_library=None):
+        """The confirmation dialog for a plan (install, update or extras): the player's InstallChoice, or None
+        when they cancelled"""
+        with self.modal_dialog():
+            dlg = InstallConfirmDialog(self, plan, self.service, fixed_library=fixed_library)
+            try:
+                return dlg.get_choice() if dlg.ShowModal() == wx.ID_OK else None
+            finally:
+                dlg.Destroy()
+
     def _confirm_change(self, game, action):
         """Update or Extras: the confirmation dialog for that plan, with the game's library fixed"""
         try:
@@ -1564,14 +1116,7 @@ class MainFrame(wx.Frame):
             log.exception("Couldn't plan %s of %s", action, game.catalog_id)
             self._tell(messages.ACTION_NOT_STARTED.format(title=game.title), "Game Chooser")
             return
-        choice = None
-        with self.modal_dialog():
-            dlg = InstallConfirmDialog(self, plan, self.service, fixed_library=self._fixed_library(game))
-            try:
-                if dlg.ShowModal() == wx.ID_OK:
-                    choice = dlg.get_choice()
-            finally:
-                dlg.Destroy()
+        choice = self.confirm_install(plan, fixed_library=self._fixed_library(game))
         live = self._live_game(game)
         if choice is not None and live is not None and live.catalog_id:
             self._submit_catalog(plan.action, live, extras=choice.extras)
@@ -1634,8 +1179,7 @@ class MainFrame(wx.Frame):
                 if dlg.ShowModal() == wx.ID_OK:
                     self.library_manager.games.append(dlg.game)
                     self.library_manager.save_games()
-                    self.refresh_game_list()
-                    self.refresh_statuses()
+                    self.games_changed()
             finally:
                 dlg.Destroy()
 
@@ -1656,32 +1200,25 @@ class MainFrame(wx.Frame):
         self._toggle_filter("year")
 
     def _toggle_filter(self, filter_key):
-        """Toggle a filter and rebuild tree"""
-        if filter_key in self.current_tree_filters:
-            self.current_tree_filters.remove(filter_key)
+        """Show or hide one category of the Library tree"""
+        keys = list(self.library_view.tree_keys)
+        if filter_key in keys:
+            keys.remove(filter_key)
         else:
-            self.current_tree_filters.append(filter_key)
-
-        # Rebuild tree with updated filters
-        self.build_tree(self.current_tree_filters)
-
-        # Update menu item check states
+            keys.append(filter_key)
+        self.library_manager.config["SavedState"]["tree_filters"] = keys
+        # The view rebuilds the tree, filters again (a selection under a category that went no longer applies)
+        # and then saves the config
+        self.library_view.set_tree_keys(keys)
         self.update_filter_menu_state()
-
-        # Save filter state immediately (prune selections under removed levels)
-        self.save_tree_selections()
-        self.library_manager.config["SavedState"]["tree_filters"] = list(self.current_tree_filters)
-        self.library_manager.save_config()
-
-        # Re-filter: a selection under a removed level no longer applies
-        self.apply_filters()
 
     def update_filter_menu_state(self):
         """Update filter menu item check states based on current filters"""
-        self.filter_platform_item.Check("platform" in self.current_tree_filters)
-        self.filter_genre_item.Check("genre" in self.current_tree_filters)
-        self.filter_developer_item.Check("developer" in self.current_tree_filters)
-        self.filter_year_item.Check("year" in self.current_tree_filters)
+        keys = self.library_view.tree_keys
+        self.filter_platform_item.Check("platform" in keys)
+        self.filter_genre_item.Check("genre" in keys)
+        self.filter_developer_item.Check("developer" in keys)
+        self.filter_year_item.Check("year" in keys)
 
     def _load_hidden_libraries(self):
         """The ids of the libraries the player has hidden"""
@@ -1721,12 +1258,10 @@ class MainFrame(wx.Frame):
             if item_id == library_id:
                 item.Check(library_id not in self.hidden_libraries)
 
-        # Save state
+        # Filter first, save second: a save that fails never stops the filter
         self.library_manager.config["SavedState"]["hidden_libraries"] = sorted(self.hidden_libraries)
-        self.library_manager.save_config()
-
-        # Apply filters
-        self.apply_filters()
+        self.library_view.apply_filters()
+        self.library_view.save_config()
 
     def on_preferences(self, event):
         """Show preferences dialog.
@@ -1752,11 +1287,7 @@ class MainFrame(wx.Frame):
         """Refresh UI after preferences dialog closes; a new catalog address fetches the catalog again"""
         if catalog_changed:
             self.refetch_index()
-        self.refresh_game_list()
-        self.build_tree(force_rebuild=True)
-        self.build_libraries_menu()
-        self.catalog_panel.refresh_rows()
-        self.refresh_statuses()  # a library may have been added, moved or removed
+        self.games_changed()  # a library may have been added, moved or removed
     
     def on_refresh(self, event):
         """F5: on the Catalog tab check for catalog updates; on Library rebuild the game list and tree and
@@ -1764,10 +1295,7 @@ class MainFrame(wx.Frame):
         if self.active_tab() == "catalog":
             self.catalog_panel.check_for_updates()
             return
-        self.refresh_game_list()
-        self.build_tree(force_rebuild=True)
-        self.build_libraries_menu()
-        self.refresh_statuses()
+        self.games_changed()
 
     def on_exit(self, event):
         """Exit application"""
@@ -1796,24 +1324,10 @@ class MainFrame(wx.Frame):
         else:
             self.Centre()
 
-        # Splitter position
-        if state["splitter_position"]:
-            self.splitter.SetSashPosition(state["splitter_position"])
-        else:
-            # Default 50/50 split
-            width = self.GetSize()[0]
-            self.splitter.SetSashPosition(width // 2)
-
-        # Search term
-        if state["last_search"]:
-            self.search_combo.SetValue(state["last_search"])
-
-        # Tree filters (an empty list is a valid saved choice)
-        if isinstance(state.get("tree_filters"), list):
-            self.current_tree_filters = list(state["tree_filters"])
-
-        # Build tree with saved filters (without restoring selections yet)
-        self.build_tree(filters=self.current_tree_filters, restore_selections=False)
+        # Each tab's splitter, now that the window has its size (the search, sort, tree filters and column widths
+        # were read by each view when it was built)
+        for view in self.views.values():
+            view.restore_sash()
 
         # Update menu item check states based on current filters
         self.update_filter_menu_state()
@@ -1827,32 +1341,16 @@ class MainFrame(wx.Frame):
         self.notebook.ChangeSelection(TABS.index(tab))
         self.update_tab_menus()
 
-        # Re-filter now that all saved state (search, filters, hidden libraries) is loaded
-        self.refresh_game_list()
-
     def save_state(self):
         """Save current window state"""
         state = self.library_manager.config["SavedState"]
 
         state["window_size"] = list(self.GetSize())
         state["window_position"] = list(self.GetPosition())
-        state["splitter_position"] = self.splitter.GetSashPosition()
-        state["last_search"] = self.search_combo.GetValue()
         state["last_tab"] = self.active_tab()
-        self.catalog_panel.save_state()
-
-        # Save tree filters
-        state["tree_filters"] = list(self.current_tree_filters)
-
-        # Save hidden libraries
-        state["hidden_libraries"] = sorted(self.hidden_libraries)
-        state.pop("active_libraries", None)
-
-        # Save column widths
-        self.game_list.save_column_widths()
-
-        # Save tree selections
-        self.save_tree_selections()
+        for view in self.views.values():
+            view.save_state()  # splitter position, column widths, search and tree selections
+        # (tree_filters and hidden_libraries are stored by their own toggles)
 
         self.library_manager.save_config()
     

@@ -3,7 +3,7 @@
 import pytest
 
 from engine.pricing import (can_play_free, checked_date, description_lines, donate_link, format_amount,
-                            install_warning, price_text, pricing_of, purchase_link)
+                            install_warning, price_text, pricing_of, purchase_link, shown_price)
 
 
 def p(model, **fields):
@@ -77,6 +77,20 @@ def test_can_play_free():
     assert not can_play_free(p("pay-what-you-want", price=1, currency="USD"))
     assert not can_play_free(p("one-time", price=1, currency="USD"))
     assert not can_play_free(p("subscription"))
+
+
+def test_shown_price_is_the_amount_price_text_names():
+    assert shown_price(p("one-time", price=10, currency="USD")) == 10
+    assert shown_price(p("subscription", price=4.99, currency="USD", period="month")) == 4.99
+    assert shown_price(p("free-to-try", price=5, currency="USD")) == 5
+    assert shown_price(p("pay-what-you-want", price=0, currency="USD", suggested=5)) == 0
+    # price_text names no price for these, so there is none to sort by: no currency, a free model, a period it
+    # doesn't know, no longer sold, only a suggested amount, nothing recorded
+    for pricing in (p("one-time", price=10), p("free", price=9, currency="USD"),
+                    p("subscription", price=2, currency="USD", period="decade"),
+                    p("one-time", price=3, currency="USD", no_longer_sold=True),
+                    p("pay-what-you-want", price="5", currency="USD", suggested=5), p("free"), None):
+        assert shown_price(pricing) is None
 
 
 def test_purchase_and_donate_links():

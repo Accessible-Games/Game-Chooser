@@ -21,16 +21,21 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 
 ### Testing Strategy
 - Logic lives in wx-free modules so it is unit-tested: `catalog_view.py`, `install_choices.py`, `install_prefs.py`,
-  `library_actions.py`, `install_service.py`, `library_manager.py`, `language_names.py`, `engine/`. UI files
-  (`main_window.py`, `dialogs.py`, `install_dialogs.py`, `catalog_panel.py`, `progress_area.py`,
-  `description_field.py`) are not unit-tested; `wx_bridge.py` takes injectable `post` functions so its threading
-  is tested without a running wx app (the test skips when wxPython is not installed).
+  `library_actions.py`, `install_service.py`, `library_manager.py`, `language_names.py`, `engine/`.
+  `wx_bridge.py` takes injectable `post` functions so its threading is tested without a running wx app (the test
+  skips when wxPython is not installed).
+- Of the UI files, `dialogs.py`, `install_dialogs.py`, `progress_area.py` and `description_field.py` are not
+  unit-tested. Three are tested in part, on a frame that is never shown or a stand-in for the main window (these
+  tests skip when wxPython is not installed or there is no display): `games_panel.py`, the games view both tabs
+  are built from (`tests/test_games_panel.py`); in `catalog_panel.py`, what its action button does while a job
+  runs and how its columns sort (`tests/test_catalog_panel.py`); in `main_window.py`, the Library list's own
+  keys and the message boxes of `launch_game` and `on_open_folder` (`tests/test_main_window.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
-- Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, install
-  choices, install prefs, install service, language names, library actions, library integration, library manager,
-  wx bridge, catalog fixtures).
+- Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, catalog
+  panel, games panel, main window, install choices, install prefs, install service, language names, library
+  actions, library integration, library manager, wx bridge, catalog fixtures).
 - `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
   except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
   build check) cover the tracing build.
@@ -39,9 +44,9 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 ## Rules that hold everywhere
 
 ### Threading
-UI thread for all wx work and every change to games, records and libraries. Background threads: `FilterWorker`,
-index fetch, status computation, the player-file counts, `GameDialog`'s duplicate check, the install queue's
-worker and notifier.
+UI thread for all wx work and every change to games, records and libraries; both tabs' lists are filtered and
+sorted there too. Background threads: index fetch, status computation, the player-file counts, `GameDialog`'s
+duplicate check, the install queue's worker and notifier.
 
 **`InstallService` threading rule.** Three members change no games, records or libraries, and the code runs them
 on worker threads: `fetch_index()` (it also saves the fetched index in the cache folder), `statuses()` and
@@ -89,7 +94,18 @@ Nothing outside `tracing/` and its tests (`tests/tracing/`) imports it; the one 
 `game-chooser.py`, inside `try/except ImportError`.
 
 ### Focus
-The progress area and background refreshes never move focus.
+The progress area and background refreshes never move focus, with three exceptions. The first is `GamesPanel`'s:
+when the control that has focus is about to become unusable (the action button as its list empties, the progress
+area as it hides), focus goes to that tab's games list; never while a dialog is open.
+
+The second is `ProgressArea`'s: when its Done button hides while it has focus, focus goes to the Cancel button
+beside it (`hide_done_button`).
+
+The third is `CatalogPanel`'s, decided on Nov 12, 2026: it stays, so that a catalog that could not be fetched is
+announced. It moves focus on a background event in two places. When a fetched index is taken and there is no
+catalog to show (the status line says why, with Retry) while the Catalog tab is showing, focus goes to the status
+line (`set_index_state`). When the status line or Retry hides while it has focus, focus goes to the Catalog's
+games list (`_update_status`). Neither happens while a dialog is open or the app is starting.
 
 ### Migration
 No migration (alpha): write no migration code.
@@ -121,8 +137,9 @@ Each file loads when a file it covers is read or edited.
   attribution, the capture filter, modules.
 - `catalog-install.md` - the install service, queue and installer bridges, the Catalog tab, catalog schema v2,
   install confirmation, progress area, Library catalog actions and launching.
-- `ui-main-window.md` - the main window and Library tab, the rest of modal safety, the quit sequence, keyboard
-  shortcuts, accessibility and focus, the Preferences and first-run dialogs.
+- `ui-main-window.md` - the main window and Library tab, the games view both tabs are built from (`GamesPanel`),
+  the rest of modal safety, the quit sequence, keyboard shortcuts, accessibility and focus, the Preferences and
+  first-run dialogs.
 - `libraries-and-config.md` - libraries (install folders), `reconcile_catalog_records`, `config.json`, a damaged
   `games.json` or `config.json`, paths and executable detection.
 - `build.md` - `build_windows.sh`, the scripts, the dependencies that are not on PyPI, the license.

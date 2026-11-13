@@ -98,6 +98,11 @@ def shows_amount(pricing: dict | None) -> bool:
     return model is not None and not no_longer_sold(pricing) and price_text(pricing) != model
 
 
+def shown_price(pricing: dict | None) -> float | int | None:
+    """The price price_text names (never the suggested one), or None when it names none."""
+    return _number(pricing.get("price")) if shows_amount(pricing) else None
+
+
 def checked_date(pricing: dict | None) -> str | None:
     """pricing.checked as "1 November 2026", or None when missing or not a YYYY-MM-DD date."""
     pricing = _dict(pricing)

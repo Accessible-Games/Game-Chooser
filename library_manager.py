@@ -156,13 +156,16 @@ class GameLibraryManager:
                 "last_selected": None,
                 "last_search": "",
                 "column_widths": None,
-                "tree_expansion": {},
                 "tree_selections": [],
                 "tree_filters": ["platform", "genre", "developer", "year"],
                 "last_tab": None,
                 "catalog_last_selected": None,
                 "catalog_last_search": "",
-                "catalog_tree_selections": []
+                "catalog_tree_selections": [],
+                "catalog_column_widths": None,
+                "catalog_splitter_position": None,
+                "catalog_sort_column": 0,
+                "catalog_sort_ascending": True
             },
             "install": {
                 "catalog_url": DEFAULT_CATALOG_URL,

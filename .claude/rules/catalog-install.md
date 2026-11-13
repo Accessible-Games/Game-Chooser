@@ -2,6 +2,7 @@
 paths:
   - "/install_*.py"
   - "/catalog_*.py"
+  - "/games_panel.py"
   - "/library_*.py"
   - "/wx_bridge.py"
   - "/main_window.py"
@@ -22,8 +23,11 @@ paths:
 - **install_prefs.py** - wx-free validation of the Installing preferences
 - **install_service.py** - `InstallService`: catalog index + engine + queue + games/records/libraries
 - **library_actions.py** - wx-free: Library tab context menu, Edit/Delete rules, Uninstall/Remove wording
-- **catalog_panel.py** - the Catalog tab; **catalog_view.py** - wx-free rows, filters, description text,
-  links; **language_names.py** - ISO 639-1 codes to English names (unknown codes shown as written)
+- **catalog_panel.py** - the Catalog tab: its status line, Retry and what a row's action does, around a
+  `GamesPanel` (`games_panel.py`, the games view both tabs share; see `.claude/rules/ui-main-window.md`);
+  **catalog_view.py** - wx-free rows for both tabs (`build_rows` for catalog entries, `library_rows` for the
+  player's games), filters, `pick_index`, the type-ahead matching, description text, links;
+  **language_names.py** - ISO 639-1 codes to English names (unknown codes shown as written)
 - **wx_bridge.py** - queue listener and installer-UI bridges to the UI thread, `run_in_background`
 
 ## Install service (`install_service.py`)
@@ -44,10 +48,13 @@ Which thread each member runs on: see CLAUDE.md (Threading).
 - `call_after(fn, *args)` and `run_in_background(work, done, name, ...)`.
 
 ## Catalog tab and catalog entries
-- **Catalog tab** (`CatalogPanel`): index entries as rows (`catalog_view.build_rows`), a filter tree (platform,
+- **Catalog tab** (`CatalogPanel`; its search, list, tree, button and description are a `GamesPanel`,
+  `catalog_panel.view`): index entries as rows (`catalog_view.build_rows`), a filter tree (platform,
   genre (any of its genres), tags, price (each model plus "Can be played for free"), language, developer, year,
   support ("No longer supported"), installed), search (title, developer and a collection's `contains` titles),
-  columns Title / Developer / Genre (the main one) / Price / Details (tags, no longer supported, installed), and an
+  columns Title / Developer / Genre (the main one) / Price / Details (tags, no longer supported, installed), each
+  one sortable (Price by `catalog_view.price_sort_key`: what can be played for free first, then by the amount
+  shown, amounts compared as plain numbers whatever the currency; nothing recorded last), and an
   action button that reads Install / Add / Launch per row (`catalog_view.action_kind`). Links open in the
   browser only when the player chooses them. The panel never fetches: `MainFrame.start_index_fetch` fetches on a
   worker and hands the state to `_take_index` through `run_when_no_dialog`. Retry and F5 fetch again.
@@ -63,10 +70,17 @@ Which thread each member runs on: see CLAUDE.md (Threading).
 ## Installing and the Library's catalog actions
 - **Install confirmation** (`InstallConfirmDialog`; wording and decisions in `install_choices.py`): library
   choice (or a fixed one), optional extras, dependencies, and a blocked reason from `InstallService.blocked`.
-  Returns an `InstallChoice(library_id, library_path, extras)`.
-- **Progress area** (`ProgressArea`): shows the queue's current job, never the selected game. One copy on the
-  Catalog tab and one beside Launch, all driven by `MainFrame._sync_progress`. Done appears while an installer
-  runs; Cancel cancels the job. Focus: see CLAUDE.md (Focus).
+  Returns an `InstallChoice(library_id, library_path, extras)`. Both tabs open it through
+  `MainFrame.confirm_install(plan, fixed_library=None)`, and say things through `MainFrame._tell`.
+- **Progress area** (`ProgressArea`): shows the queue's current job, never the selected game. One copy beside
+  each tab's action button, all driven by `MainFrame._sync_progress`; the button stays usable. Done appears while
+  an installer runs; Cancel cancels the job. Focus: see CLAUDE.md (Focus).
+- **Install while a job runs or waits** (`CatalogPanel._confirm_install`): on a game that itself has a job
+  queued or running it says so (`messages.JOB_ALREADY_RUNNING` / `JOB_ALREADY_WAITING`) and changes nothing.
+  That includes a running job that is being cancelled (`InstallQueue.job_for` still counts it: it may still be
+  changing the game's files), for which the queue's `submit` would queue a new job; for any other, `submit`
+  would return that same job anyway. Another game is planned, confirmed and queued as usual. An installed row
+  reads Launch, which is the Library's launch and is not held back by a job.
 - **Library catalog actions** (`library_actions.py`): context menu for catalog games (Update, Undo, Extras,
   Repair, Uninstall, plus links). Delete on a tracked catalog install is **Uninstall** (`delete_kind`: "uninstall";
   "forget" for an untracked install, files untouched; else "delete"). An uninstall that stopped partway (record

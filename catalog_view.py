@@ -1,16 +1,19 @@
-"""Catalog tab helpers: turn catalog index entries into list rows, filter-tree categories and description text.
+"""What both tabs' games views show: catalog index entries (the Catalog tab) and the player's games (the Library
+tab) as list rows, with their filter-tree categories and description text.
 
 Never imports wx and never fetches anything (an agarchive link is shown like any other link, never fetched).
 Entries follow catalog schema v2; a saved version 1 index may still be shown, so old shapes (links as an object,
 flags) are skipped, never an error.
 """
 import re
+import time
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from engine import messages
 from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, platform_sources
-from engine.pricing import can_play_free, description_lines, donate_link, price_text, pricing_of, purchase_link
+from engine.pricing import (can_play_free, description_lines, donate_link, price_text, pricing_of, purchase_link,
+                            shown_price)
 from language_names import language_name
 
 _UNKNOWN = {"genre": "Unknown Genre", "developer": "Unknown Developer", "year": "Unknown Year"}
@@ -31,13 +34,14 @@ class CatalogRow:
     year: str
     platforms: list[str]
     installed: bool
-    entry: dict
+    entry: dict | None  # None for a Library game the catalog doesn't list
     tags: list[str]
     languages: list[str]  # names, such as "French"
     contains: list[str]
     unsupported: bool
     price: str  # how the price reads; empty when not recorded
     price_values: set[str]  # the Price branch values this row is under
+    game: object = None  # a Library row's Game (library_rows); a Catalog row has none
 
     @property
     def genre(self) -> str:
@@ -114,6 +118,41 @@ def build_rows(entries: list[dict], installed_ids: set[str]) -> list[CatalogRow]
     return rows
 
 
+def library_rows(games, entry_for) -> list[CatalogRow]:
+    """The player's games as rows, so the Library tab filters, labels and describes them as the Catalog tab does.
+    `entry_for(game)` gives a catalog game's index entry (None for a game added by hand, or one the catalog no
+    longer lists).
+
+    The id is the catalog id, else the launch path: it stays the same when the Game object is replaced. Two
+    games can share a launch path (Locate has no duplicate check, games.json can be edited by hand); a repeat
+    then gets its number among them added, so every row has an id of its own. That number follows the games'
+    order: when the first of them is deleted or gets another path, its id passes to the next one, so the selected
+    game is looked for by its object first (`pick_index`). The values are the game's own (games.json): one genre,
+    the developer text as one value, even when it names several people."""
+    rows, used = [], set()
+    for game in games:
+        base = row_id = game.catalog_id or game.launch_path
+        repeat = 1
+        while row_id in used:
+            repeat += 1
+            row_id = f"{base} #{repeat}"
+        used.add(row_id)
+        rows.append(CatalogRow(
+            id=row_id,
+            title=game.title,
+            developer=game.developer,
+            developers=[game.developer] if game.developer else [],
+            genres=[game.genre] if game.genre else [],
+            year=game.year,
+            platforms=list(game.platforms),
+            installed=True,
+            entry=entry_for(game),
+            tags=[], languages=[], contains=[], unsupported=False, price="", price_values=set(),
+            game=game,
+        ))
+    return rows
+
+
 def _row_values(row: CatalogRow) -> dict[str, set[str]]:
     """Each filter-tree category's values for a row. Tags, price, language and support have no "unknown" value:
     a row that doesn't record them is simply not under them."""
@@ -150,7 +189,7 @@ def tree_values(key: str, values) -> list[str]:
 def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[CatalogRow]:
     """OR within a criterion, AND across criteria; an empty or missing criterion matches everything.
     Search matches the title, the developer and the titles of the games a collection contains, case-insensitively;
-    a search containing "unknown" matches nothing (as in the Library's FilterWorker)."""
+    a search containing "unknown" matches nothing."""
     term = (search or "").strip().lower()
     if "unknown" in term:
         return []
@@ -163,6 +202,95 @@ def filter_rows(rows, search: str, criteria: dict[str, set[str]]) -> list[Catalo
             continue
         result.append(row)
     return result
+
+
+class TypeAhead:
+    """The text a player is typing into a games list to jump to a title. A character continues the text when it
+    comes within `timeout` seconds of the key before it (a Space included); later than that it starts a new text.
+    A Space has longer: it belongs to the text for `space_timeout` seconds after the last character that is not a
+    Space (a player waits for the screen reader to finish the row), and Spaces do not push that limit out.
+    `clock` is the time source, so a test needs no sleep."""
+
+    def __init__(self, clock=time.monotonic, timeout=1.0, space_timeout=3.0):
+        self.clock, self.timeout, self.space_timeout = clock, timeout, space_timeout
+        self._text, self._last_key, self._last_char = "", 0.0, 0.0
+
+    def typing(self) -> bool:
+        """Whether a character typed now continues the text: then a digit belongs to it"""
+        return bool(self._text) and self.clock() - self._last_key <= self.timeout
+
+    def takes_space(self) -> bool:
+        """Whether a Space typed now belongs to the text; if not, it is the list's action"""
+        return bool(self._text) and self.clock() - self._last_char <= self.space_timeout
+
+    def add(self, char: str) -> str:
+        """The text with this character added. A Space that comes too late adds nothing: it starts no text."""
+        now = self.clock()
+        if char != " ":
+            self._text = (self._text if self.typing() else "") + char
+            self._last_key = self._last_char = now
+        elif self.takes_space():
+            self._text, self._last_key = self._text + " ", now
+        return self._text
+
+    def clear(self):
+        """End the text now: the player has moved on (an arrow key, Escape)"""
+        self._text = ""
+
+
+def type_ahead_index(titles, text: str, current: int) -> int:
+    """The row a typed text jumps to, as in a Windows list: the first title at or after row `current` that starts
+    with it, wrapping round; -1 when none does. One letter, typed once or repeated, steps on to the next title
+    that starts with that letter instead. Any case (casefolded); only the start of the title counts."""
+    text = text.casefold()
+    if not text or not titles:
+        return -1
+    step = len(set(text)) == 1
+    prefix, start = (text[0], current + 1) if step else (text, max(current, 0))
+    for offset in range(len(titles)):
+        index = (start + offset) % len(titles)
+        if titles[index].casefold().startswith(prefix):
+            return index
+    return -1
+
+
+def price_sort_key(row: CatalogRow) -> tuple:
+    """How the Price column sorts: what can be played for free first, then by the amount the column shows (as
+    text, "$10" would come before "$5"), then by how the price reads; a game with no price recorded comes last.
+    Amounts are compared as plain numbers, whatever their currency."""
+    pricing = pricing_of(row.entry)
+    if pricing is None:
+        return (2, 0, "")
+    free, amount = can_play_free(pricing), shown_price(pricing)
+    if amount is None:  # no amount shown: a free one is as good as 0, any other comes after those with one
+        amount = 0 if free else float("inf")
+    return (0 if free else 1, amount, row.price.lower())
+
+
+def pick_index(rows, wanted_id, fallback: int, wanted_game=None) -> int:
+    """The row to select in a list that was just refilled: the wanted game's; when that game is not listed, row
+    number `fallback`, clamped to the list; -1 for an empty list.
+
+    `wanted_game` is the Game of the row that was selected (a Library row; a Catalog row has none, and there
+    is no row at the first fill or after an empty list). The row that holds that same object is the game,
+    whatever its id is now: a new launch path changes the id of a game added by hand, and the old id may then be
+    another game's (two games with one launch path). A game added by hand is never another object, so when no
+    row holds it, it is gone and its id is not asked. A catalog game's object is replaced by a finished job or an
+    index take: its catalog id finds it then. `wanted_id` alone decides for a Catalog row, and whenever no row
+    was selected."""
+    if not rows:
+        return -1
+    by_id = True
+    if wanted_game is not None:
+        for index, row in enumerate(rows):
+            if row.game is wanted_game:
+                return index
+        by_id = bool(wanted_game.catalog_id)
+    if by_id:
+        for index, row in enumerate(rows):
+            if row.id == wanted_id:
+                return index
+    return min(max(fallback, 0), len(rows) - 1)
 
 
 _FENCE = re.compile(r"^[ \t]*(```|~~~)")
