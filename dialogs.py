@@ -23,7 +23,6 @@ from pathlib import Path
 
 import wx
 import platform
-import threading
 from contextlib import nullcontext
 from library_manager import LibraryError
 from engine import messages
@@ -320,18 +319,14 @@ class GameDialog(wx.Dialog):
         self._check_duplicates_async(path, platform_val, year_str)
 
     def _check_duplicates_async(self, path, platform_val, year_str):
-        """Asynchronously check for duplicate games and complete validation"""
-        def check_duplicates():
-            """Background thread to check for duplicates"""
+        """Look for a game with this path on a worker (a drive can be slow to answer), then finish here"""
+        def find():
             try:
-                duplicate_info = self._find_duplicate_game(path)
-                wx.CallAfter(self._on_duplicate_check_complete, duplicate_info, path, platform_val, year_str)
+                return self._find_duplicate_game(path), None
             except Exception as e:
-                wx.CallAfter(self._on_duplicate_check_error, str(e))
-
-        # Start background thread
-        thread = threading.Thread(target=check_duplicates, daemon=True)
-        thread.start()
+                return None, str(e)
+        run_in_background(find, lambda found: self._on_duplicate_check_complete(*found, path, platform_val, year_str),
+                          "duplicate-check")
 
     def _find_duplicate_game(self, path):
         """Find if a game with this path already exists"""
@@ -363,8 +358,14 @@ class GameDialog(wx.Dialog):
 
         return None
 
-    def _on_duplicate_check_complete(self, duplicate_info, path, platform_val, year_str):
+    def _on_duplicate_check_complete(self, duplicate_info, error, path, platform_val, year_str):
         """Handle duplicate check completion"""
+        if not self or not self.IsModal():  # closed meanwhile (Escape), or an earlier Add's check finished it
+            return
+        if error is not None:
+            wx.MessageBox(f"Error checking for duplicates: {error}\n\nGame will not be saved.",
+                          "Duplicate Check Failed", wx.OK | wx.ICON_ERROR)
+            return
         if duplicate_info:
             duplicate_game = duplicate_info['game']
             match_type = duplicate_info['type']
@@ -387,11 +388,6 @@ class GameDialog(wx.Dialog):
 
         # No duplicates found, complete the validation
         self._complete_validation(path, platform_val, year_str)
-
-    def _on_duplicate_check_error(self, error_msg):
-        """Handle duplicate check error"""
-        wx.MessageBox(f"Error checking for duplicates: {error_msg}\n\nGame will not be saved.",
-                     "Duplicate Check Failed", wx.OK | wx.ICON_ERROR)
 
     def _complete_validation(self, path, platform_val, year_str):
         """Complete validation and save the game"""
