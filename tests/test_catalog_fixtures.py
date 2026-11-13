@@ -102,6 +102,14 @@ def test_published_index_is_schema_version_2(tmp_path):
             assert "extends" not in entry
 
 
+def test_tar_game_extracts_without_the_bundled_tools(tmp_path):
+    build, state = load(tmp_path)
+    install = state.entries["test-game-tar"]["sources"][0]["install"]
+    root = Extractor(tmp_path / "no-tools").extract(build / "files" / "test-game-tar.tar.gz", tmp_path / "out",
+                                                     install, lambda: False)
+    assert (root / "game.bat").is_file() and (root / "data.dat").is_file()
+
+
 def test_extras_are_listed_on_every_game_they_extend(tmp_path):
     _, state = load(tmp_path)
     assert state.entries["test-extra"]["extends"] == ["test-game-extras"]
