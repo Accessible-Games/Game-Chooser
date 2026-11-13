@@ -19,6 +19,8 @@ _CAPTURE_RE = re.compile(r"^capture(?:-(\d+))?\.pml$", re.IGNORECASE)
 
 REPLACE_TRIES = 10
 REPLACE_DELAY = 0.015
+READ_TRIES = 5  # status.json can't be read for a moment while the recorder replaces it
+READ_RETRY_SECONDS = 0.02
 
 
 def replace_with_retry(src: Path, dst: Path, *, replace: Callable | None = None,
@@ -241,7 +243,18 @@ def recorder_alive(status: dict | None, is_alive: IsAlive) -> bool:
     return pid is not None and is_alive(pid, status.get("recorder_start"))
 
 
+def _read_status(run: RunDir) -> dict | None:
+    """status.json; a file that is there but can't be read is read again, so a recorder caught in the middle of
+    replacing it is not mistaken for a run with no status."""
+    for _ in range(READ_TRIES):
+        status = run.read_status()
+        if status is not None or not run.status_path.exists():
+            return status
+        time.sleep(READ_RETRY_SECONDS)
+    return None
+
+
 def leftover_runs(traces_dir: Path, is_alive: IsAlive) -> list[RunDir]:
     """Runs with a capture that is not split and whose recorder is gone."""
     return [run for run in run_dirs(traces_dir)
-            if run.capture_files() and not run.is_split() and not recorder_alive(run.read_status(), is_alive)]
+            if run.capture_files() and not run.is_split() and not recorder_alive(_read_status(run), is_alive)]

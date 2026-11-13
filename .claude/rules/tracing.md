@@ -29,7 +29,8 @@ Build: see `.claude/rules/build.md`.
   the app), `--trace-split [RUN...]` (split leftover runs after a crash; prints "No runs to split." when there are none;
   a named RUN that has `split.json` and no capture left prints "already split, nothing to do"; a named RUN whose
   capture was kept is split again; without RUN only runs with no `split.json` whose recorder is gone are split,
-  checked as `--trace-stop` checks it: `runfiles.leftover_runs`),
+  checked as `--trace-stop` checks it, a status that can't be read for a moment read again
+  (`runfiles.leftover_runs`, `runfiles._read_status`)),
   `--trace-stop [RUN] [--close-games]` (end the run in progress while traced programs are still open; see Ending a
   run below), `-h`/`--help` beside any command (print the help and run nothing; alone it is not a tracing command),
   `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds),
@@ -47,7 +48,7 @@ Build: see `.claude/rules/build.md`.
   run whose recorder is alive (`status.json`'s `recorder_pid` and `recorder_start`, so a pid given to another
   program doesn't count; `cli._recorder_is_alive`) and that has not ended, writes `stop-request.json` into its
   folder (atomic), then waits and prints what the recorder did (`Wrote <folder>`, `Problem: ...`). A status that
-  can't be read for a moment is read again and never taken for the recorder's death. The
+  can't be read for a moment is read again and never taken for the recorder's death (`runfiles._read_status`). The
   recorder polls for the request in its loop (`Recorder._take_stop`): it writes `stop.json` (the sessions its live
   tree counts as running; rewritten after every process asked, ended or refused), and only then sets the status
   to `stopping` (the app reads the status first, so this order is what keeps the title change quiet; a test pins

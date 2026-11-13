@@ -13,29 +13,16 @@ from typing import Callable
 
 from tracing.clock import now_filetime
 from tracing.recorder import CLOSE_WAIT_SECONDS
-from tracing.runfiles import IsAlive, RunDir, leftover_runs, recorder_alive, run_dirs
+from tracing.runfiles import IsAlive, RunDir, _read_status, leftover_runs, recorder_alive, run_dirs
 from tracing.splitrun import report_split
 
 ACK_SECONDS = 30.0  # how long a capturing recorder gets to take the request
 POLL_SECONDS = 0.5
-READ_TRIES = 5  # status.json can't be read for a moment while the recorder replaces it
-READ_RETRY_SECONDS = 0.02
 
 CLOSE_NOTE = (f"The traced games are asked to close; any still open after {CLOSE_WAIT_SECONDS:g} seconds are "
               "ended. Unsaved game progress is lost. A game started through the administrator prompt is left open.")
 NOTHING = "No tracing run is in progress."
 _PROGRESS = {"stopping": "The recorder is ending the run.", "splitting": "Splitting the capture."}
-
-
-def _read_status(run: RunDir) -> dict | None:
-    """status.json; a file that is there but can't be read is read again, so a recorder caught in the middle of
-    replacing it is not mistaken for a run with no status."""
-    for _ in range(READ_TRIES):
-        status = run.read_status()
-        if status is not None or not run.status_path.exists():
-            return status
-        time.sleep(READ_RETRY_SECONDS)
-    return None
 
 
 def _ended(run: RunDir, status: dict | None) -> bool:

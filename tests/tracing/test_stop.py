@@ -5,7 +5,7 @@ import pytest
 
 from tests.tracing.test_recorder import Clock, FakeProcmon
 from tests.tracing.test_split import CHILD, CHOOSER, ROOT, ev, info
-from tracing import messages, recorder, stop
+from tracing import messages, recorder, runfiles, stop
 from tracing.live import LiveProc
 from tracing.runfiles import RunDir, new_run, run_dirs
 from tracing.splitrun import split_run_dir
@@ -398,7 +398,7 @@ def test_a_status_that_cannot_be_read_at_first_is_read_again(s, monkeypatch):
         return None if len(reads) == 1 else real(self)
 
     monkeypatch.setattr(RunDir, "read_status", flaky)
-    monkeypatch.setattr(stop, "READ_RETRY_SECONDS", 0)
+    monkeypatch.setattr(runfiles, "READ_RETRY_SECONDS", 0)
     s.script = [finish(run)]
     assert s.stop() == 0 and run.read_stop_request() is not None
 

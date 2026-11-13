@@ -77,6 +77,20 @@ def test_leftover_runs(tmp_path):
     assert leftover_runs(tmp_path / "missing", lambda pid, start: False) == []
 
 
+def test_a_live_run_whose_status_cannot_be_read_at_first_is_not_left_over(tmp_path, monkeypatch):
+    live = new_run(tmp_path, FT, 2)
+    live.write_status("capturing", recorder_pid=22, recorder_start=7)
+    live.capture_path.write_bytes(b"x")
+    real, reads = RunDir.read_status, []
+
+    def flaky(self):  # caught while the recorder replaces it
+        reads.append(1)
+        return None if len(reads) == 1 else real(self)
+
+    monkeypatch.setattr(RunDir, "read_status", flaky)
+    assert leftover_runs(tmp_path, lambda pid, start: (pid, start) == (22, 7)) == []
+
+
 class FlakyReplace:
     def __init__(self, failures):
         self.failures, self.calls, self.replace = failures, 0, runfiles.os.replace
