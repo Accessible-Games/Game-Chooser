@@ -27,6 +27,11 @@ _ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 _PLATFORM_LABELS = {"windows": "Windows", "macos": "macOS", "linux": "Linux", "web": "Web"}
 
 
+def platform_label(platform: str) -> str:
+    """The player's word for a catalog platform ("macos" is "macOS"); "" for one it doesn't know"""
+    return _PLATFORM_LABELS.get(platform, "")
+
+
 def current_platform() -> str:
     if sys.platform.startswith("win"):
         return "windows"
@@ -257,7 +262,7 @@ def game_fields(entry: dict, platform: str | None = None) -> dict:
     """The games.json fields. With `platform`, the platform label is that of the first source for it (the one
     an install uses); without, the entry's first source."""
     sources = platform_sources(entry, platform) if platform else _sources(entry)
-    platforms = [_PLATFORM_LABELS.get(sources[0].get("platform"), "")] if sources else []
+    platforms = [platform_label(sources[0].get("platform"))] if sources else []
     genres = [g for g in entry.get("genres") or [] if isinstance(g, str) and g.strip()]
     year = entry.get("year")
     return {

@@ -40,7 +40,7 @@ from games_panel import GamesPanel
 from catalog_panel import CatalogPanel
 from dialogs import GameDialog, PreferencesDialog, FirstTimeSetupDialog
 from engine import messages
-from engine.entries import current_platform as catalog_platform
+from engine.entries import current_platform as catalog_platform, platform_label
 from engine.records import record_folder
 from engine.status import update_available
 from install_dialogs import InstallConfirmDialog, UninstallDialog
@@ -718,18 +718,7 @@ class MainFrame(wx.Frame):
         """Launch a specific game"""
         # Check platform compatibility for non-web games
         if not game.is_web:
-            # Get current platform
-            current_system = platform.system()
-
-            # Map system name to our platform names
-            platform_map = {
-                "Windows": "Windows",
-                "Darwin": "macOS",
-                "Linux": "Linux"
-            }
-            current_platform = platform_map.get(current_system, current_system)
-
-            # Check if current platform is supported by the game
+            current_platform = platform_label(catalog_platform())
             if current_platform not in game.platforms:
                 # Build supported platforms string
                 supported = ", ".join(game.platforms) if game.platforms else "no platforms"
@@ -825,13 +814,7 @@ class MainFrame(wx.Frame):
         if self.active_tab() == "catalog":
             self.catalog_panel.on_random_game()
             return
-        current_system = platform.system()
-        platform_map = {
-            "Windows": "Windows",
-            "Darwin": "macOS",
-            "Linux": "Linux"
-        }
-        current_platform = platform_map.get(current_system, current_system)
+        current_platform = platform_label(catalog_platform())
         rows = self.library_view.displayed
         compatible = [row for row in rows
                       if row.game.is_web or current_platform in row.game.platforms]

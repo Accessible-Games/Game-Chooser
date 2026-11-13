@@ -44,6 +44,7 @@ def frame(app, monkeypatch, tmp_path):
     monkeypatch.setattr(wx, "MessageBox", lambda text, caption="", style=0, parent=None:
                         frame.boxes.append((caption, style, parent, frame.dialog_active)))
     monkeypatch.setattr(main_window.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(main_window, "catalog_platform", lambda: "windows")
     return frame
 
 
