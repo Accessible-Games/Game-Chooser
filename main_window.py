@@ -214,19 +214,11 @@ class MainFrame(wx.Frame):
         # Filter Tree submenu
         filter_tree_menu = wx.Menu()
 
-        # Store menu items as instance variables for state updates
-        self.filter_platform_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Platform")
-        self.Bind(wx.EVT_MENU, self.on_toggle_filter_platform, self.filter_platform_item)
-
-        self.filter_genre_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Genre")
-        self.Bind(wx.EVT_MENU, self.on_toggle_filter_genre, self.filter_genre_item)
-
-        self.filter_developer_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Developer")
-        self.Bind(wx.EVT_MENU, self.on_toggle_filter_developer, self.filter_developer_item)
-
-        self.filter_year_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Year")
-        self.Bind(wx.EVT_MENU, self.on_toggle_filter_year, self.filter_year_item)
-
+        self.filter_items = {}  # criteria key -> check item, for state updates
+        for key, label in LIBRARY_TREE:
+            item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&" + label.replace("Release ", ""))  # menu: "Year"
+            self.Bind(wx.EVT_MENU, lambda event, k=key: self._toggle_filter(k), item)
+            self.filter_items[key] = item
         view_menu.AppendSubMenu(filter_tree_menu, "&Filter Tree")
 
         # Libraries submenu (populated in load_saved_state)
@@ -1098,22 +1090,6 @@ class MainFrame(wx.Frame):
                 self.library_manager.games.append(dlg.game)
                 self._save_games()
 
-    def on_toggle_filter_platform(self, event):
-        """Toggle platform filter in tree"""
-        self._toggle_filter("platform")
-
-    def on_toggle_filter_genre(self, event):
-        """Toggle genre filter in tree"""
-        self._toggle_filter("genre")
-
-    def on_toggle_filter_developer(self, event):
-        """Toggle developer filter in tree"""
-        self._toggle_filter("developer")
-
-    def on_toggle_filter_year(self, event):
-        """Toggle year filter in tree"""
-        self._toggle_filter("year")
-
     def _toggle_filter(self, filter_key):
         """Show or hide one category of the Library tree"""
         keys = list(self.library_view.tree_keys)
@@ -1129,11 +1105,8 @@ class MainFrame(wx.Frame):
 
     def update_filter_menu_state(self):
         """Update filter menu item check states based on current filters"""
-        keys = self.library_view.tree_keys
-        self.filter_platform_item.Check("platform" in keys)
-        self.filter_genre_item.Check("genre" in keys)
-        self.filter_developer_item.Check("developer" in keys)
-        self.filter_year_item.Check("year" in keys)
+        for key, item in self.filter_items.items():
+            item.Check(key in self.library_view.tree_keys)
 
     def _load_hidden_libraries(self):
         """The ids of the libraries the player has hidden"""
