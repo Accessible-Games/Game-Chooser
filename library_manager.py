@@ -311,7 +311,7 @@ class GameLibraryManager:
         if missing:
             entries = self._cached_entries()
             for rec in missing:
-                entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id, "title": rec.catalog_id}
+                entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id}  # titled by its id
                 self.games.append(Game.from_dict(game_fields_for(entry, rec)))
             changed = True
         if changed:  # a damaged games.json is copied first, or not written over (save_games)
