@@ -17,7 +17,7 @@ import os
 import sys
 from dataclasses import dataclass
 
-from tracing.attribution import ROOT_SLACK, UNKNOWN_PID, find_root_by_exe
+from tracing.attribution import ROOT_SLACK, UNKNOWN_PID, exe_key, find_root_by_exe
 from tracing.closing import WindowsProcesses
 
 
@@ -35,7 +35,7 @@ class _Session:
         self.root_start = root_start
         self.exe = exe
         self.launch_after = started_at if launch_after is None else launch_after
-        self.game_dir = os.path.normcase(os.path.normpath(game_dir)) if game_dir else None
+        self.game_dir = exe_key(game_dir)
         self.started_at = started_at
         self.members: set[tuple[int, int]] = set()
         self.live: list[LiveProc] = []  # the members in the last snapshot
@@ -45,9 +45,8 @@ class _Session:
     def _inside_game_dir(self, image_path):
         if not self.game_dir or not image_path:
             return False
-        image = os.path.normcase(os.path.normpath(image_path))
         try:
-            return os.path.commonpath([self.game_dir, image]) == self.game_dir
+            return os.path.commonpath([self.game_dir, exe_key(image_path)]) == self.game_dir
         except ValueError:
             return False
 

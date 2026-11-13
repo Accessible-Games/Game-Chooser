@@ -9,7 +9,7 @@ UNKNOWN_PID = 0  # root_pid when the launch handed back no process ID
 
 
 def exe_key(path: str | None) -> str | None:
-    """A path as compared when the root is found by its executable: normalized, case folded on Windows."""
+    """A path as tracing compares it (the root's exe, the game folder): normalized, case folded on Windows."""
     return os.path.normcase(os.path.normpath(path)) if path else None
 
 
