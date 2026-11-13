@@ -455,8 +455,8 @@ class InstallEngine:
         private_notes = self._private_after_installer(entry, record, list(private))
         copy_notes = self._copies_after_installer(entry, record, list(private))
         return JobResult(action, entry["id"], title, game_fields_for(entry, record, self.ctx.platform),
-                         [*([fetched.note] if fetched.note else []), *notes, *extra_notes,
-                          *(c.note for c in private if c.note), *private_notes, *copy_notes], backups=backups)
+                         [*([fetched.note] if fetched.note else []), *notes, *extra_notes, *private_notes,
+                          *copy_notes], backups=backups)
 
     def _copies_after_installer(self, entry: dict, rec: InstallRecord, copies: list[runtimes.PrivateCopy],
                                 ids: list[str] | None = None) -> list[str]:
@@ -474,9 +474,9 @@ class InstallEngine:
 
     def _private_after_installer(self, entry: dict, rec: InstallRecord,
                                  copies: list[runtimes.PrivateCopy]) -> list[str]:
-        """Give a game whose installer has run its private COM copies (engine.runtimes). An untracked
-        folder, or one outside the libraries that needs administrator permission, gets none: the notes
-        say it needs each shared component."""
+        """Give a game whose installer has run its private COM copies (engine.runtimes), with their downloads'
+        notes. An untracked folder, or one outside the libraries that needs administrator permission, gets
+        none: the notes say it needs each shared component."""
         title = _title(entry)
         game_dir = record_folder(rec, self.ctx.libraries)
         if not copies and not any(runtimes.is_runtime_owner(f.owner) for f in rec.files.values()):
@@ -484,7 +484,8 @@ class InstallEngine:
         elif not rec.tracked or game_dir is None or (not rec.library_id and not _can_write(game_dir)):
             notes = runtimes.needs_shared_notes(title, [c.runtime for c in copies])
         else:
-            return runtimes.private_after_installer(self.ctx, rec, game_dir, copies, title)
+            return [*(c.note for c in copies if c.note),
+                    *runtimes.private_after_installer(self.ctx, rec, game_dir, copies, title)]
         if rec.private_runtimes is None:
             rec.private_runtimes = []
             self.ctx.records.save(rec)

@@ -1488,16 +1488,20 @@ def test_repair_keeps_a_private_copy_after_the_preference_is_turned_on(tmp_path,
     assert eng.ctx.elevator.calls == [] and eng.ctx.records.load("dx8vb") is None
 
 
-def test_repair_restores_a_missing_private_copy(tmp_path, private_com):
+@pytest.mark.parametrize("runs", [False, True], ids=["archive", "installer-run"])
+def test_repair_restores_a_missing_private_copy(tmp_path, private_com, runs):
     routes = {}
-    rt, g = dx8vb(routes), game(routes)
-    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
-    run(eng, "install")
-    folder = lib / "Entombed"
+    rt = dx8vb(routes)
+    g = run_mode_game(routes) if runs else game(routes)
+    folder = tmp_path / "Games" / g["title"]
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False,
+                     elevator=FakeElevator(on_start=writes_game(folder)))
+    run(eng, "install", id=g["id"])
     (folder / "dx8vb.dll").unlink()
-    run(eng, "repair")
-    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / "entombed.exe.manifest").exists()
-    assert eng.ctx.records.load("entombed").private_runtimes == ["dx8vb"]
+    run(eng, "repair", id=g["id"])
+    exe = eng.ctx.records.load(g["id"]).launch_path
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / f"{exe}.manifest").exists()
+    assert eng.ctx.records.load(g["id"]).private_runtimes == ["dx8vb"]
 
 
 @pytest.mark.parametrize("action", ["repair", "undo"])
