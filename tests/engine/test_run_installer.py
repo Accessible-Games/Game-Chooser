@@ -1231,10 +1231,15 @@ def test_vendor_uninstall_whose_uninstaller_never_started_puts_files_back_and_ca
     assert error.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
     assert not setaside(eng).exists()
     assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save", "unins000.exe": b"uninstaller"}
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.uninstalled and rec.vendor_uninstaller and "unins000.exe" in rec.files
     eng.ctx.elevator.decline = False
     eng.ctx.elevator.on_start = None  # the uninstaller itself changes nothing here
     eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert eng.ctx.elevator.calls[-1][0] == str(target / "unins000.exe")
     assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    rec = eng.ctx.records.load("lightcars")
+    assert rec.uninstalled and rec.files == {} and rec.vendor_uninstaller is None
 
 
 # Findings C and D: a cancel that keeps the copies says where they are, in words that fit what happened.
@@ -1361,23 +1366,3 @@ def test_run_and_wait_checks_the_cancel_before_starting(tmp_path):
     with pytest.raises(Cancelled) as ei:
         run_installer._run_and_wait(eng.ctx, "Light Cars", "setup.exe", "", False, None, quiet, lambda: True)
     assert ei.value.tree_done and eng.ctx.elevator.calls == []
-
-
-def test_a_failed_vendor_uninstall_can_be_finished_by_uninstalling_again(tmp_path):
-    from engine.errors import ElevationDeclined
-    eng, routes, target = installed_run_game(tmp_path, vendor=True)
-    elevator = eng.ctx.elevator
-
-    def declined(exe, args, elevated):
-        raise ElevationDeclined("The administrator prompt was declined.")
-    elevator.on_start = declined
-    fails(eng.run, InstallRequest("uninstall", "lightcars"), quiet, never)
-    rec = eng.ctx.records.load("lightcars")
-    assert rec.uninstalled and rec.vendor_uninstaller and "unins000.exe" in rec.files
-    assert snapshot(target)["cfg.ini"] == b"volume=9 mine" and snapshot(target)["saves/slot1.sav"] == b"save"
-    elevator.on_start = None  # accepted this time
-    eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert elevator.calls[-1][0] == str(target / "unins000.exe")
-    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
-    rec = eng.ctx.records.load("lightcars")
-    assert rec.uninstalled and rec.files == {} and rec.vendor_uninstaller is None
