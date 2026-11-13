@@ -56,6 +56,8 @@ def test_index_loads_and_every_entry_is_readable(tmp_path):
     assert {"test-game", "test-game-no-path", "test-game-extras", "trace-test"} <= visible
     assert {"test-game-tar", "test-game-page", "test-game-hta"} <= visible
     assert not {"test-extra", "test-shared-extra"} & visible  # an extra is not a game
+    assert state.entries["test-game-no-path"]["pricing"]["model"] == "free-to-try" and \
+        state.entries["test-game-tar"]["sources"][0]["first_run_download_size"] == 50 * 2**20
 
 
 def test_every_source_matches_its_built_file_and_points_at_the_local_server(tmp_path):
