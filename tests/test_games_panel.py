@@ -981,8 +981,8 @@ def test_a_held_space_acts_once(make_view):
     assert press(view.list_ctrl, wx.WXK_SPACE, repeat=True)  # held mid-text: never the action
     now[0] += 3.5
     type_text(view, " ")
-    for _ in range(3):  # taken, so the list control never turns them into an activation
-        assert press(view.list_ctrl, wx.WXK_SPACE, repeat=True)
+    for key in (wx.WXK_SPACE, wx.WXK_SPACE, wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):  # held: taken, never acted on
+        assert press(view.list_ctrl, key, repeat=True)
     assert acted == ["Temple Of Doom"]
 
 
