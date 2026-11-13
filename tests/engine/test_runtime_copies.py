@@ -392,27 +392,37 @@ def test_installer_run_game_ships_its_own_copy(tmp_path):
     assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == "lightcars"
 
 
-@pytest.mark.parametrize("action", ["repair", "undo"])
+@pytest.mark.parametrize("action", ["update", "repair", "undo"])
 @pytest.mark.parametrize("shared_folder", ["gone", "untrusted"])
-def test_installer_run_repair_and_undo_keep_the_copy_they_have_nothing_to_copy_from(tmp_path, action, shared_folder):
+@pytest.mark.parametrize("shared_com", [True, False], ids=["shared-com", "private-com"])
+def test_installer_run_game_keeps_the_copy_it_has_nothing_to_copy_from(tmp_path, private_com, monkeypatch, action,
+                                                                         shared_folder, shared_com):
+    monkeypatch.setenv("GC_DXLIB", str(tmp_path / "system"))
     routes = {}
-    rt, g = dx8vb_entry(routes), run_mode_game(routes)
+    rt = {**plain_runtime(routes, "dxlib"), "detect": {"file": "%GC_DXLIB%\\dxlib.dll"}}
     folder = tmp_path / "Games" / "Light Cars"
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=writes_game(folder)))
+    eng, lib = setup(tmp_path, [dx8vb_entry(routes), rt, run_mode_game(routes, dependencies=["dx8vb", "dxlib"])],
+                     routes, register_shared_components=shared_com, elevator=FakeElevator(on_start=writes_game(folder)))
+    def publish(version):
+        eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=version.encode(),
+                                                     version=version, dependencies=["dx8vb", "dxlib"])
     run(eng, "install", id="lightcars")
     if action == "undo":
-        eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=b"MZ setup v2", version="2.0")
+        publish("2.0")
         run(eng, "update", id="lightcars")
-    assert (folder / "dx8vb.dll").read_bytes() == DX8VB
-    runtime_folder = eng.ctx.runtimes_root / "dx8vb"
+    assert (folder / "dxlib.dll").read_bytes() == b"dxlib"
+    runtime_folder = eng.ctx.runtimes_root / "dxlib"
     if shared_folder == "gone":
         shutil.rmtree(runtime_folder)
     else:
         eng.ctx.security.set_owner(runtime_folder, "S-1-5-21-3000-3000-3000-1003")  # another account's folder
-    eng.ctx.registry.set("HKLM", r"SOFTWARE\Classes\DxVBLibA.DirectX8", "", "REG_SZ", "DirectX8")  # present
+    (tmp_path / "system").mkdir()
+    (tmp_path / "system" / "dxlib.dll").write_bytes(b"dxlib")  # present by its detect hint
+    if action == "update":
+        publish("3.0")
     run(eng, action, id="lightcars")
-    assert (folder / "dx8vb.dll").read_bytes() == DX8VB
-    assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == OWNER
+    assert (folder / "dxlib.dll").read_bytes() == b"dxlib"
+    assert eng.ctx.records.load("lightcars").files["dxlib.dll"].owner == "runtime:dxlib"
 
 
 def test_untracked_installer_run_game_gets_a_note_instead(tmp_path, monkeypatch):

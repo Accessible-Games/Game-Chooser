@@ -980,12 +980,12 @@ def private_after_installer(ctx, rec: InstallRecord, game_dir: Path, copies: lis
     """For a tracked game whose installer has run and whose launch exe is known: replace its private COM
     copies with `copies` (already unpacked), beside the exe, with the manifest, and save the record.
 
-    The earlier copies' files (recorded with a runtime owner) are removed where unchanged; a changed
-    one is the player's now. The new files are recorded with their runtime as owner, so uninstall
+    The files of the runtimes private before or now (recorded with their owner) are removed where
+    unchanged; a changed one is the player's now. The new files are recorded with their runtime as owner, so uninstall
     removes them and the extras never claim them. If the copies can't work, they are removed again
     and the notes say the game needs each shared component. Returns those notes.
     """
-    _remove_recorded_private(rec, game_dir)
+    _remove_recorded_private(rec, game_dir, [*(rec.private_runtimes or []), *(c.runtime["id"] for c in copies)])
     exe = game_dir / rec.launch_path
 
     def keep(usable: list[PrivateCopy]) -> None:
@@ -1001,9 +1001,10 @@ def private_after_installer(ctx, rec: InstallRecord, game_dir: Path, copies: lis
     return notes
 
 
-def _remove_recorded_private(rec: InstallRecord, game_dir: Path) -> None:
+def _remove_recorded_private(rec: InstallRecord, game_dir: Path, ids: list[str]) -> None:
+    owners = {runtime_owner(runtime_id) for runtime_id in ids}  # other runtimes' copies are copies_after_installer's
     for key, recorded in list(rec.files.items()):
-        if is_runtime_owner(recorded.owner):
+        if recorded.owner in owners:
             _drop_recorded(rec, key, game_dir)
 
 
