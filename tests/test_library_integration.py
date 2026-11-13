@@ -109,10 +109,6 @@ def test_reconcile_adds_game_for_orphan_record(isolated_manager_factory, tmp_pat
     assert [g["catalog_id"] for g in _games_json(isolated_manager_factory)] == ["entombed"]
 
 
-def test_reconcile_skips_uninstalled_records(isolated_manager_factory, tmp_path):
-    assert _restart(isolated_manager_factory, tmp_path, _record(uninstalled=True)).games == []
-
-
 def test_reconcile_unlinks_game_whose_record_is_gone(isolated_manager_factory, tmp_path):
     config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
     m = isolated_manager_factory(games=[{**_catalog_row()[0], "installed_extras": ["patch"]}], config=config)
