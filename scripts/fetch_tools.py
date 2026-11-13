@@ -34,6 +34,13 @@ def download(url: str, dest: Path, expected: str) -> None:
         raise SystemExit(f"SHA256 mismatch for {url}: expected {expected or '(none recorded)'}, got {actual}")
 
 
+def extract(zf: zipfile.ZipFile, name: str, dest: Path, url: str) -> None:
+    if name not in zf.namelist():
+        raise SystemExit(f"{name} not found in {url}")
+    with zf.open(name) as src, open(dest, "wb") as dst:
+        shutil.copyfileobj(src, dst)
+
+
 def main() -> None:
     BIN.mkdir(exist_ok=True)
     licenses = BIN / "licenses"
@@ -55,16 +62,11 @@ def main() -> None:
         shutil.copy2(out / "License.txt", licenses / "7-Zip-License.txt")
 
         with zipfile.ZipFile(inno_zip) as zf:
-            names = zf.namelist()
-            if "innoextract.exe" not in names:
-                raise SystemExit(f"innoextract.exe not found in {INNOEXTRACT_URL}")
-            with zf.open("innoextract.exe") as src, open(BIN / "innoextract.exe", "wb") as dst:
-                shutil.copyfileobj(src, dst)
+            extract(zf, "innoextract.exe", BIN / "innoextract.exe", INNOEXTRACT_URL)
             # The zip ships its own license/ folder (innoextract's zlib license plus its bundled libraries').
-            for name in names:
+            for name in zf.namelist():
                 if name.startswith("license/") and not name.endswith("/"):
-                    with zf.open(name) as src, open(licenses / Path(name).name, "wb") as dst:
-                        shutil.copyfileobj(src, dst)
+                    extract(zf, name, licenses / Path(name).name, INNOEXTRACT_URL)
     print("Tools are in", BIN)
 
 

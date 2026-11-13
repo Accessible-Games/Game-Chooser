@@ -5,13 +5,12 @@ The zip is checked against a pinned SHA256. Process Monitor is never committed o
 is git-ignored, and only the tracing build copies it into its own dist folder.
 """
 
-import shutil
 import sys
 import tempfile
 import zipfile
 from pathlib import Path
 
-from fetch_tools import download  # scripts/ is on the path when this script runs
+from fetch_tools import download, extract  # scripts/ is on the path when this script runs
 
 ROOT = Path(__file__).resolve().parent.parent
 PROCMON_DIR = ROOT / "tracing-tools" / "procmon"
@@ -32,12 +31,8 @@ def main() -> None:
             raise SystemExit(f"{mismatch}. Sysinternals may have released a new version. Check its signature, then "
                              "update PROCMON_SHA256.") from None
         with zipfile.ZipFile(archive) as zf:
-            names = zf.namelist()
             for name in FILES:
-                if name not in names:
-                    raise SystemExit(f"{name} not found in {PROCMON_URL}")
-                with zf.open(name) as src, open(PROCMON_DIR / name, "wb") as dst:
-                    shutil.copyfileobj(src, dst)
+                extract(zf, name, PROCMON_DIR / name, PROCMON_URL)
     print("Process Monitor is in", PROCMON_DIR)
 
 
