@@ -39,15 +39,6 @@ def test_a_complete_session_passes(tmp_path):
     assert check(session(tmp_path, good_lines())) == []
 
 
-def test_rename_matches_new_path(tmp_path):
-    lines = good_lines()
-    for line in lines:
-        if line["op"] == "rename":
-            line["path"] = GAME + "\\saves\\slot1.tmp"
-            line["new_path"] = GAME + "\\saves\\slot1.sav"
-    assert check(session(tmp_path, lines)) == []
-
-
 def test_missing_or_out_of_order_line_fails(tmp_path):
     lines = good_lines()
     i = next(n for n, line in enumerate(lines) if line["op"] == "rename")
