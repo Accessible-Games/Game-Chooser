@@ -249,6 +249,8 @@ def test_install_failed_message_passed_through(tmp_path):
     j = r.queue.submit(req("a"), "A")
     r.listener.wait_for(("failed", "a", "Plain words."))
     assert j.state == "failed"
+    r.queue.submit(req("b"), "B")  # the worker still takes jobs after a failure
+    r.listener.wait_for(("finished", "b"))
     r.queue.shutdown(WAIT)
 
 
