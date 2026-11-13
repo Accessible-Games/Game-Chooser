@@ -1309,6 +1309,17 @@ def test_preference_off_non_com_runtime_still_installs_shared(tmp_path):
 
 
 @pytest.mark.parametrize("shared", [True, False], ids=["shared", "private"])
+def test_runtime_whose_developer_file_changed_is_installed_with_the_note(tmp_path, private_com, shared):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    rt["sources"][0].update(label="Developer", url="https://dev.example.com/dx8vb.dll")
+    routes[rt["sources"][0]["url"]] = b"MZ the developer re-uploaded this"
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=shared)
+    r = run(eng, "install")
+    assert r.notes == [messages.DEVELOPER_CHANGED_UNVERIFIED]
+
+
+@pytest.mark.parametrize("shared", [True, False], ids=["shared", "private"])
 def test_full_disk_while_unpacking_a_runtime_gets_plain_words(tmp_path, private_com, shared):
     class FullDisk(ZipExtractor):
         def extract(self, archive, dest, install, cancel):

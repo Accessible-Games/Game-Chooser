@@ -550,9 +550,11 @@ def _clear_or_fail(path: Path) -> None:
         raise InstallFailed(messages.TEMP_FOLDER_NOT_CLEARED.format(path=path))
 
 
-def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cancel) -> None:
+def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cancel) -> list[str]:
     """Install each runtime machine-wide, in order. `fetch(item, work_dir)` downloads the catalog's file
-    (raising InstallFailed when none verifies); `work` is an empty folder for the downloads."""
+    (raising InstallFailed when none verifies); `work` is an empty folder for the downloads. Returns the
+    downloads' notes for the player (the developer changed a file)."""
+    notes = []
     for runtime in runtimes:
         _check(cancel)
         progress(Progress("installing_dependency", detail=_title(runtime)))
@@ -569,6 +571,9 @@ def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cance
                 _unpack(ctx, runtime, fetched, target, work_dir / "unpacked", cancel)
         finally:
             _clear(work_dir)
+        if fetched.note:
+            notes.append(fetched.note)
+    return notes
 
 
 def _make_root(ctx, runtime: dict) -> None:
@@ -872,6 +877,7 @@ class PrivateCopy:
     usable: bool = True
     root: Path | None = None  # where it was unpacked in staging
     hashes: dict[str, tuple[str, str]] = field(default_factory=dict)  # hash_tree(root), taken once it was unpacked
+    note: str | None = None  # the download's note for the player (the developer changed the file)
 
 
 def stage_private(ctx, runtimes: list[dict], tree: Path, staging: Path, work: Path, fetch,
@@ -920,7 +926,7 @@ def unpack_private(ctx, runtimes: list[dict], staging: Path, work: Path, fetch,
             _clear(work_dir)
         _check(cancel)
         copies.append(PrivateCopy(runtime, [], [], [s.get("path") for s in steps if s.get("action") == "register"],
-                                  root=root, hashes=hashes))
+                                  root=root, hashes=hashes, note=fetched.note))
     return copies
 
 
