@@ -139,17 +139,16 @@ def test_unknown_action_in_file_steps_is_hard_error(tmp_path):
         run_file_steps([{"path": "a"}], tmp_path)
 
 
-def test_failed_system_step_undoes_predecessors_in_reverse(tmp_path, fake_winreg):
+def test_failed_system_step_undoes_predecessors_in_reverse(tmp_path, fake_winreg, ctx, fake_elev):
     fake_winreg.put(HKCU, r"Software\Game", "Path", "before", fake_winreg.REG_SZ)
     (tmp_path / "x.dll").write_bytes(b"x")
     (tmp_path / "setup.exe").write_bytes(b"x")
-    elev = FakeElevator(exit_codes={str(tmp_path / "setup.exe"): 2})
-    ctx = StepContext(tmp_path, elev, RegistryAccess(elev, hkcu=fake_winreg))
+    fake_elev.exit_codes[str(tmp_path / "setup.exe")] = 2
     with pytest.raises(StepError):
         run_system_steps([hkcu_step("Path", "first"), hkcu_step("Path", "second"),
                           {"action": "register", "path": "x.dll"}, {"action": "run", "path": "setup.exe"}], ctx)
     assert fake_winreg.value(HKCU, r"Software\Game", "Path") == ("before", fake_winreg.REG_SZ)
-    assert elev.calls[-1] == ("regsvr32.exe", f'/u /s "{tmp_path / "x.dll"}"', True)
+    assert fake_elev.calls[-1] == ("regsvr32.exe", f'/u /s "{tmp_path / "x.dll"}"', True)
 
 
 def test_file_step_order_is_kept(tmp_path):
@@ -200,31 +199,28 @@ def test_register_is_elevated_regsvr32(tmp_path, ctx, fake_elev):
     assert fake_elev.shown == [False, False]  # no console window flashing up and taking the focus (I2)
 
 
-def test_register_missing_file_or_failure_is_step_error(tmp_path):
-    elev = FakeElevator(exit_codes={"regsvr32.exe": 5})
-    ctx = StepContext(tmp_path, elev, RegistryAccess(elev, hkcu=FakeWinreg()))
+def test_register_missing_file_or_failure_is_step_error(tmp_path, ctx, fake_elev):
+    fake_elev.exit_codes["regsvr32.exe"] = 5
     with pytest.raises(StepError):
         run_system_steps([{"action": "register", "path": "missing.dll"}], ctx)
-    assert elev.calls == []
+    assert fake_elev.calls == []
     (tmp_path / "x.dll").write_bytes(b"x")
     with pytest.raises(StepError):
         run_system_steps([{"action": "register", "path": "x.dll"}], ctx)
 
 
-def test_run_step_substitutes_dir_and_fails_on_nonzero(tmp_path):
+def test_run_step_substitutes_dir_and_fails_on_nonzero(tmp_path, ctx, fake_elev):
     (tmp_path / "bin").mkdir()
     exe = tmp_path / "bin" / "setup.exe"
     exe.write_bytes(b"x")
-    elev = FakeElevator()
-    ctx = StepContext(tmp_path, elev, RegistryAccess(elev, hkcu=FakeWinreg()))
     applied = run_system_steps([{"action": "run", "path": "bin\\setup.exe", "args": '/cfg "{dir}\\cfg"'}], ctx)
-    assert elev.calls == [(str(exe), f'/cfg "{tmp_path}\\cfg"', False)]
+    assert fake_elev.calls == [(str(exe), f'/cfg "{tmp_path}\\cfg"', False)]
     assert applied == []
-    elev.exit_codes[str(exe)] = 3
+    fake_elev.exit_codes[str(exe)] = 3
     with pytest.raises(StepError) as exc:
         run_system_steps([{"action": "run", "path": "bin/setup.exe"}], ctx)
     assert "3" in str(exc.value)
-    assert elev.calls[-1] == (str(exe), "", False)
+    assert fake_elev.calls[-1] == (str(exe), "", False)
 
 
 def test_run_step_missing_file_is_step_error(tmp_path, ctx, fake_elev):
@@ -233,10 +229,9 @@ def test_run_step_missing_file_is_step_error(tmp_path, ctx, fake_elev):
     assert fake_elev.calls == []
 
 
-def test_elevation_declined_message(tmp_path, fake_winreg):
+def test_elevation_declined_message(tmp_path, fake_winreg, ctx, fake_elev):
     (tmp_path / "dx8vb.dll").write_bytes(b"x")
-    elev = FakeElevator(decline=True)
-    ctx = StepContext(tmp_path, elev, RegistryAccess(elev, hkcu=fake_winreg))
+    fake_elev.decline = True
     with pytest.raises(StepError) as exc:
         run_system_steps([{"action": "register", "path": "dx8vb.dll"}], ctx)
     assert "Administrator permission was declined" in str(exc.value)
@@ -258,28 +253,24 @@ def test_hklm_registry_step_and_undo_go_through_reg_exe(tmp_path, ctx, fake_elev
     assert undo_steps(applied, ctx) == []
 
 
-def test_undo_never_raises_and_reports_each_failure(tmp_path, fake_winreg):
+def test_undo_never_raises_and_reports_each_failure(tmp_path, fake_winreg, ctx, fake_elev):
     (tmp_path / "a.dll").write_bytes(b"x")
     (tmp_path / "b.dll").write_bytes(b"x")
-    elev = FakeElevator()
-    ctx = StepContext(tmp_path, elev, RegistryAccess(elev, hkcu=fake_winreg))
     applied = run_system_steps([{"action": "register", "path": "a.dll"}, hkcu_step("Path", "v"),
                                 {"action": "register", "path": "b.dll"}], ctx)
-    elev.exit_codes["regsvr32.exe"] = 4
+    fake_elev.exit_codes["regsvr32.exe"] = 4
     failures = undo_steps(applied, ctx)
     assert len(failures) == 2
     assert all(isinstance(f, str) and f for f in failures)
     assert "b.dll" in failures[0] and "a.dll" in failures[1]
     assert fake_winreg.value(HKCU, r"Software\Game", "Path") is None
-    assert [c[1] for c in elev.calls[-2:]] == [f'/u /s "{tmp_path / "b.dll"}"', f'/u /s "{tmp_path / "a.dll"}"']
+    assert [c[1] for c in fake_elev.calls[-2:]] == [f'/u /s "{tmp_path / "b.dll"}"', f'/u /s "{tmp_path / "a.dll"}"']
 
 
-def test_undo_reports_declined_elevation_and_continues(tmp_path, fake_winreg):
+def test_undo_reports_declined_elevation_and_continues(tmp_path, fake_winreg, ctx, fake_elev):
     (tmp_path / "a.dll").write_bytes(b"x")
-    elev = FakeElevator()
-    ctx = StepContext(tmp_path, elev, RegistryAccess(elev, hkcu=fake_winreg))
     applied = run_system_steps([hkcu_step("Path", "v"), {"action": "register", "path": "a.dll"}], ctx)
-    elev.decline = True
+    fake_elev.decline = True
     failures = undo_steps(applied, ctx)
     assert len(failures) == 1 and "a.dll" in failures[0]
     assert fake_winreg.value(HKCU, r"Software\Game", "Path") is None
