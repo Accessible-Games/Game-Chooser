@@ -39,10 +39,6 @@ class Game:
         self.installed_extras = installed_extras
 
     @property
-    def is_catalog(self):
-        return bool(self.catalog_id)
-
-    @property
     def is_web(self):
         return self.launch_path.lower().startswith(("http://", "https://"))
 
