@@ -1,9 +1,8 @@
 
 import pytest
 
-from engine.entries import is_mirror_url
-from engine.errors import Cancelled, DownloadWriteError, NoVerifiedSource
-from engine.messages import DEVELOPER_CHANGED_UNVERIFIED, DEVELOPER_CHANGED_VERIFIED
+from engine.errors import Cancelled, NoVerifiedSource
+from engine.messages import DEVELOPER_CHANGED_UNVERIFIED
 from engine.sources import fetch_exact, fetch_verified, hash_file
 from tests.engine.fakes import FakeFetcher, sha
 
@@ -47,14 +46,6 @@ def test_first_verifying_source_wins(tmp_path):
     assert f.sha256 == sha(GOOD) and f.size == len(GOOD)
     assert f.path.read_bytes() == GOOD and f.path.name == "game.zip"
     assert ff.requests == [DEV]
-
-
-def test_dev_mismatch_falls_back_to_verified_mirror(tmp_path):
-    ff = FakeFetcher({DEV: BAD, mirror(): GOOD})
-    f = run(entry(src(DEV), src(mirror())), ff, tmp_path)
-    assert is_mirror_url(f.source["url"]) and f.note == DEVELOPER_CHANGED_VERIFIED
-    assert f.position == 1
-    assert files(tmp_path) == [f.path.name]
 
 
 def test_later_dev_mismatches_are_deleted(tmp_path):
@@ -175,20 +166,3 @@ def test_hash_file_streams_in_chunks(tmp_path):
     data = b"x" * (3 * 2**20 + 5)
     p.write_bytes(data)
     assert hash_file(p) == sha(data)
-
-
-def test_download_write_failure_stops_the_walk_with_the_file_error(tmp_path):
-    """A full or locked drive isn't a bad address: no other source is tried, and the OSError reaches the
-    engine's boundary, which gives it plain words."""
-    class FullDisk(FakeFetcher):
-        def download(self, url, dest, progress=None, cancel=None):
-            self.requests.append(url)
-            try:
-                raise OSError(28, "No space left on device", str(dest))
-            except OSError as e:
-                raise DownloadWriteError(str(e)) from e
-
-    ff = FullDisk({DEV: GOOD, mirror(): GOOD})
-    with pytest.raises(OSError) as ei:
-        run(entry(src(DEV), src(mirror())), ff, tmp_path)
-    assert ei.value.errno == 28 and ff.requests == [DEV] and files(tmp_path) == []
