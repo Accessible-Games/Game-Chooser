@@ -137,13 +137,6 @@ def test_same_exe_outside_the_window_is_not_the_root():
     assert t.running() == {"s1-0"}
 
 
-def test_unknown_pid_without_an_exe_finds_nothing():
-    t = LiveTree()
-    t.add_session("s1-0", 0, None, None, 100)
-    t.update([LiveProc(0, 0, 100, None), LiveProc(60, 4, 100, EXE)])
-    assert t.running() == set()
-
-
 def test_a_session_found_by_exe_never_takes_another_sessions_root():
     s = 10_000_000  # one second in FILETIME ticks
     t = LiveTree()

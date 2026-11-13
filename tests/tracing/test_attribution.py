@@ -101,7 +101,8 @@ def test_find_root_by_exe_picks_the_start_closest_to_the_launch_call():
     far = p(701, 1, 11 * S, image=exe)
     unknown = SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {"exe": exe}, {}, ())
     assert find_root([far, near], unknown) is near
-    assert find_root([far, near], SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {}, {}, ())) is None  # no exe
+    nameless = p(702, 1, 10 * S + 2, image=None)  # a session with no exe: not even a process with no image is it
+    assert find_root([far, near, nameless], SessionInfo("s1-0", 0, None, 10 * S, 11 * S, {}, {}, ())) is None
 
 
 def test_find_root_by_exe_prefers_a_start_after_the_launch_call():
