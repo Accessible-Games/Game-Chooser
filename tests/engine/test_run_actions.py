@@ -223,6 +223,32 @@ def test_undo_unregisters_the_newer_versions_component_while_its_file_is_there(t
     assert eng.ctx.records.load(game_id).steps == []
 
 
+def test_undo_whose_unregister_and_installer_both_fail_keeps_the_step_recorded(tmp_path, monkeypatch):
+    eng, routes, folder = updated_run_game(tmp_path, [{"action": "register", "path": "v2.txt"}])
+    steps = record(eng).steps
+    assert steps
+    elevator = eng.ctx.elevator
+    place = elevator.on_start
+
+    def failing(exe, args, elevated):
+        if exe == "regsvr32.exe":
+            elevator.exit_codes[exe] = 1
+        else:
+            elevator.exit_codes[exe] = 3
+            place(exe, args, elevated)
+    elevator.on_start = failing
+    settle(monkeypatch)
+    with pytest.raises(InstallFailed):
+        run(eng, "undo")
+    assert record(eng).steps == steps and (folder / "v2.txt").exists()
+
+    elevator.exit_codes.clear()
+    elevator.on_start = lambda exe, args, elevated: (elevator.exit_codes.update({exe: 1}) if exe == "regsvr32.exe"
+                                                     else place(exe, args, elevated))
+    r = run(eng, "undo")  # the unregister still fails, but the Undo works: the note says so
+    assert messages.UNDO_UNREGISTER_FAILED.format(name="v2.txt") in r.notes
+
+
 def test_undo_of_an_archive_update_outside_the_libraries_puts_the_backups_back(tmp_path):
     eng, routes, folder = installed_outside(tmp_path)
     publish_archive(eng, routes, {"lc.exe": b"exe v2", "cfg.ini": b"volume=7"})

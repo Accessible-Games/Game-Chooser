@@ -642,7 +642,7 @@ def _step_ctx(ctx, record: InstallRecord) -> StepContext:
 def _apply_system_steps(ctx, record: InstallRecord, steps: list[dict], notes: list[str] = ()) -> list[str]:
     """Run the source's new registry/register/run steps in the game's folder and add them to the record.
 
-    Returns `notes` (the undo failures of the steps undone before the installer ran). A failing step leaves
+    Returns `notes` (the undo failures of the steps undone once the installer had run). A failing step leaves
     the game recorded and raises InstallFailed, with `notes` after its words.
     """
     try:
@@ -766,9 +766,9 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     The player's .exe/.dll/.ocx files aren't set aside: like any update, the installer's code
     replaces them without a copy. `previous` is the record's undo point afterwards (KEEP_UNDO_POINT
     leaves it as it is); it is saved with the installer's files, before the system steps run.
-    Applied steps the installer's source no longer has are undone before it runs, while their files are
-    there; those in `spare_steps` (the extras' steps, for extras the caller applies next) aren't. The new
-    steps run after the installer. The record's extras are left as they are: the caller applies and
+    Applied steps the installer's source no longer has are undone once it has run, before Undo removes
+    their files, so a failed or cancelled run leaves every step alone; those in `spare_steps` (the
+    extras' steps, for extras the caller applies next) aren't. The new steps run after the installer. The record's extras are left as they are: the caller applies and
     records them next, so if that fails, a retry still knows which extras the game has.
 
     For Undo, `undo_of` is the undo point being undone. A file the newer version recorded that this
@@ -784,12 +784,6 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     player = _player_files(record, game_dir)
     aside = _SetAside.copy(ctx, item.catalog_id, game_dir, [r for r in player if not is_code(r)], title)
     player_code = {rel: sha for rel, sha in player.items() if is_code(rel)}
-    # Applied steps not wanted any more are undone now, while the files they name are still there.
-    kept_steps, unwanted, new_steps = split_steps(record.steps, item.steps, spare_steps)
-    step_notes = undo_steps(unwanted, _step_ctx(ctx, record))
-    if unwanted:
-        record.steps = kept_steps
-        ctx.records.save(record)
     if interactive:
         ctx.installer_ui.announce_target(title, game_dir)
     keys_before = snapshot_uninstall_keys(ctx.uninstall_reader)
@@ -824,6 +818,12 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
             raise InstallFailed("\n\n".join([messages.INSTALLER_CANCELLED.format(title=title), *kept])) from e
         raise
     notes = aside.restore(title, tree_done)
+    # Applied steps not wanted any more are undone now, before Undo removes the files they name.
+    kept_steps, unwanted, new_steps = split_steps(record.steps, item.steps, spare_steps)
+    step_notes = undo_steps(unwanted, _step_ctx(ctx, record))
+    if unwanted:
+        record.steps = kept_steps
+        ctx.records.save(record)
 
     for rel, moved in aside.renamed.items():
         if norm_key(rel) in claimed:
