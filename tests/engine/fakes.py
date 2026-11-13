@@ -508,6 +508,11 @@ def zip_bytes(files: dict[str, bytes]) -> bytes:
     return buffer.getvalue()
 
 
+def reg_step(name: str, value, key: str = r"Software\Pawprints") -> dict:
+    """A catalog step that sets an HKCU REG_SZ value."""
+    return {"action": "registry", "hive": "HKCU", "key": key, "name": name, "type": "REG_SZ", "value": value}
+
+
 def served_source(routes: dict[str, bytes], url: str, data: bytes, method: str = "zip",
                   steps: list[dict] | None = None, **install) -> dict:
     """A windows source whose sha256/size match `data`; also adds `data` to `routes` at `url`."""

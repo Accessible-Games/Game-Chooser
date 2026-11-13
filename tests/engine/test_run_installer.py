@@ -16,7 +16,8 @@ from engine.run_installer import (UNINSTALL_KEYS, files_created_during, folder_f
                                   installer_command, new_uninstall_entries, silent_args_for, snapshot_folder,
                                   snapshot_uninstall_keys)
 from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeUninstallKeys, fails,
-                                make_engine, never, put, quiet, served_source, sha, snapshot, watch_with, zip_bytes)
+                                make_engine, never, put, quiet, reg_step, served_source, sha, snapshot, watch_with,
+                                zip_bytes)
 
 SETUP = b"MZ fake setup program"
 
@@ -379,9 +380,7 @@ def test_declined_elevation_fails_plainly(tmp_path):
 
 def test_system_steps_of_a_run_source_are_applied_and_recorded(tmp_path):
     routes = {}
-    step = {"action": "registry", "hive": "HKCU", "key": r"Software\LightCars", "name": "Path", "type": "REG_SZ",
-            "value": "{dir}"}
-    e = run_game(routes, installer={"type": "inno"}, steps=[step])
+    e = run_game(routes, installer={"type": "inno"}, steps=[reg_step("Path", "{dir}", r"Software\LightCars")])
     target = tmp_path / "Games" / "Light Cars"
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.exe": b"exe"}))
     install(eng)
@@ -418,9 +417,8 @@ def run_game_with_patch(routes, patch_route=True):
     """Light Cars (run-mode) with a required archive extra that patches its exe and sets a registry value."""
     e = run_game(routes, installer={"type": "inno"}, extras=[{"id": "lc-patch", "required": True}])
     data = zip_bytes({"patch.dat": b"p", "lc.exe": b"exe patched"})
-    step = {"action": "registry", "hive": "HKCU", "key": r"Software\LightCars", "name": "Patch", "type": "REG_SZ",
-            "value": "on"}
-    source = served_source(routes, f"{MIRROR}{sha(data)}/p.zip", data, steps=[step])
+    source = served_source(routes, f"{MIRROR}{sha(data)}/p.zip", data,
+                           steps=[reg_step("Patch", "on", r"Software\LightCars")])
     if not patch_route:
         del routes[source["url"]]
     x = {"id": "lc-patch", "kind": "extra", "title": "Patch", "extends": ["lightcars"], "version": "1",

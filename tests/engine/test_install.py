@@ -11,7 +11,7 @@ from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
 from engine.messages import DEFENDER_NOTE
 from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, ZipExtractor, fails, make_engine, never,
-                                served_source, zip_bytes)
+                                reg_step, served_source, zip_bytes)
 
 
 
@@ -150,10 +150,8 @@ def test_extra_file_steps_run_on_the_game_tree_and_tag_their_output(tmp_path):
 
 def test_system_steps_run_after_rename_with_final_paths(tmp_path):
     routes = {}
-    reg_step = {"action": "registry", "hive": "HKCU", "key": r"Software\Entombed", "name": "Path",
-                "type": "REG_SZ", "value": "x"}
     e = game(routes, files={"entombed.exe": b"exe", "dx.dll": b"dll"},
-             steps=[{"action": "register", "path": "dx.dll"}, reg_step])
+             steps=[{"action": "register", "path": "dx.dll"}, reg_step("Path", "x", r"Software\Entombed")])
     lib = tmp_path / "Games"
     placed_when_run = []
 
@@ -178,9 +176,7 @@ def test_failing_system_step_rolls_back(tmp_path):
     routes = {}
     lib = tmp_path / "Games"
     e = game(routes, files={"entombed.exe": b"exe", "fix.exe": b"fix"},
-             steps=[{"action": "registry", "hive": "HKCU", "key": r"Software\Entombed", "name": "Path",
-                     "type": "REG_SZ", "value": "x"},
-                    {"action": "run", "path": "fix.exe"}])
+             steps=[reg_step("Path", "x", r"Software\Entombed"), {"action": "run", "path": "fix.exe"}])
     fake_elev = FakeElevator(exit_codes={str(lib / "Entombed" / "fix.exe"): 1})
     engine, ctx, lib = setup(tmp_path, [e], routes, elevator=fake_elev)
     fake_reg, records = ctx.registry, ctx.records
@@ -193,8 +189,7 @@ def test_failing_system_step_rolls_back(tmp_path):
 def test_failing_extra_system_step_undoes_the_games_steps(tmp_path):
     routes = {}
     lib = tmp_path / "Games"
-    e = game(routes, steps=[{"action": "registry", "hive": "HKCU", "key": r"Software\Entombed", "name": "Path",
-                             "type": "REG_SZ", "value": "x"}],
+    e = game(routes, steps=[reg_step("Path", "x", r"Software\Entombed")],
              extras=[{"id": "entombed-patch", "required": True}])
     x = extra(routes, "entombed-patch", {"patch.exe": b"p"}, steps=[{"action": "run", "path": "patch.exe"}])
     fake_elev = FakeElevator(exit_codes={str(lib / "Entombed" / "patch.exe"): 3})
@@ -394,8 +389,7 @@ def test_default_exclude_is_the_scanners_rules(tmp_path):
 
 def test_record_save_failure_undoes_steps_and_removes_folder(tmp_path):
     routes = {}
-    e = game(routes, steps=[{"action": "registry", "hive": "HKCU", "key": r"Software\Entombed", "name": "Path",
-                             "type": "REG_SZ", "value": "x"}])
+    e = game(routes, steps=[reg_step("Path", "x", r"Software\Entombed")])
     engine, ctx, lib = setup(tmp_path, [e], routes)
 
     def broken_save(record):

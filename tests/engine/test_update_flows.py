@@ -15,8 +15,8 @@ from engine import messages
 from engine.entries import mirror_url_for
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord, RecordedFile
-from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, fails, make_engine, never, put, quiet, served_source, sha,
-                                snapshot, zip_bytes)
+from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, fails, make_engine, never, put, quiet, reg_step,
+                                served_source, sha, snapshot, zip_bytes)
 
 DEV_URL = "https://dev.example.com/pawprints.zip"
 
@@ -191,13 +191,9 @@ def test_update_records_previous_and_new_source(tmp_path):
 
 
 def test_update_swaps_changed_system_steps_and_keeps_unchanged_ones(tmp_path):
-    def reg(name, value):
-        return {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": name,
-                "type": "REG_SZ", "value": value}
-
-    eng, game = install_v1(tmp_path, steps=[reg("Path", "here"), reg("Mode", "old")])
+    eng, game = install_v1(tmp_path, steps=[reg_step("Path", "here"), reg_step("Mode", "old")])
     fake_reg = eng.ctx.registry
-    publish(eng, V2, steps=[reg("Path", "here"), reg("Mode", "new")])
+    publish(eng, V2, steps=[reg_step("Path", "here"), reg_step("Mode", "new")])
     run(eng, "update")
     assert fake_reg.get("HKCU", r"Software\Pawprints", "Mode") == (True, "new", "REG_SZ")
     assert fake_reg.get("HKCU", r"Software\Pawprints", "Path") == (True, "here", "REG_SZ")
@@ -403,8 +399,7 @@ def test_add_extras_later_touches_only_extra_paths(tmp_path):
 
 
 def test_added_extra_runs_only_its_own_steps_and_records_them(tmp_path):
-    reg = {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": "Path", "type": "REG_SZ",
-           "value": "x"}
+    reg = reg_step("Path", "x")
     voice_reg = {**reg, "name": "Voices", "value": "on"}
     eng, game = install_v1(tmp_path, optional=(), steps=[reg])
     routes = eng.ctx.fetcher.routes
@@ -452,8 +447,7 @@ def test_uninstall_undoes_system_steps_but_not_runtimes(tmp_path):
     elevator = WatchingElevator()
     eng, game = install_v1(tmp_path, play=False, elevator=elevator, steps=[
         {"action": "register", "path": "bass.dll"},
-        {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": "Path", "type": "REG_SZ",
-         "value": "x"}])
+        reg_step("Path", "x")])
     runtime_dir = eng.ctx.runtimes_root / "dx8vb"
     put(runtime_dir, "dx8vb.dll", b"runtime")
     runtime = InstallRecord(
@@ -509,11 +503,6 @@ def failing_write(monkeypatch, name):
 
     monkeypatch.setattr(engine.safety, "_write_file", write_file)
     return lambda: monkeypatch.setattr(engine.safety, "_write_file", real_write)
-
-
-def reg_step(name, value):
-    return {"action": "registry", "hive": "HKCU", "key": r"Software\Pawprints", "name": name, "type": "REG_SZ",
-            "value": value}
 
 
 def test_failed_update_backup_survives_a_retry_after_an_earlier_update(tmp_path, monkeypatch):
