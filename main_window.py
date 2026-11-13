@@ -38,7 +38,7 @@ from engine.folders import library_label
 from engine.launch import LaunchCancelled, launch_kind
 from games_panel import GamesPanel
 from catalog_panel import CatalogPanel
-from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
+from dialogs import GameDialog, PreferencesDialog, FirstTimeSetupDialog
 from engine import messages
 from engine.entries import current_platform as catalog_platform
 from engine.records import record_folder
@@ -960,15 +960,9 @@ class MainFrame(wx.Frame):
             return
 
         # The queued refreshes run after this handler returns, so after the removal below
-        with self.modal_dialog(), DeleteGameDialog(self, game.title) as dlg:
-            result = dlg.ShowModal()
-        if result == wx.ID_YES:
+        if self._ask(messages.DELETE_GAME_CONFIRM.format(title=game.title), messages.DELETE_GAME_TITLE):
             live = self._live_game(game)
-            games = self.library_manager.games
-            for i, g in enumerate(games):
-                if g is live:
-                    del games[i]
-                    break
+            self.library_manager.games[:] = [g for g in self.library_manager.games if g is not live]
             # The selection stays on the deleted game's row number, also when another game has the same launch
             # path and so takes over its row id (catalog_view.pick_index)
             self._save_games()
@@ -978,7 +972,7 @@ class MainFrame(wx.Frame):
         if self._game_busy(game):
             self.focus_active_list()
             return
-        answer = self._ask(messages.FORGET_GAME_CONFIRM.format(title=game.title), messages.FORGET_GAME_TITLE)
+        answer = self._ask(messages.FORGET_GAME_CONFIRM.format(title=game.title), messages.DELETE_GAME_TITLE)
         live = self._live_game(game)
         if not answer or live is None or not live.catalog_id or self._game_busy(live):
             self.focus_active_list()
@@ -987,7 +981,7 @@ class MainFrame(wx.Frame):
             self.service.forget(live.catalog_id)
         except OSError as e:
             log.warning("Couldn't forget %s: %s", live.catalog_id, e)
-            self._tell(messages.FORGET_FAILED.format(title=live.title), messages.FORGET_GAME_TITLE)
+            self._tell(messages.FORGET_FAILED.format(title=live.title), messages.DELETE_GAME_TITLE)
             if self._live_game(live) is None:  # it left the list after all (games.json couldn't be saved)
                 self.games_changed()
             else:  # nothing changed: the selection stays on it

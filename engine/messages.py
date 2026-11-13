@@ -424,7 +424,8 @@ COUNTING_FILES = "Checking {title}'s files"
 COUNTING_LIBRARY_FILES = "Checking the files of the games in {label}"
 FORGET_GAME_CONFIRM = ("Remove {title} from the list? Game Chooser didn't keep track of its files, so they stay "
                        "where they are.")
-FORGET_GAME_TITLE = "Confirm Delete"
+DELETE_GAME_CONFIRM = "Delete '{title}' from library?"
+DELETE_GAME_TITLE = "Confirm Delete"
 LAUNCH_NOT_FOUND_TITLE = "File Not Found"
 LAUNCH_NOT_FOUND_LOCATE = "Game executable not found. Please locate the game.\n\n" + DEFENDER_NOTE
 LAUNCH_NOT_FOUND_REPAIR = "Game executable not found.\n\n" + DEFENDER_NOTE + "\n\nRepair {title} now?"

@@ -16,7 +16,7 @@ paths:
 
 ## Files
 - **main_window.py** - `MainFrame`: notebook, menus, shortcuts, queue handlers, modal safety, state
-- **dialogs.py** - `FirstTimeSetupDialog`, `GameDialog` (add/edit by hand), `PreferencesDialog`, `DeleteGameDialog`
+- **dialogs.py** - `FirstTimeSetupDialog`, `GameDialog` (add/edit by hand), `PreferencesDialog`
 - **install_dialogs.py** - `InstallConfirmDialog`, `UninstallDialog`, `RemoveLibraryDialog`
 - **description_field.py** - read-only multi-line description; Enter on a link line opens it
 - **progress_area.py** - gauge, status line, Done and Cancel for the running job
