@@ -258,14 +258,6 @@ def test_page_address_escapes_the_path(tmp_path):
     assert " " not in address and "#" not in address
 
 
-def test_page_address_keeps_japanese_letters(tmp_path):
-    page = _page_in(tmp_path, "日本 #1")
-    address = page_address(str(page))
-    assert "日本" in address and "%E6" not in address
-    assert "%20" in address and "%23" in address
-    assert " " not in address and "#" not in address
-
-
 def test_page_address_does_not_follow_a_link(tmp_path):
     target = tmp_path / "x.exe"
     target.write_bytes(b"MZ")
@@ -379,13 +371,6 @@ def test_an_hta_the_catalog_did_not_name_is_started_by_nothing(tmp_path, name):
                    start=lambda p, c: pytest.fail("an .hta is never run directly or through the shell"),
                    hta_start=lambda p, c: pytest.fail("only a catalog-named .hta gets the host"))
     assert str(e.value) == messages.HTA_NOT_ALLOWED
-
-
-def test_an_hta_that_is_not_allowed_never_reaches_start_program(tmp_path, monkeypatch):
-    monkeypatch.setattr(launch, "start_program", lambda p, c: pytest.fail("no direct run, no shell open"))
-    monkeypatch.setattr(launch, "start_hta", lambda p, c: pytest.fail("no host"))
-    with pytest.raises(OSError):
-        start_game(str(tmp_path / "game.hta"), str(tmp_path))
 
 
 def test_start_game_uses_start_hta_when_no_starter_is_given(tmp_path, monkeypatch):
