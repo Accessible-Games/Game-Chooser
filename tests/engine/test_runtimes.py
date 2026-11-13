@@ -1500,6 +1500,21 @@ def test_repair_restores_a_missing_private_copy(tmp_path, private_com):
     assert eng.ctx.records.load("entombed").private_runtimes == ["dx8vb"]
 
 
+@pytest.mark.parametrize("action", ["repair", "undo"])
+def test_rebuild_that_cant_make_the_private_copy_again_says_the_game_needs_the_component(tmp_path, private_com,
+                                                                                          monkeypatch, action):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
+    run(eng, "install")
+    if action == "undo":
+        eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0")
+        run(eng, "update")
+    monkeypatch.setattr(comfree, "PRIVATE_COM_SUPPORTED", False)
+    r = run(eng, action)
+    assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Entombed", component=DX8VB_TITLE)]
+
+
 def test_repair_of_a_game_installed_shared_never_adds_a_private_copy(tmp_path, private_com):
     routes = {}
     rt, g = dx8vb(routes), game(routes)

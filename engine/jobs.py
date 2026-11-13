@@ -909,7 +909,7 @@ class InstallEngine:
         _keep_backups(rec, result.backups, prior)
         ctx.records.save(rec)
         return JobResult("repair", game_id, title, game_fields_for(entry, rec, ctx.platform),
-                         [*notes, *staged.copy_notes], backups=len(result.backups))
+                         [*staged.notes(), *notes], backups=len(result.backups))
 
     def _undo(self, entry: dict, rec: InstallRecord, game_dir: Path, progress, cancel) -> JobResult:
         """Reinstall the previous version under the same rules, then put back the player's copies the
@@ -977,7 +977,7 @@ class InstallEngine:
         rec.previous_unavailable = None
         ctx.records.save(rec)
         return JobResult("undo", game_id, title, game_fields_for(entry, rec, ctx.platform),
-                         [*notes, *staged.copy_notes], backups=len(result.backups))
+                         [*staged.notes(), *notes], backups=len(result.backups))
 
     def _retarget_backups(self, rec: InstallRecord, game_dir: Path, untouched: list[dict],
                           incoming: dict[str, RecordedFile]) -> None:
