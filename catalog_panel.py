@@ -213,12 +213,11 @@ class CatalogPanel(wx.Panel):
         except OSError as e:  # games.json couldn't be saved: nothing changes (the file on disk is whole)
             log.warning("Couldn't add the web game %s: %s", row.id, e)
             manager.games = before
-            self.frame._tell(messages.WEB_GAME_NOT_ADDED.format(title=fields["title"] or row.title), "Catalog",
-                             wx.ICON_ERROR)
+            self.frame._tell(messages.WEB_GAME_NOT_ADDED.format(title=row.title), "Catalog", wx.ICON_ERROR)
             self.frame.focus_active_list()
             return
         self.frame.games_changed()
-        self.frame.notify(messages.ADDED.format(title=fields["title"] or row.title))
+        self.frame.notify(messages.ADDED.format(title=row.title))  # title_of(entry), as fields["title"] is
         self.frame.focus_active_list()
 
     def on_random_game(self):
