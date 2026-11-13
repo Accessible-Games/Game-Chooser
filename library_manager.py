@@ -188,7 +188,7 @@ class GameLibraryManager:
                 upgraded = False
                 self._damaged(self.config_file, messages.CONFIG_FILE_DAMAGED, messages.CONFIG_FILE_DAMAGED_NOT_COPIED)
             if upgraded:
-                self.save_or_keep(self.save_config)
+                self.save_or_keep(self.save_config, "the upgraded config.json")
         else:
             self.config = default_config
             self.save_config()
@@ -198,12 +198,12 @@ class GameLibraryManager:
         self._before_writing(self.config_file)
         _write_json_atomic(self.config_file, self.config)
 
-    def save_or_keep(self, save):
+    def save_or_keep(self, save, what):
         """Run a save; one that fails (OSError) is logged, and the change stays in memory for the next save."""
         try:
             save()
         except OSError as e:
-            log.warning("Couldn't save, so the change waits for the next save: %s", e)
+            log.warning("Couldn't save %s, so the change waits for the next save: %s", what, e)
 
     def load_games(self):
         """Load games from JSON file"""
@@ -315,7 +315,7 @@ class GameLibraryManager:
                 self.games.append(Game.from_dict(game_fields_for(entry, rec)))
             changed = True
         if changed:  # a damaged games.json is copied first, or not written over (save_games)
-            self.save_or_keep(self.save_games)
+            self.save_or_keep(self.save_games, "games.json")
 
     def _record_unreadable(self, catalog_id):
         """True when a record file is there for this id but can't be read, so it may still be the game's. A

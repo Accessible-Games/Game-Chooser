@@ -130,7 +130,7 @@ class InstallService:
                 changed += 1
         if changed:
             self.manager.games = list(self.manager.games)
-            self.manager.save_or_keep(self.manager.save_games)
+            self.manager.save_or_keep(self.manager.save_games, "games.json")
         return changed
 
     def _adopt(self, catalog_id: str) -> bool:
@@ -206,7 +206,7 @@ class InstallService:
         job = self.queue.submit(request, self._title(entry_id))
         if library_id:  # remembered only once the job is queued (submit raises after shutdown)
             self.manager.config["install"]["last_library"] = library_id
-            self.manager.save_or_keep(self.manager.save_config)
+            self.manager.save_or_keep(self.manager.save_config, "the last library in config.json")
         return job
 
     def apply_result(self, result: JobResult) -> None:
@@ -344,7 +344,7 @@ class InstallService:
         for game in kept:
             self.manager.unlink_catalog_game(game)
         if kept:
-            self.manager.save_or_keep(self.manager.save_games)
+            self.manager.save_or_keep(self.manager.save_games, f"games.json while removing library {library_id}")
         try:
             for cid, rec in self.manager.records.game_records().items():
                 if rec.uninstalled and rec.library_id == library_id:
@@ -352,4 +352,5 @@ class InstallService:
         except OSError as e:
             log.warning("Couldn't delete an uninstalled game's record while removing library %s: %s", library_id, e)
             raise LibraryError(messages.LIBRARY_NOT_REMOVED) from e
-        self.manager.save_or_keep(lambda: self.manager.remove_library(library_id))
+        self.manager.save_or_keep(lambda: self.manager.remove_library(library_id),
+                                  f"config.json after removing library {library_id}")
