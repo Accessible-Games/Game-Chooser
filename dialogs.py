@@ -22,7 +22,6 @@ Dialog classes for Game Chooser application
 from pathlib import Path
 
 import wx
-import os
 import platform
 import threading
 from contextlib import nullcontext
@@ -289,7 +288,6 @@ class GameDialog(wx.Dialog):
                 return
 
             # Validate executable file exists and is supported
-            from pathlib import Path
             from path_manager import PathManager
             path_obj = Path(path)
 
@@ -338,7 +336,6 @@ class GameDialog(wx.Dialog):
     def _find_duplicate_game(self, path):
         """Find if a game with this path already exists"""
         # Normalize the path for comparison
-        from pathlib import Path
         normalized_path = str(Path(path).resolve())
 
         for game in self.library_manager.games:
