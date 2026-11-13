@@ -62,7 +62,7 @@ def test_details_decoded_from_real_bytes(op, data, expected):
     assert io.tell() == 0
 
 
-def test_rename_ex_layout_uses_u32_flags():
+def test_rename_ex_and_its_bypass_form_decode_the_name_and_the_replace_flag():
     nt_name = r"\??\C:\Games\g\new.sav"
     for op in (Op.SetRenameInformationEx, Op.SetRenameInformationExBypassAccessCheck):
         event, _ = call(op, rename_record(nt_name, flags=0x3, flags_size=4))

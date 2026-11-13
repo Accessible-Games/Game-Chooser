@@ -122,7 +122,7 @@ def win32_path(name: str) -> str:
     return name
 
 
-def _rename_handler(operation_name: str, extended: bool, previous):
+def _rename_handler(operation_name: str, previous):
     def handler(io, metadata, event, details_io, extra_detail_io):
         try:
             position = io.tell()
@@ -135,7 +135,7 @@ def _rename_handler(operation_name: str, extended: bool, previous):
             if len(head) < _RENAME_HEADER or length < 0 or length > _MAX_NAME_BYTES or length % 2                     or len(name_bytes) != length:
                 _warn_once(operation_name, "the rename record is short or garbled")
             else:
-                flags = int.from_bytes(head[0:4], "little") if extended else head[0]
+                flags = head[0]  # a byte, or the low byte of the Ex forms' u32: bit 0 either way
                 event.details["ReplaceIfExists"] = "True" if flags & 0x1 else "False"
                 event.details["FileName"] = win32_path(name_bytes.decode("utf-16-le"))
         except Exception as error:  # a decoder never breaks the parse
@@ -188,7 +188,7 @@ def install_detail_handlers() -> None:
         operation = FilesystemSetInformationOperation[name]
         previous = FilesystemSubOperationHandler.get(operation)
         if not _already_installed(previous):
-            FilesystemSubOperationHandler[operation] = _rename_handler(name, name != RENAME_OPERATIONS[0], previous)
+            FilesystemSubOperationHandler[operation] = _rename_handler(name, previous)
     operation = FilesystemSetInformationOperation.SetDispositionInformationEx
     previous = FilesystemSubOperationHandler.get(operation)
     if not _already_installed(previous):
