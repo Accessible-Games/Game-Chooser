@@ -1,7 +1,6 @@
 """Dependencies: runtimes installed before the game, shared machine-wide or as a private COM copy."""
 
 import errno
-import hashlib
 import json
 import os
 import shutil
@@ -21,10 +20,10 @@ from engine.records import RecordedFile, RecordStore
 from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present, is_com_runtime, lock_down_commands,
                              marker_present, missing_runtimes, recorded_private, register_and_mark_args,
                              runtime_present, write_marker_args)
-from tests.engine.fakes import (ADMINISTRATORS, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
-                                FakeSecurity, ZipExtractor, make_engine, served_source, split_chain, zip_bytes)
+from tests.engine.fakes import (ADMINISTRATORS, MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
+                                FakeSecurity, ZipExtractor, make_engine, never, quiet, served_source, sha, snapshot,
+                                split_chain, zip_bytes)
 
-MIRROR = "https://files.accessiblegames.net/files/"
 DX8VB = b"MZ fake dx8vb.dll"
 DX8VB_TITLE = "DirectX 8 for Visual Basic"
 DX8VB_CLSID = "{E7FF1300-96A5-11D3-AC85-00C04FC2C602}"
@@ -32,18 +31,6 @@ DX8VB_TLBID = "{E1211242-8E94-11D1-8808-00C04FC2C603}"
 DX8VB_KEY = r"SOFTWARE\Classes\DxVBLibA.DirectX8"
 VB6_TITLE = "Visual Basic 6 runtime"
 SETUP = b"MZ fake vbrun60 setup"
-
-
-def never():
-    return False
-
-
-def quiet(p):
-    pass
-
-
-def sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def dx8vb(routes, **fields):
@@ -309,10 +296,6 @@ def test_failed_register_fails_install_and_leaves_no_record_and_the_locked_folde
     # The folder was made and sealed by the elevated command, so the player can't remove it (R39). Without a
     # marker it counts as absent, and a retry adopts it.
     assert snapshot(folder) == {"dx8vb.dll": DX8VB} and not (folder / MARKER_NAME).exists()
-
-
-def snapshot(root: Path) -> dict[str, bytes]:
-    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
 def put_marker(folder: Path, files: dict[str, bytes], runtime_id: str = "dx8vb") -> None:

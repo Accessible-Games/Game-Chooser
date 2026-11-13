@@ -10,13 +10,9 @@ from engine.errors import Cancelled, DownloadWriteError, ExtractError, InstallFa
 from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
 from engine.messages import DEFENDER_NOTE
-from tests.engine.fakes import FakeElevator, FakeFetcher, ZipExtractor, make_engine, served_source, zip_bytes
+from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, ZipExtractor, make_engine, never, served_source,
+                                zip_bytes)
 
-MIRROR = "https://files.accessiblegames.net/files/"
-
-
-def never():
-    return False
 
 
 def game(routes, id="entombed", title="Entombed", files=None, steps=None, developer=("Ghorse",), method="zip",

@@ -12,9 +12,44 @@ import zipfile
 from datetime import date
 from pathlib import Path
 
-from engine.errors import Cancelled, DownloadError
+import pytest
+
+from engine.errors import Cancelled, DownloadError, InstallFailed
 from engine.extract import content_root, extract_tar
 from engine.http import check_url_allowed
+
+MIRROR = "https://files.accessiblegames.net/files/"
+BK = "Game Chooser backup 2026-11-04"
+
+
+def never():
+    return False
+
+
+def quiet(progress):
+    pass
+
+
+def sha(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def put(root: Path, rel: str, data: bytes = b"x") -> Path:
+    path = root / rel
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    return path
+
+
+def snapshot(root: Path) -> dict[str, bytes]:
+    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def fails(call, *args, **kwargs) -> InstallFailed:
+    """Runs `call(*args, **kwargs)`, which must raise InstallFailed; returns the error."""
+    with pytest.raises(InstallFailed) as ei:
+        call(*args, **kwargs)
+    return ei.value
 
 
 class FakeFetcher:
@@ -479,7 +514,7 @@ def served_source(routes: dict[str, bytes], url: str, data: bytes, method: str =
     """A windows source whose sha256/size match `data`; also adds `data` to `routes` at `url`."""
     routes[url] = data
     source = {"label": "Mirror", "url": url, "platform": "windows",
-              "sha256": hashlib.sha256(data).hexdigest(), "size": len(data),
+              "sha256": sha(data), "size": len(data),
               "install": {"method": method, **install}}
     if steps:
         source["steps"] = steps

@@ -6,7 +6,6 @@ rewrote bass.dll. v2 changes the exe, the ini and the dll, removes sounds/a.wav 
 sounds/b.wav.
 """
 
-import hashlib
 import shutil
 from dataclasses import asdict
 from pathlib import Path
@@ -19,39 +18,16 @@ from engine.entries import mirror_url_for
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord, RecordedFile
-from tests.engine.fakes import FakeElevator, FakeFetcher, make_engine, served_source, zip_bytes
+from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, make_engine, never, put, quiet, served_source, sha,
+                                snapshot, zip_bytes)
 
-MIRROR = "https://files.accessiblegames.net/files/"
 DEV_URL = "https://dev.example.com/pawprints.zip"
-BK = "Game Chooser backup 2026-11-04"
 
 V1 = {"pawprints.exe": b"exe v1", "sounds/a.wav": b"a", "pawprints.ini": b"volume=5", "bass.dll": b"bass v1"}
 V2 = {"pawprints.exe": b"exe v2", "pawprints.ini": b"volume=7", "bass.dll": b"bass v2", "sounds/b.wav": b"b"}
 EDITED_INI = b"volume=9 the player's choice"
 PLAYER_FILES = {"Saves/slot1.sav": b"save one", "Saves/slot2.sav": b"save two", "update.tmp": b"half a download"}
 SELF_UPDATED_DLL = b"bass from the self-updater"
-
-
-def never():
-    return False
-
-
-def quiet(p):
-    pass
-
-
-def sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def put(root: Path, rel: str, data: bytes) -> None:
-    path = root / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
-
-
-def snapshot(root: Path) -> dict[str, bytes]:
-    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
 def pawprints(routes, files, version, url=None, steps=None, install=None, **fields):

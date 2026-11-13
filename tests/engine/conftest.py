@@ -3,6 +3,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
 
+from tests.engine.fakes import FakeElevator, FakeWinreg
+
 
 class _Server:
     def __init__(self):
@@ -52,3 +54,13 @@ def http_server():
     }
     yield server
     server.close()
+
+
+@pytest.fixture
+def fake_elev():
+    return FakeElevator()
+
+
+@pytest.fixture
+def fake_winreg():
+    return FakeWinreg()

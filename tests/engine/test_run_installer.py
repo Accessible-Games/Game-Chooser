@@ -1,7 +1,6 @@
 """Installers that must run: silent and interactive runs, finding where the game went, tracking it by
 the install window, and the set-aside rule for run-mode updates and vendor uninstalls."""
 
-import hashlib
 import os
 import sys
 import time
@@ -16,34 +15,10 @@ from engine.records import InstalledSource, InstallRecord
 from engine.run_installer import (UNINSTALL_KEYS, files_created_during, folder_from_uninstall_entry,
                                   installer_command, new_uninstall_entries, silent_args_for, snapshot_folder,
                                   snapshot_uninstall_keys)
-from tests.engine.fakes import (FakeElevator, FakeFetcher, FakeInstallerUI, FakeUninstallKeys, make_engine,
-                                served_source, watch_with, zip_bytes)
+from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeUninstallKeys, make_engine,
+                                never, put, quiet, served_source, sha, snapshot, watch_with, zip_bytes)
 
-MIRROR = "https://files.accessiblegames.net/files/"
 SETUP = b"MZ fake setup program"
-
-
-def never():
-    return False
-
-
-def quiet(p):
-    pass
-
-
-def sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
-
-
-def put(root: Path, rel: str, data: bytes) -> Path:
-    path = root / rel
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
-    return path
-
-
-def tree(root: Path) -> dict[str, bytes]:
-    return {p.relative_to(root).as_posix(): p.read_bytes() for p in sorted(root.rglob("*")) if p.is_file()}
 
 
 def run_game(routes, installer=None, setup=SETUP, id="lightcars", title="Light Cars", steps=None, **fields):
@@ -619,7 +594,7 @@ def test_run_mode_update_refuses_while_earlier_set_aside_files_remain(tmp_path):
 def test_cancelled_update_restores_player_files_and_removes_only_new_ones(tmp_path):
     eng, routes, target = installed_run_game(tmp_path)
     publish_v2(eng, routes)
-    before = tree(target)
+    before = snapshot(target)
     started = []
 
     def installer(exe, args, elevated):
@@ -631,13 +606,13 @@ def test_cancelled_update_restores_player_files_and_removes_only_new_ones(tmp_pa
     eng.ctx.elevator.on_start = installer
     with pytest.raises(InstallFailed) as ei:
         eng.run(InstallRequest("update", "lightcars"), quiet, lambda: bool(started))
-    after = tree(target)
+    after = snapshot(target)
     assert after.pop("cfg.ini.new") == b"installer's half-written ini"
     assert after == before
     # M5: a file that appeared during the window isn't deleted (it may be the player's, written by the running
     # game); it is moved beside the set-aside copies, and the player is told where.
     aside = eng.ctx.work_root / ".setaside" / "lightcars.new"
-    assert tree(aside) == {"new.dll": b"new"}
+    assert snapshot(aside) == {"new.dll": b"new"}
     assert not (eng.ctx.work_root / ".setaside" / "lightcars").exists()  # the player's copies: back, discarded
     assert ei.value.message == "\n\n".join([messages.INSTALLER_CANCELLED.format(title="Light Cars"),
                                              messages.NEW_FILES_SET_ASIDE.format(title="Light Cars", path=aside)])
@@ -663,12 +638,12 @@ def test_failed_update_sets_new_files_aside_and_a_retry_neither_clears_nor_refus
     eng.ctx.elevator.exit_codes.clear()
     with pytest.raises(InstallFailed):
         eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert tree(aside) == {"saves/slot2.sav": b"written by the game during the window",
+    assert snapshot(aside) == {"saves/slot2.sav": b"written by the game during the window",
                            "saves/slot2 (2).sav": b"written by the game during the window"}
     eng.ctx.elevator.exit_codes.clear()
     eng.ctx.elevator.on_start = writes(target, {"lc.exe": b"exe v2"})
     r = eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert r.game["launch_path"] == "Light Cars/lc.exe" and len(tree(aside)) == 2
+    assert r.game["launch_path"] == "Light Cars/lc.exe" and len(snapshot(aside)) == 2
 
 
 def test_failed_restore_keeps_set_aside_copies(tmp_path, monkeypatch):
@@ -723,7 +698,7 @@ def test_untracked_run_install_cannot_be_updated(tmp_path):
 def test_own_record_uninstall_of_a_run_install(tmp_path):
     eng, routes, target = installed_run_game(tmp_path)
     r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
     assert r.kept_player_files == 2 and len(eng.ctx.elevator.calls) == 1
 
 
@@ -736,7 +711,7 @@ def test_vendor_uninstall_sets_aside_player_files(tmp_path):
     eng.ctx.elevator.on_start = uninstaller
     r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     assert eng.ctx.elevator.calls[-1] == (str(target / "unins000.exe"), "/SILENT", True)
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
     assert r.kept_player_files == 2
     rec = eng.ctx.records.load("lightcars")
     assert rec.uninstalled and rec.files == {}
@@ -788,7 +763,7 @@ def test_missing_vendor_uninstaller_falls_back_to_the_record(tmp_path):
     eng, routes, target = installed_run_game(tmp_path, vendor=f'"{gone}" /SILENT')
     r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     assert messages.VENDOR_UNINSTALLER_MISSING.format(title="Light Cars") in r.notes
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
     assert len(eng.ctx.elevator.calls) == 1
 
 
@@ -802,7 +777,7 @@ def test_vendor_uninstaller_error_is_a_note_and_files_are_put_back(tmp_path):
     elevator.on_start = uninstaller
     r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     assert messages.UNINSTALLER_FAILED.format(title="Light Cars", code=3) in r.notes
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
     assert eng.ctx.records.load("lightcars").uninstalled
 
 
@@ -885,7 +860,7 @@ def test_update_keeps_copies_when_the_tree_wasnt_seen_to_finish(tmp_path):
     # The child that was still running now deletes the player's files: their copies are still safe.
     (target / "cfg.ini").unlink()
     (target / "saves" / "slot1.sav").unlink()
-    assert tree(setaside(eng)) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(setaside(eng)) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
 
 
 def test_vendor_uninstall_doesnt_put_back_or_delete_copies_when_the_tree_wasnt_seen_to_finish(tmp_path):
@@ -895,7 +870,7 @@ def test_vendor_uninstall_doesnt_put_back_or_delete_copies_when_the_tree_wasnt_s
     assert messages.SETASIDE_NOT_PUT_BACK.format(title="Light Cars", path=setaside(eng)) in r.notes
     import shutil
     shutil.rmtree(target)  # ... and that relaunched copy then removes the whole folder
-    assert tree(setaside(eng)) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(setaside(eng)) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
 
 
 def test_done_pressed_early_keeps_the_copies(tmp_path):
@@ -1032,13 +1007,13 @@ def test_vendor_uninstaller_runs_after_the_record_and_is_announced(tmp_path):
     seen = []
 
     def uninstaller(exe, args, elevated):
-        seen.append(sorted(tree(target)))
+        seen.append(sorted(snapshot(target)))
     eng.ctx.elevator.on_start = uninstaller
     phases = []
     r = eng.run(InstallRequest("uninstall", "lightcars"), lambda p: phases.append(p.phase), never)
     assert seen == [["cfg.ini", "saves/slot1.sav", "unins000.exe"]]  # the record's files were already gone
     assert messages.VENDOR_UNINSTALLER_RAN.format(title="Light Cars") in r.notes and "vendor_uninstaller" in phases
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
     assert eng.ctx.records.load("lightcars").vendor_uninstaller is None
 
 
@@ -1060,7 +1035,7 @@ def test_vendor_uninstaller_runs_when_the_record_cant_remove_the_files(tmp_path,
             (target / rel).unlink()
     eng.ctx.elevator.on_start = uninstaller
     r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"} and r.kept_player_files == 2
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"} and r.kept_player_files == 2
 
 
 # Finding 5 (R22): the player's code files aren't set aside on update.
@@ -1286,11 +1261,11 @@ def test_vendor_uninstall_whose_uninstaller_never_started_puts_files_back_and_ca
         eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     assert ei.value.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
     assert not setaside(eng).exists()
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save", "unins000.exe": b"uninstaller"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save", "unins000.exe": b"uninstaller"}
     eng.ctx.elevator.decline = False
     eng.ctx.elevator.on_start = None  # the uninstaller itself changes nothing here
     eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
 
 
 # Findings C and D: a cancel that keeps the copies says where they are, in words that fit what happened.
@@ -1329,7 +1304,7 @@ def test_cancelled_vendor_uninstall_whose_tree_wasnt_seen_to_finish_says_where_t
     assert ei.value.message == "\n\n".join([
         messages.UNINSTALLER_CANCELLED.format(title="Light Cars"),
         messages.SETASIDE_NOT_PUT_BACK.format(title="Light Cars", path=setaside(eng))])
-    assert tree(setaside(eng)) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(setaside(eng)) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
 
 
 def test_cancelled_vendor_uninstall_whose_files_couldnt_be_put_back_says_so(tmp_path, monkeypatch):
@@ -1409,12 +1384,12 @@ def test_cancel_at_the_announce_of_an_update_puts_the_players_files_back(tmp_pat
     publish_v2(eng, routes, type="other")  # interactive
     ui = CancellingUI()
     eng.ctx.installer_ui = ui
-    before = tree(target)
+    before = snapshot(target)
     starts = len(eng.ctx.elevator.calls)
     with pytest.raises(Cancelled):
         eng.run(InstallRequest("update", "lightcars"), quiet, ui.cancel)
     assert ui.events == ["announce"] and len(eng.ctx.elevator.calls) == starts
-    assert tree(target) == before and eng.ctx.records.load("lightcars").source.version == "1.0"
+    assert snapshot(target) == before and eng.ctx.records.load("lightcars").source.version == "1.0"
     run_installer.require_no_setaside(eng.ctx, "lightcars", "Light Cars")  # no copies left set aside
 
 
@@ -1437,10 +1412,10 @@ def test_a_failed_vendor_uninstall_can_be_finished_by_uninstalling_again(tmp_pat
         eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     rec = eng.ctx.records.load("lightcars")
     assert rec.uninstalled and rec.vendor_uninstaller and "unins000.exe" in rec.files
-    assert tree(target)["cfg.ini"] == b"volume=9 mine" and tree(target)["saves/slot1.sav"] == b"save"
+    assert snapshot(target)["cfg.ini"] == b"volume=9 mine" and snapshot(target)["saves/slot1.sav"] == b"save"
     elevator.on_start = None  # accepted this time
     eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     assert elevator.calls[-1][0] == str(target / "unins000.exe")
-    assert tree(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
     rec = eng.ctx.records.load("lightcars")
     assert rec.uninstalled and rec.files == {} and rec.vendor_uninstaller is None

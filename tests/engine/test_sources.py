@@ -1,4 +1,3 @@
-import hashlib
 
 import pytest
 
@@ -6,17 +5,13 @@ from engine.entries import is_mirror_url
 from engine.errors import Cancelled, DownloadWriteError, NoVerifiedSource
 from engine.messages import DEVELOPER_CHANGED_UNVERIFIED, DEVELOPER_CHANGED_VERIFIED
 from engine.sources import fetch_exact, fetch_verified, hash_file
-from tests.engine.fakes import FakeFetcher
+from tests.engine.fakes import FakeFetcher, sha
 
 DEV = "https://dev.example.com/files/game.zip"
 DEV2 = "https://other.example.com/game.zip"
 BLOCKED = "https://www.agarchive.net/games/game.zip"
 GOOD = b"good bytes"
 BAD = b"changed bytes!"
-
-
-def sha(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
 
 
 def mirror(data: bytes = GOOD) -> str:

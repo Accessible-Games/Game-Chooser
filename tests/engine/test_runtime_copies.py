@@ -9,11 +9,11 @@ import pytest
 from engine import comfree, messages, run_installer, runtimes
 from engine.records import RecordStore
 from engine.runtimes import MARKER_NAME
-from tests.engine.fakes import (ADMINISTRATORS, FakeElevator, FakeFetcher, FakeInstallerUI, FakeSecurity, make_engine,
-                                served_source, zip_bytes)
+from tests.engine.fakes import (ADMINISTRATORS, MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeSecurity,
+                                make_engine, served_source, sha, zip_bytes)
 from tests.engine.test_runtimes import private_com  # noqa: F401  (a fixture, used by name)
-from tests.engine.test_runtimes import (DX8VB, DX8VB_TITLE, MIRROR, game, plain_runtime, put_marker, run,
-                                        run_mode_game, setup, sha, vb6, writes_game)
+from tests.engine.test_runtimes import (DX8VB, DX8VB_TITLE, game, plain_runtime, put_marker, run, run_mode_game, setup,
+                                        vb6, writes_game)
 from tests.engine.test_runtimes import dx8vb as dx8vb_entry
 
 OWNER = "runtime:dx8vb"

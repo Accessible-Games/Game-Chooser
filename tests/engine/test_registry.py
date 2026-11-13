@@ -2,17 +2,7 @@ import pytest
 
 from engine.errors import ElevationDeclined, StepError
 from engine.registry import RegistryAccess
-from tests.engine.fakes import FakeElevator, FakeWinreg
-
-
-@pytest.fixture
-def fake_winreg():
-    return FakeWinreg()
-
-
-@pytest.fixture
-def fake_elev():
-    return FakeElevator()
+from tests.engine.fakes import FakeElevator
 
 
 def test_hklm_write_goes_through_reg_exe(fake_elev, fake_winreg):
