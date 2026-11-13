@@ -123,9 +123,7 @@ class GameLibraryManager:
         if system == "Windows":
             app_data = Path(os.environ.get('APPDATA', ''))
             config_dir = app_data / "GameChooser"
-        elif system == "Darwin":  # macOS
-            config_dir = Path.home() / "Library" / "Application Support" / "GameChooser"
-        else:  # Fallback for other systems - use macOS style
+        else:  # macOS, and other systems the same way
             config_dir = Path.home() / "Library" / "Application Support" / "GameChooser"
         
         config_dir.mkdir(parents=True, exist_ok=True)
@@ -394,8 +392,3 @@ class GameLibraryManager:
             self.config["libraries"],
             game.library_id
         )
-    
-    def is_executable(self, path):
-        """Check if file is an executable based on platform and extension"""
-        path_obj = Path(path)
-        return self.path_manager.is_executable(path_obj)
