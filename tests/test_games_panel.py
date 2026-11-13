@@ -730,6 +730,7 @@ def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(m
     assert view.progress_area.cancel_btn.HasFocus()
     view.set_busy(False)
     assert view.list_ctrl.HasFocus() and not view.progress_area.IsShown()
+    assert view.action_btn.IsShown() and view.action_btn.IsEnabled()  # the button stays after the job
 
 
 def test_a_selection_event_while_a_dialog_is_open_is_not_the_players(make_view):
