@@ -169,9 +169,7 @@ def test_installed_ids_include_web_catalog_games(rig):
 
 
 def test_uninstall_result_removes_game(rig):
-    lib = rig.library()
-    rig.publish(game_entry(rig.routes))
-    rig.run("install", "entombed", library_id=lib["id"])
+    lib = _installed(rig, "entombed")
     job = rig.run("uninstall", "entombed")
     assert job.request.action == "uninstall"
     assert rig.manager.catalog_game("entombed") is None
@@ -181,10 +179,8 @@ def test_uninstall_result_removes_game(rig):
 
 
 def test_statuses_for_mixed_library(rig):
-    lib = rig.library()
+    lib = _installed(rig, "entombed")
     other = rig.library("Other")
-    rig.publish(game_entry(rig.routes))
-    rig.run("install", "entombed", library_id=lib["id"])
     (rig.tmp_path / "Games" / "Hand").mkdir()
     (rig.tmp_path / "Games" / "Hand" / "hand.exe").write_bytes(b"x")
     rig.manager.games += [
@@ -312,16 +308,16 @@ def test_remove_library_without_catalog_games(rig):
     assert (rig.tmp_path / "Games" / "Hand" / "hand.exe").exists()
 
 
-def _two_installed(rig):
+def _installed(rig, *ids):
     lib = rig.library()
-    rig.publish(game_entry(rig.routes), game_entry(rig.routes, id="pawprints", title="Pawprints"))
-    rig.run("install", "entombed", library_id=lib["id"])
-    rig.run("install", "pawprints", library_id=lib["id"])
+    rig.publish(*(game_entry(rig.routes, id=i, title=i.title()) for i in ids))
+    for i in ids:
+        rig.run("install", i, library_id=lib["id"])
     return lib
 
 
 def test_remove_library_uninstalls_first(rig):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")  # kept, so its record stays
     jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
     assert [(j.request.action, j.request.catalog_id) for j in jobs] == [("uninstall", "entombed"),
@@ -337,7 +333,7 @@ def test_remove_library_uninstalls_first(rig):
 
 
 def test_remove_library_failure_keeps_it(rig):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     rig.service.queue.fail.add("pawprints")
     jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
     rig.service.job_failed(jobs[1])
@@ -348,9 +344,7 @@ def test_remove_library_failure_keeps_it(rig):
 
 
 def test_remove_unreachable_library_refused(rig):
-    lib = rig.library()
-    rig.publish(game_entry(rig.routes))
-    rig.run("install", "entombed", library_id=lib["id"])
+    lib = _installed(rig, "entombed")
     shutil.rmtree(rig.tmp_path / "Games")
     engines = len(rig.service.queue.engines)
     with pytest.raises(LibraryError) as raised:
@@ -410,7 +404,7 @@ def test_malformed_entry_does_not_stop_adoption(rig):
 
 
 def test_remove_library_refused_while_a_game_is_busy(rig):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     rig.service.queue.hold.add("pawprints")
     rig.service.submit("update", "pawprints")
     submitted = rig.service.queue.next_id
@@ -423,7 +417,7 @@ def test_remove_library_refused_while_a_game_is_busy(rig):
 
 
 def test_nothing_installs_into_a_library_being_removed(rig):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     other = rig.library("Other")
     rig.publish(game_entry(rig.routes), game_entry(rig.routes, id="pawprints", title="Pawprints"),
                 game_entry(rig.routes, id="third", title="Third"))
@@ -440,7 +434,7 @@ def _untrack(rig, catalog_id):
 
 
 def test_remove_library_uninstalls_tracked_and_keeps_untracked_as_hand_added(rig, isolated_manager_factory):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     _untrack(rig, "pawprints")
     assert [[g.catalog_id for g in part] for part in rig.service.library_games(lib["id"])] == \
         [["entombed"], ["pawprints"]]
@@ -460,7 +454,7 @@ def test_remove_library_uninstalls_tracked_and_keeps_untracked_as_hand_added(rig
 
 
 def test_remove_library_with_only_untracked_games_goes_at_once(rig):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     _untrack(rig, "entombed")
     rec = rig.manager.records.load("pawprints")
     rig.manager.records.delete("pawprints")  # record-less
@@ -476,7 +470,7 @@ def test_remove_library_with_only_untracked_games_goes_at_once(rig):
 
 
 def test_remove_library_refused_while_an_untracked_game_is_busy(rig):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     _untrack(rig, "pawprints")
     rig.service.queue.hold.add("pawprints")
     rig.service.submit("repair", "pawprints")
@@ -486,7 +480,7 @@ def test_remove_library_refused_while_an_untracked_game_is_busy(rig):
 
 
 def test_unrelated_failed_job_leaves_a_pending_removal(rig):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     rig.publish(game_entry(rig.routes), game_entry(rig.routes, id="pawprints", title="Pawprints"),
                 game_entry(rig.routes, id="third", title="Third"))
     rig.run("install", "third", library_id=lib["id"])
@@ -503,7 +497,7 @@ def test_unrelated_failed_job_leaves_a_pending_removal(rig):
 
 
 def test_forget_deletes_the_record_first(rig, monkeypatch):
-    _two_installed(rig)
+    _installed(rig, "entombed", "pawprints")
     def broken(catalog_id):
         raise PermissionError("locked")
     monkeypatch.setattr(rig.manager.records, "delete", broken)
@@ -514,7 +508,7 @@ def test_forget_deletes_the_record_first(rig, monkeypatch):
 
 
 def test_player_files_counts_what_the_player_added(rig):
-    _two_installed(rig)
+    _installed(rig, "entombed", "pawprints")
     assert rig.service.player_files("entombed") == 0
     (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")
     (rig.tmp_path / "Games" / "Entombed" / "sounds" / "a.wav").write_bytes(b"changed")  # changed: kept too
@@ -525,10 +519,8 @@ def test_player_files_counts_what_the_player_added(rig):
 
 
 def test_forget_an_untracked_game_keeps_its_files_and_it_stays_gone(rig, isolated_manager_factory):
-    lib = _two_installed(rig)
-    rec = rig.manager.records.load("entombed")
-    rec.tracked = False
-    rig.manager.records.save(rec)
+    lib = _installed(rig, "entombed", "pawprints")
+    _untrack(rig, "entombed")
     rig.service.forget("entombed")
     assert rig.manager.catalog_game("entombed") is None and not rig.manager.records.exists("entombed")
     assert [g["catalog_id"] for g in _games_json(rig.manager) if g.get("catalog_id")] == ["pawprints"]
@@ -559,9 +551,7 @@ def _runtime_record(rig, catalog_id="dx8vb"):
 
 
 def test_installed_ids_skip_runtime_records(rig):
-    lib = rig.library()
-    rig.publish(game_entry(rig.routes))
-    rig.run("install", "entombed", library_id=lib["id"])
+    lib = _installed(rig, "entombed")
     _runtime_record(rig)
     assert rig.service.installed_ids() == {"entombed"}
     assert set(rig.service.statuses()) == {(lib["id"], "Entombed/entombed.exe")}
@@ -607,7 +597,7 @@ def _fail_uninstall_partway(rig, monkeypatch, catalog_id="entombed"):
 
 def test_a_failed_uninstall_stays_uninstallable_and_finishes(rig, monkeypatch, isolated_manager_factory):
     from library_actions import UNINSTALL, catalog_menu_items, delete_kind
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")
     locked = _fail_uninstall_partway(rig, monkeypatch)
     game = rig.manager.catalog_game("entombed")
@@ -625,7 +615,7 @@ def test_a_failed_uninstall_stays_uninstallable_and_finishes(rig, monkeypatch, i
 
 
 def test_remove_library_finishes_a_failed_uninstall(rig, monkeypatch):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     _fail_uninstall_partway(rig, monkeypatch)
     jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
     assert sorted(j.request.catalog_id for j in jobs) == ["entombed", "pawprints"]
@@ -636,7 +626,7 @@ def test_remove_library_finishes_a_failed_uninstall(rig, monkeypatch):
 
 
 def test_finish_removal_turns_a_record_delete_failure_into_a_library_error(rig, monkeypatch):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")  # kept, so its record stays
     rig.service.queue.hold.update({"entombed", "pawprints"})
     jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
@@ -663,7 +653,7 @@ def test_finish_removal_turns_a_record_delete_failure_into_a_library_error(rig, 
 
 
 def test_finish_removal_keeps_going_when_games_json_cannot_be_saved(rig, monkeypatch):
-    lib = _two_installed(rig)
+    lib = _installed(rig, "entombed", "pawprints")
     _untrack(rig, "entombed")
     _untrack(rig, "pawprints")
 
