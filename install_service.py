@@ -130,10 +130,7 @@ class InstallService:
                 changed += 1
         if changed:
             self.manager.games = list(self.manager.games)
-            try:
-                self.manager.save_games()
-            except OSError as e:  # kept in memory; games.json is written with the next change
-                log.warning("Couldn't save games.json: %s", e)
+            self.manager.save_or_keep(self.manager.save_games)
         return changed
 
     def _adopt(self, catalog_id: str) -> bool:
@@ -209,10 +206,7 @@ class InstallService:
         job = self.queue.submit(request, self._title(entry_id))
         if library_id:  # remembered only once the job is queued (submit raises after shutdown)
             self.manager.config["install"]["last_library"] = library_id
-            try:
-                self.manager.save_config()
-            except OSError as e:
-                log.warning("Couldn't save the last library: %s", e)
+            self.manager.save_or_keep(self.manager.save_config)
         return job
 
     def apply_result(self, result: JobResult) -> None:
@@ -350,10 +344,7 @@ class InstallService:
         for game in kept:
             self.manager.unlink_catalog_game(game)
         if kept:
-            try:
-                self.manager.save_games()
-            except OSError as e:
-                log.warning("Couldn't save games.json while removing library %s: %s", library_id, e)
+            self.manager.save_or_keep(self.manager.save_games)
         try:
             for cid, rec in self.manager.records.game_records().items():
                 if rec.uninstalled and rec.library_id == library_id:
@@ -361,7 +352,4 @@ class InstallService:
         except OSError as e:
             log.warning("Couldn't delete an uninstalled game's record while removing library %s: %s", library_id, e)
             raise LibraryError(messages.LIBRARY_NOT_REMOVED) from e
-        try:
-            self.manager.remove_library(library_id)
-        except OSError as e:  # gone from the config in memory; written with the next save
-            log.warning("Couldn't save config.json after removing library %s: %s", library_id, e)
+        self.manager.save_or_keep(lambda: self.manager.remove_library(library_id))
