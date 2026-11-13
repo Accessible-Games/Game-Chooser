@@ -206,6 +206,9 @@ class RunDir:
                                 "missing.")
         return sorted(sessions, key=lambda s: s.launch_before), problems
 
+    def write_split(self, record: dict) -> None:
+        _atomic_write(self.split_path, json.dumps(record))
+
     def is_split(self) -> bool:
         return self.split_path.exists()
 

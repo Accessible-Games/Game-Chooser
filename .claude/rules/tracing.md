@@ -93,7 +93,8 @@ Build: see `.claude/rules/build.md`.
   and `stop.json` (only for a run ended with `--trace-stop`), `split.json` (`folders`, `problems`, `capture_kept`,
   `stop`). The
   capture and `filter.pmc` are removed after a split with no problems, and kept (`capture_kept: true`) when any
-  session has a problem or a session file can't be read. Atomic writes retry `os.replace` while Windows says the
+  session has a problem or a session file can't be read. Every JSON file in a run folder is written atomically (so a recorder killed
+  while writing `split.json` leaves the run unsplit); atomic writes retry `os.replace` while Windows says the
   file is held (`runfiles.replace_with_retry`).
 - **Attribution:** a session is the launched process plus its descendants by parent links in the capture. The root
   is matched by pid and the start time read after the launch; failing an exact match, by pid within 2 s of the launch

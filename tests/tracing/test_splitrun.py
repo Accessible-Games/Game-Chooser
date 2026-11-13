@@ -1,12 +1,13 @@
 import dataclasses
 import json
+from pathlib import Path
 
 import pytest
 
 from tests.tracing.test_split import CHILD, CHOOSER, ROOT, SEVENZ, ev, info
 import tracing.splitrun as splitrun_module
 from tracing.clock import filetime_to_iso
-from tracing.runfiles import new_run
+from tracing.runfiles import leftover_runs, new_run
 from tracing.splitrun import SplitResult, split_run_dir
 
 FT = 133_000_000_000_000_000
@@ -124,6 +125,24 @@ def test_no_sessions_just_finishes(tmp_path):
     assert json.loads(run.split_path.read_text(encoding="utf-8")) == {
         "folders": [], "problems": [], "capture_kept": False, "stop": None}
     assert not run.capture_path.exists() and not run.config_path.exists()
+
+
+def test_a_split_json_cut_off_while_written_leaves_the_run_unsplit(tmp_path, monkeypatch):
+    run = make_run(tmp_path, with_session=False)
+    write_text = Path.write_text
+
+    def killed_halfway(path, text, *args, **kwargs):  # the recorder dies with split.json half written
+        if path.name.startswith("split.json"):
+            write_text(path, text[:len(text) // 2], *args, **kwargs)
+            raise KeyboardInterrupt
+        return write_text(path, text, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", killed_halfway)
+    with pytest.raises(KeyboardInterrupt):
+        split_run_dir(run, tmp_path, fake_read)
+    monkeypatch.undo()
+    assert not run.is_split()
+    assert [r.path for r in leftover_runs(tmp_path, lambda pid, start: False)] == [run.path]
 
 
 def test_failed_write_removes_this_calls_folders_and_retry_has_no_suffix(tmp_path, monkeypatch):
