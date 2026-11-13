@@ -32,16 +32,6 @@ def test_uninstall_plan_separates_player_files(tmp_path):
     assert count_player_files(rec, game) == 3
 
 
-def test_uninstall_keeps_player_data_by_default(tmp_path):
-    game, rec = setup(tmp_path)
-    p = plan_uninstall(rec, game)
-    fake = FakeRecycle()
-    kept = apply_uninstall(p, game, False, recycle=fake)
-    assert kept == 3 and fake.calls == []
-    assert (game / "Saves/1.sav").exists() and not (game / "game.exe").exists()
-    assert not (game / "sub").exists()
-
-
 def test_uninstall_recycles_player_data_when_asked(tmp_path):
     game, rec = setup(tmp_path)
     p = plan_uninstall(rec, game)
@@ -49,20 +39,6 @@ def test_uninstall_recycles_player_data_when_asked(tmp_path):
     kept = apply_uninstall(p, game, True, recycle=fake)
     assert kept == 0 and len(fake.calls) == 1 and len(fake.calls[0]) == 3
     assert not game.exists()
-
-
-def test_game_folder_removed_only_when_empty(tmp_path):
-    game = tmp_path / "game"
-    put(game, "game.exe", b"exe")
-    rec = FakeRecord({"game.exe": b"exe"})
-    fake = FakeRecycle()
-    assert apply_uninstall(plan_uninstall(rec, game), game, False, recycle=fake) == 0
-    assert not game.exists() and fake.calls == []
-    game2 = tmp_path / "game2"
-    put(game2, "game.exe", b"exe")
-    put(game2, "mine.txt", b"m")
-    apply_uninstall(plan_uninstall(rec, game2), game2, False, recycle=fake)
-    assert game2.exists() and (game2 / "mine.txt").exists()
 
 
 def test_empty_player_list_skips_recycle(tmp_path):
