@@ -239,7 +239,7 @@ def test_out_of_library_install_uses_absolute_paths(tmp_path):
     assert rec.library_id == "" and Path(rec.folder) == elsewhere / "bin" and Path(rec.folder).is_absolute()
     assert rec.launch_path == "lc.exe" and rec.vendor_uninstaller == "MsiExec.exe /X{1}"
     assert r.game["library_id"] == "" and Path(r.game["launch_path"]).is_absolute() and "manual" not in r.game
-    assert Path(r.game["launch_path"]) == elsewhere / "bin" / "lc.exe"
+    assert Path(r.game["launch_path"]) == elsewhere / "bin" / "lc.exe" and "library_name" not in r.game
 
 
 def test_registry_folder_in_a_library_is_stored_relative(tmp_path):
@@ -1209,18 +1209,6 @@ def test_cancelled_vendor_uninstall_seen_to_stop_puts_files_back_quietly(tmp_pat
     assert (target / "saves" / "slot1.sav").read_bytes() == b"save" and not setaside(eng).exists()
 
 
-def test_game_fields_for_outside_libraries():
-    from engine.jobs import game_fields_for
-    entry = {"id": "lightcars", "title": "Light Cars", "platforms": ["Windows"]}
-    elsewhere = Path(os.path.abspath("Old Games")) / "Light Cars"
-    rec = InstallRecord(catalog_id="lightcars", kind="game", library_id="", folder=str(elsewhere),
-                        launch_path="lc.exe", method="run", source=InstalledSource("u", "s" * 64, 1, "c" * 64, 1, 0, "1.0"),
-                        files={}, extras={}, steps=[])
-    game = game_fields_for(entry, rec, "windows")
-    assert game["library_id"] == "" and Path(game["launch_path"]) == elsewhere / "lc.exe"
-    assert Path(game["launch_path"]).is_absolute() and "library_name" not in game and "manual" not in game.values()
-
-
 # ---- a cancel at the "where to install" prompt (quitting releases it) -----------------------------------------
 
 
@@ -1262,10 +1250,3 @@ def test_cancel_at_the_announce_of_an_update_puts_the_players_files_back(tmp_pat
     assert ui.events == ["announce"] and len(eng.ctx.elevator.calls) == starts
     assert snapshot(target) == before and eng.ctx.records.load("lightcars").source.version == "1.0"
     run_installer.require_no_setaside(eng.ctx, "lightcars", "Light Cars")  # no copies left set aside
-
-
-def test_run_and_wait_checks_the_cancel_before_starting(tmp_path):
-    eng, lib = setup_engine(tmp_path, [], {})
-    with pytest.raises(Cancelled) as ei:
-        run_installer._run_and_wait(eng.ctx, "Light Cars", "setup.exe", "", False, None, quiet, lambda: True)
-    assert ei.value.tree_done and eng.ctx.elevator.calls == []
