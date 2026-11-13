@@ -20,6 +20,20 @@ _WRAP = 450
 _text = wx.Control.EscapeMnemonics  # a title or folder with "&" in a label is shown, not taken as an access key
 
 
+def _add_buttons(dialog, root, ok: str):
+    """`ok` (the default button) and Cancel, bottom right, as `dialog.ok_btn` and `dialog.cancel_btn`; Escape is
+    Cancel"""
+    buttons = wx.BoxSizer(wx.HORIZONTAL)
+    dialog.ok_btn = wx.Button(dialog, wx.ID_OK, ok)
+    dialog.ok_btn.SetDefault()
+    dialog.cancel_btn = wx.Button(dialog, wx.ID_CANCEL, messages.CONFIRM_BUTTON_CANCEL)
+    buttons.Add(dialog.ok_btn, 0, wx.RIGHT, 8)
+    buttons.Add(dialog.cancel_btn)
+    root.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+    dialog.SetEscapeId(wx.ID_CANCEL)
+    dialog.SetAffirmativeId(wx.ID_OK)
+
+
 class InstallConfirmDialog(wx.Dialog):
     """Confirm an install (or update, or adding extras), driven by the plan.
 
@@ -56,16 +70,8 @@ class InstallConfirmDialog(wx.Dialog):
             text.Wrap(_WRAP)
             root.Add(text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
 
-        buttons = wx.BoxSizer(wx.HORIZONTAL)
-        self.ok_btn = wx.Button(self, wx.ID_OK, ok_label(plan))
-        self.ok_btn.SetDefault()
-        self.cancel_btn = wx.Button(self, wx.ID_CANCEL, messages.CONFIRM_BUTTON_CANCEL)
-        buttons.Add(self.ok_btn, 0, wx.RIGHT, 8)
-        buttons.Add(self.cancel_btn)
-        root.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        _add_buttons(self, root, ok_label(plan))
         self.SetSizer(root)
-        self.SetEscapeId(wx.ID_CANCEL)
-        self.SetAffirmativeId(wx.ID_OK)
 
         self.Bind(wx.EVT_BUTTON, self.on_ok, id=wx.ID_OK)
         self._update_intro()
@@ -161,17 +167,19 @@ class InstallConfirmDialog(wx.Dialog):
         self.intro.Wrap(_WRAP)
         self._relayout()
 
+    def _library(self) -> dict | None:
+        """The library chosen now: the fixed one, the one picked, or the only one; None for a typed folder"""
+        if self.fixed_library is not None:
+            return self.fixed_library
+        if self._radio is not None:
+            return selected_library(self.plan, self._radio.GetSelection())
+        return self.plan.libraries[0] if self.plan.libraries else None
+
     def _library_path(self) -> Path | None:
         """The folder the game would go into now, or None when none is chosen yet"""
-        if self.fixed_library is not None:
-            return Path(self.fixed_library["path"])
-        if self._radio is not None:
-            lib = selected_library(self.plan, self._radio.GetSelection())
-            return Path(lib["path"]) if lib else None
-        if self.plan.libraries:
-            return Path(self.plan.libraries[0]["path"])
-        text = self._folder.GetValue().strip()
-        return Path(text) if text else None
+        lib = self._library()
+        text = self._folder.GetValue().strip() if self._folder is not None else ""
+        return Path(lib["path"]) if lib else Path(text) if text else None
 
     def _blocked_reason(self) -> str | None:
         if self.fixed_library is not None:  # the game's own folder: only a library being removed stops it
@@ -198,15 +206,14 @@ class InstallConfirmDialog(wx.Dialog):
         self._folder.SetFocus()
 
     def on_ok(self, event):
-        plan = self.plan
+        if self._blocked_reason():  # checked again for every kind of choice: things may have changed
+            self._update_blocked()
+            return
+        library = self._library()
         if self._folder is not None:
-            text = self._folder.GetValue().strip()
-            if not text:
+            path = self._library_path()
+            if path is None:
                 self._folder.SetFocus()
-                return
-            path = Path(text)
-            if self.service.blocked(plan.catalog_id, path):
-                self._update_blocked()
                 return
             try:
                 library = self.service.ensure_library(path)
@@ -214,16 +221,7 @@ class InstallConfirmDialog(wx.Dialog):
                 wx.MessageBox(str(e), messages.CONFIRM_LIBRARY_ERROR_TITLE, wx.OK | wx.ICON_WARNING, self)
                 self._folder.SetFocus()
                 return
-        elif self.fixed_library is not None:
-            if self._blocked_reason():
-                self._update_blocked()
-                return
-            library = self.fixed_library
-        elif self._radio is not None:
-            library = selected_library(plan, self._radio.GetSelection())
-        else:
-            library = plan.libraries[0]
-        self._choice = build_choice(plan, library, self._checked())
+        self._choice = build_choice(self.plan, library, self._checked())
         self.EndModal(wx.ID_OK)
 
     def get_choice(self) -> InstallChoice | None:
@@ -243,16 +241,8 @@ class _UninstallConfirm(wx.Dialog):
         self.delete_box = wx.CheckBox(self, label=_text(checkbox_label))
         self.delete_box.SetValue(False)
         root.Add(self.delete_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
-        buttons = wx.BoxSizer(wx.HORIZONTAL)
-        self.ok_btn = wx.Button(self, wx.ID_OK, ok)
-        self.ok_btn.SetDefault()
-        self.cancel_btn = wx.Button(self, wx.ID_CANCEL, messages.CONFIRM_BUTTON_CANCEL)
-        buttons.Add(self.ok_btn, 0, wx.RIGHT, 8)
-        buttons.Add(self.cancel_btn)
-        root.Add(buttons, 0, wx.ALL | wx.ALIGN_RIGHT, 10)
+        _add_buttons(self, root, ok)
         self.SetSizerAndFit(root)
-        self.SetEscapeId(wx.ID_CANCEL)
-        self.SetAffirmativeId(wx.ID_OK)
         self.delete_box.SetFocus()
         self.CentreOnParent()
 
