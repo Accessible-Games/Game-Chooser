@@ -61,7 +61,7 @@ from .run_installer import InstallerUI, RunItem
 from .runtimes import _clear, _clear_or_fail
 from .uninstall_keys import UninstallReader, _winreg_reader
 from .safety import (ApplyResult, UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall, is_link,
-                     plan_uninstall, plan_update, preflight, restore_backups)
+                     plain_file, plan_uninstall, plan_update, preflight, restore_backups)
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
 from .steps import StepContext, _bare, run_system_steps, split_steps, undo_steps
 
@@ -1318,8 +1318,7 @@ def _holds(game_dir: Path, rel: str, files: dict[str, RecordedFile]) -> bool:
     """True if the game's file at `rel` is exactly the one `files` lists there."""
     new = files.get(norm_key(rel))
     try:
-        path, linked = _resolve_game_path(game_dir, rel)
-        return new is not None and not linked and path.is_file() and hash_file(path) == new.sha256
+        return new is not None and plain_file(game_dir, rel, new.sha256) is not None
     except (UnsafePath, OSError):
         return False
 
@@ -1346,7 +1345,6 @@ def _failure_text(e: Exception, title: str) -> str:
 
 def _still_there(game_dir: Path, recorded: RecordedFile) -> bool:
     try:
-        path, linked = _resolve_game_path(game_dir, recorded.path)
+        return plain_file(game_dir, recorded.path) is not None
     except UnsafePath:
         return False
-    return not linked and path.is_file()

@@ -69,7 +69,7 @@ from .paths import norm_key, safe_join
 from .records import (RUNTIME_OWNER_PREFIX, InstalledSource, InstallRecord, RecordedFile, hash_tree,
                       is_runtime_owner, runtime_owner)
 from .run_installer import run_installer_untracked
-from .safety import _has_link_component, _prune_empty_dirs, _resolve_game_path, is_link
+from .safety import _has_link_component, _prune_empty_dirs, _resolve_game_path, is_link, plain_file, remove_unchanged
 from .sources import hash_file
 from .steps import StepContext, _existing_file, run_file_steps, run_system_steps, undo_steps
 
@@ -390,14 +390,10 @@ def marker_present(folder: Path, runtime_id: str, security, allow_user: bool = F
         return _owner_is(security, folder, allow_user=False)
     if data is None or data.get("id") != runtime_id:
         return False
-    for rel in data["files"]:
-        try:
-            path, linked = _resolve_game_path(folder, rel)
-        except (UnsafePath, TypeError):
-            return False
-        if linked or not path.is_file():
-            return False
-    return True
+    try:
+        return all(plain_file(folder, rel) is not None for rel in data["files"])
+    except (UnsafePath, TypeError):
+        return False
 
 
 def _write_marker(folder: Path, marker: dict) -> None:
@@ -842,14 +838,10 @@ def _only_expected(folder: Path, incoming: dict[str, tuple[str, str]]) -> bool:
 
 def _holds_download(folder: Path, incoming: dict[str, tuple[str, str]]) -> bool:
     """True if `folder` has every file of the download, each a plain file with the download's contents."""
-    for display, sha in incoming.values():
-        try:
-            path, linked = _resolve_game_path(folder, display)
-            if linked or not path.is_file() or hash_file(path) != sha:
-                return False
-        except (UnsafePath, OSError):
-            return False
-    return True
+    try:
+        return all(plain_file(folder, display, sha) is not None for display, sha in incoming.values())
+    except (UnsafePath, OSError):
+        return False
 
 
 def _matches_download(folder: Path, incoming: dict[str, tuple[str, str]]) -> bool:
@@ -1063,12 +1055,7 @@ def _drop_recorded(rec: InstallRecord, key: str, game_dir: Path) -> None:
     """Remove a recorded file where it is unchanged (a changed one is the player's now) and stop recording it."""
     recorded = rec.files[key]
     try:
-        path, linked = _resolve_game_path(game_dir, recorded.path)
-        if not linked and path.is_file() and hash_file(path) == recorded.sha256:
-            path.unlink()
-            _prune_empty_dirs(path.parent, game_dir)
-    except UnsafePath:
-        pass
+        remove_unchanged(game_dir, recorded.path, recorded.sha256)
     except OSError:
         return  # still there (in use?): it stays recorded
     rec.files.pop(key)
@@ -1297,10 +1284,9 @@ def _keep_recorded(rec: InstallRecord, game_dir: Path, tree: Path, runtime_id: s
         if recorded.owner != runtime_owner(runtime_id):
             continue
         try:
-            path, linked = _resolve_game_path(game_dir, recorded.path)
+            path = plain_file(game_dir, recorded.path, recorded.sha256)
             dest, dest_linked = _resolve_game_path(tree, recorded.path)
-            if (linked or dest_linked or os.path.lexists(dest) or not path.is_file()
-                    or hash_file(path) != recorded.sha256):
+            if path is None or dest_linked or os.path.lexists(dest):
                 continue
             dest.parent.mkdir(parents=True, exist_ok=True)
             _copy_new(path, dest)

@@ -16,9 +16,8 @@ from pathlib import Path
 from urllib.parse import quote
 
 from . import messages
-from .errors import UnsafePath
 from .paths import is_engine_dir
-from .safety import _resolve_game_path, is_link
+from .safety import is_link, plain_file
 
 MAX_DEPTH = 10
 # What the temporary guess may pick. An .hta is never guessed: it starts only when the catalog's launch path names it.
@@ -286,17 +285,9 @@ def _recorded_launch_exe(game_dir: Path, launch_path: str | None) -> Path | None
     if not launch_path:
         return None
     try:
-        path, through_link = _resolve_game_path(game_dir, launch_path)
-    except (UnsafePath, ValueError, OSError):
+        return plain_file(game_dir, launch_path)
+    except (ValueError, OSError):
         return None
-    if through_link:
-        return None
-    try:
-        if is_link(path) or not path.is_file():
-            return None
-    except OSError:
-        return None
-    return path
 
 
 def is_catalog_launch(game_dir: Path, exe: Path, hint: str | None) -> bool:

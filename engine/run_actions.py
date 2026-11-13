@@ -19,7 +19,7 @@ from .entries import title_of
 from .errors import InstallFailed, NoVerifiedSource, UnsafePath
 from .records import InstalledSource, InstallRecord
 from .run_installer import KEEP_UNDO_POINT, RunItem
-from .safety import _resolve_game_path, restore_backups
+from .safety import plain_file, restore_backups
 from .sources import Fetched, hash_file
 
 
@@ -104,10 +104,10 @@ def copy_installed_files(rec: InstallRecord, game_dir: Path, tree: Path, title: 
         tree.mkdir(parents=True)
         for recorded in rec.files.values():
             try:
-                path, linked = _resolve_game_path(game_dir, recorded.path)
+                path = plain_file(game_dir, recorded.path, recorded.sha256)
             except UnsafePath:
                 continue
-            if linked or not path.is_file() or hash_file(path) != recorded.sha256:
+            if path is None:
                 continue
             copy = tree / recorded.path
             copy.parent.mkdir(parents=True, exist_ok=True)
@@ -128,8 +128,8 @@ def _retarget_rewritten(ctx, rec: InstallRecord, game_dir: Path, untouched: list
     rewritten = {}
     for b in untouched:
         try:
-            path, linked = _resolve_game_path(game_dir, b["original"])
-            if linked or not path.is_file():
+            path = plain_file(game_dir, b["original"])
+            if path is None:
                 continue
             sha = hash_file(path)
         except (UnsafePath, OSError):

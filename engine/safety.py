@@ -160,6 +160,29 @@ def _resolve_game_path(game_dir: Path, rel: str) -> tuple[Path, bool]:
     return safe_join(game_dir, rel), False
 
 
+def plain_file(root: Path, rel: str, sha256: str | None = None) -> Path | None:
+    """The plain file at `rel` under `root`, not through a link (with contents `sha256`, if given), else None.
+    Raises UnsafePath, and OSError if it can't be read: an unreadable file is never taken as changed."""
+    path, linked = _resolve_game_path(root, rel)
+    if linked or not path.is_file() or (sha256 is not None and hash_file(path) != sha256):
+        return None
+    return path
+
+
+def remove_unchanged(game_dir: Path, rel: str, sha: str) -> bool:
+    """Delete the game's file at `rel` if it still has contents `sha`. True if it is gone; False if it
+    isn't a plain file with those contents any more. Raises OSError if it couldn't be deleted."""
+    try:
+        path = plain_file(game_dir, rel, sha)
+    except UnsafePath:
+        return False
+    if path is None:
+        return False
+    path.unlink()
+    _prune_empty_dirs(path.parent, game_dir)
+    return True
+
+
 def _first_link(path: Path, root: Path) -> Path | None:
     """The outermost link between `root` and `path` (or `path` itself), checked lexically."""
     parts = Path(path).relative_to(root).parts
@@ -343,10 +366,7 @@ def plan_uninstall(record, game_dir: Path) -> UninstallPlan:
     delete = []
     hashes = {}
     for recorded in record.files.values():
-        path, linked = _resolve_game_path(game_dir, recorded.path)
-        if linked:
-            continue
-        if path.is_file() and hash_file(path) == recorded.sha256:
+        if plain_file(game_dir, recorded.path, recorded.sha256) is not None:
             rel = recorded.path.replace("\\", "/")
             delete.append(rel)
             hashes[rel] = recorded.sha256

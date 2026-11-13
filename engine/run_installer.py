@@ -34,7 +34,7 @@ from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
 from .paths import STAGING_DIR_NAME, is_code, is_engine_dir, norm_key, unique_path
 from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is_runtime_owner, record_folder
-from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link
+from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link, remove_unchanged
 from .sources import hash_file
 from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, split_steps, undo_steps
 from .uninstall_keys import (UNINSTALL_KEYS, UninstallReader, _winreg_reader, folder_from_uninstall_entry,  # noqa: F401
@@ -864,7 +864,7 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
                 files[key] = RecordedFile(rel, sha, older[key].get("owner") or old.owner)
                 continue
             try:
-                if _remove_unchanged(game_dir, rel, sha):
+                if remove_unchanged(game_dir, rel, sha):
                     continue  # the newer version's, unchanged: Undo removes it, as an update would
             except OSError:
                 not_removed.append(rel)
@@ -894,20 +894,6 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     ctx.records.save(record)
     notes = [*_code_notes(title, outcome.code), *notes]
     return record, [*notes, *_apply_system_steps(ctx, record, new_steps, step_notes)]
-
-
-def _remove_unchanged(game_dir: Path, rel: str, sha: str) -> bool:
-    """Delete the game's file at `rel` if it still has contents `sha`. True if it is gone; False if it
-    isn't a plain file with those contents any more. Raises OSError if it couldn't be deleted."""
-    try:
-        path, linked = _resolve_game_path(game_dir, rel)
-    except UnsafePath:
-        return False
-    if linked or not path.is_file() or hash_file(path) != sha:
-        return False
-    path.unlink()
-    _prune_empty_dirs(path.parent, game_dir)
-    return True
 
 
 # ---- vendor uninstallers ---------------------------------------------------------------------------------
