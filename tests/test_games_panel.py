@@ -493,17 +493,6 @@ def test_focus_list_refuses_while_a_dialog_is_open_or_the_app_is_starting(make_v
     assert focus == [True] and (selected(view), focused(view)) == (0, 0)
 
 
-def test_two_games_with_one_launch_path_are_two_rows_that_stay_apart(make_view):
-    games = [Game(title="First", launch_path="C:/games/same.exe"),
-             Game(title="Second", launch_path="C:/games/same.exe")]
-    view = make_view(idle_label="Launch")
-    view.set_rows(library_rows(games, lambda game: None))
-    player_selects(view, 1)
-    view.set_rows(library_rows(games, lambda game: None))
-    view.refill()  # as every Status result does
-    assert view.selected_row().game is games[1] and view.action_btn.GetLabel() == "Launch Second"
-
-
 def twins():
     """Alpha and Mike Twin share a launch path (Locate has no duplicate check); Alpha comes first in games.json"""
     return [Game(title="Alpha", launch_path="C:/games/same.exe"), Game(title="Bravo", launch_path="C:/games/b.exe"),
