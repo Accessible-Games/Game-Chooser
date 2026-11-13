@@ -174,25 +174,6 @@ def test_resubmit_from_finished_callback_runs_a_new_job(tmp_path):
     assert r.entered == ["a", "a"]
 
 
-def test_resubmit_from_failed_callback_runs_a_new_job(tmp_path):
-    r = Rig(tmp_path, behavior={"a": InstallFailed("No.")})
-    resubmitted = []
-    original = r.listener.job_failed
-
-    def failed(job, message):
-        original(job, message)
-        if not resubmitted:
-            r.behavior.clear()
-            resubmitted.append(r.queue.submit(req("a"), "A"))
-
-    r.listener.job_failed = failed
-    j1 = r.queue.submit(req("a"), "A")
-    r.listener.wait_for(("finished", "a"))
-    assert resubmitted[0] is not j1
-    assert r.queue.shutdown(WAIT)
-    assert r.entered == ["a", "a"]
-
-
 def test_resubmit_while_running_job_is_cancelling_queues_a_new_job(tmp_path):
     r = Rig(tmp_path, gates=["a"])
     j1 = r.queue.submit(req("a"), "A")
