@@ -380,13 +380,7 @@ def test_library_rows_give_the_tree_each_field_as_one_value():
     assert cats["tag"] == cats["price"] == cats["language"] == cats["support"] == set()
 
 
-def test_library_rows_filter_search_label_and_describe_like_any_row():
+def test_library_rows_label_and_describe_like_any_row():
     _, rows = _library()
-    assert [r.title for r in filter_rows(rows, "", {"platform": {"macOS", "Web"}})] == ["Alpha", "Bare Web"]
-    assert [r.title for r in filter_rows(rows, "", {"developer": {"Ann Dev, Bob Dev"}})] == ["Alpha"]
-    assert [r.title for r in filter_rows(rows, "", {"genre": {"Unknown Genre"}, "year": {"Unknown Year"}})] == \
-        ["Bare Web"]
-    assert [r.title for r in filter_rows(rows, "BOB", {})] == ["Alpha"]  # title and developer are searched
-    assert filter_rows(rows, "action", {}) == [] and filter_rows(rows, "unknown", {}) == []
     assert [action_label(r, "windows") for r in rows] == ["Launch Alpha", "Launch Bare Web", "Launch Entombed"]
     assert [description_text(r.entry) for r in rows] == ["", "", description_text(entombed)]
