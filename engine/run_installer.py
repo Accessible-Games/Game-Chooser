@@ -36,7 +36,7 @@ from .paths import EXECUTABLE_CODE_SUFFIXES, STAGING_DIR_NAME, is_engine_dir, no
 from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is_runtime_owner, record_folder
 from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link
 from .sources import hash_file
-from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, undo_steps
+from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, split_steps, undo_steps
 from .uninstall_keys import (UNINSTALL_KEYS, UninstallReader, _winreg_reader, folder_from_uninstall_entry,  # noqa: F401
                              inside, is_missing_program, names_title, new_uninstall_entries, snapshot_uninstall_keys,
                              split_command, vendor_uninstaller, windows_dir)
@@ -644,33 +644,23 @@ def _where(folder: Path, library_id: str, library_path: Path, libraries: list[di
     return "", str(Path(os.path.abspath(folder)))
 
 
-def _apply_system_steps(ctx, record: InstallRecord, steps: list[dict], keep: list[dict] = (),
-                        spare: list[dict] = ()) -> list[str]:
-    """Run the source's registry/register/run steps in the game's folder and record them.
+def _step_ctx(ctx, record: InstallRecord) -> StepContext:
+    return StepContext(Path(os.path.abspath(record_folder(record, ctx.libraries))), ctx.elevator, ctx.registry)
 
-    Applied steps in `keep` that are still wanted, or are in `spare` (the steps of extras applied
-    next, which run them), stay as they are; the others are undone first. Returns notes for undo
-    failures. A failing step leaves the game recorded and raises InstallFailed.
+
+def _apply_system_steps(ctx, record: InstallRecord, steps: list[dict], notes: list[str] = ()) -> list[str]:
+    """Run the source's new registry/register/run steps in the game's folder and add them to the record.
+
+    Returns `notes` (the undo failures of the steps undone before the installer ran). A failing step leaves
+    the game recorded and raises InstallFailed, with `notes` after its words.
     """
-    folder = record_folder(record, ctx.libraries)
-    step_ctx = StepContext(Path(os.path.abspath(folder)), ctx.elevator, ctx.registry)
-    wanted = [_bare(s) for s in steps]
-    spared = [_bare(s) for s in spare]
-    kept = [s for s in keep if _bare(s) in wanted or _bare(s) in spared]
-    notes = undo_steps([s for s in keep if s not in kept], step_ctx)
-    record.steps = kept
-    ctx.records.save(record)
     try:
-        applied = run_system_steps([s for s in steps if _bare(s) not in [_bare(k) for k in kept]], step_ctx)
+        applied = run_system_steps(steps, _step_ctx(ctx, record))
     except StepError as e:
         raise InstallFailed("\n\n".join([str(e), *getattr(e, "undo_failures", []), *notes])) from e
-    record.steps = kept + applied
+    record.steps = record.steps + applied
     ctx.records.save(record)
-    return notes
-
-
-def _bare(step: dict) -> dict:
-    return {k: v for k, v in step.items() if k != "undo"}
+    return list(notes)
 
 
 # ---- the player's files, set aside ---------------------------------------------------------------------
@@ -792,8 +782,9 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     The player's .exe/.dll/.ocx files aren't set aside: like any update, the installer's code
     replaces them without a copy. `previous` is the record's undo point afterwards (KEEP_UNDO_POINT
     leaves it as it is); it is saved with the installer's files, before the system steps run.
-    Applied steps in `spare_steps` (the extras' steps, for extras the caller applies next) aren't
-    undone. The record's extras are left as they are: the caller applies and records them next, so
+    Applied steps the installer's source no longer has are undone before it runs, while their files are
+    there; those in `spare_steps` (the extras' steps, for extras the caller applies next) aren't. The new
+    steps run after the installer. The record's extras are left as they are: the caller applies and records them next, so
     if that fails, a retry still knows which extras the game has.
 
     For Undo, `undo_of` is the undo point being undone. A file the newer version recorded that this
@@ -809,6 +800,12 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     player = _player_files(record, game_dir)
     aside = _SetAside.copy(ctx, item.catalog_id, game_dir, [r for r in player if not _is_code(r)], title)
     player_code = {rel: sha for rel, sha in player.items() if _is_code(rel)}
+    # Applied steps not wanted any more are undone now, while the files they name are still there.
+    kept_steps, unwanted, new_steps = split_steps(record.steps, item.steps, spare_steps)
+    step_notes = undo_steps(unwanted, _step_ctx(ctx, record))
+    if unwanted:
+        record.steps = kept_steps
+        ctx.records.save(record)
     if interactive:
         ctx.installer_ui.announce_target(title, game_dir)
     keys_before = snapshot_uninstall_keys(ctx.uninstall_reader)
@@ -905,7 +902,7 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     record.uninstalled = False
     ctx.records.save(record)
     notes = [*_code_notes(title, outcome.code), *notes]
-    return record, [*notes, *_apply_system_steps(ctx, record, item.steps, keep=record.steps, spare=spare_steps)]
+    return record, [*notes, *_apply_system_steps(ctx, record, new_steps, step_notes)]
 
 
 def _remove_unchanged(game_dir: Path, rel: str, sha: str) -> bool:

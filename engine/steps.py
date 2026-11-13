@@ -166,6 +166,22 @@ def run_system_steps(steps: list[dict], ctx: StepContext) -> list[dict]:
     return applied
 
 
+def _bare(step: dict) -> dict:
+    """A step as the catalog wrote it, without the undo data an applied step carries."""
+    return {k: v for k, v in step.items() if k != "undo"}
+
+
+def split_steps(applied: list[dict], wanted: list[dict], spare: list[dict] = ()
+                ) -> tuple[list[dict], list[dict], list[dict]]:
+    """(kept, unwanted, new): the applied steps still wanted or in `spare` (kept with their undo data, never
+    run again, so their undo never captures a value Game Chooser set itself), the other applied steps (to
+    undo), and the wanted steps not applied yet (to run)."""
+    keep = [_bare(s) for s in [*wanted, *spare]]
+    kept = [s for s in applied if _bare(s) in keep]
+    kept_bare = [_bare(s) for s in kept]
+    return kept, [s for s in applied if _bare(s) not in keep], [s for s in wanted if _bare(s) not in kept_bare]
+
+
 def _undo_one(item: dict, ctx: StepContext) -> None:
     if item.get("action") == "registry":
         undo = item["undo"]

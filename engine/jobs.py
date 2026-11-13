@@ -61,7 +61,7 @@ from .uninstall_keys import UninstallReader, _winreg_reader
 from .safety import (ApplyResult, UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall, is_link,
                      plan_uninstall, plan_update, preflight, restore_backups)
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
-from .steps import StepContext, run_system_steps, undo_steps
+from .steps import StepContext, _bare, run_system_steps, split_steps, undo_steps
 
 log = logging.getLogger(__name__)
 
@@ -768,10 +768,8 @@ class InstallEngine:
         except Exception as e:
             raise InstallFailed(_failure_text(e, title)) from e
         step_ctx = StepContext(game_dir.absolute(), ctx.elevator, ctx.registry)
-        wanted = [_bare(s) for s in wanted_steps]
-        kept = [s for s in rec.steps if _bare(s) in wanted]
-        kept_bare = [_bare(s) for s in kept]
-        notes = undo_steps([s for s in rec.steps if _bare(s) not in wanted], step_ctx)
+        kept, unwanted, new = split_steps(rec.steps, wanted_steps)
+        notes = undo_steps(unwanted, step_ctx)
         try:
             result = apply_plan(plan, game_dir, tree, ctx.today())
         except Exception as e:
@@ -779,7 +777,7 @@ class InstallEngine:
             self._save_partial(rec, plan, game_dir, partial.backups if partial else [], kept, prior)
             raise InstallFailed(_failure_text(e, title)) from e
         try:
-            applied = run_system_steps([s for s in wanted_steps if _bare(s) not in kept_bare], step_ctx)
+            applied = run_system_steps(new, step_ctx)
         except StepError as e:
             self._save_partial(rec, plan, game_dir, result.backups, kept, prior)
             raise InstallFailed("\n\n".join([str(e), *getattr(e, "undo_failures", []), *notes])) from e
@@ -1230,11 +1228,6 @@ def game_fields_for(entry: dict, rec: InstallRecord, platform: str | None = None
         "installed_source": {"url": rec.source.url, "sha256": rec.source.sha256, "size": rec.source.size},
         "installed_extras": list(rec.extras),
     }
-
-
-def _bare(step: dict) -> dict:
-    """A step as the catalog wrote it, without the undo data an applied step carries."""
-    return {k: v for k, v in step.items() if k != "undo"}
 
 
 def _snapshot(rec: InstallRecord) -> dict:

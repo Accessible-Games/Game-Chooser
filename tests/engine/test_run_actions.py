@@ -33,15 +33,17 @@ def record(eng):
 def versioned(target):
     """A fake installer that writes v1's or v2's files, depending on which setup program was started."""
     def installer(exe, args, elevated):
+        if Path(exe).name != "setup.exe":
+            return  # regsvr32 for a register step
         files = V2 if Path(exe).read_bytes() == SETUP_V2 else V1
         writes(target, files)(exe, args, elevated)
     return installer
 
 
-def updated_run_game(tmp_path):
-    """Light Cars installed and played, then updated by v2's installer."""
+def updated_run_game(tmp_path, steps=None):
+    """Light Cars installed and played, then updated by v2's installer (with v2's `steps`)."""
     eng, routes, target = installed_run_game(tmp_path)
-    publish_v2(eng, routes, setup=SETUP_V2)
+    publish_v2(eng, routes, setup=SETUP_V2, steps=steps)
     eng.ctx.elevator.on_start = versioned(target)
     run(eng, "update")
     return eng, routes, target
@@ -117,16 +119,16 @@ def test_repair_runs_the_recorded_installer_and_keeps_the_undo_point(tmp_path):
     assert_players_files_kept(target)
 
 
-def any_game(tmp_path, kind, updated):
+def any_game(tmp_path, kind, updated, v2_steps=None):
     """An archive game (Pawprints) or one whose installer runs (Light Cars), installed, played and, with `updated`,
-    updated once: (engine, its id, its title, its folder)."""
+    updated once to v2 (with `v2_steps`): (engine, its id, its title, its folder)."""
     if kind == "archive":
         eng, folder = archive.install_v1(tmp_path)
         if updated:
-            archive.publish(eng, archive.V2)
+            archive.publish(eng, archive.V2, steps=v2_steps)
             archive.run(eng, "update")
         return eng, "pawprints", "Pawprints", folder
-    eng, routes, folder = updated_run_game(tmp_path) if updated else installed_run_game(tmp_path)
+    eng, routes, folder = updated_run_game(tmp_path, v2_steps) if updated else installed_run_game(tmp_path)
     return eng, "lightcars", "Light Cars", folder
 
 
@@ -198,6 +200,27 @@ def test_undo_after_a_run_update_reinstalls_the_previous_installer(tmp_path):
     assert rec.previous is None and rec.previous_unavailable is None
     assert rec.extras == {} and rec.steps == previous["steps"]
     assert rec.files["lc.exe"].sha256 == sha(b"exe v1")
+
+
+@pytest.mark.parametrize("kind", ["archive", "installer-run"])
+def test_undo_unregisters_the_newer_versions_component_while_its_file_is_there(tmp_path, monkeypatch, kind):
+    only_v2 = {"archive": "sounds/b.wav", "installer-run": "v2.txt"}[kind]
+    eng, game_id, title, folder = any_game(tmp_path, kind, updated=True,
+                                           v2_steps=[{"action": "register", "path": only_v2}])
+    elevator = eng.ctx.elevator
+    place = elevator.on_start
+    there = []
+
+    def on_start(exe, args, elevated):
+        if exe == "regsvr32.exe" and args.startswith("/u"):
+            there.append((folder / only_v2).is_file())
+        elif place is not None:
+            place(exe, args, elevated)
+    elevator.on_start = on_start
+    settle(monkeypatch)
+    eng.run(InstallRequest("undo", game_id, "Games"), quiet, never)
+    assert there == [True] and not (folder / only_v2).exists()
+    assert eng.ctx.records.load(game_id).steps == []
 
 
 def test_undo_of_an_archive_update_outside_the_libraries_puts_the_backups_back(tmp_path):
