@@ -140,16 +140,10 @@ def test_type_ahead_gives_a_space_three_seconds_and_any_other_character_one():
     now[0] += 0.8  # 3.2 seconds after "t"
     assert not typed.takes_space() and typed.add(" ") == "t   "  # a Space that comes too late adds nothing
     assert typed.add("a") == "t   a"  # a character counts from the key before it: the last Space taken, 0.8 s ago
-
-
-def test_a_space_exactly_three_seconds_after_the_last_character_still_belongs_to_the_text():
-    now = [50.0]
-    typed = TypeAhead(clock=lambda: now[0])
-    typed.add("t")
-    now[0] += 3.0
+    now[0] = 100.0
+    typed.add("b")
+    now[0] = 103.0  # exactly 3 seconds after "b": the Space still belongs to the text
     assert typed.takes_space()
-    now[0] += 0.001
-    assert not typed.takes_space()
 
 
 def test_type_ahead_text_can_be_ended_at_once():

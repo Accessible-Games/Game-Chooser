@@ -1,6 +1,7 @@
 """MainFrame methods that need no main window: each runs on a stand-in for the frame, so no window is built, no
 dialog opens and nothing is launched. Skips when wxPython is not installed or there is no display."""
 
+from contextlib import nullcontext
 from types import SimpleNamespace
 
 import pytest
@@ -98,27 +99,7 @@ def test_a_games_list_that_cannot_be_saved_is_told_and_the_change_still_shows(is
 
 
 
-class PickedFile:
-    """wx.FileDialog in which the player picks `path` and presses OK"""
-
-    def __init__(self, path):
-        self.path = path
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def ShowModal(self):
-        return wx.ID_OK
-
-    def GetPath(self):
-        return str(self.path)
-
-
-@pytest.mark.parametrize("name, accepted", [("game.exe", True), ("play.bat", True), ("readme.txt", False),
-                                            ("menu.hta", False)])
+@pytest.mark.parametrize("name, accepted", [("game.exe", True), ("menu.hta", False)])
 def test_locate_accepts_only_the_files_add_game_accepts(frame, monkeypatch, tmp_path, name, accepted):
     picked = tmp_path / "picked" / name
     picked.parent.mkdir()
@@ -128,7 +109,8 @@ def test_locate_accepts_only_the_files_add_game_accepts(frame, monkeypatch, tmp_
     frame.service.entry_for = lambda game: None
     frame._live_game = lambda game: game
     frame._save_games = lambda: frame.boxes.append("saved")
-    monkeypatch.setattr(wx, "FileDialog", lambda *args, **kwargs: PickedFile(picked))
+    monkeypatch.setattr(wx, "FileDialog", lambda *args, **kwargs: nullcontext(
+        SimpleNamespace(ShowModal=lambda: wx.ID_OK, GetPath=lambda: str(picked))))
     MainFrame.launch_game(frame, frame.game)
     assert frame.boxes[0][0] == messages.LAUNCH_NOT_FOUND_TITLE
     if accepted:

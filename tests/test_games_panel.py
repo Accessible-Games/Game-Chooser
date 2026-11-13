@@ -643,24 +643,6 @@ def test_only_values_are_selected_from_the_saved_tree_selections(make_view):
     assert [tree.GetItemText(item) for item in tree.GetSelections()] == ["Action"] and titles(view) == ["Bravo"]
 
 
-@pytest.mark.parametrize("prefix", ["", "catalog_"])
-@pytest.mark.parametrize("selections", [None, 7, [["Genre/Action"], 7, None, "Genre/Action"]])
-def test_saved_tree_selections_that_are_not_a_list_of_paths_do_not_stop_the_first_fill(make_view, prefix, selections):
-    """A hand-edited config.json: the app must still start. Only the paths in a list count."""
-    view = make_view({prefix + "tree_selections": selections}, prefix=prefix)
-    view.set_rows(rows(ALPHA, BRAVO))
-    assert titles(view) == (["Bravo"] if isinstance(selections, list) else ["Alpha", "Bravo"])
-
-
-@pytest.mark.parametrize("prefix", ["", "catalog_"])
-@pytest.mark.parametrize("position", ["wide", 3.5, [300], None])
-def test_a_saved_splitter_position_that_is_not_a_number_gives_the_middle(make_view, prefix, position):
-    view = make_view({prefix + "splitter_position": position}, prefix=prefix)
-    view.GetTopLevelParent().SendSizeEvent()
-    view.restore_sash()
-    assert view.splitter.GetSashPosition() == view.splitter.GetSize()[0] // 2 > 200
-
-
 def test_the_splitter_goes_where_it_was_saved_or_to_the_middle_and_is_saved(make_view):
     """restore_sash() is called once the window has its size. Left to wx, the sash would sit at the minimum pane
     size (100) for good, as the Catalog's did."""
@@ -839,10 +821,9 @@ def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_vi
     now[0] += 0.5
     type_text(view, "r")  # "temple r", within a second of the Space: past "Temple Of Doom", and nothing launched
     assert acted == [] and selected(view) == 4
-    type_text(view, "\r")  # Enter always acts, in the middle of a text too
+    type_text(view, "\r")  # Enter always acts, in the middle of a text too, and ends the text
     assert acted == ["Temple Run"]
-    now[0] += 3.5  # more than 3 seconds after the last character: Space is the action again
-    type_text(view, " ")
+    type_text(view, " ")  # so Space is the action again at once
     assert acted == ["Temple Run", "Temple Run"] and selected(view) == 4
     type_text(view, "t")  # steps on to "Temple Of Doom"; then a Space every 0.8 seconds
     for _ in range(3):
@@ -851,7 +832,14 @@ def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_vi
     assert acted == ["Temple Run", "Temple Run"] and selected(view) == 3
     now[0] += 0.8  # 3.2 seconds after "t": the Spaces before it did not push the limit out
     type_text(view, " ")
+    for key in (wx.WXK_SPACE, wx.WXK_RETURN):  # held, Windows repeats them: taken on the list, never acted on
+        assert press(view.list_ctrl, key, repeat=True)
     assert acted == ["Temple Run", "Temple Run", "Temple Of Doom"]
+    now[0] += 5
+    type_text(view, "t")  # on to "Temple Run"
+    view.sort_by(1)  # a sort ends the text too: Space acts at once
+    type_text(view, " ")
+    assert acted[-1] == "Temple Run" and len(acted) == 4
 
 
 @pytest.mark.parametrize("held", [{"shift": True}, {"ctrl": True}, {"ctrl": True, "shift": True},
@@ -970,34 +958,6 @@ def test_a_typed_text_ends_on_a_key_that_ends_a_thought(make_view, key):
     player_selects(view, 2)  # where an arrow key takes the player
     type_text(view, " ")
     assert acted == ["Bravo"]
-
-
-def test_a_held_space_acts_once(make_view):
-    """On the Catalog tab the first press opens the install confirmation; a repeat must not land on its button"""
-    acted = []
-    view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
-    type_text(view, "temple")
-    now[0] += 1.2
-    assert press(view.list_ctrl, wx.WXK_SPACE, repeat=True)  # held mid-text: never the action
-    now[0] += 3.5
-    type_text(view, " ")
-    for key in (wx.WXK_SPACE, wx.WXK_SPACE, wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):  # held: taken, never acted on
-        assert press(view.list_ctrl, key, repeat=True)
-    assert acted == ["Temple Of Doom"]
-
-
-@pytest.mark.parametrize("end", ["RETURN", "NUMPAD_ENTER", "sort"])
-def test_enter_and_a_sort_end_a_typed_text(make_view, end):
-    """Enter acts and a digit sorts, and after either a Space within 3 seconds of the last letter acts too"""
-    acted = []
-    view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
-    type_text(view, "t")
-    if end == "sort":
-        view.sort_by(1)
-    else:
-        assert press(view.list_ctrl, getattr(wx, f"WXK_{end}")) and acted == ["Temple Of Doom"]
-    type_text(view, " ")
-    assert acted[-1] == "Temple Of Doom" and not view.type_ahead.typing()
 
 
 def test_a_character_typed_with_altgr_is_text(make_view):

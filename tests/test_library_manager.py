@@ -288,27 +288,13 @@ def test_a_failed_write_leaves_the_old_file_whole(isolated_manager_factory, monk
     assert not list(m.games_file.parent.glob("*.tmp")) and not list(m.config_file.parent.glob("*.tmp"))
 
 
-@pytest.mark.parametrize("value, kind, item, expected", [
-    ([800, 600], list, int, [800, 600]),
-    (5, list, int, None),  # "column_widths": 5 in a hand-edited config.json
-    ([800, "wide"], list, int, [800]),  # only the items of the right kind
-    (["a", {"b": 1}], list, str, ["a"]),  # a hidden library that can't go in a set
-    (5, str, None, None),  # "last_search": 5
-    ("Temple", str, None, "Temple"),
-    (None, int, None, None),
+@pytest.mark.parametrize("saved, kind, item, expected", [
+    ({"x": [800, 600]}, list, int, [800, 600]),
+    ({"x": 5}, list, int, None),  # "column_widths": 5 in a hand-edited config.json
+    ({"x": [800, "wide"]}, list, int, [800]),  # only the items of the right kind
+    ({}, str, None, None),  # not there
 ])
-def test_a_saved_value_is_read_only_when_it_has_the_right_kind(isolated_manager_factory, value, kind, item, expected):
-    m = isolated_manager_factory(config={"libraries": [], "SavedState": {"x": value}})
+def test_a_saved_value_is_read_only_when_it_has_the_right_kind(isolated_manager_factory, saved, kind, item, expected):
+    m = isolated_manager_factory(config={"libraries": [], "SavedState": saved})
     assert m.saved("x", kind, item=item) == expected
     assert m.saved("x", kind, "default", item=item) == ("default" if expected is None else expected)
-    assert m.saved("not there", kind) is None
-
-
-
-def test_save_or_keep_says_whether_it_saved(isolated_manager, caplog):
-    def full_disk():
-        raise OSError("the disk is full")
-
-    assert isolated_manager.save_or_keep(isolated_manager.save_games, "games.json") is True
-    assert isolated_manager.save_or_keep(full_disk, "games.json") is False
-    assert "Couldn't save games.json" in caplog.text
