@@ -1,3 +1,4 @@
+import gzip
 import json
 
 import pytest
@@ -104,27 +105,20 @@ def test_add_catalog_game_replaces_and_saves_then_remove(isolated_manager):
     assert m.games == [] and _games_json(m) == []
 
 
-def test_reconcile_adds_game_for_orphan_record(isolated_manager_factory, tmp_path):
+@pytest.mark.parametrize("cached, title", [(False, "entombed"), (True, "Entombed!")])  # uncached: the id stands in
+def test_reconcile_adds_game_for_orphan_record(isolated_manager_factory, tmp_path, cached, title):
+    if cached:
+        cache = isolated_manager_factory.config_dir / "catalog"
+        cache.mkdir(parents=True)
+        doc = {"schema_version": 1, "entries": [{"id": "entombed", "title": "Entombed!"}]}
+        (cache / "index.json.gz").write_bytes(gzip.compress(json.dumps(doc).encode()))
     m = _restart(isolated_manager_factory, tmp_path, _record())
     game = m.catalog_game("entombed")
     assert game is not None
-    assert game.title == "entombed"  # the entry isn't cached: the id stands in for the title
+    assert game.title == title
     assert game.launch_path == "Entombed/e.exe" and game.library_id == "main"
     assert game.installed_extras == ["patch"]
     assert [g["catalog_id"] for g in _games_json(isolated_manager_factory)] == ["entombed"]
-
-
-def test_reconcile_uses_cached_entry_for_title(isolated_manager_factory, tmp_path):
-    import gzip
-    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
-    isolated_manager_factory(config=config)
-    cache = isolated_manager_factory.config_dir / "catalog"
-    cache.mkdir()
-    doc = {"schema_version": 1, "entries": [{"id": "entombed", "title": "Entombed!"}]}
-    (cache / "index.json.gz").write_bytes(gzip.compress(json.dumps(doc).encode()))
-    _seed_records(isolated_manager_factory, _record())
-    m = isolated_manager_factory()
-    assert m.catalog_game("entombed").title == "Entombed!"
 
 
 def test_reconcile_skips_uninstalled_records(isolated_manager_factory, tmp_path):
