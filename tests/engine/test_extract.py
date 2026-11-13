@@ -16,9 +16,8 @@ TOOLS_DIR = REPO_ROOT / "bin"
 
 
 def test_seven_zip_command():
-    assert seven_zip_command(Path("bin/7z.exe"), Path("a.7z"), Path("out"), "pw") == [
-        "bin\\7z.exe", "x", "-y", "-bso0", "-bsp0", "-ppw", "-oout", "a.7z"]
-    assert "-p" not in " ".join(seven_zip_command(Path("bin/7z.exe"), Path("a.zip"), Path("out"), None))
+    assert seven_zip_command(Path("bin/7z.exe"), Path("a.7z"), Path("out")) == [
+        "bin\\7z.exe", "x", "-y", "-bso0", "-bsp0", "-oout", "a.7z"]
 
 
 def test_innoextract_and_msi_commands():
@@ -100,7 +99,7 @@ def _extractor(run):
 
 @pytest.mark.parametrize("install", [
     {"method": "zip"},
-    {"method": "7z", "password": "pw"},
+    {"method": "7z"},
     {"method": "cab"},
     {"method": "installer", "installer": {"type": "nsis", "mode": "extract"}},
     {"method": "installer", "installer": {"type": "other", "mode": "extract"}},
@@ -112,7 +111,6 @@ def test_dispatch_uses_seven_zip(tmp_path, install):
     assert len(run.calls) == 1
     assert Path(run.calls[0][0]).name == "7z.exe"
     assert run.calls[0][-1] == str(tmp_path / "a.bin")
-    assert ("-ppw" in run.calls[0]) == (install.get("password") == "pw")
 
 
 def test_dispatch_inno_extracts_then_flattens(tmp_path):
@@ -213,36 +211,24 @@ def test_default_run_missing_tool_is_extract_error(tmp_path):
 
 
 @pytest.mark.tools
-def test_real_zip_and_password_7z(tmp_path, make_zip):
-    extractor = Extractor(TOOLS_DIR)
+def test_real_zip(tmp_path, make_zip):
     zpath = make_zip({"Game/Game.exe": b"exe", "Game/data/x.txt": b"x"})
     out = tmp_path / "zip-out"
-    assert extractor.extract(zpath, out, {"method": "zip"}, lambda: False) == out
+    assert Extractor(TOOLS_DIR).extract(zpath, out, {"method": "zip"}, lambda: False) == out
     assert (out / "Game" / "Game.exe").read_bytes() == b"exe"
-
-    src = tmp_path / "secret.txt"
-    src.write_bytes(b"s")
-    sevenz = tmp_path / "pw.7z"
-    subprocess.run([str(TOOLS_DIR / "7z.exe"), "a", "-pSECRET", "-mhe=on", str(sevenz), str(src)],
-                   check=True, capture_output=True, stdin=subprocess.DEVNULL)
-    out2 = tmp_path / "7z-out"
-    extractor.extract(sevenz, out2, {"method": "7z", "password": "SECRET"}, lambda: False)
-    assert (out2 / "secret.txt").read_bytes() == b"s"
 
 
 @pytest.mark.tools
-def test_wrong_password_fails_fast(tmp_path):
+def test_password_archive_fails_fast(tmp_path):
     src = tmp_path / "secret.txt"
     src.write_bytes(b"s")
     sevenz = tmp_path / "pw.7z"
     subprocess.run([str(TOOLS_DIR / "7z.exe"), "a", "-pSECRET", "-mhe=on", str(sevenz), str(src)],
                    check=True, capture_output=True, stdin=subprocess.DEVNULL)
     start = time.monotonic()
-    with pytest.raises(ExtractError):
-        Extractor(TOOLS_DIR).extract(sevenz, tmp_path / "out", {"method": "7z", "password": "WRONG"},
-                                     lambda: False)
-    with pytest.raises(ExtractError):  # no password at all: 7z must not prompt
-        Extractor(TOOLS_DIR).extract(sevenz, tmp_path / "out2", {"method": "7z"}, lambda: False)
+    with pytest.raises(ExtractError) as info:  # 7z must not prompt
+        Extractor(TOOLS_DIR).extract(sevenz, tmp_path / "out", {"method": "7z"}, lambda: False)
+    assert str(info.value) == messages.EXTRACT_FAILED
     assert time.monotonic() - start < 10
 
 

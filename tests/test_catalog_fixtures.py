@@ -158,15 +158,12 @@ def test_single_exe_game_is_a_copy_of_where_exe(tmp_path):
 
 @pytest.mark.tools
 @pytest.mark.skipif(not HAVE_7Z, reason="bin/7z.exe is missing")
-def test_password_7z_extracts_with_the_catalog_password(tmp_path):
+def test_7z_game_extracts(tmp_path):
     build, state = load(tmp_path)
     install = state.entries["test-game-7z"]["sources"][0]["install"]
     archive = build / "files" / "test-game-7z.7z"
     root = Extractor(serve.ROOT / "bin").extract(archive, tmp_path / "out", install, lambda: False)
     assert (root / "game.bat").is_file() and (root / "data.dat").is_file()
-    with pytest.raises(Exception):
-        Extractor(serve.ROOT / "bin").extract(archive, tmp_path / "bad", {"method": "7z", "password": "nope"},
-                                              lambda: False)
 
 
 def test_test_story_is_a_page_game_with_its_own_files(tmp_path):

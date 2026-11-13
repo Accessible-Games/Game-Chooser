@@ -32,12 +32,8 @@ def default_tools_dir() -> Path:
     return Path(sys.argv[0]).resolve().parent / "bin"
 
 
-def seven_zip_command(seven_zip: Path, archive: Path, dest: Path, password: str | None) -> list[str]:
-    cmd = [str(seven_zip), "x", "-y", "-bso0", "-bsp0"]
-    if password:
-        cmd.append(f"-p{password}")
-    cmd += [f"-o{dest}", str(archive)]
-    return cmd
+def seven_zip_command(seven_zip: Path, archive: Path, dest: Path) -> list[str]:
+    return [str(seven_zip), "x", "-y", "-bso0", "-bsp0", f"-o{dest}", str(archive)]
 
 
 def innoextract_command(tool: Path, archive: Path, dest: Path) -> list[str]:
@@ -191,8 +187,7 @@ class Extractor:
         elif tool == "tar":
             extract_tar(archive, dest, cancel)
         elif tool == "7z":
-            self._run_checked(seven_zip_command(self.tools_dir / "7z.exe", archive, dest, install.get("password")),
-                              cancel)
+            self._run_checked(seven_zip_command(self.tools_dir / "7z.exe", archive, dest), cancel)
         elif tool == "inno":
             self._run_checked(innoextract_command(self.tools_dir / "innoextract.exe", archive, dest), cancel)
             flatten_inno(dest)
