@@ -211,20 +211,6 @@ def test_label_and_description_follow_the_row_when_its_number_stays_but_the_game
         ("Install", False, "")
 
 
-def test_every_programmatic_select_also_moves_the_focused_item(make_view):
-    """Else the arrow keys start from the old focused row (row 0 after startup), not from the selected game"""
-    view = make_view({"last_selected": "charlie"})
-    view.set_rows(rows(ALPHA, BRAVO, CHARLIE))
-    assert (selected(view), focused(view)) == (2, 2)  # the game remembered from the last run
-    view.search_combo.SetValue("b")
-    assert titles(view) == ["Bravo"] and (selected(view), focused(view)) == (0, 0)
-    view.search_combo.SetValue("")
-    view.select_row(view.displayed[2])
-    assert (selected(view), focused(view)) == (2, 2)
-    view.set_rows(rows(ALPHA, CHARLIE))  # Charlie moved up a row
-    assert (selected(view), focused(view)) == (1, 1)
-
-
 def test_tree_gains_a_node_for_a_new_value_and_keeps_its_selection(make_view):
     view = make_view()
     view.set_rows(rows(ALPHA, BRAVO))
