@@ -104,9 +104,6 @@ class ProgressArea(wx.Panel):
         self._waiting = waiting
         self._render()
 
-    def status_text(self) -> str:
-        return self.status.GetValue()
-
     def _render(self):
         text = messages.with_waiting(self._label, self._waiting)
         if self.status.GetValue() != text:

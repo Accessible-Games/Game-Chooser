@@ -14,8 +14,9 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-import re
 from pathlib import Path
+
+from engine.pricing import http_url
 
 class ValidationService:
     """Centralized validation logic for game data."""
@@ -39,22 +40,14 @@ class ValidationService:
     @staticmethod
     def validate_url(url):
         """
-        Validate a URL for web games.
+        Validate a URL for web games: the catalog's own test of a web address (engine.pricing.http_url).
 
         Returns:
             Tuple of (is_valid, error_message)
         """
         if not url:
             return False, "URL cannot be empty"
-
-        # Basic URL pattern
-        url_pattern = re.compile(
-            r'^https?://'  # http:// or https://
-            r'(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\.)+[A-Z]{2,6}\.?'  # domain
-            r'(?:/?|[/?]\S+)$', re.IGNORECASE
-        )
-
-        if not url_pattern.match(url):
+        if http_url(url) is None:
             return False, "Invalid URL format"
 
         return True, None

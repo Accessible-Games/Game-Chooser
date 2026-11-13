@@ -207,18 +207,13 @@ class CatalogPanel(wx.Panel):
         fields = game_fields(row.entry, current_platform())
         fields.update(platforms=["Web"], launch_path=sources[0].get("url", ""), library_id="", catalog_id=row.id)
         manager = self.service.manager
-        before = list(manager.games)
-        try:
-            manager.add_catalog_game(fields)
-        except OSError as e:  # games.json couldn't be saved: nothing changes (the file on disk is whole)
-            log.warning("Couldn't add the web game %s: %s", row.id, e)
-            manager.games = before
-            self.frame._tell(messages.WEB_GAME_NOT_ADDED.format(title=fields["title"] or row.title), "Catalog",
-                             wx.ICON_ERROR)
-            self.frame.focus_active_list()
-            return
+        # A save that fails keeps the game in memory (add_catalog_game adds it first), as Add Game does
+        saved = manager.save_or_keep(lambda: manager.add_catalog_game(fields), "games.json")
         self.frame.games_changed()
-        self.frame.notify(messages.ADDED.format(title=fields["title"] or row.title))
+        if saved:
+            self.frame.notify(messages.ADDED.format(title=row.title))  # title_of(entry), as fields["title"] is
+        else:
+            self.frame._tell(messages.GAMES_NOT_SAVED.format(path=manager.games_file), "Game Chooser")
         self.frame.focus_active_list()
 
     def on_random_game(self):
@@ -239,9 +234,9 @@ class CatalogPanel(wx.Panel):
         if row is None:
             return None
         menu = wx.Menu()
-        action = menu.Append(wx.ID_ANY, action_label(row))
+        action = menu.Append(wx.ID_ANY, wx.Control.EscapeMnemonics(action_label(row)))
         menu.Bind(wx.EVT_MENU, lambda e: self.on_action(), action)
         for label, url in link_items(row.entry):
-            item = menu.Append(wx.ID_ANY, label)
+            item = menu.Append(wx.ID_ANY, wx.Control.EscapeMnemonics(label))
             menu.Bind(wx.EVT_MENU, lambda e, link=url: webbrowser.open(link), item)
         return menu

@@ -149,3 +149,15 @@ def test_the_catalog_list_sorts_by_each_column_and_remembers_it(make_panel):
 def test_the_catalog_list_starts_in_the_saved_sort(make_panel):
     view = make_panel(entries=PRICED, saved={"catalog_sort_column": 3, "catalog_sort_ascending": False}).view
     assert titles(view) == ["Bravo", "Delta", "Alpha", "Charlie"] and headers(view)[3] == "Price ▼"
+
+
+
+def test_an_ampersand_in_a_title_or_a_link_label_is_shown_not_taken_as_an_access_key(make_panel):
+    tom = {**entry("tom"), "title": "Tom & Jerry", "links": [{"label": "Manual & FAQ", "url": "https://m.example"}]}
+    panel = make_panel(entries=[tom])
+    view = panel.view
+    view.select_row(view.displayed[0])
+    assert view.action_btn.GetLabelText() == "Install Tom & Jerry"
+    menu = panel.context_menu(view.selected_row())
+    assert [item.GetItemLabelText() for item in menu.GetMenuItems()] == ["Install Tom & Jerry", "Open Manual & FAQ"]
+    menu.Destroy()

@@ -418,14 +418,16 @@ LIBRARY_NOT_REMOVED = ("Game Chooser couldn't finish removing that library, beca
 LIBRARY_ROW_GONE = ("{title}'s library is no longer in Preferences, so Game Chooser can't find it. Delete it and add "
                     "it again with Add Game.")
 FORGET_FAILED = "Game Chooser couldn't remove {title} from the list. Try again."
-WEB_GAME_NOT_ADDED = ("Game Chooser couldn't add {title} to your games list, because the list couldn't be saved. "
-                      "Try again.")
 COUNTING_FILES = "Checking {title}'s files"
 COUNTING_LIBRARY_FILES = "Checking the files of the games in {label}"
 FORGET_GAME_CONFIRM = ("Remove {title} from the list? Game Chooser didn't keep track of its files, so they stay "
                        "where they are.")
-FORGET_GAME_TITLE = "Confirm Delete"
+DELETE_GAME_CONFIRM = "Delete '{title}' from library?"
+DELETE_GAME_TITLE = "Confirm Delete"
 LAUNCH_NOT_FOUND_TITLE = "File Not Found"
+FILE_MISSING = "File does not exist: {path}"
+INVALID_EXECUTABLE = "File is not a valid executable.\n\nSupported types for {platform}: {types}"
+INVALID_EXECUTABLE_TITLE = "Invalid Executable"
 LAUNCH_NOT_FOUND_LOCATE = "Game executable not found. Please locate the game.\n\n" + DEFENDER_NOTE
 LAUNCH_NOT_FOUND_REPAIR = "Game executable not found.\n\n" + DEFENDER_NOTE + "\n\nRepair {title} now?"
 LAUNCH_NOT_FOUND_CATALOG = "Game executable not found.\n\n" + DEFENDER_NOTE
@@ -440,6 +442,8 @@ EDIT_GAME_TITLE = "Edit Game"
 LIBRARY_NOT_FOUND_TITLE = "Library Not Found"
 GAME_BUSY = "Game Chooser is still working on {title}. Wait for it to finish, then try again."
 ACTION_NOT_STARTED = "Game Chooser couldn't start that for {title}. Try again."
+GAMES_NOT_SAVED = ("Game Chooser couldn't save your games list ({path}). Your change is kept for now; Game Chooser "
+                   "tries to save it again with your next change and when it closes.")
 
 # games.json or config.json couldn't be read at startup (told once, after the window opens)
 FILE_DAMAGED_TITLE = "Game Chooser"

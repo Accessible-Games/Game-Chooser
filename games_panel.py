@@ -36,7 +36,8 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
   move. While a text is being typed, Space and the digit keys belong to it (Space for 3 seconds after the last
   character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. A
   Space never moves the selection; with any modifier but Alt alone it is a plain Space, and only Alt+Space (the
-  window menu) goes on to the list control. Escape, Backspace and the navigation keys end the text. Enter always acts.
+  window menu) goes on to the list control. A held Space or Enter acts once on the list; a dialog its first press
+  opens can still get the repeats. Escape, Backspace, Enter, a sort and the navigation keys end the text. Enter always acts.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
   unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
   open or the app is starting.
@@ -44,7 +45,6 @@ What differs between the tabs is a setting of `GamesPanel` or lives in the tab's
 does, its context menu, the Catalog's status line).
 """
 
-import logging
 import random
 
 import wx
@@ -57,13 +57,11 @@ from description_field import DescriptionField
 from engine import messages
 from progress_area import ProgressArea
 
-log = logging.getLogger(__name__)
-
-# The keys that end a text being typed in the list: Escape, Backspace and the keys that move through the list
-# (with Num Lock off the number pad sends its own codes for those)
+# The keys that end a text being typed in the list: Escape, Backspace, Enter and the keys that move through the
+# list (with Num Lock off the number pad sends its own codes for those)
 ENDS_TYPED_TEXT = frozenset(getattr(wx, f"WXK_{prefix}{name}") for prefix in ("", "NUMPAD_")
                             for name in ("UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN")
-                            ) | {wx.WXK_ESCAPE, wx.WXK_BACK}
+                            ) | {wx.WXK_ESCAPE, wx.WXK_BACK, wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER}
 
 
 class GamesPanel(wx.Panel):
@@ -108,17 +106,17 @@ class GamesPanel(wx.Panel):
         self.type_ahead = TypeAhead()  # the text being typed into the list to jump to a title
         # Read here, not by the main window later: the list is filled before the rest of the saved state loads
         self.sort_column, self.sort_ascending = 0, True
-        column = self._saved()[self._key("sort_column")]
-        if isinstance(column, int) and 0 <= column < len(sort_keys):
+        column = self._read("sort_column", int, -1)
+        if 0 <= column < len(sort_keys):
             self.sort_column = column
-            self.sort_ascending = bool(self._saved()[self._key("sort_ascending")])
+            self.sort_ascending = self._read("sort_ascending", bool, True)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
 
         search_sizer = wx.BoxSizer(wx.HORIZONTAL)
         search_label = wx.StaticText(self, label="Search:")
         self.search_combo = wx.ComboBox(self, style=wx.CB_DROPDOWN)
-        self.search_combo.SetValue(self._saved()[self._key("last_search")] or "")
+        self.search_combo.SetValue(self._read("last_search", str, ""))
         search_sizer.Add(search_label, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
         search_sizer.Add(self.search_combo, 1, wx.EXPAND)
         sizer.Add(search_sizer, 0, wx.EXPAND | wx.ALL, 5)
@@ -129,7 +127,7 @@ class GamesPanel(wx.Panel):
         self.list.set_columns(columns)
         self.list.SetLabel(name)
         self.list_ctrl.SetName(name)
-        widths = self._saved()[self._key("column_widths")]
+        widths = self._read("column_widths", list, item=int)
         if widths and not self.list.control.use_dataview:  # a DataViewCtrl (macOS) keeps its own widths
             for column, width in enumerate(widths[:len(columns)]):
                 self.list_ctrl.SetColumnWidth(column, width)
@@ -191,13 +189,14 @@ class GamesPanel(wx.Panel):
         """This tab's SavedState key"""
         return self.state_prefix + name
 
+    def _read(self, name, kind, default=None, item=None):
+        return self.frame.library_manager.saved(self._key(name), kind, default, item)
+
     def save_config(self):
         """Write the config. A save that fails is logged and never stops what the player was doing: the change
         stays in memory and is written with the next save that works."""
-        try:
-            self.frame.library_manager.save_config()
-        except OSError as e:
-            log.warning("Couldn't save the config: %s", e)
+        manager = self.frame.library_manager
+        manager.save_or_keep(manager.save_config, "the config")
 
     def _get_virtual_item(self, index):
         return self.displayed[index] if 0 <= index < len(self.displayed) else None
@@ -236,7 +235,7 @@ class GamesPanel(wx.Panel):
         if nodes == self._tree_nodes:
             return
         # Until the tree has values, the saved selections wait (the catalog offline with no saved copy)
-        paths = self._selected_paths() if self._tree_nodes else self._saved()[self._key("tree_selections")]
+        paths = self._selected_paths() if self._tree_nodes else self._read("tree_selections", list, [], str)
         tree = self.tree_ctrl
         opened = [path for path, item in self._tree_items().items() if path and tree.IsExpanded(item)]
         focused = self._tree_path(tree.GetFocusedItem())
@@ -313,8 +312,8 @@ class GamesPanel(wx.Panel):
             for path in opened:
                 if path in items:
                     tree.Expand(items[path])
-            for path in selected if isinstance(selected, list) else ():  # a hand-edited config.json may hold
-                if isinstance(path, str) and "/" in path and path in items:  # anything; a category selects nothing
+            for path in selected:
+                if "/" in path and path in items:  # a category selects nothing
                     tree.SelectItem(items[path], True)
             item = None if focused is None else items.get(focused) or items.get(focused.split("/")[0])
             if item:
@@ -370,7 +369,7 @@ class GamesPanel(wx.Panel):
         rows.sort(key=lambda r: (r.title.lower(), r.id))  # title order, also among rows that tie below
         rows.sort(key=self.sort_keys[self.sort_column], reverse=not self.sort_ascending)
         old, old_index = self.selected_row(), self.list.get_selected_index()
-        wanted = old.id if old is not None else self._saved()[self._key("last_selected")]
+        wanted = old.id if old is not None else self._read("last_selected", str)
         scroll = by_player or self._in_view(old_index)  # asked before the list changes
         self._populating = True  # the selection chosen here is not the player's, so it isn't saved
         try:
@@ -411,7 +410,7 @@ class GamesPanel(wx.Panel):
         row = self.selected_row()
         if row is None and self.action_btn.HasFocus():
             self.focus_list()  # never leave focus on a control that is about to be disabled (not under a dialog)
-        self.action_btn.SetLabel(action_label(row) if row else self.idle_label)
+        self.action_btn.SetLabelText(action_label(row) if row else self.idle_label)
         self.action_btn.Enable(row is not None)
         self.description.set_text(description_text(row.entry) if row else "")
         self.action_sizer_slot.Layout()
@@ -422,7 +421,8 @@ class GamesPanel(wx.Panel):
 
     def sort_by(self, column):
         """A header click or a digit key: sort by that column; the same column again, the other way round.
-        The selected game stays selected."""
+        The selected game stays selected, and a text being typed ends."""
+        self.type_ahead.clear()
         if column == self.sort_column:
             self.sort_ascending = not self.sort_ascending
         else:
@@ -540,8 +540,11 @@ class GamesPanel(wx.Panel):
         # Any Space but Alt+Space (the window menu) is a plain one: Ctrl+Space reaching the list control clears
         # the selection, and the button still names the game
         space = key == wx.WXK_SPACE and event.GetModifiers() != wx.MOD_ALT
-        if key in ENDS_TYPED_TEXT:  # the key itself goes on to the list as before
+        if key in ENDS_TYPED_TEXT:  # the key itself goes on to the list as before (Enter acts below)
             self.type_ahead.clear()
+        # A held Space or Enter acts once on the list (a dialog its first press opens still gets the repeats)
+        if event.IsAutoRepeat() and (space or key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER)):
+            return
         if space and self.type_ahead.takes_space():
             # Part of the text being typed ("temple of"), for 3 seconds after its last character: a player
             # waits for the screen reader to finish the row. Taken here, never skipped on to on_char: wx turns
@@ -576,10 +579,7 @@ class GamesPanel(wx.Panel):
         """Put the splitter where it was saved, else in the middle. The main window calls this once it has its
         size: a position set before that does not hold, and one left to wx stays at the minimum pane size and
         does not follow a resize."""
-        saved = self._saved()[self._key("splitter_position")]
-        if not isinstance(saved, int) or not saved:  # nothing saved, or not a position (a hand-edited config.json)
-            saved = self.splitter.GetSize()[0] // 2
-        self.splitter.SetSashPosition(saved)
+        self.splitter.SetSashPosition(self._read("splitter_position", int) or self.splitter.GetSize()[0] // 2)
 
     def save_state(self):
         """On close, into SavedState (the caller writes the config): the splitter position, the column widths, the

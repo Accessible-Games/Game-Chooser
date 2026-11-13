@@ -22,20 +22,22 @@ Dialog classes for Game Chooser application
 from pathlib import Path
 
 import wx
-import os
 import platform
-import threading
 from contextlib import nullcontext
 from library_manager import LibraryError
 from engine import messages
 from engine.folders import library_label
 from install_dialogs import RemoveLibraryDialog
 from install_prefs import check_install_prefs, current_catalog_url, register_shared_components
-from library_actions import library_row_name
+from library_actions import executable_problem, library_row_name
 from wx_bridge import run_in_background
 from models import Game, is_web_path
 from validation_service import ValidationService
 from smart_list import SmartList, Column
+
+# The file picker of Add Game and Locate: the files PathManager.is_executable accepts first
+EXECUTABLE_WILDCARD = ("Executable files (*.exe)|*.exe|Batch files (*.bat)|*.bat|All files (*.*)|*.*"
+                       if platform.system() == "Windows" else "Applications (*.app)|*.app|All files (*.*)|*.*")
 
 
 class FirstTimeSetupDialog(wx.Dialog):
@@ -88,27 +90,24 @@ class FirstTimeSetupDialog(wx.Dialog):
 
     def on_add_library(self, event):
         """Open directory picker to add library"""
-        dlg = wx.DirDialog(self, "Choose Game Library Directory")
-        if dlg.ShowModal() == wx.ID_OK:
-            try:
-                self.library_manager.add_library(dlg.GetPath())
-            except LibraryError as e:
-                wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
-        dlg.Destroy()
+        with wx.DirDialog(self, "Choose Game Library Directory") as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                try:
+                    self.library_manager.add_library(dlg.GetPath())
+                except LibraryError as e:
+                    wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
 
     def on_add_game(self, event):
         """Open add game dialog"""
-        dlg = GameDialog(self, self.library_manager)
-        if dlg.ShowModal() == wx.ID_OK:
-            self.library_manager.games.append(dlg.game)
-            self.library_manager.save_games()
-        dlg.Destroy()
+        with GameDialog(self, self.library_manager) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.library_manager.games.append(dlg.game)
+                self.parent_frame._save_games()
 
     def on_preferences(self, event):
         """Open preferences dialog"""
-        dlg = PreferencesDialog(self, self.library_manager, getattr(self.parent_frame, "service", None))
-        dlg.ShowModal()
-        dlg.Destroy()
+        with PreferencesDialog(self, self.library_manager, getattr(self.parent_frame, "service", None)) as dlg:
+            dlg.ShowModal()
 
     def on_close(self, event):
         """Handle close button (X) click"""
@@ -252,16 +251,9 @@ class GameDialog(wx.Dialog):
 
     def on_browse(self, event):
         """Browse for executable file"""
-        system = platform.system()
-        if system == "Windows":
-            wildcard = "Executable files (*.exe)|*.exe|Batch files (*.bat)|*.bat|All files (*.*)|*.*"
-        else:  # macOS
-            wildcard = "Applications (*.app)|*.app|All files (*.*)|*.*"
-
-        dlg = wx.FileDialog(self, "Select Game Executable", wildcard=wildcard)
-        if dlg.ShowModal() == wx.ID_OK:
-            self.path_ctrl.SetValue(dlg.GetPath())
-        dlg.Destroy()
+        with wx.FileDialog(self, "Select Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.path_ctrl.SetValue(dlg.GetPath())
 
     def on_ok(self, event):
         """Validate and save changes"""
@@ -292,25 +284,9 @@ class GameDialog(wx.Dialog):
                 wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
                 return
 
-            # Validate executable file exists and is supported
-            from pathlib import Path
-            from path_manager import PathManager
-            path_obj = Path(path)
-
-            # Check if file exists
-            if not path_obj.exists():
-                wx.MessageBox(f"File does not exist: {path}",
-                             "File Not Found", wx.OK | wx.ICON_ERROR)
-                return
-
-            # Use PathManager's robust executable validation
-            if not PathManager.is_executable(path_obj):
-                if platform_val == "Windows":
-                    valid_exts_str = ".exe, .bat"
-                else:  # macOS
-                    valid_exts_str = ".app"
-                wx.MessageBox(f"File is not a valid executable.\n\nSupported types for {platform_val}: {valid_exts_str}",
-                             "Invalid Executable", wx.OK | wx.ICON_ERROR)
+            problem = executable_problem(path, platform_val)  # the file exists and is a game executable
+            if problem:
+                wx.MessageBox(*problem, wx.OK | wx.ICON_ERROR)
                 return
 
         # Validate year if provided
@@ -326,23 +302,18 @@ class GameDialog(wx.Dialog):
         self._check_duplicates_async(path, platform_val, year_str)
 
     def _check_duplicates_async(self, path, platform_val, year_str):
-        """Asynchronously check for duplicate games and complete validation"""
-        def check_duplicates():
-            """Background thread to check for duplicates"""
+        """Look for a game with this path on a worker (a drive can be slow to answer), then finish here"""
+        def find():
             try:
-                duplicate_info = self._find_duplicate_game(path)
-                wx.CallAfter(self._on_duplicate_check_complete, duplicate_info, path, platform_val, year_str)
+                return self._find_duplicate_game(path), None
             except Exception as e:
-                wx.CallAfter(self._on_duplicate_check_error, str(e))
-
-        # Start background thread
-        thread = threading.Thread(target=check_duplicates, daemon=True)
-        thread.start()
+                return None, str(e)
+        run_in_background(find, lambda found: self._on_duplicate_check_complete(*found, path, platform_val, year_str),
+                          "duplicate-check")
 
     def _find_duplicate_game(self, path):
         """Find if a game with this path already exists"""
         # Normalize the path for comparison
-        from pathlib import Path
         normalized_path = str(Path(path).resolve())
 
         for game in self.library_manager.games:
@@ -360,34 +331,24 @@ class GameDialog(wx.Dialog):
             # For non-web games, also check resolved absolute paths
             if not is_web_path(path) and not game.is_web:
                 try:
-                    if game.library_id:
-                        # Library game - resolve to absolute path
-                        game_full_path = self.library_manager.get_full_path(game)
-                        if game_full_path:
-                            game_resolved = str(Path(game_full_path).resolve())
-                            if game_resolved == normalized_path:
-                                return {
-                                    'type': 'resolved',
-                                    'game': game,
-                                    'match_path': game_full_path
-                                }
-                    else:
-                        # User-managed game - compare resolved paths
-                        game_resolved = str(Path(game.launch_path).resolve())
-                        if game_resolved == normalized_path:
-                            return {
-                                'type': 'resolved',
-                                'game': game,
-                                'match_path': game.launch_path
-                            }
+                    # A library game's path joined to its library; a game added by hand's as it is
+                    game_full_path = self.library_manager.get_full_path(game)
+                    if game_full_path and str(Path(game_full_path).resolve()) == normalized_path:
+                        return {'type': 'resolved', 'game': game, 'match_path': game_full_path}
                 except (OSError, ValueError):
                     # Path resolution failed, skip this comparison
                     continue
 
         return None
 
-    def _on_duplicate_check_complete(self, duplicate_info, path, platform_val, year_str):
+    def _on_duplicate_check_complete(self, duplicate_info, error, path, platform_val, year_str):
         """Handle duplicate check completion"""
+        if not self or not self.IsModal():  # closed meanwhile (Escape), or an earlier Add's check finished it
+            return
+        if error is not None:
+            wx.MessageBox(f"Error checking for duplicates: {error}\n\nGame will not be saved.",
+                          "Duplicate Check Failed", wx.OK | wx.ICON_ERROR)
+            return
         if duplicate_info:
             duplicate_game = duplicate_info['game']
             match_type = duplicate_info['type']
@@ -410,11 +371,6 @@ class GameDialog(wx.Dialog):
 
         # No duplicates found, complete the validation
         self._complete_validation(path, platform_val, year_str)
-
-    def _on_duplicate_check_error(self, error_msg):
-        """Handle duplicate check error"""
-        wx.MessageBox(f"Error checking for duplicates: {error_msg}\n\nGame will not be saved.",
-                     "Duplicate Check Failed", wx.OK | wx.ICON_ERROR)
 
     def _complete_validation(self, path, platform_val, year_str):
         """Complete validation and save the game"""
@@ -579,8 +535,7 @@ class PreferencesDialog(wx.Dialog):
         result = check_install_prefs(install, self.address_ctrl.GetValue(), self.shared_check.GetValue())
         if not result.ok:
             self.notebook.SetSelection(self.notebook.FindPage(self.installing_page))
-            wx.MessageBox(messages.PREFS_BAD_CATALOG_ADDRESS, messages.PREFS_BAD_ADDRESS_TITLE,
-                          wx.OK | wx.ICON_ERROR, self)
+            self._tell(messages.PREFS_BAD_CATALOG_ADDRESS, messages.PREFS_BAD_ADDRESS_TITLE)
             self.address_ctrl.SelectAll()
             self.address_ctrl.SetFocus()
             return False
@@ -612,9 +567,9 @@ class PreferencesDialog(wx.Dialog):
         index = self.lib_list.get_selected_index()
         return self.lib_list.find_item_from_index(index) if index >= 0 else None
 
-    def _tell(self, text):
+    def _tell(self, text, caption="Library"):
         with self._modal():
-            wx.MessageBox(text, "Library", wx.OK | wx.ICON_ERROR, self)
+            wx.MessageBox(text, caption, wx.OK | wx.ICON_ERROR, self)
 
     def _change_libraries(self, action, *args):
         """Run a library change, show why it can't be done, and redraw the list"""
@@ -632,12 +587,10 @@ class PreferencesDialog(wx.Dialog):
 
     def on_add_library(self, event):
         """Add a new library path (applies immediately)"""
-        dlg = wx.DirDialog(self, "Choose Game Library Directory")
-        with self._modal():
-            chosen = dlg.ShowModal() == wx.ID_OK
+        with self._modal(), wx.DirDialog(self, "Choose Game Library Directory") as dlg:
+            chosen, path = dlg.ShowModal() == wx.ID_OK, dlg.GetPath()
         if chosen:
-            self._change_libraries(self.library_manager.add_library, dlg.GetPath())
-        dlg.Destroy()
+            self._change_libraries(self.library_manager.add_library, path)
 
     def on_change_library_folder(self, event):
         """Point the selected library at another folder (applies immediately)"""
@@ -648,12 +601,10 @@ class PreferencesDialog(wx.Dialog):
             # its queued uninstalls find the game folders through the library when they run
             self._tell(messages.LIBRARY_BEING_REMOVED)
             return
-        dlg = wx.DirDialog(self, "Choose the library's new folder", defaultPath=selected["path"])
-        with self._modal():
-            chosen = dlg.ShowModal() == wx.ID_OK
+        with self._modal(), wx.DirDialog(self, "Choose the library's new folder", defaultPath=selected["path"]) as dlg:
+            chosen, path = dlg.ShowModal() == wx.ID_OK, dlg.GetPath()
         if chosen:
-            self._change_libraries(self.library_manager.change_library_folder, selected["id"], dlg.GetPath())
-        dlg.Destroy()
+            self._change_libraries(self.library_manager.change_library_folder, selected["id"], path)
 
     def on_remove_library(self, event):
         """Remove the selected library (applies immediately). One holding catalog installs is removed once they
@@ -726,14 +677,10 @@ class PreferencesDialog(wx.Dialog):
             if found is None:
                 return
             lib, tracked, kept = found
-            dlg = RemoveLibraryDialog(self, library_label(lib), [g.title or g.catalog_id for g in tracked],
-                                      player_files, [g.title or g.catalog_id for g in kept])
-            try:
-                with self._modal():
-                    confirmed = dlg.ShowModal() == wx.ID_OK
+            with self._modal(), RemoveLibraryDialog(self, library_label(lib), [g.title or g.catalog_id for g in tracked],
+                                                    player_files, [g.title or g.catalog_id for g in kept]) as dlg:
+                confirmed = dlg.ShowModal() == wx.ID_OK
                 delete_player_data = dlg.delete_player_data()
-            finally:
-                dlg.Destroy()
             if confirmed:
                 self._change_libraries(self.service.remove_library, library_id, delete_player_data)
         finally:
@@ -756,49 +703,3 @@ class PreferencesDialog(wx.Dialog):
         """Save and close (stays open when the catalog address isn't valid)"""
         if self.on_apply(event):
             self.EndModal(wx.ID_OK)
-
-
-class DeleteGameDialog(wx.Dialog):
-    """Confirmation dialog for game deletion"""
-
-    def __init__(self, parent, game_title):
-        super().__init__(parent, title="Confirm Delete",
-                        style=wx.CAPTION | wx.CLOSE_BOX | wx.SYSTEM_MENU)
-
-        self.game_title = game_title
-        self.init_ui()
-        self.CenterOnParent()
-
-    def init_ui(self):
-        """Initialize the dialog UI"""
-        sizer = wx.BoxSizer(wx.VERTICAL)
-
-        # Message
-        message = wx.StaticText(self, label=f"Delete '{self.game_title}' from library?")
-        sizer.Add(message, 0, wx.ALL | wx.CENTER, 15)
-
-        # Buttons
-        button_sizer = wx.BoxSizer(wx.HORIZONTAL)
-
-        yes_btn = wx.Button(self, wx.ID_YES, "Yes")
-        no_btn = wx.Button(self, wx.ID_NO, "No")
-
-        button_sizer.Add(yes_btn, 0, wx.ALL, 5)
-        button_sizer.Add(no_btn, 0, wx.ALL, 5)
-
-        sizer.Add(button_sizer, 0, wx.ALL | wx.CENTER, 10)
-
-        # Bind events
-        self.Bind(wx.EVT_BUTTON, self.on_yes, yes_btn)
-        self.Bind(wx.EVT_BUTTON, self.on_no, no_btn)
-
-        self.SetSizer(sizer)
-        sizer.Fit(self)
-
-    def on_yes(self, event):
-        """Handle Yes button"""
-        self.EndModal(wx.ID_YES)
-
-    def on_no(self, event):
-        """Handle No button"""
-        self.EndModal(wx.ID_NO)

@@ -6,7 +6,7 @@ import pytest
 from engine import messages
 from library_actions import (EXTRAS, LINK, REPAIR, UNDO, UNINSTALL, UPDATE, catalog_menu_items, delete_kind,
                              is_editable, is_tracked, is_uninstall_unfinished, is_uninstallable, launch_problem,
-                             may_start_hta, start_launch_file,
+                             may_start_hta, start_launch_file, executable_problem,
                              library_row_name, remove_library_checkbox_label, remove_library_text, undo_item,
                              uninstall_checkbox_label)
 from models import Game
@@ -245,3 +245,21 @@ def test_start_launch_file_reads_no_record_for_a_file_that_is_not_an_hta(tmp_pat
     start_launch_file(exe, str(tmp_path), catalog_game(), lambda g: pytest.fail("only an .hta needs the record"),
                       [], start=lambda path, cwd, hta_allowed: calls.append((path, cwd, hta_allowed)))
     assert calls == [(exe, str(tmp_path), False)]
+
+
+
+def test_a_hand_added_games_file_is_one_add_game_and_locate_both_accept(tmp_path):
+    """PathManager.is_executable decides: an .exe or .bat file, or an .app folder. Never an .hta."""
+    for name in ("game.exe", "PLAY.BAT", "readme.txt", "menu.hta"):
+        (tmp_path / name).write_bytes(b"MZ")
+    (tmp_path / "Game.app").mkdir()
+    for name in ("game.exe", "PLAY.BAT", "Game.app"):
+        assert executable_problem(str(tmp_path / name), "Windows") is None
+    invalid = (messages.INVALID_EXECUTABLE.format(platform="Windows", types=".exe, .bat"),
+               messages.INVALID_EXECUTABLE_TITLE)
+    assert executable_problem(str(tmp_path / "readme.txt"), "Windows") == invalid
+    assert executable_problem(str(tmp_path / "menu.hta"), "Windows") == invalid
+    assert executable_problem(str(tmp_path / "menu.hta"), "macOS")[0].endswith("macOS: .app")
+    gone = str(tmp_path / "gone.exe")
+    assert executable_problem(gone, "Windows") == (messages.FILE_MISSING.format(path=gone),
+                                                   messages.LAUNCH_NOT_FOUND_TITLE)

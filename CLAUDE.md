@@ -28,14 +28,15 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   unit-tested. Three are tested in part, on a frame that is never shown or a stand-in for the main window (these
   tests skip when wxPython is not installed or there is no display): `games_panel.py`, the games view both tabs
   are built from (`tests/test_games_panel.py`); in `catalog_panel.py`, what its action button does while a job
-  runs and how its columns sort (`tests/test_catalog_panel.py`); in `main_window.py`, the Library list's own
-  keys and the message boxes of `launch_game` and `on_open_folder` (`tests/test_main_window.py`).
+  runs, how its columns sort and an "&" in its labels (`tests/test_catalog_panel.py`); in `main_window.py`, the
+  Library list's own key (Del), four message boxes of `launch_game` and `on_open_folder`, Locate's file check
+  and a games.json save that fails (`tests/test_main_window.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
 - Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, catalog
   panel, games panel, main window, install choices, install prefs, install service, language names, library
-  actions, library integration, library manager, wx bridge, catalog fixtures).
+  actions, library integration, library manager, validation service, wx bridge, catalog fixtures).
 - `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
   except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
   build check) cover the tracing build.
@@ -54,8 +55,8 @@ on worker threads: `fetch_index()` (it also saves the fetched index in the cache
 only**: `take_index`, `load_cached_index`, `refresh_index`, `adopt_launch_paths`, `apply_result`, `job_failed`,
 `submit`, `forget`, `remove_library`, and so on. Pattern: fetch on a worker, then `take_index` on the UI thread.
 What starts each worker: `MainFrame.start_index_fetch` and `MainFrame.refresh_statuses` each start their own
-daemon thread, the player-file counts go through `wx_bridge.run_in_background`, and `GameDialog` starts its own
-thread for the duplicate check.
+daemon thread, and the player-file counts and `GameDialog`'s duplicate check go through
+`wx_bridge.run_in_background`.
 
 ### Modal safety
 wx runs `CallAfter` events inside a modal loop, so work that replaces games must not run under a dialog that

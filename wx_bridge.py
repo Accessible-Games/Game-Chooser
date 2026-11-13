@@ -317,13 +317,9 @@ class WxInstallerUI:
             return
         path = None
         try:
-            dlg = wx.DirDialog(self.frame, messages.LOCATE_FOLDER.format(title=title),
-                               style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST)
-            try:
-                with self.frame.modal_dialog():
-                    if dlg.ShowModal() == wx.ID_OK and dlg.GetPath():
-                        path = Path(dlg.GetPath())
-            finally:
-                dlg.Destroy()
+            with wx.DirDialog(self.frame, messages.LOCATE_FOLDER.format(title=title),
+                              style=wx.DD_DEFAULT_STYLE | wx.DD_DIR_MUST_EXIST) as dlg, self.frame.modal_dialog():
+                if dlg.ShowModal() == wx.ID_OK and dlg.GetPath():
+                    path = Path(dlg.GetPath())
         finally:
             gate.answer(path)

@@ -16,7 +16,7 @@ paths:
 
 ## Files
 - **main_window.py** - `MainFrame`: notebook, menus, shortcuts, queue handlers, modal safety, state
-- **dialogs.py** - `FirstTimeSetupDialog`, `GameDialog` (add/edit by hand), `PreferencesDialog`, `DeleteGameDialog`
+- **dialogs.py** - `FirstTimeSetupDialog`, `GameDialog` (add/edit by hand), `PreferencesDialog`
 - **install_dialogs.py** - `InstallConfirmDialog`, `UninstallDialog`, `RemoveLibraryDialog`
 - **description_field.py** - read-only multi-line description; Enter on a link line opens it
 - **progress_area.py** - gauge, status line, Done and Cancel for the running job
@@ -39,7 +39,10 @@ description. The Catalog tab has its status line and Retry above these.
   `MainFrame.selected_game()` is the selected row's `Game`.
   `MainFrame.games_changed()` is the one call after every change to a game, to `manager.games`, to a library or
   to what is installed (Add, Edit, Delete, Locate, a job that ended, an index take, Preferences, F5, a web game
-  added from the Catalog): it rebuilds both tabs' rows, the Libraries menu and the statuses.
+  added from the Catalog): it rebuilds both tabs' rows, the Libraries menu and the statuses. Add (also the
+  first-run dialog's), Edit, Delete and Locate write games.json through `_save_games`, and the Catalog's Add of a
+  web game through `save_or_keep` too: a save that fails says so (`messages.GAMES_NOT_SAVED`), and the change stays
+  in memory and still shows.
   Status values (`engine/status.py`): `Ready`, `Update available`, `Executable not found`, `Library not found`.
   A `self_updating` entry never shows `Update available`.
   Statuses are computed on a worker thread (`refresh_statuses`) and applied on the UI thread.
@@ -113,10 +116,11 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
     native list clear the selection while the button still named the game, and Enter then acted on nothing.
     A Space belongs to the text for 3 seconds after the last character that is not a Space
     (a player waits for the screen reader to finish the row), and Spaces do not push that limit out. After
-    those 3 seconds Space is the action again. After typing, Enter is the key that always acts.
-  - Escape, Backspace, Up, Down, Home, End, Page Up and Page Down end the text at once (also from the number
-    pad with Num Lock off, which sends its own key codes): what is typed next is a new text, and Space acts on
-    the row the player moved to. The key itself goes on to the list.
+    those 3 seconds Space is the action again. After typing, Enter is the key that always acts. A held Space
+    or Enter acts once on the list (`IsAutoRepeat`); a dialog its first press opens can still get the repeats.
+  - Escape, Backspace, Enter, Up, Down, Home, End, Page Up and Page Down end the text at once (also from the
+    number pad with Num Lock off, which sends its own key codes), and so does a sort: what is typed next is a new
+    text, and Space acts on the row the player moved to. The key itself goes on to the list (Enter acts).
   - A key with Ctrl alone or Alt alone is never text. With both down it is AltGr and is text: wx hands over a
     letter outside the system code page that way (the Polish e with ogonek under code page 1252), and a letter
     inside it with neither.
@@ -138,7 +142,7 @@ What differs between the tabs, each a setting passed to `GamesPanel`:
 | `columns` with one of `sort_keys` each | Title, Genre, Developer, Year, Platform (by how many), Status | Title, Developer, Genre, Price (`catalog_view.price_sort_key`: free first, then by the amount shown), Details |
 | `categories` / `tree_keys` | Platform, Genre, Developer, Release Year; View > Filter Tree picks which show | `catalog_panel.TREE_CATEGORIES`, all shown |
 | `row_filter` | View > Libraries (hidden libraries) | none |
-| `on_key` | Del, Ctrl+E | none |
+| `on_key` | Del | none |
 | `on_shown` | `update_tab_menus` (Edit Game follows the selection) | none |
 | `on_action`, `context_menu` | launch; `build_list_menu` | install, add or launch; the action and links |
 | `random_game` candidates, and what Yes does | the listed games that run on this system; launch | any listed row, its own action (Ctrl+R); the rows that install, the install confirmation (Ctrl+Shift+R) |
@@ -150,8 +154,8 @@ search, the tree selections, the sort, the column widths and the splitter positi
 ## Modal safety
 The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn, *args)` are in CLAUDE.md
 (Modal safety).
-- `run_when_no_dialog` is used for index takes, job outcomes (`_apply_finished`, `_apply_failed`,
-  `_apply_cancelled`) and the uninstall confirmation.
+- `run_when_no_dialog` is used for index takes, job outcomes (`_apply_outcome`) and the uninstall
+  confirmation.
 - `PreferencesDialog` sets `holds_no_games = True`: it holds library ids only, is **not** opened in
   `modal_dialog()`, and `_modal_open()` ignores it, so job results apply while it is open (through
   `job_done_hooks`). The prompts it opens use the parent's `modal_dialog()` and do defer.

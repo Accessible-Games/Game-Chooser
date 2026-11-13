@@ -131,27 +131,17 @@ class GameLibraryManager:
     
     def load_config(self):
         """Load configuration from JSON file"""
+        view = {"splitter_position": None, "sort_column": 0, "sort_ascending": True, "last_selected": None,
+                "last_search": "", "column_widths": None, "tree_selections": []}  # each tab's games view
         default_config = {
             "libraries": [],
             "SavedState": {
                 "window_size": None,
                 "window_position": None,
-                "splitter_position": None,
-                "sort_column": 0,
-                "sort_ascending": True,
-                "last_selected": None,
-                "last_search": "",
-                "column_widths": None,
-                "tree_selections": [],
                 "tree_filters": ["platform", "genre", "developer", "year"],
                 "last_tab": None,
-                "catalog_last_selected": None,
-                "catalog_last_search": "",
-                "catalog_tree_selections": [],
-                "catalog_column_widths": None,
-                "catalog_splitter_position": None,
-                "catalog_sort_column": 0,
-                "catalog_sort_ascending": True
+                **view,
+                **{"catalog_" + key: value for key, value in view.items()},
             },
             "install": {
                 "catalog_url": DEFAULT_CATALOG_URL,
@@ -199,11 +189,22 @@ class GameLibraryManager:
         _write_json_atomic(self.config_file, self.config)
 
     def save_or_keep(self, save, what):
-        """Run a save; one that fails (OSError) is logged, and the change stays in memory for the next save."""
+        """Run a save; one that fails (OSError) is logged, and the change stays in memory for the next save.
+        Returns whether it saved."""
         try:
             save()
         except OSError as e:
             log.warning("Couldn't save %s, so the change waits for the next save: %s", what, e)
+            return False
+        return True
+
+    def saved(self, key, kind, default=None, item=None):
+        """SavedState[key] when it is a `kind` (a list keeps only its `item`s), else `default`: a hand-edited
+        config.json may hold anything"""
+        value = self.config["SavedState"].get(key)
+        if not isinstance(value, kind):
+            return default
+        return value if item is None else [v for v in value if isinstance(v, item)]
 
     def load_games(self):
         """Load games from JSON file"""

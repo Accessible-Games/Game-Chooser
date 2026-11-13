@@ -38,14 +38,15 @@ from engine.folders import library_label
 from engine.launch import LaunchCancelled, launch_kind
 from games_panel import GamesPanel
 from catalog_panel import CatalogPanel
-from dialogs import GameDialog, PreferencesDialog, DeleteGameDialog, FirstTimeSetupDialog
+from dialogs import EXECUTABLE_WILDCARD, GameDialog, PreferencesDialog, FirstTimeSetupDialog
 from engine import messages
-from engine.entries import current_platform as catalog_platform
+from engine.entries import current_platform as catalog_platform, platform_label
 from engine.records import record_folder
 from engine.status import update_available
 from install_dialogs import InstallConfirmDialog, UninstallDialog
 import library_actions
-from library_actions import catalog_menu_items, delete_kind, is_editable, launch_problem, start_launch_file
+from library_actions import (catalog_menu_items, delete_kind, executable_problem, is_editable, launch_problem,
+                             start_launch_file)
 from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener, run_in_background
 from wx_bridge import call_after as _call_after  # wx.CallAfter that does nothing once the app is gone
 
@@ -96,7 +97,7 @@ class MainFrame(wx.Frame):
         self.initializing = True  # Flag to prevent focus stealing during startup
         # Libraries hidden via View > Libraries. Storing hidden (not shown) names means
         # newly added libraries are visible by default and stale names are harmless.
-        self.hidden_libraries = self._load_hidden_libraries()
+        self.hidden_libraries = set(self.library_manager.saved("hidden_libraries", list, [], str))
         self.library_menu_items = []  # (library name, menu item) pairs in the Libraries submenu
 
         # Set up UI
@@ -129,9 +130,8 @@ class MainFrame(wx.Frame):
         self.notebook = wx.Notebook(self)
         self.create_menu_bar()
 
-        tree_keys = self.library_manager.config["SavedState"].get("tree_filters")
-        if not isinstance(tree_keys, list):  # an empty list is a valid saved choice
-            tree_keys = [key for key, _ in LIBRARY_TREE]
+        # None (nothing saved) shows every category; an empty list is a valid saved choice
+        tree_keys = self.library_manager.saved("tree_filters", list, item=str)
         self.library_view = GamesPanel(
             self.notebook, self, name="Games", categories=LIBRARY_TREE, tree_keys=tree_keys, state_prefix="",
             idle_label="Launch",
@@ -214,19 +214,11 @@ class MainFrame(wx.Frame):
         # Filter Tree submenu
         filter_tree_menu = wx.Menu()
 
-        # Store menu items as instance variables for state updates
-        self.filter_platform_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Platform")
-        self.Bind(wx.EVT_MENU, self.on_toggle_filter_platform, self.filter_platform_item)
-
-        self.filter_genre_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Genre")
-        self.Bind(wx.EVT_MENU, self.on_toggle_filter_genre, self.filter_genre_item)
-
-        self.filter_developer_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Developer")
-        self.Bind(wx.EVT_MENU, self.on_toggle_filter_developer, self.filter_developer_item)
-
-        self.filter_year_item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&Year")
-        self.Bind(wx.EVT_MENU, self.on_toggle_filter_year, self.filter_year_item)
-
+        self.filter_items = {}  # criteria key -> check item, for state updates
+        for key, label in LIBRARY_TREE:
+            item = filter_tree_menu.AppendCheckItem(wx.ID_ANY, "&" + label.replace("Release ", ""))  # menu: "Year"
+            self.Bind(wx.EVT_MENU, lambda event, k=key: self._toggle_filter(k), item)
+            self.filter_items[key] = item
         view_menu.AppendSubMenu(filter_tree_menu, "&Filter Tree")
 
         # Libraries submenu (populated in load_saved_state)
@@ -246,46 +238,15 @@ class MainFrame(wx.Frame):
         self.SetMenuBar(menu_bar)
     
     def setup_accelerators(self):
-        """Set up keyboard accelerators"""
-        accel_entries = []
-
-        # Ctrl+F for search
-        search_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, ord('F'), search_id))
-        self.Bind(wx.EVT_MENU, self.on_find, id=search_id)
-
-        # Ctrl+N for new game
-        new_game_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, ord('N'), new_game_id))
-        self.Bind(wx.EVT_MENU, self.on_add_game, id=new_game_id)
-
-        # Ctrl+Enter for open folder
-        open_folder_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, wx.WXK_RETURN, open_folder_id))
-        self.Bind(wx.EVT_MENU, self.on_open_folder, id=open_folder_id)
-
-        # F5 for refresh
-        refresh_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_NORMAL, wx.WXK_F5, refresh_id))
-        self.Bind(wx.EVT_MENU, self.on_refresh, id=refresh_id)
-
-        # Ctrl+R for random game
-        random_game_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, ord('R'), random_game_id))
-        self.Bind(wx.EVT_MENU, self.on_random_game, id=random_game_id)
-
-        # Ctrl+Shift+R for a random game to install from the catalog
-        random_install_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL | wx.ACCEL_SHIFT, ord('R'), random_install_id))
-        self.Bind(wx.EVT_MENU, self.on_random_install, id=random_install_id)
-
-        # Ctrl+E for Edit Game, also while the menu item is disabled for a catalog game: it then says why
-        edit_game_id = wx.NewIdRef()
-        accel_entries.append((wx.ACCEL_CTRL, ord('E'), edit_game_id))
-        self.Bind(wx.EVT_MENU, self.on_edit_game, id=edit_game_id)
-
-        accel_table = wx.AcceleratorTable(accel_entries)
-        self.SetAcceleratorTable(accel_table)
+        """The shortcuts no menu item carries (a menu item's own shortcut needs no entry): Ctrl+F, Ctrl+Enter, and
+        Ctrl+E for Edit Game also while its menu item is disabled for a catalog game (it then says why)"""
+        entries = []
+        for key, handler in [(ord('F'), self.on_find), (wx.WXK_RETURN, self.on_open_folder),
+                             (ord('E'), self.on_edit_game)]:
+            entry_id = wx.NewIdRef()
+            entries.append((wx.ACCEL_CTRL, key, entry_id))
+            self.Bind(wx.EVT_MENU, handler, id=entry_id)
+        self.SetAcceleratorTable(wx.AcceleratorTable(entries))
     
     def active_tab(self):
         """The notebook page showing now, as a TABS name ("library" or "catalog")"""
@@ -496,10 +457,8 @@ class MainFrame(wx.Frame):
     def check_libraries(self):
         """Check if first run and show setup dialog"""
         if self.library_manager.is_first_run:
-            dlg = FirstTimeSetupDialog(self, self.library_manager)
-            with self.modal_dialog():
+            with self.modal_dialog(), FirstTimeSetupDialog(self, self.library_manager) as dlg:
                 dlg.ShowModal()
-            dlg.Destroy()
 
             # Refresh UI in case they added stuff
             self.games_changed()
@@ -543,27 +502,21 @@ class MainFrame(wx.Frame):
             area.update(progress, waiting)
 
     def on_job_finished(self, job, result):
-        if not self:
-            return
-        self._job_ended(job)
-        self.run_when_no_dialog(self._apply_finished, job, result)
+        self._job_ended("finished", job, result)
 
     def on_job_failed(self, job, message):
-        if not self:
-            return
-        self._job_ended(job)
-        self.run_when_no_dialog(self._apply_failed, job, message)
+        self._job_ended("failed", job, message)
 
     def on_job_cancelled(self, job):
+        self._job_ended("cancelled", job)
+
+    def _job_ended(self, kind, job, detail=None):
         if not self:
             return
-        self._job_ended(job)
-        self.run_when_no_dialog(self._apply_cancelled, job)
-
-    def _job_ended(self, job):
         if self._cancelling_job_id == job.id:
             self._cancelling_job_id = None
         self._sync_progress()
+        self.run_when_no_dialog(self._apply_outcome, kind, job, detail)
 
     def _sync_progress(self):
         """Show the progress areas while a job runs or waits (and the queue's current job in them); hide them
@@ -616,54 +569,30 @@ class MainFrame(wx.Frame):
             area.hide_done_button()
             area.set_label(messages.JOB_CANCELLING.format(title=job.title))
 
-    def _apply_finished(self, job, result):
-        """A finished job (any action) reaches the library, then the player hears about it. Runs only while
-        no dialog is open (run_when_no_dialog), so no dialog holds a game this replaces."""
+    def _apply_outcome(self, kind, job, detail):
+        """A job's end ("finished", "failed" or "cancelled") reaches the library, then the player hears about it.
+        Runs only while no dialog is open (run_when_no_dialog), so no dialog holds a game this replaces."""
         if self.job_outcomes.take(job):  # not already applied while quitting
-            self._finished(job, result)
+            self._outcome(kind, job, detail)
 
-    def _apply_failed(self, job, message):
-        if self.job_outcomes.take(job):
-            self._failed(job, message)
-
-    def _apply_cancelled(self, job):
-        if self.job_outcomes.take(job):
-            self._cancelled(job)
-
-    def _finished(self, job, result):
-        try:
-            self.service.apply_result(result)
-        except Exception:
-            log.exception("Couldn't apply the result of %s", job.title)
-        if self._quitting:
-            return
-        self.games_changed()
-        self.notify(messages.finished_text(result.action, result.title or job.title, result.notes,
-                                           result.backups))
-        self._run_job_done_hooks(job)
-
-    def _failed(self, job, message):
-        try:
-            self.service.job_failed(job)
-        except Exception:
-            log.exception("Couldn't clean up after %s failed", job.title)
-        if self._quitting:
-            return
-        self.games_changed()
-        self.notify(messages.failed_text(job.request.action, job.title))
-        with self.modal_dialog():  # a second failure waits for this box instead of stacking on it
-            wx.MessageBox(message, messages.INSTALL_PROBLEM_TITLE, wx.OK | wx.ICON_ERROR, self)
-        self._run_job_done_hooks(job)
-
-    def _cancelled(self, job):
+    def _outcome(self, kind, job, detail):
         """A cancelled job is a failed one to the service (an uninstall's library stays), without the message"""
         try:
-            self.service.job_failed(job)
+            if kind == "finished":
+                self.service.apply_result(detail)
+            else:
+                self.service.job_failed(job)
         except Exception:
-            log.exception("Couldn't clean up after %s was cancelled", job.title)
+            log.exception("Couldn't apply how %s ended (%s)", job.title, kind)
         if self._quitting:
             return
         self.games_changed()
+        if kind == "finished":
+            self.notify(messages.finished_text(detail.action, detail.title or job.title, detail.notes,
+                                               detail.backups))
+        elif kind == "failed":
+            self.notify(messages.failed_text(job.request.action, job.title))
+            self._tell(detail, messages.INSTALL_PROBLEM_TITLE)  # a second failure waits for this box, never stacks
         self._run_job_done_hooks(job)
 
     def _apply_outcomes_on_quit(self):
@@ -673,12 +602,7 @@ class MainFrame(wx.Frame):
         self._run_deferred()
         for kind, job, detail in self.job_outcomes.drain():
             try:
-                if kind == "finished":
-                    self._finished(job, detail)
-                elif kind == "failed":
-                    self._failed(job, detail)
-                else:
-                    self._cancelled(job)
+                self._outcome(kind, job, detail)
             except Exception:
                 log.exception("Couldn't apply how %s ended while quitting", job.title)
 
@@ -696,6 +620,15 @@ class MainFrame(wx.Frame):
                 refresh()
             except Exception:
                 log.exception("Couldn't refresh after the games changed")
+
+    def _save_games(self):
+        """The player changed a game (Add, Edit, Delete, Locate): write games.json and show the change. A save that
+        fails says so; the change stays in memory for the next save."""
+        manager = self.library_manager
+        saved = manager.save_or_keep(manager.save_games, "games.json")
+        self.games_changed()
+        if not saved:
+            self._tell(messages.GAMES_NOT_SAVED.format(path=manager.games_file), "Game Chooser")
 
     def _run_job_done_hooks(self, job):
         for hook in list(self.job_done_hooks):
@@ -723,7 +656,7 @@ class MainFrame(wx.Frame):
                     item = menu.Append(wx.ID_ANY, label)
                     menu.Bind(wx.EVT_MENU, handler, item)
             for action in self._catalog_menu_items(game):
-                item = menu.Append(wx.ID_ANY, action.label.replace("&", "&&"))
+                item = menu.Append(wx.ID_ANY, wx.Control.EscapeMnemonics(action.label))
                 item.Enable(action.enabled)
                 menu.Bind(wx.EVT_MENU, lambda e, a=action, g=game: self.on_catalog_action(a, g), item)
             menu.AppendSeparator()
@@ -746,15 +679,11 @@ class MainFrame(wx.Frame):
         return catalog_menu_items(game, record, entry, update_available(record, entry, catalog_platform()), extras)
 
     def on_list_key(self, event) -> bool:
-        """The Library list's own keys (the view handles Enter, Space and the context menu keys); True for a key
-        that was taken"""
-        key = event.GetKeyCode()
-        if key == ord('E') and event.ControlDown() and not event.AltDown():  # with Alt it is AltGr+E, a letter
-            self.on_edit_game(None)
-        elif key == wx.WXK_DELETE:
-            self.on_delete_game(None)
-        else:
+        """The Library list's own key, Del (the view handles Enter, Space and the context menu keys; Ctrl+E is the
+        frame's); True for a key that was taken"""
+        if event.GetKeyCode() != wx.WXK_DELETE:
             return False
+        self.on_delete_game(None)
         return True
 
     def on_open_folder(self, event):
@@ -772,9 +701,7 @@ class MainFrame(wx.Frame):
         # Get full path to game
         full_path = self.library_manager.get_full_path(game)
         if not full_path or not Path(full_path).exists():
-            with self.modal_dialog():
-                wx.MessageBox("Game folder not found.",
-                            "Folder Not Found", wx.OK | wx.ICON_ERROR)
+            self._tell("Game folder not found.", "Folder Not Found")
             return
 
         # Get the game directory
@@ -790,37 +717,19 @@ class MainFrame(wx.Frame):
                 # macOS - just open the folder
                 subprocess.Popen(['open', game_dir])
         except Exception as e:
-            with self.modal_dialog():
-                wx.MessageBox(f"Failed to open folder: {e}",
-                            "Error", wx.OK | wx.ICON_ERROR)
+            self._tell(f"Failed to open folder: {e}", "Error")
 
     def launch_game(self, game):
         """Launch a specific game"""
         # Check platform compatibility for non-web games
         if not game.is_web:
-            # Get current platform
-            current_system = platform.system()
-
-            # Map system name to our platform names
-            platform_map = {
-                "Windows": "Windows",
-                "Darwin": "macOS",
-                "Linux": "Linux"
-            }
-            current_platform = platform_map.get(current_system, current_system)
-
-            # Check if current platform is supported by the game
+            current_platform = platform_label(catalog_platform())
             if current_platform not in game.platforms:
                 # Build supported platforms string
                 supported = ", ".join(game.platforms) if game.platforms else "no platforms"
 
-                # Show error dialog
-                with self.modal_dialog():
-                    wx.MessageBox(
-                        f"You're trying to run {game.title} on {current_platform}, but it only supports {supported}.",
-                        "Uh-oh",
-                        wx.OK | wx.ICON_ERROR
-                    )
+                self._tell(f"You're trying to run {game.title} on {current_platform}, but it only supports "
+                           f"{supported}.", "Uh-oh")
                 return
 
         if game.is_web:
@@ -836,22 +745,19 @@ class MainFrame(wx.Frame):
                     self._launch_problem(game, problem)
                     return
                 with self.modal_dialog():
-                    wx.MessageBox(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE,
-                                  wx.OK | wx.ICON_ERROR)
-
-                    # File dialog to relocate
-                    dlg = wx.FileDialog(self, "Locate Game Executable")
-                    if dlg.ShowModal() == wx.ID_OK:
+                    self._tell(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE)
+                    with wx.FileDialog(self, "Locate Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
+                        located = dlg.ShowModal() == wx.ID_OK
                         new_path = dlg.GetPath()
-
-                        # Any path on disk will do; it is no longer tied to a library
-                        live = self._live_game(game)
-                        if live is not None:
-                            live.launch_path = new_path
-                            live.library_id = ""
-                            self.library_manager.save_games()
-                            self.games_changed()  # the view finds it again by the Game object, under its new id
-                    dlg.Destroy()
+                    # Any file Add Game accepts will do; the game is no longer tied to a library
+                    problem = located and executable_problem(new_path, platform_label(catalog_platform()))
+                    if problem:
+                        self._tell(*problem)
+                    live = self._live_game(game)
+                    if located and not problem and live is not None:
+                        live.launch_path = new_path
+                        live.library_id = ""
+                        self._save_games()  # the view finds it again by the Game object, under its new id
                 return
 
             # Tracing watches a program launch only; a web page is never observed
@@ -885,9 +791,7 @@ class MainFrame(wx.Frame):
             except LaunchCancelled:
                 pass  # the player declined the administrator prompt: nothing started, nothing to say
             except Exception as e:
-                with self.modal_dialog():
-                    wx.MessageBox(f"Failed to launch game: {e}",
-                                "Launch Error", wx.OK | wx.ICON_ERROR)
+                self._tell(f"Failed to launch game: {e}", "Launch Error")
 
     def _launch_problem(self, game, problem):
         """A launch found no executable: the library is unreachable, or a catalog game's files are missing (a
@@ -898,11 +802,10 @@ class MainFrame(wx.Frame):
         if problem == "catalog":
             self._tell(messages.LAUNCH_NOT_FOUND_CATALOG, messages.LAUNCH_NOT_FOUND_TITLE)
             return
-        with self.modal_dialog():
-            answer = wx.MessageBox(messages.LAUNCH_NOT_FOUND_REPAIR.format(title=game.title),
-                                   messages.LAUNCH_NOT_FOUND_TITLE, wx.YES_NO | wx.ICON_ERROR, self)
+        answer = self._ask(messages.LAUNCH_NOT_FOUND_REPAIR.format(title=game.title), messages.LAUNCH_NOT_FOUND_TITLE,
+                           wx.ICON_ERROR)
         live = self._live_game(game)
-        if answer == wx.YES and live is not None and live.catalog_id and not self._game_busy(live):
+        if answer and live is not None and live.catalog_id and not self._game_busy(live):
             self._submit_catalog("repair", live)
 
     def on_launch(self, event):
@@ -919,13 +822,7 @@ class MainFrame(wx.Frame):
         if self.active_tab() == "catalog":
             self.catalog_panel.on_random_game()
             return
-        current_system = platform.system()
-        platform_map = {
-            "Windows": "Windows",
-            "Darwin": "macOS",
-            "Linux": "Linux"
-        }
-        current_platform = platform_map.get(current_system, current_system)
+        current_platform = platform_label(catalog_platform())
         rows = self.library_view.displayed
         compatible = [row for row in rows
                       if row.game.is_web or current_platform in row.game.platforms]
@@ -933,7 +830,7 @@ class MainFrame(wx.Frame):
             none_left = (f"No games compatible with {current_platform} in the current filtered list.",
                          "No Compatible Games")
         else:
-            none_left = ("No games available to choose from.", "No Games")
+            none_left = (messages.CATALOG_NO_GAMES, "No Games")
         self.library_view.random_game(compatible, none_left, lambda row: self.launch_game(row.game))
 
     def on_random_install(self, event):
@@ -950,23 +847,15 @@ class MainFrame(wx.Frame):
         if not game:
             return
         if not is_editable(game):  # the catalog owns a catalog game's details; Ctrl+E says so, never silent
-            with self.modal_dialog():
-                wx.MessageBox(messages.CATALOG_NOT_EDITABLE.format(title=game.title), messages.EDIT_GAME_TITLE,
-                              wx.OK | wx.ICON_INFORMATION, self)
+            self._tell(messages.CATALOG_NOT_EDITABLE.format(title=game.title), messages.EDIT_GAME_TITLE,
+                       wx.ICON_INFORMATION)
             self.focus_active_list()
             return
 
-        dlg = GameDialog(self, self.library_manager, game)
+        with self.modal_dialog(), GameDialog(self, self.library_manager, game) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self._save_games()
 
-        # Block spurious selection events (and game-changing refreshes) while modal dialog is active
-        with self.modal_dialog():
-            try:
-                if dlg.ShowModal() == wx.ID_OK:
-                    self.library_manager.save_games()
-                    self.games_changed()
-            finally:
-                dlg.Destroy()
-    
     def on_delete_game(self, event):
         """Delete selected game"""
         if self.active_tab() != "library":
@@ -983,46 +872,29 @@ class MainFrame(wx.Frame):
             self._forget_game(game)
             return
 
-        # Show custom delete dialog
-        dlg = DeleteGameDialog(self, game.title)
-
-        # Block spurious selection events (and game-changing refreshes) while modal dialog is active.
-        # The queued refreshes run after this handler returns, so after the removal below.
-        with self.modal_dialog():
-            try:
-                result = dlg.ShowModal()
-            finally:
-                dlg.Destroy()
-
-        if result == wx.ID_YES:
+        # The queued refreshes run after this handler returns, so after the removal below
+        if self._ask(messages.DELETE_GAME_CONFIRM.format(title=game.title), messages.DELETE_GAME_TITLE):
             live = self._live_game(game)
-            games = self.library_manager.games
-            for i, g in enumerate(games):
-                if g is live:
-                    del games[i]
-                    break
-            self.library_manager.save_games()
+            self.library_manager.games[:] = [g for g in self.library_manager.games if g is not live]
             # The selection stays on the deleted game's row number, also when another game has the same launch
             # path and so takes over its row id (catalog_view.pick_index)
-            self.games_changed()
+            self._save_games()
 
     def _forget_game(self, game):
         """Delete an untracked catalog install: its record goes and it leaves the list; its files stay"""
         if self._game_busy(game):
             self.focus_active_list()
             return
-        with self.modal_dialog():
-            answer = wx.MessageBox(messages.FORGET_GAME_CONFIRM.format(title=game.title), messages.FORGET_GAME_TITLE,
-                                   wx.YES_NO | wx.ICON_QUESTION, self)
+        answer = self._ask(messages.FORGET_GAME_CONFIRM.format(title=game.title), messages.DELETE_GAME_TITLE)
         live = self._live_game(game)
-        if answer != wx.YES or live is None or not live.catalog_id or self._game_busy(live):
+        if not answer or live is None or not live.catalog_id or self._game_busy(live):
             self.focus_active_list()
             return
         try:
             self.service.forget(live.catalog_id)
         except OSError as e:
             log.warning("Couldn't forget %s: %s", live.catalog_id, e)
-            self._tell(messages.FORGET_FAILED.format(title=live.title), messages.FORGET_GAME_TITLE)
+            self._tell(messages.FORGET_FAILED.format(title=live.title), messages.DELETE_GAME_TITLE)
             if self._live_game(live) is None:  # it left the list after all (games.json couldn't be saved)
                 self.games_changed()
             else:  # nothing changed: the selection stays on it
@@ -1035,6 +907,11 @@ class MainFrame(wx.Frame):
     def _tell(self, text, caption, icon=wx.ICON_ERROR):
         with self.modal_dialog():
             wx.MessageBox(text, caption, wx.OK | icon, self)
+
+    def _ask(self, text, caption, style=wx.ICON_QUESTION) -> bool:
+        """Yes or No (True for Yes), inside modal_dialog()"""
+        with self.modal_dialog():
+            return wx.MessageBox(text, caption, wx.YES_NO | style, self) == wx.YES
 
     def _tell_load_problems(self):
         """Once, after startup: games.json or config.json couldn't be read (and where the copy of it was kept)"""
@@ -1101,12 +978,8 @@ class MainFrame(wx.Frame):
     def confirm_install(self, plan, fixed_library=None):
         """The confirmation dialog for a plan (install, update or extras): the player's InstallChoice, or None
         when they cancelled"""
-        with self.modal_dialog():
-            dlg = InstallConfirmDialog(self, plan, self.service, fixed_library=fixed_library)
-            try:
-                return dlg.get_choice() if dlg.ShowModal() == wx.ID_OK else None
-            finally:
-                dlg.Destroy()
+        with self.modal_dialog(), InstallConfirmDialog(self, plan, self.service, fixed_library=fixed_library) as dlg:
+            return dlg.get_choice() if dlg.ShowModal() == wx.ID_OK else None
 
     def _confirm_change(self, game, action):
         """Update or Extras: the confirmation dialog for that plan, with the game's library fixed"""
@@ -1155,14 +1028,9 @@ class MainFrame(wx.Frame):
         try:
             if live is None or not live.catalog_id or self._library_unreachable(live) or self._game_busy(live):
                 return
-            confirmed = delete_player_data = False
-            with self.modal_dialog():
-                dlg = UninstallDialog(self, live.title, player_files)
-                try:
-                    confirmed = dlg.ShowModal() == wx.ID_OK
-                    delete_player_data = dlg.delete_player_data()
-                finally:
-                    dlg.Destroy()
+            with self.modal_dialog(), UninstallDialog(self, live.title, player_files) as dlg:
+                confirmed = dlg.ShowModal() == wx.ID_OK
+                delete_player_data = dlg.delete_player_data()
             live = self._live_game(live)
             if confirmed and live is not None and live.catalog_id:
                 self._submit_catalog("uninstall", live, delete_player_data=delete_player_data)
@@ -1171,33 +1039,11 @@ class MainFrame(wx.Frame):
     
     def on_add_game(self, event):
         """Add a new game"""
-        dlg = GameDialog(self, self.library_manager)
-
         # Block spurious selection events (and game-changing refreshes) while modal dialog is active
-        with self.modal_dialog():
-            try:
-                if dlg.ShowModal() == wx.ID_OK:
-                    self.library_manager.games.append(dlg.game)
-                    self.library_manager.save_games()
-                    self.games_changed()
-            finally:
-                dlg.Destroy()
-
-    def on_toggle_filter_platform(self, event):
-        """Toggle platform filter in tree"""
-        self._toggle_filter("platform")
-
-    def on_toggle_filter_genre(self, event):
-        """Toggle genre filter in tree"""
-        self._toggle_filter("genre")
-
-    def on_toggle_filter_developer(self, event):
-        """Toggle developer filter in tree"""
-        self._toggle_filter("developer")
-
-    def on_toggle_filter_year(self, event):
-        """Toggle year filter in tree"""
-        self._toggle_filter("year")
+        with self.modal_dialog(), GameDialog(self, self.library_manager) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.library_manager.games.append(dlg.game)
+                self._save_games()
 
     def _toggle_filter(self, filter_key):
         """Show or hide one category of the Library tree"""
@@ -1214,17 +1060,8 @@ class MainFrame(wx.Frame):
 
     def update_filter_menu_state(self):
         """Update filter menu item check states based on current filters"""
-        keys = self.library_view.tree_keys
-        self.filter_platform_item.Check("platform" in keys)
-        self.filter_genre_item.Check("genre" in keys)
-        self.filter_developer_item.Check("developer" in keys)
-        self.filter_year_item.Check("year" in keys)
-
-    def _load_hidden_libraries(self):
-        """The ids of the libraries the player has hidden"""
-        state = self.library_manager.config["SavedState"]
-        state.setdefault("hidden_libraries", [])
-        return set(state["hidden_libraries"])
+        for key, item in self.filter_items.items():
+            item.Check(key in self.library_view.tree_keys)
 
     def build_libraries_menu(self):
         """Build/rebuild the libraries submenu with current libraries"""
@@ -1238,9 +1075,7 @@ class MainFrame(wx.Frame):
         # (two folders both named Games) are separate items, told apart by their path.
         for lib in self.library_manager.config["libraries"]:
             library_id = lib["id"]
-            label = library_label(lib)
-            # Escape & so it isn't treated as a mnemonic marker
-            text = f"{label} ({lib['path']})".replace("&", "&&")
+            text = wx.Control.EscapeMnemonics(f"{library_label(lib)} ({lib['path']})")
             menu_item = self.libraries_menu.AppendCheckItem(wx.ID_ANY, text)
             self.library_menu_items.append((library_id, menu_item))
             self.Bind(wx.EVT_MENU, lambda evt, lid=library_id: self.on_toggle_library(evt, lid), menu_item)
@@ -1269,19 +1104,16 @@ class MainFrame(wx.Frame):
         Preferences holds library ids, never a Game, so finished installs are applied while it is open (it is
         marked holds_no_games, and isn't opened in modal_dialog()): a library whose last uninstall finishes
         leaves its list at once. The prompts it opens still defer them, through modal_dialog()."""
-        dlg = PreferencesDialog(self, self.library_manager, self.service)
-        catalog_changed = False
-        hook = dlg.on_job_done
-        self.job_done_hooks.append(hook)
-        try:
-            dlg.ShowModal()
-            catalog_changed = dlg.catalog_url_changed()  # Apply may have saved a new address, even before Cancel
-            # Refresh even on Cancel: Apply may already have saved changes.
-            # Deferred to avoid blocking the dialog close.
-            wx.CallAfter(self.refresh_ui_after_preferences, catalog_changed)
-        finally:
-            self.job_done_hooks.remove(hook)
-            dlg.Destroy()
+        with PreferencesDialog(self, self.library_manager, self.service) as dlg:
+            hook = dlg.on_job_done
+            self.job_done_hooks.append(hook)
+            try:
+                dlg.ShowModal()
+                # Refresh even on Cancel: Apply may already have saved changes (a new address too).
+                # Deferred to avoid blocking the dialog close.
+                wx.CallAfter(self.refresh_ui_after_preferences, dlg.catalog_url_changed())
+            finally:
+                self.job_done_hooks.remove(hook)
 
     def refresh_ui_after_preferences(self, catalog_changed=False):
         """Refresh UI after preferences dialog closes; a new catalog address fetches the catalog again"""
@@ -1308,19 +1140,14 @@ class MainFrame(wx.Frame):
     
     def load_saved_state(self):
         """Load saved window state"""
-        state = self.library_manager.config["SavedState"]
-
-        # Window size and position
-        if state["window_size"]:
-            self.SetSize(state["window_size"])
-        else:
-            # Default to 50% of screen
-            display = wx.Display()
-            rect = display.GetClientArea()
+        size, position = (self.library_manager.saved(key, list, [], int) for key in ("window_size", "window_position"))
+        if len(size) == 2:
+            self.SetSize(size)
+        else:  # half the screen
+            rect = wx.Display().GetClientArea()
             self.SetSize(rect.width // 2, rect.height // 2)
-
-        if state["window_position"]:
-            self.SetPosition(state["window_position"])
+        if len(position) == 2:
+            self.SetPosition(position)
         else:
             self.Centre()
 
@@ -1337,7 +1164,7 @@ class MainFrame(wx.Frame):
 
         # Opening tab: the saved one, else Catalog on a first run and Library otherwise.
         # ChangeSelection, not SetSelection: no page-changed event (and no focus move) during startup.
-        tab = initial_tab(state.get("last_tab"), self.library_manager.is_first_run)
+        tab = initial_tab(self.library_manager.saved("last_tab", str), self.library_manager.is_first_run)
         self.notebook.ChangeSelection(TABS.index(tab))
         self.update_tab_menus()
 
@@ -1392,7 +1219,5 @@ class MainFrame(wx.Frame):
 
     def confirm_quit_while_busy(self, title, action="install"):
         """"<title> is still installing. Cancel it and quit?" (worded by the job's action). True for Yes."""
-        with self.modal_dialog():
-            answer = wx.MessageBox(messages.quit_while_busy_text(action, title), messages.QUIT_WHILE_BUSY_TITLE,
-                                   wx.YES_NO | wx.NO_DEFAULT | wx.ICON_QUESTION, self)
-        return answer == wx.YES
+        return self._ask(messages.quit_while_busy_text(action, title), messages.QUIT_WHILE_BUSY_TITLE,
+                         wx.NO_DEFAULT | wx.ICON_QUESTION)

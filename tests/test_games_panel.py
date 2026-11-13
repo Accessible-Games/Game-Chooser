@@ -2,7 +2,6 @@
 fetched. Skips when wxPython is not installed or there is no display."""
 
 import logging
-from contextlib import contextmanager
 
 import pytest
 
@@ -14,6 +13,7 @@ from smart_list import Column  # noqa: E402
 
 from catalog_view import build_rows, library_rows  # noqa: E402
 from games_panel import GamesPanel  # noqa: E402
+from main_window import MainFrame  # noqa: E402
 from models import Game  # noqa: E402
 
 SRC = [{"platform": "windows", "install": {"method": "zip"}, "url": "https://x/e.zip"}]
@@ -50,19 +50,16 @@ class Saves:
 class FakeFrame:
     """What a view uses of MainFrame: the manager, the two flags, modal_dialog() and _tell()"""
 
+    modal_dialog = MainFrame.modal_dialog
+
     def __init__(self, manager):
         self.library_manager = manager
         self.initializing = False
         self.dialog_active = False
         self.told = []
 
-    @contextmanager
-    def modal_dialog(self):
-        was_active, self.dialog_active = self.dialog_active, True
-        try:
-            yield
-        finally:
-            self.dialog_active = was_active
+    def _run_deferred(self):
+        pass
 
     def _tell(self, text, caption, icon=None):
         self.told.append((text, caption))
@@ -137,16 +134,33 @@ def tree_nodes(view):
     return nodes
 
 
-def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False, shift=False):
-    """True when a handler took the key"""
-    event = wx.KeyEvent(event_type)
+class KeyEvent(wx.KeyEvent):
+    """wx leaves a made-up key event's auto-repeat flag unset (it reads as anything): here it is `repeat`"""
+
+    repeat = False
+
+    def IsAutoRepeat(self):
+        return self.repeat
+
+
+def key_event(key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False, shift=False, unicode=None,
+              repeat=False):
+    """A key event as wx gives it: a character's unicode key is its key code unless `unicode` is given; `repeat`
+    for a key-down Windows repeats while the key is held"""
+    event = KeyEvent(event_type)
+    event.repeat = repeat
     event.SetKeyCode(key_code)
     if event_type == wx.wxEVT_CHAR:
-        event.SetUnicodeKey(key_code)  # a character, as wx gives it
+        event.SetUnicodeKey(key_code if unicode is None else unicode)
     event.SetControlDown(ctrl)
     event.SetAltDown(alt)
     event.SetShiftDown(shift)
-    return window.GetEventHandler().ProcessEvent(event)
+    return event
+
+
+def press(window, key_code, event_type=wx.wxEVT_KEY_DOWN, **modifiers):
+    """True when a handler took the key"""
+    return window.GetEventHandler().ProcessEvent(key_event(key_code, event_type, **modifiers))
 
 
 def type_text(view, text):
@@ -629,24 +643,6 @@ def test_only_values_are_selected_from_the_saved_tree_selections(make_view):
     assert [tree.GetItemText(item) for item in tree.GetSelections()] == ["Action"] and titles(view) == ["Bravo"]
 
 
-@pytest.mark.parametrize("prefix", ["", "catalog_"])
-@pytest.mark.parametrize("selections", [None, 7, [["Genre/Action"], 7, None, "Genre/Action"]])
-def test_saved_tree_selections_that_are_not_a_list_of_paths_do_not_stop_the_first_fill(make_view, prefix, selections):
-    """A hand-edited config.json: the app must still start. Only the paths in a list count."""
-    view = make_view({prefix + "tree_selections": selections}, prefix=prefix)
-    view.set_rows(rows(ALPHA, BRAVO))
-    assert titles(view) == (["Bravo"] if isinstance(selections, list) else ["Alpha", "Bravo"])
-
-
-@pytest.mark.parametrize("prefix", ["", "catalog_"])
-@pytest.mark.parametrize("position", ["wide", 3.5, [300], None])
-def test_a_saved_splitter_position_that_is_not_a_number_gives_the_middle(make_view, prefix, position):
-    view = make_view({prefix + "splitter_position": position}, prefix=prefix)
-    view.GetTopLevelParent().SendSizeEvent()
-    view.restore_sash()
-    assert view.splitter.GetSashPosition() == view.splitter.GetSize()[0] // 2 > 200
-
-
 def test_the_splitter_goes_where_it_was_saved_or_to_the_middle_and_is_saved(make_view):
     """restore_sash() is called once the window has its size. Left to wx, the sash would sit at the minimum pane
     size (100) for good, as the Catalog's did."""
@@ -729,6 +725,15 @@ def test_the_tree_is_rebuilt_only_when_what_it_shows_changed(make_view):
     assert len(builds) == 1
     view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))
     assert len(builds) == 2
+
+
+def test_a_view_starts_from_any_hand_edited_saved_state(make_view):
+    """config.json may hold anything; what isn't the right kind is ignored and the view builds as on a first run"""
+    view = make_view(saved={"column_widths": 5, "last_search": 5, "tree_selections": 5, "last_selected": [1],
+                            "splitter_position": "middle", "sort_column": "2"})
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.restore_sash()
+    assert view.search_combo.GetValue() == "" and titles(view) == ["Alpha", "Bravo"] and selected(view) == 0
 
 
 def test_a_config_save_that_fails_is_logged_and_never_raised(make_view, caplog):
@@ -816,10 +821,9 @@ def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_vi
     now[0] += 0.5
     type_text(view, "r")  # "temple r", within a second of the Space: past "Temple Of Doom", and nothing launched
     assert acted == [] and selected(view) == 4
-    type_text(view, "\r")  # Enter always acts, in the middle of a text too
+    type_text(view, "\r")  # Enter always acts, in the middle of a text too, and ends the text
     assert acted == ["Temple Run"]
-    now[0] += 3.5  # more than 3 seconds after the last character: Space is the action again
-    type_text(view, " ")
+    type_text(view, " ")  # so Space is the action again at once
     assert acted == ["Temple Run", "Temple Run"] and selected(view) == 4
     type_text(view, "t")  # steps on to "Temple Of Doom"; then a Space every 0.8 seconds
     for _ in range(3):
@@ -828,7 +832,14 @@ def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_vi
     assert acted == ["Temple Run", "Temple Run"] and selected(view) == 3
     now[0] += 0.8  # 3.2 seconds after "t": the Spaces before it did not push the limit out
     type_text(view, " ")
+    for key in (wx.WXK_SPACE, wx.WXK_RETURN):  # held, Windows repeats them: taken on the list, never acted on
+        assert press(view.list_ctrl, key, repeat=True)
     assert acted == ["Temple Run", "Temple Run", "Temple Of Doom"]
+    now[0] += 5
+    type_text(view, "t")  # on to "Temple Run"
+    view.sort_by(1)  # a sort ends the text too: Space acts at once
+    type_text(view, " ")
+    assert acted[-1] == "Temple Run" and len(acted) == 4
 
 
 @pytest.mark.parametrize("held", [{"shift": True}, {"ctrl": True}, {"ctrl": True, "shift": True},
@@ -905,9 +916,7 @@ def test_typing_reads_the_character_not_the_key_code(make_view):
     view = make_view()
     view.set_rows(rows(entry("alpha"), entry("zebra"), entry("żuk")))
     assert titles(view) == ["Alpha", "Zebra", "Żuk"]
-    event = wx.KeyEvent(wx.wxEVT_CHAR)
-    event.SetUnicodeKey(ord("Ż"))  # typed in capitals: any case finds it
-    assert event.GetKeyCode() == wx.WXK_NONE and view.list_ctrl.GetEventHandler().ProcessEvent(event)
+    assert press(view.list_ctrl, wx.WXK_NONE, wx.wxEVT_CHAR, unicode=ord("Ż"))  # in capitals: any case finds it
     assert view.selected_row().title == "Żuk" and saved(view)["last_selected"] == "żuk"
 
 
@@ -956,11 +965,7 @@ def test_a_character_typed_with_altgr_is_text(make_view):
     that way (\u0119 and \u017c on a Polish layout, under code page 1252), and with no key code"""
     view = make_view()
     view.set_rows(rows(entry("alpha"), entry("zebra"), entry("\u017cuk")))
-    event = wx.KeyEvent(wx.wxEVT_CHAR)
-    event.SetUnicodeKey(ord("\u017c"))
-    event.SetControlDown(True)
-    event.SetAltDown(True)
-    view.list_ctrl.GetEventHandler().ProcessEvent(event)
+    press(view.list_ctrl, wx.WXK_NONE, wx.wxEVT_CHAR, ctrl=True, alt=True, unicode=ord("\u017c"))
     assert view.selected_row().title == "\u017buk"
 
 

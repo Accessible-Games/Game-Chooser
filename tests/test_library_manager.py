@@ -286,3 +286,15 @@ def test_a_failed_write_leaves_the_old_file_whole(isolated_manager_factory, monk
             m.save_config()
     assert m.games_file.read_bytes() == games_before and m.config_file.read_bytes() == config_before
     assert not list(m.games_file.parent.glob("*.tmp")) and not list(m.config_file.parent.glob("*.tmp"))
+
+
+@pytest.mark.parametrize("saved, kind, item, expected", [
+    ({"x": [800, 600]}, list, int, [800, 600]),
+    ({"x": 5}, list, int, None),  # "column_widths": 5 in a hand-edited config.json
+    ({"x": [800, "wide"]}, list, int, [800]),  # only the items of the right kind
+    ({}, str, None, None),  # not there
+])
+def test_a_saved_value_is_read_only_when_it_has_the_right_kind(isolated_manager_factory, saved, kind, item, expected):
+    m = isolated_manager_factory(config={"libraries": [], "SavedState": saved})
+    assert m.saved("x", kind, item=item) == expected
+    assert m.saved("x", kind, "default", item=item) == ("default" if expected is None else expected)

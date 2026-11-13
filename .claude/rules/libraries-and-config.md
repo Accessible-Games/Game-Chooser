@@ -43,7 +43,9 @@ paths:
   `last_search`, `tree_selections` (path strings such as `Platform/Windows`), `sort_column`, `sort_ascending`,
   `column_widths` and `splitter_position`: the Library under those names, the Catalog under the same names with
   `catalog_` in front. Library only: `tree_filters` (subset of platform/genre/developer/year);
-  `hidden_libraries` is added when the main window starts, if it is not there yet.
+  `hidden_libraries` is written when the player first hides or shows a library. Every `SavedState` value is read
+  through `GameLibraryManager.saved(key, kind, default, item)`: a value of the wrong kind (a hand-edited file) is
+  ignored and the default used, and a list keeps only its items of the right kind.
 - A missing config starts from defaults (first run); missing keys (also inside `SavedState` and `install`) are
   filled in.
 
@@ -60,6 +62,7 @@ paths:
 ## Paths and executable detection
 - Paths inside a library use forward slashes internally and are library-relative; `GameLibraryManager.get_full_path`
   joins one to its library's folder (a web address or an absolute path is returned as it is).
-- Executable detection (`PathManager.is_executable`, used by `GameDialog`): a file ending in `.exe` or `.bat`, or
+- Executable detection (`PathManager.is_executable`, used by Add Game and Locate through
+  `library_actions.executable_problem`): a file ending in `.exe` or `.bat`, or
   a folder ending in `.app` (a macOS bundle). Nothing else counts: `.cmd` is not accepted, the executable bit is
   not checked and there is no Linux case.
