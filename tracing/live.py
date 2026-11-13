@@ -17,7 +17,8 @@ import os
 import sys
 from dataclasses import dataclass
 
-from tracing.attribution import ROOT_SLACK, UNKNOWN_PID, find_root_by_exe
+from tracing.attribution import UNKNOWN_PID, exe_key, find_root_by_exe, in_launch_window
+from tracing.closing import WindowsProcesses
 
 
 @dataclass(frozen=True)
@@ -34,19 +35,17 @@ class _Session:
         self.root_start = root_start
         self.exe = exe
         self.launch_after = started_at if launch_after is None else launch_after
-        self.game_dir = os.path.normcase(os.path.normpath(game_dir)) if game_dir else None
+        self.game_dir = exe_key(game_dir)
         self.started_at = started_at
         self.members: set[tuple[int, int]] = set()
         self.live: list[LiveProc] = []  # the members in the last snapshot
         self.alive = False
-        self.seen = False
 
     def _inside_game_dir(self, image_path):
         if not self.game_dir or not image_path:
             return False
-        image = os.path.normcase(os.path.normpath(image_path))
         try:
-            return os.path.commonpath([self.game_dir, image]) == self.game_dir
+            return os.path.commonpath([self.game_dir, exe_key(image_path)]) == self.game_dir
         except ValueError:
             return False
 
@@ -63,9 +62,8 @@ class _Session:
             if root is not None:
                 self.root_pid, self.root_start = root.pid, root.start
         elif self.root_start is None:
-            low, high = self.started_at - ROOT_SLACK, self.launch_after + ROOT_SLACK
             for p in procs:
-                if p.pid == self.root_pid and low <= p.start <= high:
+                if p.pid == self.root_pid and in_launch_window(p.start, self.started_at, self.launch_after):
                     self.root_start = p.start
         member_pids = {}
         for pid, start in self.members:
@@ -83,8 +81,6 @@ class _Session:
                     changed = True
         self.live = [p for p in procs if (p.pid, p.start) in self.members]
         self.alive = bool(self.live)
-        if self.members:
-            self.seen = True
 
     def _qualifies(self, p, member_pids, alive_start):
         if self.root_pid != UNKNOWN_PID and p.pid == self.root_pid:
@@ -132,51 +128,12 @@ class LiveTree:
         """Each running session's members that were in the last snapshot, in snapshot order."""
         return {sid: list(s.live) for sid, s in self._sessions.items() if s.live}
 
-    def forget_ended(self):
-        for sid in [sid for sid, s in self._sessions.items() if s.seen and not s.alive]:
-            del self._sessions[sid]
-
 
 def windows_snapshot() -> list[LiveProc]:
-    import ctypes
-    from ctypes import wintypes
-
-    kernel32 = ctypes.windll.kernel32
-    kernel32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    kernel32.CreateToolhelp32Snapshot.argtypes = [wintypes.DWORD, wintypes.DWORD]
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.Process32FirstW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
-    kernel32.Process32NextW.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
-
-    class PROCESSENTRY32W(ctypes.Structure):
-        _fields_ = [
-            ("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD), ("th32ProcessID", wintypes.DWORD),
-            ("th32DefaultHeapID", ctypes.c_size_t), ("th32ModuleID", wintypes.DWORD),
-            ("cntThreads", wintypes.DWORD), ("th32ParentProcessID", wintypes.DWORD),
-            ("pcPriClassBase", wintypes.LONG), ("dwFlags", wintypes.DWORD),
-            ("szExeFile", wintypes.WCHAR * 260),
-        ]
-
-    snap = kernel32.CreateToolhelp32Snapshot(0x2, 0)  # TH32CS_SNAPPROCESS
-    if not snap or snap == wintypes.HANDLE(-1).value:
-        return []
-    found = []
-    try:
-        entry = PROCESSENTRY32W()
-        entry.dwSize = ctypes.sizeof(entry)
-        ok = kernel32.Process32FirstW(snap, ctypes.byref(entry))
-        while ok:
-            found.append((entry.th32ProcessID, entry.th32ParentProcessID))
-            ok = kernel32.Process32NextW(snap, ctypes.byref(entry))
-    finally:
-        kernel32.CloseHandle(snap)
-    result = []
-    for pid, ppid in found:
-        start, image = _query(pid)
-        result.append(LiveProc(pid, ppid, start, image))
-    return result
+    """Every running process. Raises OSError when Windows' process list can't be read: an empty list would say
+    that every traced game has exited."""
+    from engine.installer_watch import process_parents
+    return [LiveProc(pid, ppid, *_query(pid)) for pid, ppid in process_parents()]
 
 
 def _query(pid: int):
@@ -184,28 +141,20 @@ def _query(pid: int):
     import ctypes
     from ctypes import wintypes
 
-    kernel32 = ctypes.windll.kernel32
-    kernel32.OpenProcess.restype = wintypes.HANDLE
-    kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
-    kernel32.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4
-    kernel32.QueryFullProcessImageNameW.argtypes = [
-        wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
-    handle = kernel32.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    processes = WindowsProcesses()
+    handle = processes.open(pid, False)
     if not handle:
         return None, None
     try:
-        created, exited, kernel, user = (wintypes.FILETIME() for _ in range(4))
-        start = None
-        if kernel32.GetProcessTimes(handle, ctypes.byref(created), ctypes.byref(exited),
-                                    ctypes.byref(kernel), ctypes.byref(user)):
-            start = (created.dwHighDateTime << 32) | created.dwLowDateTime or None
+        kernel32 = ctypes.windll.kernel32
+        kernel32.QueryFullProcessImageNameW.argtypes = [
+            ctypes.c_void_p, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)]
         buf = ctypes.create_unicode_buffer(32768)
         size = wintypes.DWORD(len(buf))
         image = buf.value if kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)) else None
-        return start, image
+        return processes.start_time(handle), image
     finally:
-        kernel32.CloseHandle(handle)
+        processes.close(handle)
 
 
 def process_start_time(pid: int) -> int | None:

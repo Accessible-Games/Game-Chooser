@@ -22,14 +22,14 @@ from pathlib import Path
 from tracing import paths
 from tracing.attribution import find_root, session_tree
 from tracing.clock import now_filetime
+from tracing.kinds import RENAME_OPERATIONS
 from tracing.live import process_start_time
 from tracing.model import ProcInfo, RawEvent, SessionInfo
 from tracing.pml import capture_raw_details, read_capture
 from tracing.procmon import WindowsProcmon, write_filter_config
 from tracing.runfiles import RunDir
 
-RAW_OPERATIONS = ("SetRenameInformationFile", "SetRenameInformationEx", "SetRenameInformationExBypassAccessCheck",
-                  "SetDispositionInformationEx")
+RAW_OPERATIONS = RENAME_OPERATIONS + ("SetDispositionInformationEx",)
 READY_TIMEOUT = 60
 IDLE_SECONDS = 30
 AFTER_WORKLOAD_SECONDS = 5

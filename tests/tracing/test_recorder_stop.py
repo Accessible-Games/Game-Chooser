@@ -1,15 +1,13 @@
 """The recorder taking a stop request (--trace-stop), with and without closing the traced games."""
 import os
 
-from tests.tracing.test_recorder import Clock, FakeProcmon
+from tests.tracing import test_recorder
+from tests.tracing.test_recorder import Clock
 from tracing import closing, messages, recorder
 from tracing.closing import Closer, Identity
 from tracing.live import LiveProc
 from tracing.model import SessionInfo
-from tracing.runfiles import RunDir
-from tracing.splitrun import SplitResult
 
-GIB = 1024**3
 NOW = 133_500_000_000_000_000
 APP_PID = 42
 GAME = r"C:\Games\Foo"
@@ -93,25 +91,16 @@ def session(sid, pid, start, game_dir=GAME):
     return SessionInfo(sid, pid, start, start - 5, start - 1, {"game_dir": game_dir}, {}, ())
 
 
-def make(tmp_path, *, sessions=(), closer=True, app_until=10_000.0, dies_at=None):
+def make(tmp_path, *, game=False, sessions=(), closer=True, app_until=10_000.0, dies_at=None):
+    """`game`: the one session s1 and its running game process (pid 100)."""
     clock = Clock()
     world = World(clock)
-    run = RunDir(tmp_path / "run")
-    (run.path / "sessions").mkdir(parents=True)
-    for info in sessions:
-        run.write_session(info)
-    pm = FakeProcmon(clock, True, dies_at, run)
-    states = []
-    real = run.write_status
-
-    def spy(state, **kwargs):
-        states.append(state)
-        real(state, **kwargs)
-
-    run.write_status = spy
-    rec = recorder.Recorder(run, lambda: clock.t < app_until, pm, world.snapshot, lambda r: SplitResult([], []),
-                            lambda: [], lambda: 10 * GIB, clock, clock.sleep,
-                            closer=_closer(world, closer), now=lambda: NOW, protected_pids=(APP_PID,))
+    if game:
+        sessions = [session("s1", 100, 1000)]
+        one_game(world)
+    rec, run, pm, states, _splits, _ = test_recorder.make(
+        tmp_path, sessions=sessions, app_until=app_until, dies_at=dies_at, snapshot=world.snapshot, clock=clock,
+        closer=_closer(world, closer), now=lambda: NOW, protected_pids=(APP_PID,))
     return rec, run, pm, states, world, clock
 
 
@@ -126,9 +115,20 @@ def one_game(world, until=None):
     world.add(100, APP_PID, 1000, GAME + r"\game.exe", until)
 
 
+def at(rec, clock, t, action):
+    """Do `action` once the recorder's clock reaches `t` (after one of its sleeps)."""
+    sleep = clock.sleep
+
+    def sleep_then(seconds):
+        sleep(seconds)
+        if clock.t == t:
+            action()
+
+    rec.sleep = sleep_then
+
+
 def test_a_stop_request_ends_the_run_while_a_game_is_still_running(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     run.write_stop_request({"requested": NOW - 7, "close_games": False})
     assert rec.run() == 0
     assert pm.stopped_at == 0.0 and pm.calls.count("stop") == 1
@@ -139,16 +139,8 @@ def test_a_stop_request_ends_the_run_while_a_game_is_still_running(tmp_path):
 
 
 def test_a_stop_request_made_later_is_taken_at_the_next_poll(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
-    sleep = clock.sleep
-
-    def sleep_then_ask(seconds):
-        sleep(seconds)
-        if clock.t == 20.0:
-            run.write_stop_request({"requested": NOW, "close_games": False})
-
-    rec.sleep = sleep_then_ask
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
+    at(rec, clock, 20.0, lambda: run.write_stop_request({"requested": NOW, "close_games": False}))
     assert rec.run() == 0
     assert pm.stopped_at == 20.0
 
@@ -176,14 +168,7 @@ def test_stop_lists_every_running_session_and_no_ended_one(tmp_path):
     world.add(200, APP_PID, 2000, r"C:\Games\B\b.exe", until=10.0)
     world.add(300, APP_PID, 3000, r"C:\Games\C\c.exe", until=10.0)
     world.add(301, 300, 3001, r"C:\Windows\System32\fondue.exe")  # the prompt a closed game left open
-    sleep = clock.sleep
-
-    def sleep_then_ask(seconds):
-        sleep(seconds)
-        if clock.t == 20.0:
-            run.write_stop_request({"requested": NOW, "close_games": False})
-
-    rec.sleep = sleep_then_ask
+    at(rec, clock, 20.0, lambda: run.write_stop_request({"requested": NOW, "close_games": False}))
     assert rec.run() == 0
     assert run.read_stop()["sessions"] == {"s1": NO_LISTS, "s3": NO_LISTS}
 
@@ -197,8 +182,7 @@ def test_stop_with_no_session_running_still_ends_the_run(tmp_path):
 
 
 def test_a_plain_stop_touches_no_process(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     world.add(101, 100, 1001, GAME + r"\helper.exe")
     run.write_stop_request({"requested": NOW})
     assert rec.run() == 0
@@ -207,8 +191,7 @@ def test_a_plain_stop_touches_no_process(tmp_path):
 
 
 def test_close_games_asks_every_process_then_ends_what_is_left_after_the_wait(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     world.add(101, 100, 1001, r"C:\Users\u\AppData\Roaming\Guide\client.exe")
     world.windowless.add(101)
     world.closes_when_asked[100] = 2.0
@@ -224,8 +207,7 @@ def test_close_games_asks_every_process_then_ends_what_is_left_after_the_wait(tm
 
 
 def test_close_games_does_not_wait_once_everything_has_closed(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     world.closes_when_asked[100] = 2.0
     run.write_stop_request({"requested": NOW, "close_games": True})
     assert rec.run() == 0
@@ -234,8 +216,7 @@ def test_close_games_does_not_wait_once_everything_has_closed(tmp_path):
 
 
 def test_a_process_that_exits_by_itself_during_the_wait_is_not_ended(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     world.add(101, 100, 1001, GAME + r"\saver.exe", until=6.0)
     world.windowless.add(101)
     run.write_stop_request({"requested": NOW, "close_games": True})
@@ -261,14 +242,7 @@ def test_close_games_never_targets_anything_outside_a_running_session(tmp_path):
     world.add(104, 100, 1004, None)  # a program whose path could not be read
     world.add(500, 900, 5000, r"C:\Games\Over\over.exe", until=1.0)  # that session ended before the stop
     world.add(501, 900, 5001, r"C:\Games\Over\later.exe")  # never linked to it
-    sleep = clock.sleep
-
-    def sleep_then_ask(seconds):
-        sleep(seconds)
-        if clock.t == 5.0:
-            run.write_stop_request({"requested": NOW, "close_games": True})
-
-    rec.sleep = sleep_then_ask
+    at(rec, clock, 5.0, lambda: run.write_stop_request({"requested": NOW, "close_games": True}))
     assert rec.run() == 0
     game_tree = [(100, 1000), (101, 1001), (102, 1002)]
     assert world.asked == game_tree and world.ended == game_tree
@@ -283,18 +257,10 @@ def test_close_games_never_targets_anything_outside_a_running_session(tmp_path):
 
 
 def test_a_game_launched_after_the_stop_was_taken_is_left_alone(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     world.windowless.add(100)
-    sleep = clock.sleep
-
-    def sleep_then_launch(seconds):
-        sleep(seconds)
-        if clock.t == 3.0:
-            world.add(200, APP_PID, 2000, r"C:\Games\Late\late.exe")
-            run.write_session(session("s2", 200, 2000, r"C:\Games\Late"))
-
-    rec.sleep = sleep_then_launch
+    at(rec, clock, 3.0, lambda: (world.add(200, APP_PID, 2000, r"C:\Games\Late\late.exe"),
+                                 run.write_session(session("s2", 200, 2000, r"C:\Games\Late"))))
     run.write_stop_request({"requested": NOW, "close_games": True})
     assert rec.run() == 0
     assert world.asked == [(100, 1000)] and world.ended == [(100, 1000)]
@@ -302,8 +268,7 @@ def test_a_game_launched_after_the_stop_was_taken_is_left_alone(tmp_path):
 
 
 def test_a_process_that_cannot_be_ended_is_recorded_and_the_run_still_ends(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     world.unendable.add(100)
     run.write_stop_request({"requested": NOW, "close_games": True})
     assert rec.run() == 0
@@ -326,8 +291,7 @@ def test_the_same_process_in_two_sessions_is_asked_and_ended_once(tmp_path):
 
 
 def test_process_monitor_dying_during_the_wait_ends_nothing(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)], dies_at=4.0)
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True, dies_at=4.0)
     run.write_stop_request({"requested": NOW, "close_games": True})
     assert rec.run() == 1
     assert world.asked == [(100, 1000)] and world.ended == []
@@ -337,8 +301,7 @@ def test_process_monitor_dying_during_the_wait_ends_nothing(tmp_path):
 
 
 def test_a_closer_that_raises_does_not_stop_the_stop(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
 
     def boom(pid, start):
         raise OSError("access denied")
@@ -351,8 +314,7 @@ def test_a_closer_that_raises_does_not_stop_the_stop(tmp_path):
 
 
 def test_close_games_without_a_closer_closes_nothing_and_says_so(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)], closer=False)
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True, closer=False)
     run.write_stop_request({"requested": NOW, "close_games": True})
     assert rec.run() == 0
     assert pm.stopped_at == 0.0
@@ -453,8 +415,7 @@ class Died(BaseException):
 
 
 def test_stop_json_is_true_after_each_act_should_the_recorder_die_partway(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     world.add(101, 100, 1001, GAME + r"\helper.exe")
     world.add(102, 100, 1002, GAME + r"\other.exe")
     on_disk = {}
@@ -502,8 +463,7 @@ def test_a_refusal_is_on_disk_before_the_next_act(tmp_path):
 def test_stop_json_is_written_before_the_status_says_stopping(tmp_path):
     # Game Chooser reads the status first and stop.json next: with the other order it would take a stop for a
     # recorder that closed unexpectedly, and open a dialog.
-    rec, run, pm, states, world, clock = make(tmp_path, sessions=[session("s1", 100, 1000)])
-    one_game(world)
+    rec, run, pm, states, world, clock = make(tmp_path, game=True)
     spy = run.write_status
     seen = []
 

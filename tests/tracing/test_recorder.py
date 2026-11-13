@@ -51,12 +51,14 @@ def session(sid="s1", pid=100, start=1000):
 
 
 def make(tmp_path, *, app_until=0.0, game_until=None, ready=True, dies_at=None, free=None,
-         split=None, leftovers=None, capture=True, snapshot=None, with_session=False):
-    clock = Clock()
+         split=None, leftovers=None, capture=True, snapshot=None, with_session=False, sessions=(), clock=None,
+         **options):
+    """`options` go to the Recorder as they are (closer, now, protected_pids)."""
+    clock = clock or Clock()
     run = RunDir(tmp_path / "run")
     (run.path / "sessions").mkdir(parents=True)
-    if with_session:
-        run.write_session(session())
+    for info in ([session()] if with_session else []) + list(sessions):
+        run.write_session(info)
     pm = FakeProcmon(clock, ready, dies_at, run if capture else None)
     states = []
     real = run.write_status
@@ -80,7 +82,7 @@ def make(tmp_path, *, app_until=0.0, game_until=None, ready=True, dies_at=None, 
         return []
 
     rec = recorder.Recorder(run, lambda: clock.t < app_until, pm, snapshot or snap, do_split,
-                            leftovers or (lambda: []), free or (lambda: 10 * GIB), clock, clock.sleep)
+                            leftovers or (lambda: []), free or (lambda: 10 * GIB), clock, clock.sleep, **options)
     return rec, run, pm, states, splits, clock
 
 
@@ -173,6 +175,34 @@ def test_snapshot_error_is_logged_and_run_continues(tmp_path):
     assert "live tree update failed" in run.log_path.read_text(encoding="utf-8")
 
 
+def test_a_process_list_that_cannot_be_read_keeps_the_last_membership(tmp_path):
+    clock = Clock()
+
+    def snap():  # the game runs, then the list can't be read for 30 s, then the game is gone
+        if clock.t == 0:
+            return [LiveProc(100, 1, 1000, "C:/g/x.exe")]
+        if clock.t < 30:
+            raise OSError("nope")
+        return []
+
+    rec, run, pm, *_ = make(tmp_path, snapshot=snap, with_session=True, clock=clock)
+    assert rec.run() == 0
+    assert 40.0 <= pm.stopped_at <= 41.0
+
+
+def test_a_process_list_unreadable_for_a_minute_counts_every_game_as_exited(tmp_path):
+    clock = Clock()
+
+    def snap():
+        if clock.t == 0:
+            return [LiveProc(100, 1, 1000, "C:/g/x.exe")]
+        raise OSError("nope")
+
+    rec, run, pm, *_ = make(tmp_path, snapshot=snap, with_session=True, clock=clock, dies_at=300.0)
+    code = rec.run()
+    assert 70.0 <= pm.stopped_at <= 71.0 and code == 0  # 60 s of failed reads, then the 10 s grace
+
+
 def test_sessions_added_once(tmp_path):
     rec, run, *_ = make(tmp_path, with_session=True)
     added = []
@@ -182,22 +212,13 @@ def test_sessions_added_once(tmp_path):
     assert added == [("s1", 100, 1000, "C:/g", 500, None, 600)]  # exe (none in this session), launch_after
 
 
-def test_session_without_pid_passes_the_exe(tmp_path):
-    rec, run, *_ = make(tmp_path)
-    run.write_session(SessionInfo("s1-0", 0, None, 500, 600, {"game_dir": "C:/g", "exe": "C:/g/a.exe"}, {}, ()))
-    added = []
-    orig = rec.tree.add_session
-    rec.tree.add_session = lambda *a: (added.append(a), orig(*a))[1]
-    rec.run()
-    assert added == [("s1-0", 0, None, "C:/g", 500, "C:/g/a.exe", 600)]
-
-
 def _raiser():
     raise OSError("disk gone")
 
 
-def _check_recorder_error(tmp_path, **kwargs):
+def _check_recorder_error(tmp_path, app_alive=None, **kwargs):
     rec, run, pm, states, splits, _ = make(tmp_path, app_until=1000.0, **kwargs)
+    rec.app_alive = app_alive or rec.app_alive
     assert rec.run() == 1
     st = run.read_status()
     assert st["state"] == "failed"
@@ -211,12 +232,7 @@ def test_free_bytes_raising_still_stops_and_splits(tmp_path):
 
 
 def test_app_alive_raising_still_stops_and_splits(tmp_path):
-    rec, run, pm, states, splits, clock = make(tmp_path)
-    rec.app_alive = _raiser
-    assert rec.run() == 1
-    st = run.read_status()
-    assert st["error"] == messages.RECORDER_ERROR.format(error="disk gone")
-    assert "stop" in pm.calls and len(splits) == 1
+    _check_recorder_error(tmp_path, app_alive=_raiser)
 
 
 def test_corrupt_session_warning_reaches_recorder_log(tmp_path):

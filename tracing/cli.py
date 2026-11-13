@@ -10,15 +10,13 @@ from pathlib import Path
 
 from tracing import messages, paths
 from tracing.runfiles import RunDir, leftover_runs
-from tracing.splitrun import split_run_dir
+from tracing.splitrun import report_split, split_run_dir
 
 COMMANDS = ("--trace-recorder", "--trace-split", "--trace-stop", "--trace-probe", "--trace-check")
 DEFAULT_WORKLOAD = paths.REPO_DIR / "tests" / "catalog_fixtures" / "games" / "trace-test" / "trace-test.bat"
 
 SYNCHRONIZE = 0x00100000
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WAIT_TIMEOUT = 0x102
-STILL_ACTIVE = 259
 
 
 def tracing_wanted(argv: list[str], compiled: bool) -> bool:
@@ -147,7 +145,7 @@ def _record_early_failure(run_path: Path, error) -> int:
 def _split(args, compiled: bool) -> int:
     from tracing.pml import read_capture
     traces_dir = paths.traces_dir(compiled, args.traces_dir)
-    runs = [RunDir(Path(r)) for r in args.trace_split] or leftover_runs(traces_dir, _is_alive)
+    runs = [RunDir(Path(r)) for r in args.trace_split] or leftover_runs(traces_dir, _recorder_is_alive)
     if not runs:
         print("No runs to split.")
     failed = False
@@ -161,11 +159,7 @@ def _split(args, compiled: bool) -> int:
             print(f"{run.path}: {error}")
             failed = True
             continue
-        for folder in result.folders:
-            print(f"Wrote {folder}")
-        for problem in result.problems:
-            print(f"Problem: {problem}")
-            failed = True
+        failed = report_split(result.folders, result.problems, print) or failed
     return 1 if failed else 0
 
 
@@ -189,54 +183,32 @@ def _run_probe(out_dir: Path, procmon: Path, workload: Path) -> int:
     return run_probe(out_dir, procmon, workload)
 
 
-def _open_process(access: int, pid: int):
-    import ctypes
-    kernel32 = ctypes.windll.kernel32
-    kernel32.OpenProcess.restype = ctypes.c_void_p
-    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
-    return kernel32.OpenProcess(access, False, pid)
-
-
-def _is_alive(pid: int) -> bool:
-    import ctypes
-    from ctypes import wintypes
-    handle = _open_process(PROCESS_QUERY_LIMITED_INFORMATION, pid)
-    if not handle:
-        return False
-    try:
-        code = wintypes.DWORD()
-        kernel32 = ctypes.windll.kernel32
-        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
-        return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == STILL_ACTIVE
-    finally:
-        _close(handle)
-
-
 def _recorder_is_alive(pid: int, start: int | None) -> bool:
     """The recorder a status names is still running: the pid is alive and, when the status gives the start time,
     it is still that process and not another one Windows gave the pid to."""
-    if not _is_alive(pid):
+    from tracing.closing import WindowsProcesses
+    processes = WindowsProcesses()
+    handle = processes.open(pid, False)
+    if not handle:
         return False
-    if start is None:
-        return True
-    from tracing.live import process_start_time
-    return process_start_time(pid) == start
-
-
-def _close(handle) -> None:
-    import ctypes
-    ctypes.windll.kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-    ctypes.windll.kernel32.CloseHandle(handle)
+    try:
+        created = processes.creation_time(handle)  # None once it has exited
+    finally:
+        processes.close(handle)
+    return created is not None and (start is None or created == start)
 
 
 def _app_alive_check(pid: int):
     """Open the app's handle at once: a pid already gone is never alive; otherwise alive until it is signalled."""
     import ctypes
-    handle = _open_process(SYNCHRONIZE, pid)
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
     if not handle:
         return lambda: False
-    ctypes.windll.kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    return lambda: ctypes.windll.kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
+    kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    return lambda: kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
 
 
 def _recorder(args, compiled: bool) -> int:
@@ -256,10 +228,10 @@ def _build_recorder(args) -> "Recorder":
     from tracing.procmon import WindowsProcmon
     from tracing.recorder import Recorder
     run = RunDir(Path(args.trace_recorder))
-    traces_dir = run.path.parent.parent
+    traces_dir = run.traces_dir
     return Recorder(
         run, _app_alive_check(args.app_pid), WindowsProcmon(Path(args.procmon)), windows_snapshot,
-        lambda r: split_run_dir(r, traces_dir, read_capture), lambda: leftover_runs(traces_dir, _is_alive),
+        lambda r: split_run_dir(r, traces_dir, read_capture), lambda: leftover_runs(traces_dir, _recorder_is_alive),
         lambda: shutil.disk_usage(run.path).free, time.monotonic, time.sleep,
         # --close-games closes only what runs as the app's user with no more rights than the app: both are read
         # here, once, from the app's own process (the one that started this recorder and named itself).

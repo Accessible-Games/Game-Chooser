@@ -9,6 +9,11 @@ from tracing.runfiles import RunDir, new_run
 from tracing.splitrun import SplitResult
 
 
+@pytest.fixture
+def run(tmp_path):
+    return new_run(tmp_path, 133_000_000_000_000_000, 5)
+
+
 def test_no_tracing_command_returns_none():
     assert cli.run_command([], False) is None
     assert cli.run_command(["--tracing"], False) is None
@@ -27,7 +32,7 @@ def test_traces_dir_override():
     assert cli.traces_dir_override(["--tracing"]) is None
 
 
-def test_split_command_splits_named_and_leftover_runs(tmp_path, monkeypatch, capsys):
+def test_split_command_splits_named_and_leftover_runs(tmp_path, run, monkeypatch, capsys):
     calls = []
 
     def fake_split(run, traces_dir, read_capture):
@@ -41,7 +46,6 @@ def test_split_command_splits_named_and_leftover_runs(tmp_path, monkeypatch, cap
     assert cli.run_command(["--trace-split", str(named), "--traces-dir", str(tmp_path)], False) == 0
     assert calls == [(named, tmp_path)]
 
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
     run.capture_path.write_bytes(b"pml")
     calls.clear()
     assert cli.run_command(["--trace-split", "--traces-dir", str(tmp_path)], False) == 0
@@ -76,16 +80,13 @@ def _failed_status(run):
     assert run.log_path.exists()
 
 
-def test_recorder_bad_app_pid_records_failure(tmp_path):
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+def test_recorder_bad_app_pid_records_failure(run):
     code = cli.run_command(["--trace-recorder", str(run.path), "--app-pid", "abc", "--procmon", "p"], False)
     assert code not in (0, None)
     _failed_status(run)
 
 
-def test_recorder_build_failure_records_failure(tmp_path, monkeypatch):
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
-
+def test_recorder_build_failure_records_failure(run, monkeypatch):
     def boom(exe):
         raise RuntimeError("no parser")
 
@@ -95,26 +96,23 @@ def test_recorder_build_failure_records_failure(tmp_path, monkeypatch):
     _failed_status(run)
 
 
-def test_recorder_missing_args_records_failure(tmp_path):
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+def test_recorder_missing_args_records_failure(run):
     assert cli.run_command(["--trace-recorder", str(run.path)], False) == 2
     _failed_status(run)
 
 
-def test_split_named_run_already_split_does_nothing(tmp_path, monkeypatch, capsys):
+def test_split_named_run_already_split_does_nothing(tmp_path, run, monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(cli, "split_run_dir", lambda run, d, r: calls.append(run.path) or SplitResult([], []))
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
     run.split_path.write_text("{}", encoding="utf-8")
     assert cli.run_command(["--trace-split", str(run.path), "--traces-dir", str(tmp_path)], False) == 0
     assert calls == []
     assert f"{run.path}: already split, nothing to do" in capsys.readouterr().out
 
 
-def test_split_named_run_with_a_kept_capture_splits_again(tmp_path, monkeypatch):
+def test_split_named_run_with_a_kept_capture_splits_again(tmp_path, run, monkeypatch):
     calls = []
     monkeypatch.setattr(cli, "split_run_dir", lambda run, d, r: calls.append(run.path) or SplitResult([], []))
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
     run.split_path.write_text("{}", encoding="utf-8")
     run.capture_path.write_bytes(b"pml")
     assert cli.run_command(["--trace-split", str(run.path), "--traces-dir", str(tmp_path)], False) == 0
@@ -163,12 +161,11 @@ def test_close_games_alone_is_not_a_command():
     assert cli.run_command(["--close-games"], True) is None
 
 
-def test_stop_asks_whether_the_recorder_is_alive(tmp_path, monkeypatch, capsys):
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+def test_stop_asks_whether_the_recorder_is_alive(tmp_path, run, monkeypatch, capsys):
     run.write_status("capturing", recorder_pid=4321)
     run.capture_path.write_bytes(b"pml")
     asked = []
-    monkeypatch.setattr(cli, "_is_alive", lambda pid: asked.append(pid) or False)
+    monkeypatch.setattr(cli, "_recorder_is_alive", lambda pid, start: asked.append(pid) or False)
     assert cli.run_command(["--trace-stop", "--traces-dir", str(tmp_path)], False) == 1
     assert 4321 in asked and "the recorder is no longer running" in capsys.readouterr().out
 
@@ -195,11 +192,10 @@ def test_help_alone_is_not_a_tracing_command():
 
 @pytest.mark.windows
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
-def test_the_recorder_is_built_to_close_only_what_the_app_could_and_never_the_app(tmp_path):
+def test_the_recorder_is_built_to_close_only_what_the_app_could_and_never_the_app(run):
     import argparse
     import os
     from tracing.closing import WindowsCloser, process_identity
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
     recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=os.getpid(),
                                                       procmon="p.exe"))
     assert isinstance(recorder.closer, WindowsCloser)
@@ -210,11 +206,10 @@ def test_the_recorder_is_built_to_close_only_what_the_app_could_and_never_the_ap
 
 @pytest.mark.windows
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
-def test_a_recorder_whose_app_has_gone_closes_nothing(tmp_path):
+def test_a_recorder_whose_app_has_gone_closes_nothing(run):
     import argparse
     gone = subprocess.Popen([sys.executable, "-c", "pass"])
     gone.wait(30)
-    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
     recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=gone.pid,
                                                       procmon="p.exe"))
     assert recorder.closer.limit is None
@@ -230,3 +225,16 @@ def test_a_recorder_is_alive_only_as_the_process_that_started_then():
     assert cli._recorder_is_alive(me, started) is True
     assert cli._recorder_is_alive(me, started + 1) is False  # the pid, but another process
     assert cli._recorder_is_alive(me, None) is True  # a status without a start time: by pid alone
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_split_takes_a_run_whose_recorder_pid_went_to_another_program(tmp_path, run, monkeypatch):
+    import os
+    from tracing.live import process_start_time
+    calls = []
+    monkeypatch.setattr(cli, "split_run_dir", lambda run, d, r: calls.append(run.path) or SplitResult([], []))
+    run.write_status("capturing", recorder_pid=os.getpid(), recorder_start=process_start_time(os.getpid()) + 1)
+    run.capture_path.write_bytes(b"pml")
+    assert cli.run_command(["--trace-split", "--traces-dir", str(tmp_path)], False) == 0
+    assert calls == [run.path]

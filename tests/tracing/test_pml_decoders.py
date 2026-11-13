@@ -32,6 +32,7 @@ HANDLERS = detail_format.FilesystemSubOperationHandler
 def fresh_handlers():
     saved = dict(HANDLERS)
     pml._warned.clear()
+    install_detail_handlers()
     yield
     HANDLERS.clear()
     HANDLERS.update(saved)
@@ -51,7 +52,6 @@ def call(op: Op, data: bytes, trailer: bytes = b"TRAILER"):
 
 
 def test_rename_target_decoded():
-    install_detail_handlers()
     event, io = call(Op.SetRenameInformationFile, REAL_RENAME_IO)
     assert event.details["FileName"] == TARGET
     assert event.details["ReplaceIfExists"] == "True"
@@ -59,7 +59,6 @@ def test_rename_target_decoded():
 
 
 def test_rename_ex_target_decoded_from_real_bytes():
-    install_detail_handlers()
     event, io = call(Op.SetRenameInformationEx, REAL_RENAME_EX_IO)
     assert event.details["FileName"] == REAL_RENAME_EX_TARGET
     assert event.details["ReplaceIfExists"] == "True"
@@ -67,14 +66,12 @@ def test_rename_ex_target_decoded_from_real_bytes():
 
 
 def test_disposition_ex_from_real_bytes():
-    install_detail_handlers()
     event, io = call(Op.SetDispositionInformationEx, REAL_DISPOSITION_EX_IO)
     assert event.details["Delete"] == "True"
     assert io.tell() == 0
 
 
 def test_rename_ex_layout_uses_u32_flags():
-    install_detail_handlers()
     nt_name = r"\??\C:\Games\g\new.sav"
     for op in (Op.SetRenameInformationEx, Op.SetRenameInformationExBypassAccessCheck):
         event, _ = call(op, rename_record(nt_name, flags=0x3, flags_size=4))
@@ -91,14 +88,12 @@ def test_win32_path():
 
 
 def test_disposition_ex_delete_flag():
-    install_detail_handlers()
     for flags, expected in ((b"\x03\x00\x00\x00", "True"), (b"\x00\x00\x00\x00", "False"), (b"\x02\x00\x00\x00", "False")):
         event, _ = call(Op.SetDispositionInformationEx, flags)
         assert event.details["Delete"] == expected
 
 
 def test_decoders_leave_the_stream_where_procmon_parser_expects():
-    install_detail_handlers()
     for op, data in ((Op.SetRenameInformationFile, REAL_RENAME_IO[:96]),
                      (Op.SetDispositionInformationEx, b"\x01\x00\x00\x00")):
         io = BytesIO(b"PREFIX" + data + b"NEXT")
@@ -109,6 +104,7 @@ def test_decoders_leave_the_stream_where_procmon_parser_expects():
 
 
 def test_chained_raw_handler_still_runs():
+    HANDLERS.clear()  # the probe's wrapper first, then the decoders
     capture_raw_details(["SetRenameInformationFile"])
     install_detail_handlers()
     event, _ = call(Op.SetRenameInformationFile, REAL_RENAME_IO)
@@ -123,7 +119,6 @@ def test_chained_raw_handler_still_runs():
 
 
 def test_install_is_idempotent():
-    install_detail_handlers()
     first = {op: HANDLERS[op] for op in (Op.SetRenameInformationFile, Op.SetRenameInformationEx,
                                          Op.SetDispositionInformationEx)}
     install_detail_handlers()
@@ -143,7 +138,6 @@ def test_install_is_idempotent():
     rename_record("abcd", length=1 << 30),
 ])
 def test_garbled_rename_leaves_filename_unset_and_warns_once(data, caplog):
-    install_detail_handlers()
     with caplog.at_level(logging.WARNING, logger="tracing.pml"):
         for _ in range(2):
             event, io = call(Op.SetRenameInformationFile, data, trailer=b"")
@@ -153,7 +147,6 @@ def test_garbled_rename_leaves_filename_unset_and_warns_once(data, caplog):
 
 
 def test_short_disposition_ex_does_not_raise(caplog):
-    install_detail_handlers()
     with caplog.at_level(logging.WARNING, logger="tracing.pml"):
         event, _ = call(Op.SetDispositionInformationEx, b"\x01", trailer=b"")
     assert "Delete" not in event.details

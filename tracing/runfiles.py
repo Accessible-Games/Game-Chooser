@@ -14,13 +14,13 @@ from tracing.model import SessionInfo
 
 log = logging.getLogger(__name__)
 
-STATES = ("starting", "capturing", "failed", "stopping", "splitting", "done")
-
 _CAPTURE_RE = re.compile(r"^capture(?:-(\d+))?\.pml$", re.IGNORECASE)
 
 
 REPLACE_TRIES = 10
 REPLACE_DELAY = 0.015
+READ_TRIES = 5  # status.json can't be read for a moment while the recorder replaces it
+READ_RETRY_SECONDS = 0.02
 
 
 def replace_with_retry(src: Path, dst: Path, *, replace: Callable | None = None,
@@ -45,8 +45,8 @@ def _temp_for(path: Path) -> Path:
 
 def _atomic_write(path: Path, text: str) -> None:
     temp = _temp_for(path)
-    temp.write_text(text, encoding="utf-8")
     try:
+        temp.write_text(text, encoding="utf-8")
         replace_with_retry(temp, path)
     except BaseException:
         temp.unlink(missing_ok=True)
@@ -56,8 +56,8 @@ def _atomic_write(path: Path, text: str) -> None:
 def _atomic_create(path: Path, text: str) -> bool:
     """Write `path` whole, only if it does not exist yet; False (and nothing changed) when it does."""
     temp = _temp_for(path)
-    temp.write_text(text, encoding="utf-8")
     try:
+        temp.write_text(text, encoding="utf-8")
         if sys.platform == "win32":
             os.rename(temp, path)  # on Windows a rename never replaces a file
         else:
@@ -81,6 +81,11 @@ def _read_dict(path: Path) -> dict | None:
 class RunDir:
     def __init__(self, path: Path):
         self.path = Path(path)
+
+    @property
+    def traces_dir(self) -> Path:
+        """The traces folder this run sits in (traces/_runs/<run>, as new_run makes it)."""
+        return self.path.parent.parent
 
     @property
     def status_path(self) -> Path:
@@ -206,6 +211,12 @@ class RunDir:
                                 "missing.")
         return sorted(sessions, key=lambda s: s.launch_before), problems
 
+    def read_split(self) -> dict | None:
+        return _read_dict(self.split_path)
+
+    def write_split(self, record: dict) -> None:
+        _atomic_write(self.split_path, json.dumps(record))
+
     def is_split(self) -> bool:
         return self.split_path.exists()
 
@@ -216,19 +227,34 @@ def new_run(traces_dir: Path, now_ft: int, pid: int) -> RunDir:
     return RunDir(path)
 
 
-def leftover_runs(traces_dir: Path, is_alive: Callable[[int], bool]) -> list[RunDir]:
+IsAlive = Callable[[int, int | None], bool]  # (pid, start time or None): that very process is still running
+
+
+def run_dirs(traces_dir: Path) -> list[RunDir]:
     runs_dir = Path(traces_dir) / "_runs"
     if not runs_dir.is_dir():
         return []
-    leftovers = []
-    for item in sorted(runs_dir.iterdir()):
-        if not item.is_dir():
-            continue
-        run = RunDir(item)
-        if not run.capture_files() or run.is_split():
-            continue
+    return [RunDir(item) for item in sorted(runs_dir.iterdir()) if item.is_dir()]
+
+
+def recorder_alive(status: dict | None, is_alive: IsAlive) -> bool:
+    """The recorder the status names, by pid and start time (a pid alone may be another program by now)."""
+    pid = status.get("recorder_pid") if status else None
+    return pid is not None and is_alive(pid, status.get("recorder_start"))
+
+
+def _read_status(run: RunDir) -> dict | None:
+    """status.json; a file that is there but can't be read is read again, so a recorder caught in the middle of
+    replacing it is not mistaken for a run with no status."""
+    for _ in range(READ_TRIES):
         status = run.read_status()
-        pid = status.get("recorder_pid") if status else None
-        if pid is None or not is_alive(pid):
-            leftovers.append(run)
-    return leftovers
+        if status is not None or not run.status_path.exists():
+            return status
+        time.sleep(READ_RETRY_SECONDS)
+    return None
+
+
+def leftover_runs(traces_dir: Path, is_alive: IsAlive) -> list[RunDir]:
+    """Runs with a capture that is not split and whose recorder is gone."""
+    return [run for run in run_dirs(traces_dir)
+            if run.capture_files() and not run.is_split() and not recorder_alive(_read_status(run), is_alive)]

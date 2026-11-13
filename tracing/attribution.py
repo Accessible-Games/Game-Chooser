@@ -9,8 +9,13 @@ UNKNOWN_PID = 0  # root_pid when the launch handed back no process ID
 
 
 def exe_key(path: str | None) -> str | None:
-    """A path as compared when the root is found by its executable: normalized, case folded on Windows."""
+    """A path as tracing compares it (the root's exe, the game folder): normalized, case folded on Windows."""
     return os.path.normcase(os.path.normpath(path)) if path else None
+
+
+def in_launch_window(start: int, before: int, after: int) -> bool:
+    """The process started within ROOT_SLACK of the launch call: from `before - ROOT_SLACK` to `after + ROOT_SLACK`."""
+    return before - ROOT_SLACK <= start <= after + ROOT_SLACK
 
 
 def find_root_by_exe(processes, exe: str | None, before: int, after: int, exclude=frozenset()):
@@ -23,9 +28,8 @@ def find_root_by_exe(processes, exe: str | None, before: int, after: int, exclud
     want = exe_key(exe)
     if want is None:
         return None
-    low, high = before - ROOT_SLACK, after + ROOT_SLACK
     candidates = [q for q in processes if q.pid != UNKNOWN_PID and q.start is not None
-                  and low <= q.start <= high and (q.pid, q.start) not in exclude
+                  and in_launch_window(q.start, before, after) and (q.pid, q.start) not in exclude
                   and exe_key(q.image_path) == want]
     if not candidates:
         return None
@@ -47,9 +51,7 @@ def find_root(processes: list[ProcInfo], session: SessionInfo, exclude=frozenset
         for q in candidates:
             if q.start == session.root_start:
                 return q
-    low = session.launch_before - ROOT_SLACK
-    high = session.launch_after + ROOT_SLACK
-    candidates = [q for q in candidates if low <= q.start <= high]
+    candidates = [q for q in candidates if in_launch_window(q.start, session.launch_before, session.launch_after)]
     if not candidates:
         return None
     target = session.root_start if session.root_start is not None else session.launch_before

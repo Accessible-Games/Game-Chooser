@@ -8,6 +8,7 @@ from collections.abc import Iterable, Iterator
 from itertools import chain
 from pathlib import Path
 
+from tracing.kinds import RENAME_OPERATIONS
 from tracing.model import ProcInfo, RawEvent
 
 
@@ -95,7 +96,6 @@ def install_event_offsets() -> None:
     stream_logs_format.EventOffsetsArray = event_offsets
 
 
-RENAME_OPERATIONS = ("SetRenameInformationFile", "SetRenameInformationEx", "SetRenameInformationExBypassAccessCheck")
 _RENAME_HEADER = 20  # flags (u8 or u32) + padding, u64 RootDirectory, u32 FileNameLength; the name follows
 _MAX_NAME_BYTES = 65536
 _DISPOSITION_DELETE = 0x1

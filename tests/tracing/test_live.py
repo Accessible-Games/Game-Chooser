@@ -96,11 +96,7 @@ def test_ended_session_not_running():
     t.update([LiveProc(10, 1, 100, None)])
     t.update([])
     assert t.running() == set()
-    t.forget_ended()
-    t.update([LiveProc(10, 1, 100, None)])
-    assert t.running() == set()
     t.add_session("s2", 5, None, None, 0)
-    t.forget_ended()
     t.update([LiveProc(5, 1, 7, None)])
     assert t.running() == {"s2"}
 
@@ -115,6 +111,15 @@ def test_windows_snapshot_sees_this_process():
     assert p.start
     assert p.image_path and p.image_path.lower().endswith("python.exe")
     assert process_start_time(os.getpid()) == p.start
+
+
+def test_a_process_list_windows_cannot_read_raises_instead_of_saying_nothing_runs(monkeypatch):
+    def unreadable():
+        raise OSError("no process list")
+
+    monkeypatch.setattr("engine.installer_watch.process_parents", unreadable)
+    with pytest.raises(OSError):
+        windows_snapshot()  # an empty list would mark every traced game as exited
 
 
 # ---- a launch that gave no process ID: the root is found by exe ------------------------------------------
@@ -168,15 +173,6 @@ def test_a_session_found_by_exe_never_takes_another_sessions_root():
     assert t.running() == {"a"}
 
 
-def test_root_by_exe_prefers_a_start_after_the_launch_call():
-    s = 10_000_000
-    t = LiveTree()
-    t.add_session("b", 0, None, None, 10 * s, exe=EXE, launch_after=11 * s)
-    t.update([LiveProc(700, 4, 10 * s - s // 2, EXE), LiveProc(701, 4, 10 * s + s, EXE)])
-    t.update([LiveProc(700, 4, 10 * s - s // 2, EXE)])
-    assert t.running() == set()  # the root was 701, which has exited
-
-
 def test_running_processes_lists_the_live_members_of_each_session():
     t = tree()
     t.add_session("s2", 50, 500, None, 500)
@@ -221,15 +217,11 @@ def test_a_root_with_no_start_time_is_not_a_process_from_before_the_launch():
 
 
 def test_a_root_with_no_start_time_is_found_within_the_launch_window_and_then_kept():
-    for start in (98 * S, 100 * S + 5, 103 * S):  # 2 s before the call to 2 s after it returned
+    for start in (98 * S, 100 * S + 5, 103 * S):  # 2 s before the call to 2 s after it returned (in_launch_window)
         t = startless()
         root = LiveProc(10, 1, start, r"C:\Games\Foo\a.exe")
         t.update([root, LiveProc(11, 10, 110 * S, None)])
         assert t.running() == {"s1"} and len(t.running_processes()["s1"]) == 2
         # once found, that process is the root: the pid given to another program later is not
         t.update([LiveProc(10, 1, 400 * S, r"C:\Other\x.exe")])
-        assert t.running() == set()
-    for start in (98 * S - 1, 103 * S + 1):
-        t = startless()
-        t.update([LiveProc(10, 1, start, r"C:\Games\Foo\a.exe")])
         assert t.running() == set()

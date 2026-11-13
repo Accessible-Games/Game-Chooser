@@ -28,7 +28,9 @@ Build: see `.claude/rules/build.md`.
   tracing build is always on), `--trace-recorder RUN --app-pid N --procmon EXE` (the elevated recorder, started by
   the app), `--trace-split [RUN...]` (split leftover runs after a crash; prints "No runs to split." when there are none;
   a named RUN that has `split.json` and no capture left prints "already split, nothing to do"; a named RUN whose
-  capture was kept is split again; without RUN only runs with no `split.json` are split),
+  capture was kept is split again; without RUN only runs with no `split.json` whose recorder is gone are split,
+  checked as `--trace-stop` checks it, a status that can't be read for a moment read again
+  (`runfiles.leftover_runs`, `runfiles._read_status`)),
   `--trace-stop [RUN] [--close-games]` (end the run in progress while traced programs are still open; see Ending a
   run below), `-h`/`--help` beside any command (print the help and run nothing; alone it is not a tracing command),
   `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds),
@@ -46,7 +48,7 @@ Build: see `.claude/rules/build.md`.
   run whose recorder is alive (`status.json`'s `recorder_pid` and `recorder_start`, so a pid given to another
   program doesn't count; `cli._recorder_is_alive`) and that has not ended, writes `stop-request.json` into its
   folder (atomic), then waits and prints what the recorder did (`Wrote <folder>`, `Problem: ...`). A status that
-  can't be read for a moment is read again and never taken for the recorder's death. The
+  can't be read for a moment is read again and never taken for the recorder's death (`runfiles._read_status`). The
   recorder polls for the request in its loop (`Recorder._take_stop`): it writes `stop.json` (the sessions its live
   tree counts as running; rewritten after every process asked, ended or refused), and only then sets the status
   to `stopping` (the app reads the status first, so this order is what keeps the title change quiet; a test pins
@@ -92,7 +94,8 @@ Build: see `.claude/rules/build.md`.
   and `stop.json` (only for a run ended with `--trace-stop`), `split.json` (`folders`, `problems`, `capture_kept`,
   `stop`). The
   capture and `filter.pmc` are removed after a split with no problems, and kept (`capture_kept: true`) when any
-  session has a problem or a session file can't be read. Atomic writes retry `os.replace` while Windows says the
+  session has a problem or a session file can't be read. Every JSON file in a run folder is written atomically (so a recorder killed
+  while writing `split.json` leaves the run unsplit); atomic writes retry `os.replace` while Windows says the
   file is held (`runfiles.replace_with_retry`).
 - **Attribution:** a session is the launched process plus its descendants by parent links in the capture. The root
   is matched by pid and the start time read after the launch; failing an exact match, by pid within 2 s of the launch
@@ -103,7 +106,8 @@ Build: see `.claude/rules/build.md`.
   else the closest to it (`attribution.find_root_by_exe`; the live tree uses the same rule). A launch that gave a
   pid but whose start time couldn't be read: the live tree takes the process with that pid only if it started
   within the same 2 s window, and then keeps to that one process (a later program given the pid is never the
-  root). `process_exit` lines
+  root). The window (from 2 s before the call to 2 s after it returned) is `attribution.in_launch_window`, used by
+  all three. `process_exit` lines
   are written for every process whose exit is in the capture. `session.json` env carries `app_build` (short git
   commit from source, else null).
 - **Capture filter** (`procmon.filter_config`; destructive, so dropped events never reach the file): drops every
@@ -128,15 +132,20 @@ Build: see `.claude/rules/build.md`.
   - `recorder.py` - elevated side: drives Process Monitor for the whole run, then splits; takes a stop request
   - `stop.py` - the `--trace-stop` command (unelevated): finds the run, writes the request, waits, reports
   - `closing.py` - `Closer` (the rules: start time, then who the process runs as) over `ProcessAccess`
-    (`WindowsProcesses`: lazy ctypes), `WindowsCloser`, `Identity`, `process_identity`, the `not_closed` reasons
+    (`WindowsProcesses`: lazy ctypes; also how `live.py` and `cli._recorder_is_alive` open a process and read
+    its start time), `WindowsCloser`, `Identity`, `process_identity`, the `not_closed` reasons
   - `procmon.py` - Process Monitor's filter file, start, ready check, stop
   - `pml.py` - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`). `read_capture` swaps
     in `event_offsets` for procmon-parser's event offsets reader, which drops bits 32 to 39 of each offset and so
     cannot read a capture over 4 GiB
-  - `live.py` - live process snapshot (Windows) used for roots and the running tree
+  - `live.py` - live process snapshot (Windows) used for roots and the running tree; the process list is
+    `engine.installer_watch.process_parents`, and a list that can't be read raises (the recorder and the
+    client then keep the last membership; the recorder for 60 s at most, `SNAPSHOT_WARNING_SECONDS`, then
+    counts every game as exited, so a run whose app has closed still ends)
   - `runfiles.py` - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` - split a run folder
   - `split.py` - attribute events to sessions and merge writes; `attribution.py` - the process tree
-  - `kinds.py` - event to write kind; `virtualstore.py` - the VirtualStore path
+  - `kinds.py` - event to write kind, the write kinds and the rename and delete operation names the other
+    modules use; `virtualstore.py` - the VirtualStore path
   - `output.py` - writes `session.json` and `events.jsonl`; `model.py`, `clock.py`, `paths.py`
   - `probe.py` - the `--trace-probe` command
   - `check_trace_test.py` - `python -m tracing.check_trace_test <session folder>` checks a session of the

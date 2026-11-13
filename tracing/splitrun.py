@@ -3,7 +3,6 @@
 The capture (and filter.pmc) is kept when any session couldn't be recovered: a session with a problem or a session
 file that couldn't be read. split.json says so (`capture_kept`), and `--trace-split RUN` can split it again.
 """
-import json
 import logging
 import shutil
 from dataclasses import dataclass
@@ -24,6 +23,15 @@ class SplitResult:
     folders: list[Path]
     problems: list[str]
     capture_kept: bool = False
+
+
+def report_split(folders, problems, out) -> bool:
+    """Say what a split wrote and its problems; True when it had a problem."""
+    for folder in folders:
+        out(f"Wrote {folder}")
+    for problem in problems:
+        out(f"Problem: {problem}")
+    return bool(problems)
 
 
 def _clear_capture(run: RunDir) -> None:
@@ -47,9 +55,8 @@ def _stop_summary(stop: dict | None) -> dict | None:
 
 def _write_marker(run: RunDir, folders: list[Path], problems: list[str], capture_kept: bool,
                   stop: dict | None) -> None:
-    run.split_path.write_text(json.dumps({"folders": [f.name for f in folders], "problems": problems,
-                                          "capture_kept": capture_kept, "stop": _stop_summary(stop)}),
-                              encoding="utf-8")
+    run.write_split({"folders": [f.name for f in folders], "problems": problems, "capture_kept": capture_kept,
+                     "stop": _stop_summary(stop)})
 
 
 def split_run_dir(run: RunDir, traces_dir: Path,

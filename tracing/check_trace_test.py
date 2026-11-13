@@ -3,6 +3,8 @@ import json
 import sys
 from pathlib import Path
 
+from tracing.kinds import WRITE_KINDS
+
 # (op alternatives joined by "|", path suffix, must come from a child process of the game)
 EXPECTED = [
     ("file_create|file_write", r"\saves\settings.ini", False),
@@ -17,8 +19,6 @@ EXPECTED = [
 ]
 
 FORBIDDEN_PROCESSES = ("7z.exe", "game-chooser.exe", "python.exe")
-WRITE_KINDS = ("file_create", "folder_create", "file_write", "rename", "delete", "reg_create_key", "reg_set_value",
-               "reg_delete_key", "reg_delete_value")
 
 
 def _describe(expected: tuple) -> str:
