@@ -230,7 +230,8 @@ def title_of(entry: dict) -> str:
 def is_web_game(entry: dict, platform: str) -> bool:
     """True if every source for `platform` is a link: a web game, never installed."""
     sources = platform_sources(entry, platform)
-    return bool(sources) and all((s.get("install") or {}).get("method") == "url" for s in sources)
+    return bool(sources) and all(isinstance(s.get("install"), dict) and s["install"].get("method") == "url"
+                                 for s in sources)
 
 
 def runs_installer(source: dict) -> bool:

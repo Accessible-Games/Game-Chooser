@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from urllib.parse import urlsplit
 
 from engine import messages
-from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, platform_sources
+from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, is_web_game
 from engine.pricing import (can_play_free, description_lines, donate_link, price_text, pricing_of, purchase_link,
                             shown_price)
 from language_names import language_name
@@ -433,10 +433,7 @@ def action_kind(row: CatalogRow, platform: str | None = None) -> str:
     link, nothing downloads) or "install"."""
     if row.installed:
         return "launch"
-    sources = platform_sources(row.entry, platform or current_platform())
-    if sources and all(isinstance(s.get("install"), dict) and s["install"].get("method") == "url" for s in sources):
-        return "add"
-    return "install"
+    return "add" if is_web_game(row.entry, platform or current_platform()) else "install"
 
 
 _ACTION_VERBS = {"launch": "Launch", "add": "Add", "install": "Install"}
