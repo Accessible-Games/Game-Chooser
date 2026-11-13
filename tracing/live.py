@@ -17,7 +17,7 @@ import os
 import sys
 from dataclasses import dataclass
 
-from tracing.attribution import ROOT_SLACK, UNKNOWN_PID, exe_key, find_root_by_exe
+from tracing.attribution import UNKNOWN_PID, exe_key, find_root_by_exe, in_launch_window
 from tracing.closing import WindowsProcesses
 
 
@@ -63,9 +63,8 @@ class _Session:
             if root is not None:
                 self.root_pid, self.root_start = root.pid, root.start
         elif self.root_start is None:
-            low, high = self.started_at - ROOT_SLACK, self.launch_after + ROOT_SLACK
             for p in procs:
-                if p.pid == self.root_pid and low <= p.start <= high:
+                if p.pid == self.root_pid and in_launch_window(p.start, self.started_at, self.launch_after):
                     self.root_start = p.start
         member_pids = {}
         for pid, start in self.members:

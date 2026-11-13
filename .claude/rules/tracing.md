@@ -105,7 +105,8 @@ Build: see `.claude/rules/build.md`.
   else the closest to it (`attribution.find_root_by_exe`; the live tree uses the same rule). A launch that gave a
   pid but whose start time couldn't be read: the live tree takes the process with that pid only if it started
   within the same 2 s window, and then keeps to that one process (a later program given the pid is never the
-  root). `process_exit` lines
+  root). The window (from 2 s before the call to 2 s after it returned) is `attribution.in_launch_window`, used by
+  all three. `process_exit` lines
   are written for every process whose exit is in the capture. `session.json` env carries `app_build` (short git
   commit from source, else null).
 - **Capture filter** (`procmon.filter_config`; destructive, so dropped events never reach the file): drops every
