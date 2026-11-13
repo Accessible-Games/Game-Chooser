@@ -22,6 +22,10 @@ Data models for Game Chooser application
 from typing import List, Dict, Any
 
 
+def is_web_path(path: str) -> bool:
+    return path.lower().startswith(("http://", "https://"))
+
+
 class Game:
     """Represents a game in the library"""
     def __init__(self, title="", genre="", developer="", year="",
@@ -40,7 +44,7 @@ class Game:
 
     @property
     def is_web(self):
-        return self.launch_path.lower().startswith(("http://", "https://"))
+        return is_web_path(self.launch_path)
 
     def to_dict(self):
         data = {

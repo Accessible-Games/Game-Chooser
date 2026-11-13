@@ -33,7 +33,7 @@ from install_dialogs import RemoveLibraryDialog
 from install_prefs import check_install_prefs, current_catalog_url, register_shared_components
 from library_actions import library_row_name
 from wx_bridge import run_in_background
-from models import Game
+from models import Game, is_web_path
 from validation_service import ValidationService
 from smart_list import SmartList, Column
 
@@ -243,7 +243,7 @@ class GameDialog(wx.Dialog):
             self.path_label.SetLabel("URL:")
             self.browse_btn.Hide()
             # If switching to web game and field is empty, prefill with https://
-            if not self.path_ctrl.GetValue() or not self.path_ctrl.GetValue().startswith("http"):
+            if not is_web_path(self.path_ctrl.GetValue()):
                 self.path_ctrl.SetValue("https://")
         else:
             self.path_label.SetLabel("Launch Path:")
@@ -364,7 +364,7 @@ class GameDialog(wx.Dialog):
                 }
 
             # For non-web games, also check resolved absolute paths
-            if not path.startswith('http') and not game.is_web:
+            if not is_web_path(path) and not game.is_web:
                 try:
                     if game.library_id:
                         # Library game - resolve to absolute path
