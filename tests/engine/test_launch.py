@@ -128,6 +128,12 @@ def test_adopt_catalog_launch(tmp_path):
     assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False
 
 
+def test_a_page_is_never_guessed(tmp_path):
+    touch(tmp_path, "index.html")
+    touch(tmp_path, "story/page2.htm")
+    assert find_launch_exe(tmp_path, None, EXCL) is None
+
+
 @pytest.mark.parametrize("name", ["index.html", "jumpgame.hta"], ids=["page", "hta"])
 def test_adopt_catalog_launch_takes_a_page_or_an_hta(tmp_path, name):
     touch(tmp_path, name)
