@@ -463,9 +463,9 @@ class RunItem:
 
 
 def run_installer_untracked(file: Path, installer: dict, target: Path, ctx, progress, cancel,
-                            title: str | None = None) -> None:
+                            title: str | None = None) -> list[str]:
     """Run an installer whose files aren't tracked (runtimes). A cancelled or failed silent run removes
-    what it added to `target`."""
+    what it added to `target`. Returns notes for the player (a restart it asked for, an exit code)."""
     title = title or Path(target).name
     interactive = _interactive(ctx, installer, title)
     target = Path(target)
@@ -484,6 +484,7 @@ def run_installer_untracked(file: Path, installer: dict, target: Path, ctx, prog
     except BaseException:
         _remove_new_files(target, before, existed)
         raise
+    return _code_notes(title, outcome.code)
 
 
 def install(ctx, item: RunItem, target: Path, library_id: str, library_path: Path,

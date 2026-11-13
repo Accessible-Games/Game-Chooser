@@ -572,8 +572,8 @@ def run_file_steps_or_fail(steps: list[dict], tree: Path) -> None:
 
 def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cancel) -> list[str]:
     """Install each runtime machine-wide, in order. `fetch(item, work_dir)` downloads the catalog's file
-    (raising InstallFailed when none verifies); `work` is an empty folder for the downloads. Returns the
-    downloads' notes for the player (the developer changed a file)."""
+    (raising InstallFailed when none verifies); `work` is an empty folder for the downloads. Returns notes
+    for the player: the downloads' (the developer changed a file) and the installers' (a restart)."""
     notes = []
     for runtime in runtimes:
         _check(cancel)
@@ -586,7 +586,7 @@ def install_shared(ctx, runtimes: list[dict], work: Path, fetch, progress, cance
             _make_root(ctx, runtime)
             target = ctx.runtimes_root / runtime["id"]
             if _runs_installer(fetched.source):
-                _run_installer(ctx, runtime, fetched, target, progress, cancel)
+                notes += _run_installer(ctx, runtime, fetched, target, progress, cancel)
             else:
                 _unpack(ctx, runtime, fetched, target, work_dir / "unpacked", progress, cancel)
         finally:
@@ -612,15 +612,16 @@ def _source(runtime: dict, fetched) -> InstalledSource:
         install=dict(fetched.source.get("install") or {}), steps=list(fetched.source.get("steps") or []))
 
 
-def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) -> None:
+def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) -> list[str]:
     """Run the runtime's installer untracked; where it has a `detect` hint, it must find the runtime after.
+    Returns the installer's notes (a restart it asked for).
 
     The record (untracked, no files) only stops the installer being run again for the next game.
     """
     title = _title(runtime)
     installer = dict((fetched.source.get("install") or {}).get("installer") or {})
     # A failed or cancelled run removes only the files it added to `target`.
-    run_installer_untracked(fetched.path, installer, target, ctx, progress, cancel, title=title)
+    notes = run_installer_untracked(fetched.path, installer, target, ctx, progress, cancel, title=title)
     if runtime.get("detect") and not runtime_present(runtime, ctx.records, ctx.registry):
         raise InstallFailed(messages.FAILED.format(title=title))
     # No marker: the installer put the runtime wherever it likes, so the record or the detect hint says.
@@ -630,6 +631,7 @@ def _run_installer(ctx, runtime: dict, fetched, target: Path, progress, cancel) 
             source=_source(runtime, fetched), extras={}, files={}, steps=[], method="run", tracked=False))
     except OSError as e:
         raise InstallFailed(messages.FAILED.format(title=title)) from e
+    return notes
 
 
 def _unpack(ctx, runtime: dict, fetched, target: Path, unpack_dir: Path, progress, cancel) -> None:

@@ -1152,18 +1152,23 @@ def test_failure_after_registering_in_a_folder_it_made_unregisters(tmp_path):
 
 
 def test_installer_runtime_runs_untracked_then_is_checked(tmp_path, monkeypatch):
+    """It asks for a restart, as redistributables often do: the player is told, as for a game's installer."""
     routes = {}
     rt, g = vb6(routes), game(routes, dependencies=["vb6-runtime"])
     system = tmp_path / "system"
     system.mkdir()
     monkeypatch.setenv("GC_VB6", str(system))
+    elevator = FakeElevator()
 
     def installs(exe, args, elevated):
         if exe.endswith("vbrun60.exe"):
             (system / "msvbvm60.dll").write_bytes(b"vb")
+            elevator.exit_codes[exe] = 3010
+    elevator.on_start = installs
 
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=installs))
-    run(eng, "install")
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=elevator)
+    r = run(eng, "install")
+    assert messages.INSTALLER_RESTART_NOTE.format(title=VB6_TITLE) in r.notes
     calls = [c for c in eng.ctx.elevator.calls if c[0].endswith("vbrun60.exe")]
     assert len(calls) == 1 and calls[0][1:] == ("/Q", False)
     rec = eng.ctx.records.load("vb6-runtime")

@@ -691,7 +691,7 @@ class InstallEngine:
 
     def _install_runtimes(self, deps: runtimes.RuntimePlan, work: Path, progress, cancel) -> list[str]:
         """Install the game's missing runtimes machine-wide, before the game is downloaded. Returns their
-        downloads' notes."""
+        notes (see runtimes.install_shared)."""
         return runtimes.install_shared(self.ctx, deps.shared, work / "runtimes",
                                        self._catalog_fetch(progress, cancel), progress, cancel)
 
