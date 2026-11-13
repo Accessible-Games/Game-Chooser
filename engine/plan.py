@@ -8,11 +8,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from . import messages
-from .entries import extras_of, platform_sources
+from .entries import extras_of, is_web_game, platform_sources, runs_installer, title_of
 from .errors import InstallFailed
 from .pricing import install_warning, pricing_of
 from .run_installer import silent_args_for
-from .runtimes import _has_elevated_steps, _is_installer_runtime, _runs_installer, is_com_runtime, missing_runtimes
+from .runtimes import _has_elevated_steps, _is_installer_runtime, missing_runtimes, runtime_route
 
 @dataclass
 class ExtraChoice:
@@ -42,7 +42,6 @@ class InstallPlan:
     dependencies: list[DependencyLine] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
     interactive: bool = False
-    is_web: bool = False
     base_size: int | None = None
     first_run_size: int = 0  # bytes the game downloads itself the first time it starts
 
@@ -69,23 +68,12 @@ def _first_run_size(entry: dict, platform: str | None) -> int:
     return size if isinstance(size, int) and not isinstance(size, bool) and size > 0 else 0
 
 
-def _title(entry: dict) -> str:
-    return entry.get("title") or entry["id"]
-
-
-def _installer_only(runtime: dict, platform: str | None) -> bool:
-    if platform:
-        return _is_installer_runtime(runtime, platform)
-    sources = runtime.get("sources") or []
-    return bool(sources) and all(_runs_installer(s) for s in sources)
-
-
 def _needs_administrator(runtime: dict, platform: str | None) -> bool:
     """True if installing the runtime machine-wide brings an administrator prompt: a register or HKLM step,
     an installer that must run (its own prompt), or an installer flagged for elevation."""
     flagged = any(bool(((s.get("install") or {}).get("installer") or {}).get("elevation"))
                   for s in runtime.get("sources") or [] if isinstance(s, dict))
-    return _has_elevated_steps(runtime) or _installer_only(runtime, platform) or flagged
+    return _has_elevated_steps(runtime) or _is_installer_runtime(runtime, platform) or flagged
 
 
 def dependency_line(runtime: dict, register_shared_components: bool, platform: str | None = None) -> DependencyLine:
@@ -94,29 +82,20 @@ def dependency_line(runtime: dict, register_shared_components: bool, platform: s
     Without a `platform`, every source of the runtime is considered. A shared install is said to need
     administrator permission only when it will ask for it.
     """
-    title = _title(runtime)
+    title = title_of(runtime)
     size = _size(runtime, platform)
-    if not register_shared_components:
-        if _installer_only(runtime, platform):
-            return DependencyLine(runtime["id"], messages.PLAN_DEPENDENCY_SKIPPED.format(title=title), False, size)
-        if is_com_runtime(runtime):
-            return DependencyLine(runtime["id"], messages.PLAN_DEPENDENCY_PRIVATE.format(title=title), True, size)
+    route = runtime_route(runtime, register_shared_components, platform)
+    if route == "skipped":
+        return DependencyLine(runtime["id"], messages.PLAN_DEPENDENCY_SKIPPED.format(title=title), False, size)
+    if route == "private":
+        return DependencyLine(runtime["id"], messages.PLAN_DEPENDENCY_PRIVATE.format(title=title), True, size)
     text = messages.PLAN_DEPENDENCY_SHARED if _needs_administrator(runtime, platform) else messages.PLAN_DEPENDENCY_SHARED_PLAIN
     return DependencyLine(runtime["id"], text.format(title=title), True, size)
 
 
 def _is_interactive(entry: dict, platform: str) -> bool:
-    source = _first_source(entry, platform)
-    install = (source or {}).get("install") or {}
-    if install.get("method") != "installer":
-        return False
-    installer = install.get("installer") or {}
-    return installer.get("mode") == "run" and silent_args_for(installer) is None
-
-
-def _is_web(entry: dict, platform: str) -> bool:
-    sources = platform_sources(entry, platform)
-    return bool(sources) and all((s.get("install") or {}).get("method") == "url" for s in sources)
+    source = _first_source(entry, platform) or {}
+    return runs_installer(source) and silent_args_for((source.get("install") or {}).get("installer") or {}) is None
 
 
 def _suggested_folder() -> Path:
@@ -129,7 +108,7 @@ def _extra_choices(entry: dict, entries: dict, platform: str, installed: set[str
     for info in extras_of(entry, entries, platform):
         if info.entry["id"] in installed or (optional_only and info.required):
             continue
-        choices.append(ExtraChoice(info.entry["id"], _title(info.entry), info.required,
+        choices.append(ExtraChoice(info.entry["id"], title_of(info.entry), info.required,
                                    _size(info.entry, platform)))
     return choices
 
@@ -169,7 +148,7 @@ def build_install_plan(entry_id: str, entries: dict, libraries: list[dict], reco
     count as "present", as the install itself does.
     """
     entry = entries[entry_id]
-    plan = InstallPlan(entry_id, _title(entry), action, is_web=_is_web(entry, platform))
+    plan = InstallPlan(entry_id, title_of(entry), action)
     record = records.load(entry_id)
     installed = set(record.extras) if record is not None and not record.uninstalled else set()
     if action == "extras":
@@ -179,7 +158,7 @@ def build_install_plan(entry_id: str, entries: dict, libraries: list[dict], reco
     plan.base_size = _size(entry, platform)
     if action == "install":  # an update keeps what the game downloaded the first time
         plan.first_run_size = _first_run_size(entry, platform)
-    if plan.is_web:
+    if is_web_game(entry, platform):
         return plan
     if action == "install":
         _choose_library(plan, libraries, last_library)

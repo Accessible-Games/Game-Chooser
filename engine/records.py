@@ -11,7 +11,7 @@ import typing
 from dataclasses import MISSING, asdict, dataclass, fields
 from pathlib import Path
 
-from .paths import is_engine_dir, norm_key
+from .paths import is_engine_dir, norm_key, same_folder, walk_files
 from .sources import hash_file
 
 log = logging.getLogger(__name__)
@@ -93,14 +93,9 @@ def hash_tree(root: Path) -> dict[str, tuple[str, str]]:
     """Map norm_key -> (display path with forward slashes, sha256) for every file under root."""
     root = Path(root)
     result: dict[str, tuple[str, str]] = {}
-    for dirpath, dirnames, filenames in os.walk(root):
-        # Never follow a symlink or junction out of the folder.
-        dirnames[:] = [d for d in dirnames if not is_engine_dir(d)
-                       and not (os.path.islink(Path(dirpath) / d) or os.path.isjunction(Path(dirpath) / d))]
-        for name in filenames:
-            full = Path(dirpath) / name
-            rel = full.relative_to(root).as_posix()
-            result[norm_key(rel)] = (rel, hash_file(full))
+    for full in walk_files(root, is_engine_dir):
+        rel = full.relative_to(root).as_posix()
+        result[norm_key(rel)] = (rel, hash_file(full))
     return result
 
 
@@ -143,11 +138,6 @@ def _check_id(catalog_id: str) -> str:
             or "\x00" in catalog_id or ":" in catalog_id):
         raise ValueError(f"Not a safe catalog id: {catalog_id!r}")
     return catalog_id
-
-
-def _same_path(a: Path, b: Path) -> bool:
-    return os.path.normcase(os.path.normpath(str(a))).lower() == \
-        os.path.normcase(os.path.normpath(str(b))).lower()
 
 
 class RecordStore:
@@ -226,6 +216,6 @@ class RecordStore:
     def owner_of_folder(self, folder: Path, libraries: list[dict]) -> InstallRecord | None:
         for record in self.all().values():
             candidate = record_folder(record, libraries)
-            if candidate is not None and _same_path(candidate, folder):
+            if candidate is not None and same_folder(candidate, folder):
                 return record
         return None

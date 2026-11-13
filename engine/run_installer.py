@@ -17,7 +17,6 @@ told where.
 """
 
 import os
-import re
 import shutil
 import threading
 import time
@@ -28,16 +27,16 @@ from typing import Protocol
 
 from . import messages
 from .elevation import RunningProcess
-from .errors import Cancelled, ElevationDeclined, InstallFailed, StepError, UnsafePath
+from .errors import Cancelled, ElevationDeclined, InstallFailed, StepError, UnsafePath, check_cancel
 from .installer_watch import ProcessWatch, watch_process  # noqa: F401  (re-exported)
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import EXECUTABLE_CODE_SUFFIXES, STAGING_DIR_NAME, is_engine_dir, norm_key, unique_path
+from .paths import STAGING_DIR_NAME, is_code, same_folder, walk_files, is_engine_dir, norm_key, unique_path
 from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is_runtime_owner, record_folder
-from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link
+from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link, remove_unchanged
 from .sources import hash_file
-from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, undo_steps
-from .uninstall_keys import (UNINSTALL_KEYS, UninstallReader, _winreg_reader, folder_from_uninstall_entry,  # noqa: F401
+from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, split_steps, undo_steps
+from .uninstall_keys import (UNINSTALL_KEYS, folder_from_uninstall_entry,  # noqa: F401  (UNINSTALL_KEYS re-exported)
                              inside, is_missing_program, names_title, new_uninstall_entries, snapshot_uninstall_keys,
                              split_command, vendor_uninstaller, windows_dir)
 
@@ -97,12 +96,9 @@ def _walk(root: Path) -> Iterator[tuple[str, Path]]:
 
     Never enters links or Game Chooser's own folders, the way hash_tree walks.
     """
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [d for d in dirnames if not is_engine_dir(d) and not is_link(Path(dirpath) / d)]
-        for name in filenames:
-            full = Path(dirpath) / name
-            if not is_link(full):
-                yield full.relative_to(root).as_posix(), full
+    for full in walk_files(root, is_engine_dir):
+        if not is_link(full):
+            yield full.relative_to(root).as_posix(), full
 
 
 def snapshot_folder(root: Path) -> set[str]:
@@ -138,10 +134,6 @@ def _claimed(folder: Path, start: float, end: float, before: set[str] | None, sl
 def files_created_during(folder: Path, start: float, end: float, before: set[str] | None,
                          slack: float = 2.0) -> list[str]:
     return sorted(_claimed(folder, start, end, before, slack))
-
-
-def _same(a: Path, b: Path) -> bool:
-    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
 def _personal_folders() -> list[str]:
@@ -269,11 +261,6 @@ class _Outcome:
     tree_done: bool  # the installer and everything it started were seen to finish
 
 
-def _check(cancel: Callable[[], bool]) -> None:
-    if cancel():
-        raise Cancelled()
-
-
 def _interactive(ctx, installer: dict, title: str) -> bool:
     """True when the player drives the installer; refuses if no one can."""
     if silent_args_for(installer) is not None:
@@ -384,9 +371,20 @@ def _poll_for(watch: ProcessWatch, seconds: float, never: Callable[[], bool]) ->
     return False
 
 
-def _installer_failed(code: int | None, interactive: bool) -> bool:
-    """A silent installer's non-zero exit is a failure; for an interactive one, the player's Done decides."""
-    return not interactive and code is not None and code != 0 and code not in _RESTART_CODES
+def _run_installer(ctx, title: str, file: Path, installer: dict, target: Path, interactive: bool,
+                   progress, cancel) -> _Outcome:
+    """Run the installer into `target` and wait for it (see _run_and_wait).
+
+    A silent installer's non-zero exit, other than a restart, raises InstallFailed (with `tree_done`);
+    for an interactive one, the player's Done decides.
+    """
+    exe, args = installer_command(file, installer, target)
+    outcome = _run_and_wait(ctx, title, exe, args, _elevated(installer), Path(file).parent, progress, cancel)
+    if not interactive and outcome.code not in (None, 0, *_RESTART_CODES):
+        error = InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code))
+        error.tree_done = outcome.tree_done
+        raise error
+    return outcome
 
 
 def _code_notes(title: str, code: int | None) -> list[str]:
@@ -463,9 +461,9 @@ class RunItem:
 
 
 def run_installer_untracked(file: Path, installer: dict, target: Path, ctx, progress, cancel,
-                            title: str | None = None) -> None:
+                            title: str | None = None) -> list[str]:
     """Run an installer whose files aren't tracked (runtimes). A cancelled or failed silent run removes
-    what it added to `target`."""
+    what it added to `target`. Returns notes for the player (a restart it asked for, an exit code)."""
     title = title or Path(target).name
     interactive = _interactive(ctx, installer, title)
     target = Path(target)
@@ -474,16 +472,14 @@ def run_installer_untracked(file: Path, installer: dict, target: Path, ctx, prog
     before = snapshot_folder(target)
     if interactive:
         ctx.installer_ui.announce_target(title, target)
-    exe, args = installer_command(file, installer, target)
     try:
-        outcome = _run_and_wait(ctx, title, exe, args, _elevated(installer), Path(file).parent, progress, cancel)
-        if _installer_failed(outcome.code, interactive):
-            raise InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code))
+        outcome = _run_installer(ctx, title, file, installer, target, interactive, progress, cancel)
     except _StillRunning as e:
         raise InstallFailed(messages.INSTALLER_STILL_RUNNING.format(title=title)) from e
     except BaseException:
         _remove_new_files(target, before, existed)
         raise
+    return _code_notes(title, outcome.code)
 
 
 def install(ctx, item: RunItem, target: Path, library_id: str, library_path: Path,
@@ -494,21 +490,16 @@ def install(ctx, item: RunItem, target: Path, library_id: str, library_path: Pat
     """
     title = item.title
     interactive = _interactive(ctx, item.installer, title)
-    _check(cancel)
+    check_cancel(cancel)
     if interactive:
         ctx.installer_ui.announce_target(title, target)
     keys_before = snapshot_uninstall_keys(ctx.uninstall_reader)
     existed = target.exists()
     before = snapshot_folder(target)
-    exe, args = installer_command(item.file, item.installer, target)
     start = time.time()
     placed = False
     try:
-        outcome = _run_and_wait(ctx, title, exe, args, _elevated(item.installer), item.file.parent,
-                                progress, cancel)
-        code = outcome.code
-        if _installer_failed(code, interactive):
-            raise InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=code))
+        code = _run_installer(ctx, title, item.file, item.installer, target, interactive, progress, cancel).code
         progress(Progress("finishing"))
         found = _find_folder(ctx, item, target, before, start, time.time(), keys_before)
         if found is None:
@@ -572,7 +563,7 @@ def _matching_uninstaller(new_entries: list[dict], folder: Path, title: str) -> 
     """The uninstaller of the new entry for `folder`, or of the new entry named like the game."""
     for values in new_entries:
         named = folder_from_uninstall_entry(values)
-        if named is not None and _same(named, folder):
+        if named is not None and same_folder(named, folder):
             return vendor_uninstaller(values)
     for values in new_entries:
         if folder_from_uninstall_entry(values) is None and names_title(values, title):
@@ -639,45 +630,31 @@ def _where(folder: Path, library_id: str, library_path: Path, libraries: list[di
             continue
         root = Path(os.path.abspath(lib["path"]))
         absolute = Path(os.path.abspath(folder))
-        if inside(absolute, root) and not _same(absolute, root):
+        if inside(absolute, root) and not same_folder(absolute, root):
             return lib["id"], Path(os.path.relpath(absolute, root)).as_posix()
     return "", str(Path(os.path.abspath(folder)))
 
 
-def _apply_system_steps(ctx, record: InstallRecord, steps: list[dict], keep: list[dict] = (),
-                        spare: list[dict] = ()) -> list[str]:
-    """Run the source's registry/register/run steps in the game's folder and record them.
+def _step_ctx(ctx, record: InstallRecord) -> StepContext:
+    return StepContext(Path(os.path.abspath(record_folder(record, ctx.libraries))), ctx.elevator, ctx.registry)
 
-    Applied steps in `keep` that are still wanted, or are in `spare` (the steps of extras applied
-    next, which run them), stay as they are; the others are undone first. Returns notes for undo
-    failures. A failing step leaves the game recorded and raises InstallFailed.
+
+def _apply_system_steps(ctx, record: InstallRecord, steps: list[dict], notes: list[str] = ()) -> list[str]:
+    """Run the source's new registry/register/run steps in the game's folder and add them to the record.
+
+    Returns `notes` (the undo failures of the steps undone once the installer had run). A failing step leaves
+    the game recorded and raises InstallFailed, with `notes` after its words.
     """
-    folder = record_folder(record, ctx.libraries)
-    step_ctx = StepContext(Path(os.path.abspath(folder)), ctx.elevator, ctx.registry)
-    wanted = [_bare(s) for s in steps]
-    spared = [_bare(s) for s in spare]
-    kept = [s for s in keep if _bare(s) in wanted or _bare(s) in spared]
-    notes = undo_steps([s for s in keep if s not in kept], step_ctx)
-    record.steps = kept
-    ctx.records.save(record)
     try:
-        applied = run_system_steps([s for s in steps if _bare(s) not in [_bare(k) for k in kept]], step_ctx)
+        applied = run_system_steps(steps, _step_ctx(ctx, record))
     except StepError as e:
         raise InstallFailed("\n\n".join([str(e), *getattr(e, "undo_failures", []), *notes])) from e
-    record.steps = kept + applied
+    record.steps = record.steps + applied
     ctx.records.save(record)
-    return notes
-
-
-def _bare(step: dict) -> dict:
-    return {k: v for k, v in step.items() if k != "undo"}
+    return list(notes)
 
 
 # ---- the player's files, set aside ---------------------------------------------------------------------
-
-
-def _is_code(rel: str) -> bool:
-    return os.path.splitext(rel)[1].lower() in EXECUTABLE_CODE_SUFFIXES
 
 
 def _player_files(record: InstallRecord, game_dir: Path) -> dict[str, str]:
@@ -686,17 +663,14 @@ def _player_files(record: InstallRecord, game_dir: Path) -> dict[str, str]:
     found = {}
     if not game_dir.is_dir():
         return found
-    for dirpath, dirnames, filenames in os.walk(game_dir):
-        dirnames[:] = [d for d in dirnames if d != STAGING_DIR_NAME and not is_link(Path(dirpath) / d)]
-        for name in filenames:
-            full = Path(dirpath) / name
-            if is_link(full):
-                continue
-            rel = full.relative_to(game_dir).as_posix()
-            recorded = record.files.get(norm_key(rel))
-            sha = hash_file(full)
-            if recorded is None or sha != recorded.sha256:
-                found[rel] = sha
+    for full in walk_files(game_dir, lambda name: name == STAGING_DIR_NAME):
+        if is_link(full):
+            continue
+        rel = full.relative_to(game_dir).as_posix()
+        recorded = record.files.get(norm_key(rel))
+        sha = hash_file(full)
+        if recorded is None or sha != recorded.sha256:
+            found[rel] = sha
     return found
 
 
@@ -792,9 +766,11 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     The player's .exe/.dll/.ocx files aren't set aside: like any update, the installer's code
     replaces them without a copy. `previous` is the record's undo point afterwards (KEEP_UNDO_POINT
     leaves it as it is); it is saved with the installer's files, before the system steps run.
-    Applied steps in `spare_steps` (the extras' steps, for extras the caller applies next) aren't
-    undone. The record's extras are left as they are: the caller applies and records them next, so
-    if that fails, a retry still knows which extras the game has.
+    Applied steps the installer's source no longer has are undone once it has run, before Undo removes
+    their files, so a failed or cancelled run leaves every step alone; those in `spare_steps` (the
+    extras' steps, for extras the caller applies next) aren't. The new steps run after the installer.
+    The record's extras are left as they are: the caller applies and records them next, so if that
+    fails, a retry still knows which extras the game has.
 
     For Undo, `undo_of` is the undo point being undone. A file the newer version recorded that this
     run didn't claim, and that is unchanged, is removed, unless the older version recorded that path
@@ -805,23 +781,19 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     """
     title = item.title
     interactive = _interactive(ctx, item.installer, title)
-    _check(cancel)
+    check_cancel(cancel)
     player = _player_files(record, game_dir)
-    aside = _SetAside.copy(ctx, item.catalog_id, game_dir, [r for r in player if not _is_code(r)], title)
-    player_code = {rel: sha for rel, sha in player.items() if _is_code(rel)}
+    aside = _SetAside.copy(ctx, item.catalog_id, game_dir, [r for r in player if not is_code(r)], title)
+    player_code = {rel: sha for rel, sha in player.items() if is_code(rel)}
     if interactive:
         ctx.installer_ui.announce_target(title, game_dir)
     keys_before = snapshot_uninstall_keys(ctx.uninstall_reader)
     before = snapshot_folder(game_dir)
-    exe, args = installer_command(item.file, item.installer, game_dir)
     start = time.time()
     tree_done = False
     try:
-        outcome = _run_and_wait(ctx, title, exe, args, _elevated(item.installer), item.file.parent,
-                                progress, cancel)
+        outcome = _run_installer(ctx, title, item.file, item.installer, game_dir, interactive, progress, cancel)
         tree_done = outcome.tree_done
-        if _installer_failed(outcome.code, interactive):
-            raise InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code))
         progress(Progress("finishing"))
         if item.steps:
             theirs_now = {norm_key(r) for r in player}  # never the installer's, whatever their dates
@@ -847,6 +819,12 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
             raise InstallFailed("\n\n".join([messages.INSTALLER_CANCELLED.format(title=title), *kept])) from e
         raise
     notes = aside.restore(title, tree_done)
+    # Applied steps not wanted any more are undone now, before Undo removes the files they name.
+    kept_steps, unwanted, new_steps = split_steps(record.steps, item.steps, spare_steps)
+    step_notes = undo_steps(unwanted, _step_ctx(ctx, record))
+    if unwanted:
+        record.steps = kept_steps
+        ctx.records.save(record)
 
     for rel, moved in aside.renamed.items():
         if norm_key(rel) in claimed:
@@ -876,7 +854,7 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
                 files[key] = RecordedFile(rel, sha, older[key].get("owner") or old.owner)
                 continue
             try:
-                if _remove_unchanged(game_dir, rel, sha):
+                if remove_unchanged(game_dir, rel, sha):
                     continue  # the newer version's, unchanged: Undo removes it, as an update would
             except OSError:
                 not_removed.append(rel)
@@ -905,21 +883,7 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     record.uninstalled = False
     ctx.records.save(record)
     notes = [*_code_notes(title, outcome.code), *notes]
-    return record, [*notes, *_apply_system_steps(ctx, record, item.steps, keep=record.steps, spare=spare_steps)]
-
-
-def _remove_unchanged(game_dir: Path, rel: str, sha: str) -> bool:
-    """Delete the game's file at `rel` if it still has contents `sha`. True if it is gone; False if it
-    isn't a plain file with those contents any more. Raises OSError if it couldn't be deleted."""
-    try:
-        path, linked = _resolve_game_path(game_dir, rel)
-    except UnsafePath:
-        return False
-    if linked or not path.is_file() or hash_file(path) != sha:
-        return False
-    path.unlink()
-    _prune_empty_dirs(path.parent, game_dir)
-    return True
+    return record, [*notes, *_apply_system_steps(ctx, record, new_steps, step_notes)]
 
 
 # ---- vendor uninstallers ---------------------------------------------------------------------------------
@@ -958,7 +922,7 @@ def run_vendor_uninstaller(ctx, record: InstallRecord, game_dir: Path, title: st
         return [messages.VENDOR_UNINSTALLER_MISSING.format(title=title)]
     exe, args = split_command(command)
     installer = ((record.source.install or {}).get("installer") or {})
-    _check(cancel)
+    check_cancel(cancel)
     aside = _SetAside.copy(ctx, record.catalog_id, game_dir, list(_player_files(record, game_dir)), title)
     progress(Progress("vendor_uninstaller"))
     try:

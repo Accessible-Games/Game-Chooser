@@ -1,6 +1,8 @@
 """Path helpers: safe joining, naming, and engine-owned directory names."""
 
+import os
 import re
+from collections.abc import Iterator
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -45,6 +47,26 @@ def backup_dir_name(day: date) -> str:
 
 def is_engine_dir(name: str) -> bool:
     return name == STAGING_DIR_NAME or name.startswith(BACKUP_PREFIX)
+
+
+def is_link(path) -> bool:
+    """True for symlinks and NTFS junctions. The engine never follows or removes these."""
+    return os.path.islink(path) or os.path.isjunction(path)
+
+
+def walk_files(root: Path, skip=lambda name: False) -> Iterator[Path]:
+    """Every file under `root` (a linked file too), never entering a linked folder or a folder `skip` names."""
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if not skip(d) and not is_link(Path(dirpath) / d)]
+        yield from (Path(dirpath) / name for name in filenames)
+
+
+def is_code(path) -> bool:
+    return PurePosixPath(str(path).replace("\\", "/")).suffix.lower() in EXECUTABLE_CODE_SUFFIXES
+
+
+def same_folder(a, b) -> bool:
+    return os.path.normcase(os.path.abspath(a)).lower() == os.path.normcase(os.path.abspath(b)).lower()
 
 
 def norm_key(rel: str) -> str:

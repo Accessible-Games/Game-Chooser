@@ -1,6 +1,5 @@
 import pytest
 import hashlib
-from pathlib import Path
 
 from engine.records import RecordedFile
 from engine.safety import UninstallPlan, apply_uninstall, count_player_files, plan_uninstall

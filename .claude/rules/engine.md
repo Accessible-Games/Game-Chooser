@@ -40,6 +40,13 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   game's install record holds its own copy (`InstallRecord.extras`, its files owned by the extra's id); an extra
   never has a record of its own, so updating, repairing, undoing or uninstalling one game leaves another game's
   copy alone (`tests/engine/test_shared_extras.py`).
+- **Rules written once in `engine/`** (use these; never write another copy in `engine/`; the UI side still has
+  its own copies): `entries.title_of` (an entry's title, else its id), `runs_installer`, `is_web_game`,
+  `dependency_order` (also used for the catalog's visibility, which further requires each runtime to be usable
+  here); `paths.same_folder`, `is_link`, `is_code`, `walk_files` (skips only linked folders and those `skip`
+  names: backups are the player's); `safety.plain_file` ("is this still the recorded file", read
+  errors raised) and `remove_unchanged`; `runtimes.runtime_route` (shared, private or skipped);
+  `errors.check_cancel`.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan (the entry's `warning`, the price warning on installs, `first_run_download_size` added to the
   size), and target-folder naming (`<library>/<Title>`).

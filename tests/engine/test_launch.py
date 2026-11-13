@@ -168,8 +168,6 @@ def test_adopt_catalog_launch_takes_a_page(tmp_path):
 
 # ---- start_program: an exe flagged to run as administrator (bug 19) ----------------------------------------
 
-import pytest
-
 from engine.launch import LaunchCancelled, start_program
 
 

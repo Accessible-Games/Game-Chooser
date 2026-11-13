@@ -9,6 +9,11 @@ class Cancelled(EngineError):
     pass
 
 
+def check_cancel(cancel) -> None:
+    if cancel():
+        raise Cancelled()
+
+
 class BlockedHost(EngineError):
     pass
 
@@ -44,10 +49,6 @@ class StepError(EngineError):
 
 
 class ElevationDeclined(EngineError):
-    pass
-
-
-class DependencyError(EngineError):
     pass
 
 

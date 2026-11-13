@@ -106,11 +106,11 @@ class InstallConfirmDialog(wx.Dialog):
     def _build_blocked(self, root):
         """The install problem, right after the library choice in Tab order. Its hidden label is its previous
         sibling (how Windows names an edit field), and it shows only while there is a problem."""
-        self.blocked_label = wx.StaticText(self, label=messages.INSTALL_PROBLEM_NAME)
+        self.blocked_label = wx.StaticText(self, label=messages.INSTALL_PROBLEM_TITLE)
         self.blocked_label.Hide()
         self.blocked_text = wx.TextCtrl(self, value="", size=(_WRAP, 60),
                                         style=wx.TE_MULTILINE | wx.TE_READONLY | wx.TE_NO_VSCROLL,
-                                        name=messages.INSTALL_PROBLEM_NAME)
+                                        name=messages.INSTALL_PROBLEM_TITLE)
         self.blocked_text.Hide()
         root.Add(self.blocked_label, 0, wx.LEFT | wx.RIGHT, 10)
         root.Add(self.blocked_text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)

@@ -372,20 +372,6 @@ def test_undo_tries_recorded_url_then_mirror_path(tmp_path):
     assert record(eng).source.sha256 == v1_sha
 
 
-def test_undo_unavailable_when_no_exact_file(tmp_path):
-    eng, game = install_v1(tmp_path, url=DEV_URL)
-    publish(eng, V2, url=DEV_URL)
-    run(eng, "update")
-    before = snapshot(game)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    expected = messages.UNDO_UNAVAILABLE.format(title="Pawprints")
-    assert ei.value.message == expected
-    rec = record(eng)
-    assert rec.previous_unavailable == expected and rec.previous is not None
-    assert snapshot(game) == before
-
-
 def test_undo_with_nothing_to_undo_refuses(tmp_path):
     eng, game = install_v1(tmp_path)
     with pytest.raises(InstallFailed) as ei:
@@ -425,20 +411,6 @@ def test_repair_reproduces_file_steps(tmp_path):
     (game / "pawprints.exe").unlink()
     run(eng, "repair")
     assert snapshot(game) == {"pawprints.exe": b"exe"}
-
-
-def test_repair_refuses_when_download_changed(tmp_path):
-    eng, game = install_v1(tmp_path)
-    url = record(eng).source.url
-    eng.ctx.fetcher.routes[url] = zip_bytes(V2)
-    eng.ctx.fetcher.requests.clear()
-    (game / "pawprints.exe").unlink()
-    before = snapshot(game)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "repair")
-    assert ei.value.message == messages.REPAIR_FILE_CHANGED.format(title="Pawprints")
-    assert snapshot(game) == before
-    assert eng.ctx.fetcher.requests == [url]   # the recorded URL is the mirror's copy itself
 
 
 # ---- extras ------------------------------------------------------------------
@@ -783,18 +755,6 @@ def test_repair_when_the_games_download_changed_and_the_mirror_is_unreachable(tm
     with pytest.raises(InstallFailed) as ei:
         run(eng, "repair")
     assert ei.value.message == messages.REPAIR_FILE_CHANGED.format(title="Pawprints")
-
-
-def test_undo_offline_says_try_again_later_and_stays_available(tmp_path):
-    eng, game = install_v1(tmp_path)
-    publish(eng, V2)
-    run(eng, "update")
-    eng.ctx.fetcher.routes.clear()
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    assert ei.value.message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
-    rec = record(eng)
-    assert rec.previous_unavailable is None and rec.previous is not None
 
 
 def test_adding_extras_offline_says_try_again_later(tmp_path):

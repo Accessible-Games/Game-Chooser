@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 
-from .entries import first_developer
+from .entries import first_developer, title_of
 from .paths import sanitize_title
 from .records import RecordStore
 
@@ -20,7 +20,7 @@ def target_folder(entry: dict, library_path: Path, records: RecordStore, librari
     Then the first developer is added, `<Title> (<Developer>)`, and if that is taken too,
     the catalog id, `<Title> (<id>)`. A folder this game's own record owns is never "taken".
     """
-    title = entry.get("title") or entry["id"]
+    title = title_of(entry)
     library_path = Path(library_path)
     names = [title]
     developer = first_developer(entry)

@@ -10,7 +10,6 @@ install) are never deleted or overwritten without a backup first. Only
 import fnmatch
 import os
 import re
-import posixpath
 import shutil
 import tempfile
 from collections.abc import Callable
@@ -22,8 +21,7 @@ from typing import Sequence
 
 from . import messages
 from .errors import EngineError, UnsafePath
-from .paths import (EXECUTABLE_CODE_SUFFIXES, STAGING_DIR_NAME, backup_dir_name, norm_key, safe_join,
-                    unique_path)
+from .paths import STAGING_DIR_NAME, backup_dir_name, is_code, is_link, norm_key, safe_join, unique_path
 from .records import RecordedFile
 from .sources import hash_file
 
@@ -66,10 +64,6 @@ def matches_persist(path: str, persist: Sequence[str]) -> bool:
         elif fnmatch.fnmatchcase(key, pat) or key.startswith(pat + "/"):
             return True  # a pattern naming a folder, with or without the slash, protects everything under it
     return False
-
-
-def _is_code(path: str) -> bool:
-    return posixpath.splitext(path.replace("\\", "/"))[1].lower() in EXECUTABLE_CODE_SUFFIXES
 
 
 def _rekey(items: dict, what: str) -> dict:
@@ -128,9 +122,9 @@ def _decide(key, path, inst, disk, new, persist, restore_code):
         return Op.KEEP, "player-owned and not shipped"
     if new.sha256 == d:
         return Op.KEEP, "already equals new version"
-    if inst is not None and new.sha256 == inst.sha256 and not (restore_code and _is_code(path)):
+    if inst is not None and new.sha256 == inst.sha256 and not (restore_code and is_code(path)):
         return Op.KEEP, "player changed, new version same as installed"
-    if _is_code(path):
+    if is_code(path):
         return Op.WRITE, "code replaced without copy"
     return Op.BACKUP_AND_WRITE, "player-owned file replaced"
 
@@ -147,11 +141,6 @@ def _rel(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
 
-def is_link(path) -> bool:
-    """True for symlinks and NTFS junctions. The engine never follows or removes these."""
-    return os.path.islink(path) or os.path.isjunction(path)
-
-
 def _resolve_game_path(game_dir: Path, rel: str) -> tuple[Path, bool]:
     """Path of `rel` under `game_dir` and whether it passes through a link.
 
@@ -164,6 +153,29 @@ def _resolve_game_path(game_dir: Path, rel: str) -> tuple[Path, bool]:
         if _has_link_component(lexical, game_dir):
             return lexical, True
     return safe_join(game_dir, rel), False
+
+
+def plain_file(root: Path, rel: str, sha256: str | None = None) -> Path | None:
+    """The plain file at `rel` under `root`, not through a link (with contents `sha256`, if given), else None.
+    Raises UnsafePath, and OSError if it can't be read: an unreadable file is never taken as changed."""
+    path, linked = _resolve_game_path(root, rel)
+    if linked or not path.is_file() or (sha256 is not None and hash_file(path) != sha256):
+        return None
+    return path
+
+
+def remove_unchanged(game_dir: Path, rel: str, sha: str) -> bool:
+    """Delete the game's file at `rel` if it still has contents `sha`. True if it is gone; False if it
+    isn't a plain file with those contents any more. Raises OSError if it couldn't be deleted."""
+    try:
+        path = plain_file(game_dir, rel, sha)
+    except UnsafePath:
+        return False
+    if path is None:
+        return False
+    path.unlink()
+    _prune_empty_dirs(path.parent, game_dir)
+    return True
 
 
 def _first_link(path: Path, root: Path) -> Path | None:
@@ -275,10 +287,6 @@ def apply_plan(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: dat
     return result
 
 
-def _is_code_path(path: Path) -> bool:
-    return path.suffix.lower() in EXECUTABLE_CODE_SUFFIXES
-
-
 def _apply_op(op: FileOp, plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date,
               result: ApplyResult) -> None:
     if op.op is Op.KEEP:
@@ -303,7 +311,7 @@ def _apply_op(op: FileOp, plan: UpdatePlan, game_dir: Path, incoming_root: Path,
     if op.op is Op.WRITE and changed and state != ABSENT:
         if op.key not in plan.new_files:
             return  # a persist default that appeared meanwhile: keep the player's copy
-        needs_backup = not _is_code_path(target)
+        needs_backup = not is_code(target)
     if not needs_backup or not target.exists():
         _write_file(source, target, None, game_dir)
         return
@@ -353,10 +361,7 @@ def plan_uninstall(record, game_dir: Path) -> UninstallPlan:
     delete = []
     hashes = {}
     for recorded in record.files.values():
-        path, linked = _resolve_game_path(game_dir, recorded.path)
-        if linked:
-            continue
-        if path.is_file() and hash_file(path) == recorded.sha256:
+        if plain_file(game_dir, recorded.path, recorded.sha256) is not None:
             rel = recorded.path.replace("\\", "/")
             delete.append(rel)
             hashes[rel] = recorded.sha256

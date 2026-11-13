@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from engine import jobs, messages
+from engine import jobs, messages, runtimes
 from engine.errors import Cancelled, DownloadWriteError, ExtractError, InstallFailed
 from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
@@ -507,7 +507,7 @@ def test_temp_folder_that_cannot_be_emptied_stops_the_install(tmp_path, monkeypa
         if Path(path) != folder:
             real_clear(path)
 
-    monkeypatch.setattr(jobs, "_clear", clear)
+    monkeypatch.setattr(runtimes, "_clear", clear)
     with pytest.raises(InstallFailed) as ei:
         engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert ei.value.message == messages.TEMP_FOLDER_NOT_CLEARED.format(path=folder)

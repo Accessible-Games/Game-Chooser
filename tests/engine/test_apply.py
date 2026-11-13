@@ -4,9 +4,11 @@ from datetime import date
 
 import pytest
 
+from engine import safety
 from engine.errors import EngineError
 from engine.records import RecordedFile
-from engine.safety import ApplyResult, FileOp, Op, UpdatePlan, apply_plan, restore_backups
+from engine.safety import (ApplyResult, FileOp, Op, UpdatePlan, apply_plan, plain_file, remove_unchanged,
+                           restore_backups)
 
 DAY = date(2026, 11, 4)
 BK = "Game Chooser backup 2026-11-04"
@@ -303,3 +305,19 @@ def test_preflight_catches_backup_path_blocked_by_file(dirs):
     with pytest.raises(EngineError):
         apply_plan(plan, game, inc, DAY)
     assert (game / "other.txt").read_bytes() == b"old"
+
+
+def test_a_file_that_cant_be_read_is_never_taken_as_changed(tmp_path, monkeypatch):
+    put(tmp_path, "a.dll", b"a")
+
+    def locked(path):
+        raise PermissionError(13, "locked", str(path))
+    monkeypatch.setattr(safety, "hash_file", locked)
+    with pytest.raises(OSError):
+        plain_file(tmp_path, "a.dll", hashlib.sha256(b"a").hexdigest())
+
+
+def test_remove_unchanged_keeps_a_changed_file(tmp_path):
+    put(tmp_path, "a.dll", b"the player's")
+    assert not remove_unchanged(tmp_path, "a.dll", hashlib.sha256(b"installed").hexdigest())
+    assert (tmp_path / "a.dll").read_bytes() == b"the player's"

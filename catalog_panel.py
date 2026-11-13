@@ -132,7 +132,7 @@ class CatalogPanel(wx.Panel):
         state = self.state
         if state.newer_app_needed and not self._newer_shown:
             self._newer_shown = True
-            return messages.CATALOG_NEWER_APP_NEEDED, bool(state.error and not state.entries)
+            return messages.CATALOG_NEWER_APP, bool(state.error and not state.entries)
         if state.error and not state.entries:
             return messages.CATALOG_LOAD_FAILED, True
         return "", False

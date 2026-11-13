@@ -1,7 +1,10 @@
 """A runtime's DLL and OCX files, copied beside the game's launch exe so a load by name finds them."""
 
 import json
+import shutil
 import time
+
+import pytest
 
 from engine import comfree, messages, run_installer, runtimes
 from engine.records import RecordStore
@@ -389,6 +392,39 @@ def test_installer_run_game_ships_its_own_copy(tmp_path):
     assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == "lightcars"
 
 
+@pytest.mark.parametrize("action", ["update", "repair", "undo"])
+@pytest.mark.parametrize("shared_folder", ["gone", "untrusted"])
+@pytest.mark.parametrize("shared_com", [True, False], ids=["shared-com", "private-com"])
+def test_installer_run_game_keeps_the_copy_it_has_nothing_to_copy_from(tmp_path, private_com, monkeypatch, action,
+                                                                         shared_folder, shared_com):
+    monkeypatch.setenv("GC_DXLIB", str(tmp_path / "system"))
+    routes = {}
+    rt = {**plain_runtime(routes, "dxlib"), "detect": {"file": "%GC_DXLIB%\\dxlib.dll"}}
+    folder = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup(tmp_path, [dx8vb_entry(routes), rt, run_mode_game(routes, dependencies=["dx8vb", "dxlib"])],
+                     routes, register_shared_components=shared_com, elevator=FakeElevator(on_start=writes_game(folder)))
+    def publish(version):
+        eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=version.encode(),
+                                                     version=version, dependencies=["dx8vb", "dxlib"])
+    run(eng, "install", id="lightcars")
+    if action == "undo":
+        publish("2.0")
+        run(eng, "update", id="lightcars")
+    assert (folder / "dxlib.dll").read_bytes() == b"dxlib"
+    runtime_folder = eng.ctx.runtimes_root / "dxlib"
+    if shared_folder == "gone":
+        shutil.rmtree(runtime_folder)
+    else:
+        eng.ctx.security.set_owner(runtime_folder, "S-1-5-21-3000-3000-3000-1003")  # another account's folder
+    (tmp_path / "system").mkdir()
+    (tmp_path / "system" / "dxlib.dll").write_bytes(b"dxlib")  # present by its detect hint
+    if action == "update":
+        publish("3.0")
+    run(eng, action, id="lightcars")
+    assert (folder / "dxlib.dll").read_bytes() == b"dxlib"
+    assert eng.ctx.records.load("lightcars").files["dxlib.dll"].owner == "runtime:dxlib"
+
+
 def test_untracked_installer_run_game_gets_a_note_instead(tmp_path, monkeypatch):
     monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
     routes = {}
@@ -416,3 +452,23 @@ def test_installer_run_game_in_private_mode_with_an_unusable_copy_still_gets_the
     assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Light Cars", component=DX8VB_TITLE)]
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB and not (folder / "lightcars.exe.manifest").exists()
     assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == OWNER
+
+
+def test_installer_run_game_whose_private_runtime_changes_gets_the_new_ones_copies_and_manifest(tmp_path,
+                                                                                                private_com):
+    routes = {}
+    data = b"MZ dx9vb"
+    dx9vb = {"id": "dx9vb", "kind": "runtime", "title": "DX9", "version": "1",
+             "sources": [served_source(routes, f"{MIRROR}{sha(data)}/dx9vb.dll", data, method="none",
+                                       steps=[{"action": "register", "path": "dx9vb.dll"}])],
+             "detect": {"registry": {"hive": "HKCR", "key": "DxVBLibA.DirectX9"}}}
+    folder = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup(tmp_path, [dx8vb_entry(routes), dx9vb, run_mode_game(routes)], routes,
+                     register_shared_components=False, elevator=FakeElevator(on_start=writes_game(folder)))
+    run(eng, "install", id="lightcars")
+    eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=b"MZ setup v2", version="2.0",
+                                                 dependencies=["dx9vb"])
+    run(eng, "update", id="lightcars")
+    rec = eng.ctx.records.load("lightcars")
+    assert not (folder / "dx8vb.dll").exists() and rec.private_runtimes == ["dx9vb"]
+    assert rec.files["dx9vb.dll"].owner == rec.files["lightcars.exe.manifest"].owner == "runtime:dx9vb"

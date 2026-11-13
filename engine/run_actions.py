@@ -6,45 +6,47 @@ checksum (as an archive's Repair and Undo are), with the version's recorded extr
 changes. The installer runs over the game's folder the way a run-mode update does
 (engine.run_installer.update): the player's files are copied aside first and put back afterwards
 if the installer changed or removed them. The extras are then applied over the folder under the
-three-checksum rule. Undo also removes the newer version's unchanged files the older installer
+three-checksum rule, and the version's private COM copies are made again, as an archive's Repair and
+Undo make them (engine.runtimes). Undo also removes the newer version's unchanged files the older installer
 didn't write, and puts back the player's copies the update it undoes moved into the backup folder.
 """
 
 import shutil
 from pathlib import Path
 
-from . import jobs, messages, run_installer
+from . import jobs, messages, run_installer, runtimes
+from .entries import title_of
 from .errors import InstallFailed, NoVerifiedSource, UnsafePath
 from .records import InstalledSource, InstallRecord
 from .run_installer import KEEP_UNDO_POINT, RunItem
-from .safety import _resolve_game_path, restore_backups
+from .safety import plain_file, restore_backups
 from .sources import Fetched, hash_file
 
 
 def repair(engine, entry: dict, rec: InstallRecord, game_dir: Path, progress, cancel) -> "jobs.JobResult":
     """Run the recorded installer again over the game's folder, then put its recorded extras back.
     The record keeps its source and extras, and its undo point stays as it was: Repair isn't one."""
-    game_id, title = entry["id"], jobs._title(entry)
+    game_id, title = entry["id"], title_of(entry)
     extra_sources = dict(rec.extras)
     if extra_sources:  # applied by Game Chooser after the installer, so checked before it runs
         engine._require_writable(rec, game_dir, title)
+    private = runtimes.private_runtimes(rec, entry, engine.ctx)
     prior = jobs._snapshot(rec)
     with engine._workspace(engine._staging_root(rec, game_dir), game_id) as (staging, work):
         try:
-            fetched, unpacked = _fetch_recorded(engine, entry, rec.source, extra_sources, staging, work,
-                                                progress, cancel)
-        except NoVerifiedSource as e:
+            fetched, unpacked, copies = _fetch_recorded(engine, entry, rec.source, extra_sources, private, staging,
+                                                        work, progress, cancel)
+        except (NoVerifiedSource, jobs._NoUnpackSpec) as e:
             raise InstallFailed(jobs._repair_failure_text(e, game_id, title)) from e
-        except jobs._NoUnpackSpec as e:
-            raise InstallFailed(messages.REPAIR_NOT_POSSIBLE.format(title=title)) from e
         record, notes = run_installer.update(engine.ctx, _run_item(engine, entry, fetched, rec.source), rec,
                                              game_dir, progress, cancel, previous=KEEP_UNDO_POINT,
                                              spare_steps=jobs._extra_steps(unpacked))
         extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, prior, cancel,
                                                               recorded=extra_sources)
-        copy_notes = engine._copies_after_installer(entry, record, [], record.runtime_copies)
+        private_notes = engine._private_after_installer(entry, record, copies)
+        copy_notes = engine._copies_after_installer(entry, record, copies, record.runtime_copies)
     return jobs.JobResult("repair", game_id, title, jobs.game_fields_for(entry, record, engine.ctx.platform),
-                          [*notes, *extra_notes, *copy_notes],
+                          [*notes, *extra_notes, *private_notes, *copy_notes],
                           backups=backups)
 
 
@@ -54,25 +56,18 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
     put its extras back, then put back the player's copies the update moved aside, where the update's
     file is untouched."""
     ctx = engine.ctx
-    game_id, title = entry["id"], jobs._title(entry)
+    game_id, title = entry["id"], title_of(entry)
     previous = rec.previous
     extra_sources = {k: jobs._source_from(v) for k, v in (previous.get("extras") or {}).items()}
     if extra_sources or rec.extras:  # changed by Game Chooser after the installer, so checked before it runs
         engine._require_writable(rec, game_dir, title)
+    private = runtimes.private_runtimes(rec, entry, ctx, previous.get("private_runtimes"))
     with engine._workspace(engine._staging_root(rec, game_dir), game_id) as (staging, work):
         try:
-            fetched, unpacked = _fetch_recorded(engine, entry, source, extra_sources, staging, work,
-                                                progress, cancel)
-        except NoVerifiedSource as e:
-            if not e.downloaded:  # Nothing could be reached: maybe only for now, so Undo stays offered.
-                raise InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title)) from e
-            rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
-            ctx.records.save(rec)
-            raise InstallFailed(rec.previous_unavailable) from e
-        except jobs._NoUnpackSpec as e:
-            rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
-            ctx.records.save(rec)
-            raise InstallFailed(rec.previous_unavailable) from e
+            fetched, unpacked, copies = _fetch_recorded(engine, entry, source, extra_sources, private, staging,
+                                                        work, progress, cancel)
+        except (NoVerifiedSource, jobs._NoUnpackSpec) as e:
+            raise engine._undo_failed(e, rec, title) from e
         # Decided before anything changes: a backup goes back only over the file the update wrote.
         untouched = jobs._untouched_backups(game_dir, previous.get("backups") or [])
         try:
@@ -82,7 +77,8 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
                                                  spare_steps=jobs._extra_steps(unpacked), undo_of=previous)
             extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, previous,
                                                                   cancel, recorded=extra_sources)
-            extra_notes += engine._copies_after_installer(entry, record, [], jobs._previous_copies(previous, rec))
+            extra_notes += engine._private_after_installer(entry, record, copies)
+            extra_notes += engine._copies_after_installer(entry, record, copies, jobs._previous_copies(previous, rec))
         except BaseException:
             _retarget_rewritten(ctx, rec, game_dir, untouched)
             raise
@@ -108,10 +104,10 @@ def copy_installed_files(rec: InstallRecord, game_dir: Path, tree: Path, title: 
         tree.mkdir(parents=True)
         for recorded in rec.files.values():
             try:
-                path, linked = _resolve_game_path(game_dir, recorded.path)
+                path = plain_file(game_dir, recorded.path, recorded.sha256)
             except UnsafePath:
                 continue
-            if linked or not path.is_file() or hash_file(path) != recorded.sha256:
+            if path is None:
                 continue
             copy = tree / recorded.path
             copy.parent.mkdir(parents=True, exist_ok=True)
@@ -132,8 +128,8 @@ def _retarget_rewritten(ctx, rec: InstallRecord, game_dir: Path, untouched: list
     rewritten = {}
     for b in untouched:
         try:
-            path, linked = _resolve_game_path(game_dir, b["original"])
-            if linked or not path.is_file():
+            path = plain_file(game_dir, b["original"])
+            if path is None:
                 continue
             sha = hash_file(path)
         except (UnsafePath, OSError):
@@ -150,18 +146,22 @@ def _retarget_rewritten(ctx, rec: InstallRecord, game_dir: Path, untouched: list
 
 
 def _fetch_recorded(engine, entry: dict, source: InstalledSource, extra_sources: dict[str, InstalledSource],
-                    staging: Path, work: Path, progress, cancel) -> tuple[Fetched, list]:
-    """Download exactly the recorded installer, and download and unpack exactly the recorded extras,
-    before anything changes. Raises NoVerifiedSource if an address doesn't serve one of them."""
+                    private: list[dict], staging: Path, work: Path, progress,
+                    cancel) -> tuple[Fetched, list, list[runtimes.PrivateCopy]]:
+    """Download exactly the recorded installer, and download and unpack exactly the recorded extras and
+    (from today's catalog) the `private` COM runtimes, before anything changes. Raises NoVerifiedSource
+    if an address doesn't serve the installer or an extra."""
     fetch = engine._exact_fetch({entry["id"]: source, **extra_sources}, progress, cancel)
     fetched = fetch(entry, work / "fetched")
     extras = [engine.ctx.entries.get(x) or {"id": x} for x in extra_sources]
-    return fetched, engine._unpack_extras(extras, staging, work, fetch, progress, cancel)
+    copies = runtimes.unpack_private(engine.ctx, private, staging, work, engine._catalog_fetch(progress, cancel),
+                                     progress, cancel)
+    return fetched, engine._unpack_extras(extras, staging, work, fetch, progress, cancel), copies
 
 
 def _run_item(engine, entry: dict, fetched: Fetched, source: InstalledSource) -> RunItem:
     """The downloaded installer, set up as recorded, with the recorded source kept exactly."""
     install = fetched.source.get("install") or {}
-    return RunItem(entry["id"], entry.get("kind", "game"), jobs._title(entry), fetched.path,
+    return RunItem(entry["id"], entry.get("kind", "game"), title_of(entry), fetched.path,
                    dict(install.get("installer") or {}), jobs._steps(fetched), source,
                    jobs._recorded_launch(source, entry, engine.ctx.platform))

@@ -1,5 +1,6 @@
 """Dependencies: runtimes installed before the game, shared machine-wide or as a private COM copy."""
 
+import errno
 import hashlib
 import json
 import os
@@ -11,7 +12,7 @@ from xml.dom import minidom
 
 import pytest
 
-from engine import comfree, messages, run_installer
+from engine import comfree, messages, run_installer, runtimes
 from engine.comfree import PrivateComUnavailable, com_manifest_xml, has_embedded_manifest, write_private_com
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
@@ -21,7 +22,7 @@ from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present,
                              marker_present, missing_runtimes, recorded_private, register_and_mark_args,
                              runtime_present, write_marker_args)
 from tests.engine.fakes import (ADMINISTRATORS, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
-                                FakeSecurity, make_engine, served_source, split_chain, zip_bytes)
+                                FakeSecurity, ZipExtractor, make_engine, served_source, split_chain, zip_bytes)
 
 MIRROR = "https://files.accessiblegames.net/files/"
 DX8VB = b"MZ fake dx8vb.dll"
@@ -1151,24 +1152,45 @@ def test_failure_after_registering_in_a_folder_it_made_unregisters(tmp_path):
 
 
 def test_installer_runtime_runs_untracked_then_is_checked(tmp_path, monkeypatch):
+    """It asks for a restart, as redistributables often do: the player is told, as for a game's installer."""
     routes = {}
     rt, g = vb6(routes), game(routes, dependencies=["vb6-runtime"])
     system = tmp_path / "system"
     system.mkdir()
     monkeypatch.setenv("GC_VB6", str(system))
+    elevator = FakeElevator()
 
     def installs(exe, args, elevated):
         if exe.endswith("vbrun60.exe"):
             (system / "msvbvm60.dll").write_bytes(b"vb")
+            elevator.exit_codes[exe] = 3010
+    elevator.on_start = installs
 
-    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=installs))
-    run(eng, "install")
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=elevator)
+    r = run(eng, "install")
+    assert messages.INSTALLER_RESTART_NOTE.format(title=VB6_TITLE) in r.notes
     calls = [c for c in eng.ctx.elevator.calls if c[0].endswith("vbrun60.exe")]
     assert len(calls) == 1 and calls[0][1:] == ("/Q", False)
     rec = eng.ctx.records.load("vb6-runtime")
     assert rec.kind == "runtime" and rec.method == "run" and not rec.tracked and rec.files == {}
     assert not (eng.ctx.runtimes_root / "vb6-runtime" / MARKER_NAME).exists()  # presence: record or detect
     assert (lib / "Entombed" / "entombed.exe").exists()
+
+
+def test_installer_runtime_that_exits_with_an_error_fails_and_its_new_files_are_removed(tmp_path, monkeypatch):
+    routes = {}
+    rt, g = vb6(routes), game(routes, dependencies=["vb6-runtime"])
+    monkeypatch.setenv("GC_VB6", str(tmp_path / "system"))
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    left = eng.ctx.runtimes_root / "vb6-runtime" / "half-installed.dll"
+
+    def fails(exe, args, elevated):
+        left.write_bytes(b"MZ half")
+        eng.ctx.elevator.exit_codes[exe] = 4
+    eng.ctx.elevator.on_start = fails
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.INSTALLER_FAILED.format(title=VB6_TITLE, code=4) and not left.exists()
 
 
 def test_installer_runtime_still_missing_fails(tmp_path, monkeypatch):
@@ -1305,6 +1327,74 @@ def test_preference_off_non_com_runtime_still_installs_shared(tmp_path):
     eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
     run(eng, "install")
     assert (eng.ctx.runtimes_root / "bass" / "bass.dll").exists() and eng.ctx.records.load("bass") is not None
+
+
+@pytest.mark.parametrize("shared", [True, False], ids=["shared", "private"])
+def test_runtime_whose_developer_file_changed_is_installed_with_the_note(tmp_path, private_com, shared):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    rt["sources"][0].update(label="Developer", url="https://dev.example.com/dx8vb.dll")
+    routes[rt["sources"][0]["url"]] = b"MZ the developer re-uploaded this"
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=shared)
+    r = run(eng, "install")
+    assert r.notes == [messages.DEVELOPER_CHANGED_UNVERIFIED]
+
+
+def test_runtimes_last_register_step_with_an_unsafe_path_is_refused_before_it_runs(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    rt["sources"][0]["steps"] = [{"action": "register", "path": "../evil.dll"}]
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message.startswith(messages.STEP_UNSAFE_PATH)
+    assert not any("evil.dll" in args for _, args, _ in eng.ctx.elevator.calls)
+
+
+@pytest.mark.parametrize("action", ["install", "update"])
+def test_runtime_note_still_reaches_the_player_when_the_game_then_fails(tmp_path, action):
+    routes = {}
+    rt = dx8vb(routes)
+    rt["sources"][0].update(label="Developer", url="https://dev.example.com/dx8vb.dll")
+    routes[rt["sources"][0]["url"]] = b"MZ the developer re-uploaded this"
+    eng, lib = setup(tmp_path, [rt, game(routes, dependencies=())], routes)
+    if action == "update":
+        run(eng, "install")
+    g = game(routes, files={"entombed.exe": b"exe 2"}, version="2.0")
+    eng.ctx.entries["entombed"] = g
+    del routes[g["sources"][0]["url"]]  # the game's download is unreachable
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, action)
+    unreachable = messages.NO_SOURCE.format(title="Entombed", reasons=messages.SOURCE_UNREACHABLE)
+    assert ei.value.message == "\n\n".join([unreachable, messages.DEVELOPER_CHANGED_UNVERIFIED])
+
+
+@pytest.mark.parametrize("shared", [True, False], ids=["shared", "private"])
+def test_full_disk_while_unpacking_a_runtime_gets_plain_words(tmp_path, private_com, shared):
+    class FullDisk(ZipExtractor):
+        def extract(self, archive, dest, install, cancel):
+            if Path(archive).name == "dx8vb.dll":
+                raise OSError(errno.ENOSPC, "No space left on device")
+            return super().extract(archive, dest, install, cancel)
+
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=shared, extractor=FullDisk())
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
+
+
+def test_full_disk_while_copying_a_private_runtime_into_the_game_gets_plain_words(tmp_path, private_com,
+                                                                                    monkeypatch):
+    def full_disk(root, tree, copy):
+        raise OSError(errno.ENOSPC, "No space left on device")
+    monkeypatch.setattr(runtimes, "_copy_into", full_disk)
+    routes = {}
+    eng, lib = setup(tmp_path, [dx8vb(routes), game(routes)], routes, register_shared_components=False)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
 
 
 def run_mode_game(routes, setup_exe=b"MZ fake game setup", silent=True, version="1.0", **fields):
@@ -1460,16 +1550,35 @@ def test_repair_keeps_a_private_copy_after_the_preference_is_turned_on(tmp_path,
     assert eng.ctx.elevator.calls == [] and eng.ctx.records.load("dx8vb") is None
 
 
-def test_repair_restores_a_missing_private_copy(tmp_path, private_com):
+@pytest.mark.parametrize("runs", [False, True], ids=["archive", "installer-run"])
+def test_repair_restores_a_missing_private_copy(tmp_path, private_com, runs):
+    routes = {}
+    rt = dx8vb(routes)
+    g = run_mode_game(routes) if runs else game(routes)
+    folder = tmp_path / "Games" / g["title"]
+    eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False,
+                     elevator=FakeElevator(on_start=writes_game(folder)))
+    run(eng, "install", id=g["id"])
+    (folder / "dx8vb.dll").unlink()
+    run(eng, "repair", id=g["id"])
+    exe = eng.ctx.records.load(g["id"]).launch_path
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / f"{exe}.manifest").exists()
+    assert eng.ctx.records.load(g["id"]).private_runtimes == ["dx8vb"]
+
+
+@pytest.mark.parametrize("action", ["repair", "undo"])
+def test_rebuild_that_cant_make_the_private_copy_again_says_the_game_needs_the_component(tmp_path, private_com,
+                                                                                          monkeypatch, action):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False)
     run(eng, "install")
-    folder = lib / "Entombed"
-    (folder / "dx8vb.dll").unlink()
-    run(eng, "repair")
-    assert (folder / "dx8vb.dll").read_bytes() == DX8VB and (folder / "entombed.exe.manifest").exists()
-    assert eng.ctx.records.load("entombed").private_runtimes == ["dx8vb"]
+    if action == "undo":
+        eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0")
+        run(eng, "update")
+    monkeypatch.setattr(comfree, "PRIVATE_COM_SUPPORTED", False)
+    r = run(eng, action)
+    assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Entombed", component=DX8VB_TITLE)]
 
 
 def test_repair_of_a_game_installed_shared_never_adds_a_private_copy(tmp_path, private_com):

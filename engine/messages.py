@@ -279,7 +279,6 @@ LIBRARY_REMOVE_BUSY = "{title} is still installing or updating. Wait for it to f
 LIBRARY_BEING_REMOVED = "That library is being removed."
 
 CATALOG_CHECKING = "Checking for catalog updates"
-CATALOG_NEWER_APP_NEEDED = "A newer version of Game Chooser is needed to see the latest catalog."
 CATALOG_LOAD_FAILED = "Couldn't load the catalog. Check your internet connection, then choose Retry."
 CATALOG_RANDOM_PROMPT = "Your game for today is...\n\n{title}\n\n{verb} now?"
 CATALOG_NO_GAMES = "No games available to choose from."
@@ -441,7 +440,6 @@ EDIT_GAME_TITLE = "Edit Game"
 LIBRARY_NOT_FOUND_TITLE = "Library Not Found"
 GAME_BUSY = "Game Chooser is still working on {title}. Wait for it to finish, then try again."
 ACTION_NOT_STARTED = "Game Chooser couldn't start that for {title}. Try again."
-INSTALL_PROBLEM_NAME = "Install problem"
 
 # games.json or config.json couldn't be read at startup (told once, after the window opens)
 FILE_DAMAGED_TITLE = "Game Chooser"

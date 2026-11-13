@@ -151,9 +151,8 @@ def test_download_size_sums_and_unknown(tmp_path):
 
 def test_web_game_plan(tmp_path):
     p = plan(tmp_path, game([source(None, method="url", platform="web")]))
-    assert p.is_web
     assert p.libraries == [] and p.suggested_folder is None and p.dependencies == []
-    assert not plan(tmp_path, game()).is_web
+    assert plan(tmp_path, game()).libraries
 
 
 def record(extras):
