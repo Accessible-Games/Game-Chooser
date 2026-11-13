@@ -108,7 +108,7 @@ def _closer(world, kind):
     """True: the world acts as the closer itself. "checked": the real closer, with its identity check, over it."""
     if kind == "checked":
         return Closer(APP_IDENTITY, WorldProcesses(world))
-    return world if kind else None
+    return world
 
 
 def one_game(world, until=None):
@@ -311,15 +311,6 @@ def test_a_closer_that_raises_does_not_stop_the_stop(tmp_path):
     assert rec.run() == 0
     assert world.ended == [(100, 1000)]
     assert run.read_stop()["sessions"]["s1"] == {"asked_to_close": [], "ended": [100], "not_closed": []}
-
-
-def test_close_games_without_a_closer_closes_nothing_and_says_so(tmp_path):
-    rec, run, pm, states, world, clock = make(tmp_path, game=True, closer=False)
-    run.write_stop_request({"requested": NOW, "close_games": True})
-    assert rec.run() == 0
-    assert pm.stopped_at == 0.0
-    assert run.read_stop()["sessions"]["s1"] == {"asked_to_close": [], "ended": [],
-                                                 "not_closed": left(closing.NOT_CLOSED_NO_CLOSER, 100)}
 
 
 # --- the session files are written unelevated: they must not be able to point the elevated recorder at anything

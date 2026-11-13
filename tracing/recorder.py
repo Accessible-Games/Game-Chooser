@@ -37,7 +37,7 @@ class Recorder:
     def __init__(self, run: RunDir, app_alive: Callable[[], bool], procmon: ProcmonControl,
                  snapshot: Callable[[], list[LiveProc]], split: Callable[[RunDir], SplitResult],
                  leftovers: Callable[[], list[RunDir]], free_bytes: Callable[[], int],
-                 clock: Callable[[], float], sleep: Callable[[float], None], closer: GameCloser | None = None,
+                 clock: Callable[[], float], sleep: Callable[[float], None], closer: GameCloser,
                  now: Callable[[], int] = now_filetime, protected_pids=()):
         self.run_dir = run
         self.app_alive = app_alive
@@ -244,9 +244,7 @@ class Recorder:
             return
         why = closing.NOT_CLOSED_FAILED
         try:
-            if self.closer is None:
-                why = closing.NOT_CLOSED_NO_CLOSER
-            elif not self._close_games(record):
+            if not self._close_games(record):
                 why = closing.NOT_CLOSED_PROCMON
         finally:
             for sid, procs in self.tree.running_processes().items():
