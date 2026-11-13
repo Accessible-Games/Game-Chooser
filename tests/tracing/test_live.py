@@ -210,6 +210,12 @@ def test_a_root_with_no_start_time_is_not_a_later_process_with_that_pid():
     assert t.running() == set() and t.running_processes() == {}
 
 
+def test_a_root_with_no_start_time_is_not_a_process_from_before_the_launch():
+    t = startless()
+    t.update([LiveProc(10, 1, 50 * S, r"C:\Other\x.exe")])
+    assert t.running() == set()
+
+
 def test_a_root_with_no_start_time_is_found_within_the_launch_window_and_then_kept():
     for start in (98 * S, 100 * S + 5, 103 * S):  # 2 s before the call to 2 s after it returned (in_launch_window)
         t = startless()
