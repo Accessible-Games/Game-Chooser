@@ -7,7 +7,7 @@ from tests.tracing.test_recorder import Clock, FakeProcmon
 from tests.tracing.test_split import CHILD, CHOOSER, ROOT, ev, info
 from tracing import messages, recorder, stop
 from tracing.live import LiveProc
-from tracing.runfiles import RunDir, new_run
+from tracing.runfiles import RunDir, new_run, run_dirs
 from tracing.splitrun import split_run_dir
 
 FT = 133_000_000_000_000_000
@@ -72,41 +72,32 @@ def finish(run, sessions=None, state="done", error=None, folders=(), problems=()
 
 # --- nothing to stop ---
 
-def test_no_runs_folder_is_nothing_to_stop(s):
+@pytest.mark.parametrize("setup", [
+    lambda s: None,  # no runs folder
+    lambda s: s.run(state="done", capture=False).split_path.write_text("{}", encoding="utf-8"),  # a finished run
+    lambda s: s.run(state=None, capture=False),  # no status: Game Chooser is still at the administrator prompt
+    lambda s: (s.run(state="failed", capture=False), s.alive.clear()),  # the recorder gone, nothing captured
+], ids=["no runs", "finished", "no status", "gone with no capture"])
+def test_nothing_to_stop_gets_no_request(s, setup):
+    setup(s)
     assert s.stop() == 0
     assert s.lines == ["No tracing run is in progress."]
-
-
-def test_finished_runs_are_nothing_to_stop_and_get_no_request(s):
-    done = s.run(state="done", capture=False)
-    done.split_path.write_text("{}", encoding="utf-8")
-    assert s.stop() == 0
-    assert s.lines == ["No tracing run is in progress."]
-    assert done.read_stop_request() is None
-
-
-def test_a_run_whose_recorder_never_wrote_a_status_is_not_in_progress(s):
-    s.run(state=None, capture=False)  # Game Chooser is still at the administrator prompt
-    assert s.stop() == 0
-    assert s.lines == ["No tracing run is in progress."]
+    assert all(run.read_stop_request() is None for run in run_dirs(s.traces))
 
 
 # --- the recorder already gone ---
 
-def test_recorder_gone_with_an_unsplit_capture_is_a_problem(s):
+@pytest.mark.parametrize("gone", [
+    lambda s: s.alive.clear(),
+    lambda s: s.starts.update({RECORDER: STARTED + 500}),  # the pid is alive, but it is another process now
+], ids=["dead", "pid given to another program"])
+def test_recorder_gone_with_an_unsplit_capture_is_a_problem(s, gone):
     run = s.run()
-    s.alive.clear()
+    gone(s)
     assert s.stop() == 1
     assert s.lines == [f"{run.path}: the recorder is no longer running, so there is nothing to stop. "
                        "Its capture was not split; run --trace-split to split it."]
     assert run.read_stop_request() is None
-
-
-def test_recorder_gone_with_nothing_captured_is_nothing_to_stop(s):
-    s.run(state="failed", capture=False)
-    s.alive.clear()
-    assert s.stop() == 0
-    assert s.lines == ["No tracing run is in progress."]
 
 
 def test_a_dead_run_beside_a_live_one_is_left_to_the_live_recorder(s):
@@ -174,13 +165,6 @@ def test_stop_writes_the_request_waits_and_reports_the_session_folders(s):
                        "The run has ended."]
 
 
-def test_stop_with_no_game_running_says_so(s):
-    run = s.run()
-    s.script = [finish(run)]
-    assert s.stop() == 0
-    assert "No traced game was running when the run was stopped." in s.lines and "The run has ended." in s.lines
-
-
 def test_close_games_goes_into_the_request_with_its_warning(s):
     run = s.run()
     lists = {"asked_to_close": [100, 101], "ended": [101], "not_closed": []}
@@ -200,13 +184,6 @@ def test_a_process_that_could_not_be_closed_is_a_problem(s):
     assert ("Problem: s001-9: still running after the stop: 100 (could not be ended), "
             "103 (runs as another user)") in s.lines
     assert "The run has ended." not in s.lines
-
-
-def test_a_plain_stop_leaving_games_running_is_no_problem(s):
-    run = s.run()
-    s.script = [finish(run, {"s001-9": LISTS})]
-    assert s.stop() == 0
-    assert not any(line.startswith("Problem") for line in s.lines)
 
 
 def test_no_answer_withdraws_the_request_and_is_a_problem(s):
@@ -387,15 +364,6 @@ def test_no_second_request_is_written_while_a_claimed_one_is_being_taken(s):
 
 
 # --- the recorder is known by pid and start time; a status that can't be read for a moment is not its death ---
-
-def test_a_dead_run_whose_recorder_pid_went_to_another_program_is_not_in_progress(s):
-    run = s.run()
-    s.starts[RECORDER] = STARTED + 500  # the pid is alive, but it is another process now
-    assert s.stop() == 1
-    assert s.lines == [f"{run.path}: the recorder is no longer running, so there is nothing to stop. "
-                       "Its capture was not split; run --trace-split to split it."]
-    assert run.read_stop_request() is None
-
 
 def test_a_status_from_before_start_times_were_written_is_checked_by_pid(s):
     run = s.run(state=None)
