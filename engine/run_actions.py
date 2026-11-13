@@ -35,10 +35,8 @@ def repair(engine, entry: dict, rec: InstallRecord, game_dir: Path, progress, ca
         try:
             fetched, unpacked, copies = _fetch_recorded(engine, entry, rec.source, extra_sources, private, staging,
                                                         work, progress, cancel)
-        except NoVerifiedSource as e:
+        except (NoVerifiedSource, jobs._NoUnpackSpec) as e:
             raise InstallFailed(jobs._repair_failure_text(e, game_id, title)) from e
-        except jobs._NoUnpackSpec as e:
-            raise InstallFailed(messages.REPAIR_NOT_POSSIBLE.format(title=title)) from e
         record, notes = run_installer.update(engine.ctx, _run_item(engine, entry, fetched, rec.source), rec,
                                              game_dir, progress, cancel, previous=KEEP_UNDO_POINT,
                                              spare_steps=jobs._extra_steps(unpacked))
@@ -67,16 +65,8 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
         try:
             fetched, unpacked, copies = _fetch_recorded(engine, entry, source, extra_sources, private, staging,
                                                         work, progress, cancel)
-        except NoVerifiedSource as e:
-            if not e.downloaded:  # Nothing could be reached: maybe only for now, so Undo stays offered.
-                raise InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title)) from e
-            rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
-            ctx.records.save(rec)
-            raise InstallFailed(rec.previous_unavailable) from e
-        except jobs._NoUnpackSpec as e:
-            rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
-            ctx.records.save(rec)
-            raise InstallFailed(rec.previous_unavailable) from e
+        except (NoVerifiedSource, jobs._NoUnpackSpec) as e:
+            raise engine._undo_failed(e, rec, title) from e
         # Decided before anything changes: a backup goes back only over the file the update wrote.
         untouched = jobs._untouched_backups(game_dir, previous.get("backups") or [])
         try:

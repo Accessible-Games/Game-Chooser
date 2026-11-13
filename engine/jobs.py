@@ -256,6 +256,17 @@ class _StagedGame:
         fetched = [f.note for f in [self.game, *(f for _, f in self.extras)] if f.note]
         return list(dict.fromkeys([*fetched, *self.dependency_notes, *self.copy_notes]))
 
+    def record_into(self, rec: InstallRecord, files: dict[str, RecordedFile], steps: list[dict]) -> None:
+        """Write what an installed game's record takes from this tree once it is applied (Update, Repair, Undo):
+        its files and steps as applied, its launch file, its runtimes and how it was unpacked."""
+        rec.files = files
+        rec.steps = steps
+        rec.launch_path = self.launch_path
+        rec.launch_from_catalog = self.launch_from_catalog
+        rec.private_runtimes = self.private_ids
+        rec.runtime_copies = self.copy_ids
+        rec.method = (self.game.source.get("install") or {}).get("method", "")
+
 
 class InstallEngine:
     def __init__(self, ctx: EngineContext):
@@ -836,15 +847,9 @@ class InstallEngine:
         # A failed earlier attempt at this change may already have moved the player's copy aside and
         # written this version's file; that backup belongs to this undo point too.
         carried = [b for b in (rec.previous or {}).get("backups") or [] if _targets(plan, b)]
-        rec.files = plan.new_files
-        rec.steps = steps
+        staged.record_into(rec, plan.new_files, steps)
         rec.source = _installed_source(entry, staged.game, ctx.platform)
         rec.extras = {x["id"]: _installed_source(x, f, ctx.platform) for x, f in staged.extras}
-        rec.launch_path = staged.launch_path
-        rec.launch_from_catalog = staged.launch_from_catalog
-        rec.private_runtimes = staged.private_ids
-        rec.runtime_copies = staged.copy_ids
-        rec.method = (staged.game.source.get("install") or {}).get("method", "")
         rec.vendor_uninstaller = None  # An installer's own uninstaller no longer matches these files.
         rec.previous = {**prior, "backups": [*carried, *result.backups]}
         rec.previous_unavailable = None
@@ -889,10 +894,8 @@ class InstallEngine:
                 staged = self._stage_recorded(entry, rec.source, rec.extras, game_dir.name, staging, work,
                                               progress, cancel, private=private, copy_ids=rec.runtime_copies,
                                               installed=(rec, game_dir))
-            except NoVerifiedSource as e:
+            except (NoVerifiedSource, _NoUnpackSpec) as e:
                 raise InstallFailed(_repair_failure_text(e, game_id, title)) from e
-            except _NoUnpackSpec as e:
-                raise InstallFailed(messages.REPAIR_NOT_POSSIBLE.format(title=title)) from e
             _check(cancel)
             # The steps stay the ones applied, whatever today's catalog says.
             plan, result, steps, notes = self._change_folder(
@@ -900,13 +903,7 @@ class InstallEngine:
                 [_bare(s) for s in rec.steps], prior, title, persist=entry.get("persist") or [],
                 restore_changed_code=True)
 
-        rec.files = plan.new_files
-        rec.steps = steps
-        rec.launch_path = staged.launch_path
-        rec.launch_from_catalog = staged.launch_from_catalog
-        rec.private_runtimes = staged.private_ids
-        rec.runtime_copies = staged.copy_ids
-        rec.method = (staged.game.source.get("install") or {}).get("method", rec.method)
+        staged.record_into(rec, plan.new_files, steps)
         _keep_backups(rec, result.backups, prior)
         ctx.records.save(rec)
         return JobResult("repair", game_id, title, game_fields_for(entry, rec, ctx.platform),
@@ -938,16 +935,8 @@ class InstallEngine:
                 staged = self._stage_recorded(entry, source, extra_sources, game_dir.name, staging, work,
                                               progress, cancel, private=private,
                                               copy_ids=_previous_copies(previous, rec), installed=(rec, game_dir))
-            except NoVerifiedSource as e:
-                if not e.downloaded:  # Nothing could be reached: maybe only for now, so Undo stays offered.
-                    raise InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title)) from e
-                rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
-                ctx.records.save(rec)
-                raise InstallFailed(rec.previous_unavailable) from e
-            except _NoUnpackSpec as e:
-                rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
-                ctx.records.save(rec)
-                raise InstallFailed(rec.previous_unavailable) from e
+            except (NoVerifiedSource, _NoUnpackSpec) as e:
+                raise self._undo_failed(e, rec, title) from e
             _check(cancel)
             incoming = _incoming(staged.tree, staged.owners, game_id)
             # Decided before anything changes: a backup goes back only over the file the update wrote.
@@ -964,21 +953,24 @@ class InstallEngine:
         # The undo has just rewritten those files, so each is compared with what the undo wrote.
         restored = restore_backups(game_dir, [_rewritten_by(plan.new_files, b) for b in untouched])
         notes += _backups_kept_note(game_dir, previous.get("backups") or [], restored, title)
-        rec.files = plan.new_files
-        rec.steps = steps
+        staged.record_into(rec, plan.new_files, steps)
         rec.source = source
         rec.extras = extra_sources
-        rec.launch_path = staged.launch_path
-        rec.launch_from_catalog = staged.launch_from_catalog
-        rec.private_runtimes = staged.private_ids
-        rec.runtime_copies = staged.copy_ids
-        rec.method = (staged.game.source.get("install") or {}).get("method", rec.method)
         rec.vendor_uninstaller = previous.get("vendor_uninstaller")  # the previous version's, if it had one
         rec.previous = None
         rec.previous_unavailable = None
         ctx.records.save(rec)
         return JobResult("undo", game_id, title, game_fields_for(entry, rec, ctx.platform),
                          [*staged.notes(), *notes], backups=len(result.backups))
+
+    def _undo_failed(self, e: NoVerifiedSource | _NoUnpackSpec, rec: InstallRecord, title: str) -> InstallFailed:
+        """Why Undo couldn't get the previous version back. Unless nothing could be reached (maybe only for
+        now, so Undo stays offered), the record says it is unavailable."""
+        if isinstance(e, NoVerifiedSource) and not e.downloaded:
+            return InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title))
+        rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
+        self.ctx.records.save(rec)
+        return InstallFailed(rec.previous_unavailable)
 
     def _retarget_backups(self, rec: InstallRecord, game_dir: Path, untouched: list[dict],
                           incoming: dict[str, RecordedFile]) -> None:
@@ -1369,8 +1361,11 @@ def _holds(game_dir: Path, rel: str, files: dict[str, RecordedFile]) -> bool:
         return False
 
 
-def _repair_failure_text(e: NoVerifiedSource, game_id: str, title: str) -> str:
-    """Why Repair couldn't get an installed file back: not reachable now, or changed (naming an extra)."""
+def _repair_failure_text(e: NoVerifiedSource | _NoUnpackSpec, game_id: str, title: str) -> str:
+    """Why Repair couldn't get an installed file back: not reachable now, changed (naming an extra), or
+    not known how it was unpacked."""
+    if isinstance(e, _NoUnpackSpec):
+        return messages.REPAIR_NOT_POSSIBLE.format(title=title)
     if not e.downloaded:
         return messages.DOWNLOAD_UNREACHABLE.format(title=title)
     item = getattr(e, "item", None) or {"id": game_id}

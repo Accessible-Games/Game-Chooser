@@ -11,6 +11,7 @@ import pytest
 from engine import jobs, messages, run_actions, run_installer
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
+from tests.engine import test_update_flows as archive
 from tests.engine.fakes import FakeUninstallKeys, served_source, zip_bytes
 from tests.engine.test_run_installer import (MIRROR, SETUP, install, installed_run_game, never, publish_v2, put,
                                              quiet, run_game, run_game_with_patch, setaside, setup_engine, sha, tree,
@@ -116,14 +117,50 @@ def test_repair_runs_the_recorded_installer_and_keeps_the_undo_point(tmp_path):
     assert_players_files_kept(target)
 
 
-def test_repair_when_the_installers_download_changed_offers_update_and_changes_nothing(tmp_path):
-    eng, routes, target = installed_run_game(tmp_path)
-    eng.ctx.fetcher.routes[setup_url(eng)] = b"MZ a different setup"
-    before, files = record(eng), tree(target)
+def any_game(tmp_path, kind, updated):
+    """An archive game (Pawprints) or one whose installer runs (Light Cars), installed, played and, with `updated`,
+    updated once: (engine, its id, its title, its folder)."""
+    if kind == "archive":
+        eng, folder = archive.install_v1(tmp_path)
+        if updated:
+            archive.publish(eng, archive.V2)
+            archive.run(eng, "update")
+        return eng, "pawprints", "Pawprints", folder
+    eng, routes, folder = updated_run_game(tmp_path) if updated else installed_run_game(tmp_path)
+    return eng, "lightcars", "Light Cars", folder
+
+
+@pytest.mark.parametrize("kind", ["archive", "installer-run"])
+def test_repair_whose_download_changed_changes_nothing(tmp_path, kind):
+    eng, game_id, title, folder = any_game(tmp_path, kind, updated=False)
+    before = eng.ctx.records.load(game_id)
+    eng.ctx.fetcher.routes[before.source.url] = b"MZ a different file"
+    eng.ctx.fetcher.requests.clear()
+    files = tree(folder)
     with pytest.raises(InstallFailed) as ei:
-        run(eng, "repair")
-    assert ei.value.message == messages.REPAIR_FILE_CHANGED.format(title="Light Cars")
-    assert tree(target) == files and record(eng) == before and len(eng.ctx.elevator.calls) == 1
+        eng.run(InstallRequest("repair", game_id, "Games"), quiet, never)
+    assert ei.value.message == messages.REPAIR_FILE_CHANGED.format(title=title)
+    assert tree(folder) == files and eng.ctx.records.load(game_id) == before
+    assert eng.ctx.fetcher.requests == [before.source.url]  # the recorded URL is the mirror's copy itself
+
+
+@pytest.mark.parametrize("kind", ["archive", "installer-run"])
+@pytest.mark.parametrize("served", [b"MZ not that file", None], ids=["changed", "unreachable"])
+def test_undo_whose_previous_download_is_gone_changes_nothing(tmp_path, kind, served):
+    """Changed for good, Undo is no longer offered; unreachable (maybe only for now), it stays offered."""
+    eng, game_id, title, folder = any_game(tmp_path, kind, updated=True)
+    url = eng.ctx.records.load(game_id).previous["source"]["url"]
+    if served is None:
+        del eng.ctx.fetcher.routes[url]
+    else:
+        eng.ctx.fetcher.routes[url] = served
+    files = tree(folder)
+    with pytest.raises(InstallFailed) as ei:
+        eng.run(InstallRequest("undo", game_id, "Games"), quiet, never)
+    expected = (messages.UNDO_UNAVAILABLE if served else messages.DOWNLOAD_UNREACHABLE).format(title=title)
+    rec = eng.ctx.records.load(game_id)
+    assert ei.value.message == expected and rec.previous is not None
+    assert rec.previous_unavailable == (expected if served else None) and tree(folder) == files
 
 
 def test_repair_runs_the_recorded_system_steps_under_the_update_rules(tmp_path):
@@ -161,29 +198,6 @@ def test_undo_after_a_run_update_reinstalls_the_previous_installer(tmp_path):
     assert rec.previous is None and rec.previous_unavailable is None
     assert rec.extras == {} and rec.steps == previous["steps"]
     assert rec.files["lc.exe"].sha256 == sha(b"exe v1")
-
-
-def test_undo_when_the_previous_installer_changed_marks_it_unavailable(tmp_path):
-    eng, routes, target = updated_run_game(tmp_path)
-    eng.ctx.fetcher.routes[f"{MIRROR}{sha(SETUP)}/setup.exe"] = b"MZ not the old setup"
-    files = tree(target)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    expected = messages.UNDO_UNAVAILABLE.format(title="Light Cars")
-    assert ei.value.message == expected
-    rec = record(eng)
-    assert rec.previous_unavailable == expected and rec.previous is not None
-    assert tree(target) == files and len(eng.ctx.elevator.calls) == 2
-
-
-def test_undo_when_the_previous_installer_cant_be_reached_stays_offered(tmp_path):
-    eng, routes, target = updated_run_game(tmp_path)
-    del eng.ctx.fetcher.routes[f"{MIRROR}{sha(SETUP)}/setup.exe"]
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    assert ei.value.message == messages.DOWNLOAD_UNREACHABLE.format(title="Light Cars")
-    rec = record(eng)
-    assert rec.previous_unavailable is None and rec.previous is not None
 
 
 def test_undo_of_an_archive_update_outside_the_libraries_puts_the_backups_back(tmp_path):
