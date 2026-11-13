@@ -48,8 +48,8 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   errors raised) and `remove_unchanged`; `runtimes.runtime_route` (shared, private or skipped);
   `errors.check_cancel`.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
-  confirmation plan (the entry's `warning`, the price warning on installs, `first_run_download_size` added to the
-  size), and target-folder naming (`<library>/<Title>`).
+  confirmation plan (the price warning on installs, `first_run_download_size` added to the size), and
+  target-folder naming (`<library>/<Title>`).
 
 ## Bundled tools requirement
 

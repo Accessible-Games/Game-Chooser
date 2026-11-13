@@ -13,7 +13,7 @@ The entries (catalog schema v2) come from tests/catalog_fixtures/entries/*.json,
 tests/catalog_fixtures/games/. Test Shared Extra Level is an optional extra of two games (Test Game With Extra and
 Test Game Tar), each getting its own copy. Test Story is a two-page web page game (it opens in the browser). Test HTA
 Game is one harmless .hta file with no script (Windows' mshta.exe runs it). The zips,
-the password 7z, the tar.gz, TinyGame.exe (a copy of where.exe) and the index are built into
+the 7z, the tar.gz, TinyGame.exe (a copy of where.exe) and the index are built into
 tests/catalog_fixtures/_build/ (git-ignored). Only the source files are committed. Every download address points at this
 server; nothing here contacts a real host. (The entries' web page links point at example.com and example.org, which only
 open when chosen.)
@@ -42,7 +42,6 @@ GAMES_DIR = FIXTURES / "games"
 DEFAULT_BUILD_DIR = FIXTURES / "_build"
 DEFAULT_PORT = 8765
 TINY_GAME_SOURCE = Path(r"C:\Windows\System32\where.exe")
-SEVEN_ZIP_PASSWORD = "test-password"
 _ZIP_TIME = (2026, 1, 1, 0, 0, 0)
 _LAUNCHER = "launcher/start.bat"
 SCHEMA_VERSION = 2
@@ -81,9 +80,9 @@ def _add_extras(entries: list[dict]) -> None:
             entry["extras"] = [{"id": i, "required": required} for i, required in extras]
 
 
-def _seven_zip_dir(source: Path, out: Path, seven_zip: Path, password: str) -> None:
+def _seven_zip_dir(source: Path, out: Path, seven_zip: Path) -> None:
     out.unlink(missing_ok=True)
-    subprocess.run([str(seven_zip), "a", "-t7z", f"-p{password}", "-mhe=on", str(out), "*"],
+    subprocess.run([str(seven_zip), "a", "-t7z", str(out), "*"],
                    cwd=source, check=True, capture_output=True)
 
 
@@ -100,7 +99,7 @@ def build_catalog(out_dir: Path = DEFAULT_BUILD_DIR, port: int = DEFAULT_PORT, v
                   add_launch_path: bool = False, seven_zip: Path | None = None) -> dict:
     """Build the files and the index into `out_dir`; returns the index document.
 
-    Without a 7-Zip (bin/7z.exe, from scripts/fetch_tools.py) the password-7z game is left out, as is the
+    Without a 7-Zip (bin/7z.exe, from scripts/fetch_tools.py) the 7z game is left out, as is the
     single-exe game when where.exe isn't there."""
     out_dir = Path(out_dir)
     files = out_dir / "files"
@@ -124,8 +123,7 @@ def build_catalog(out_dir: Path = DEFAULT_BUILD_DIR, port: int = DEFAULT_PORT, v
         "test-game-tar": ("test-game-tar.tar.gz", lambda p: _tar_gz_dir(GAMES_DIR / "test-game-tar" / "TarGame", p)),
     }
     if seven_zip is not None:
-        builds["test-game-7z"] = ("test-game-7z.7z", lambda p: _seven_zip_dir(
-            GAMES_DIR / "test-game-7z", p, seven_zip, SEVEN_ZIP_PASSWORD))
+        builds["test-game-7z"] = ("test-game-7z.7z", lambda p: _seven_zip_dir(GAMES_DIR / "test-game-7z", p, seven_zip))
     if TINY_GAME_SOURCE.is_file():
         builds["test-game-none"] = ("TinyGame.exe", lambda p: shutil.copyfile(TINY_GAME_SOURCE, p))
 
@@ -195,7 +193,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if find_seven_zip() is None:
-        print("bin/7z.exe is missing, so the password 7z game is left out. "
+        print("bin/7z.exe is missing, so the 7z game is left out. "
               "Fetch the tools with: uv run python scripts/fetch_tools.py")
     doc = build_catalog(args.build_dir, args.port, args.version, args.add_launch_path)
     if args.build_only:

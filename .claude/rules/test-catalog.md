@@ -17,7 +17,7 @@ to that URL.
 
 Sources: `tests/catalog_fixtures/entries/*.json` (catalog schema v2; each game's `extras` is computed from every
 entry whose `extends` list names it, as catalog-index does) and `tests/catalog_fixtures/games/`. They include a
-tar.gz game, prices, links, a warning, a first-run download size, a required extra (Test Extra Level) and an
+tar.gz game, prices, links, a first-run download size, a required extra (Test Extra Level) and an
 optional extra shared by Test Game With Extra and Test Game Tar (Test Shared Extra Level), and Test Story, a
 two-page web page game that opens in the browser (launch path `index.html`), and Test HTA Game, one harmless
 `.hta` file with no script and no exe beside it (launch path `test-game.hta`; Windows' `mshta.exe` shows its text
