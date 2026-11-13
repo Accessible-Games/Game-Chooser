@@ -129,12 +129,15 @@ Build: see `.claude/rules/build.md`.
   - `recorder.py` - elevated side: drives Process Monitor for the whole run, then splits; takes a stop request
   - `stop.py` - the `--trace-stop` command (unelevated): finds the run, writes the request, waits, reports
   - `closing.py` - `Closer` (the rules: start time, then who the process runs as) over `ProcessAccess`
-    (`WindowsProcesses`: lazy ctypes), `WindowsCloser`, `Identity`, `process_identity`, the `not_closed` reasons
+    (`WindowsProcesses`: lazy ctypes; also how `live.py` and `cli._recorder_is_alive` open a process and read
+    its start time), `WindowsCloser`, `Identity`, `process_identity`, the `not_closed` reasons
   - `procmon.py` - Process Monitor's filter file, start, ready check, stop
   - `pml.py` - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`). `read_capture` swaps
     in `event_offsets` for procmon-parser's event offsets reader, which drops bits 32 to 39 of each offset and so
     cannot read a capture over 4 GiB
-  - `live.py` - live process snapshot (Windows) used for roots and the running tree
+  - `live.py` - live process snapshot (Windows) used for roots and the running tree; the process list is
+    `engine.installer_watch.process_parents`, and a list that can't be read raises (the recorder and the
+    client then keep the last membership)
   - `runfiles.py` - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` - split a run folder
   - `split.py` - attribute events to sessions and merge writes; `attribution.py` - the process tree
   - `kinds.py` - event to write kind; `virtualstore.py` - the VirtualStore path

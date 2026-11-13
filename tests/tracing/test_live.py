@@ -117,6 +117,15 @@ def test_windows_snapshot_sees_this_process():
     assert process_start_time(os.getpid()) == p.start
 
 
+def test_a_process_list_windows_cannot_read_raises_instead_of_saying_nothing_runs(monkeypatch):
+    def unreadable():
+        raise OSError("no process list")
+
+    monkeypatch.setattr("engine.installer_watch.process_parents", unreadable)
+    with pytest.raises(OSError):
+        windows_snapshot()  # an empty list would mark every traced game as exited
+
+
 # ---- a launch that gave no process ID: the root is found by exe ------------------------------------------
 
 from tracing.attribution import ROOT_SLACK  # noqa: E402

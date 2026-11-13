@@ -16,9 +16,7 @@ COMMANDS = ("--trace-recorder", "--trace-split", "--trace-stop", "--trace-probe"
 DEFAULT_WORKLOAD = paths.REPO_DIR / "tests" / "catalog_fixtures" / "games" / "trace-test" / "trace-test.bat"
 
 SYNCHRONIZE = 0x00100000
-PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 WAIT_TIMEOUT = 0x102
-STILL_ACTIVE = 259
 
 
 def tracing_wanted(argv: list[str], compiled: bool) -> bool:
@@ -189,54 +187,32 @@ def _run_probe(out_dir: Path, procmon: Path, workload: Path) -> int:
     return run_probe(out_dir, procmon, workload)
 
 
-def _open_process(access: int, pid: int):
-    import ctypes
-    kernel32 = ctypes.windll.kernel32
-    kernel32.OpenProcess.restype = ctypes.c_void_p
-    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
-    return kernel32.OpenProcess(access, False, pid)
-
-
-def _is_alive(pid: int) -> bool:
-    import ctypes
-    from ctypes import wintypes
-    handle = _open_process(PROCESS_QUERY_LIMITED_INFORMATION, pid)
-    if not handle:
-        return False
-    try:
-        code = wintypes.DWORD()
-        kernel32 = ctypes.windll.kernel32
-        kernel32.GetExitCodeProcess.argtypes = [ctypes.c_void_p, ctypes.POINTER(wintypes.DWORD)]
-        return bool(kernel32.GetExitCodeProcess(handle, ctypes.byref(code))) and code.value == STILL_ACTIVE
-    finally:
-        _close(handle)
-
-
 def _recorder_is_alive(pid: int, start: int | None) -> bool:
     """The recorder a status names is still running: the pid is alive and, when the status gives the start time,
     it is still that process and not another one Windows gave the pid to."""
-    if not _is_alive(pid):
+    from tracing.closing import WindowsProcesses
+    processes = WindowsProcesses()
+    handle = processes.open(pid, False)
+    if not handle:
         return False
-    if start is None:
-        return True
-    from tracing.live import process_start_time
-    return process_start_time(pid) == start
-
-
-def _close(handle) -> None:
-    import ctypes
-    ctypes.windll.kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
-    ctypes.windll.kernel32.CloseHandle(handle)
+    try:
+        created = processes.creation_time(handle)  # None once it has exited
+    finally:
+        processes.close(handle)
+    return created is not None and (start is None or created == start)
 
 
 def _app_alive_check(pid: int):
     """Open the app's handle at once: a pid already gone is never alive; otherwise alive until it is signalled."""
     import ctypes
-    handle = _open_process(SYNCHRONIZE, pid)
+    kernel32 = ctypes.windll.kernel32
+    kernel32.OpenProcess.restype = ctypes.c_void_p
+    kernel32.OpenProcess.argtypes = [ctypes.c_uint32, ctypes.c_int, ctypes.c_uint32]
+    handle = kernel32.OpenProcess(SYNCHRONIZE, False, pid)
     if not handle:
         return lambda: False
-    ctypes.windll.kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
-    return lambda: ctypes.windll.kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
+    kernel32.WaitForSingleObject.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
+    return lambda: kernel32.WaitForSingleObject(handle, 0) == WAIT_TIMEOUT
 
 
 def _recorder(args, compiled: bool) -> int:
