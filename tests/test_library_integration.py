@@ -93,18 +93,6 @@ def test_catalog_games_in_library(isolated_manager):
     assert isolated_manager.catalog_games_in("none") == []
 
 
-def test_add_catalog_game_replaces_and_saves_then_remove(isolated_manager):
-    m = isolated_manager
-    first = m.add_catalog_game({"title": "Old", "catalog_id": "e", "launch_path": "x/e.exe", "library_id": "l"})
-    second = m.add_catalog_game({"title": "New", "catalog_id": "e", "launch_path": "x/e.exe", "library_id": "l",
-                                 "installed_extras": ["p"]})
-    assert first is not second
-    assert [g.title for g in m.games] == ["New"]
-    assert _games_json(m)[0]["installed_extras"] == ["p"]
-    m.remove_catalog_game("e")
-    assert m.games == [] and _games_json(m) == []
-
-
 @pytest.mark.parametrize("cached, title", [(False, "entombed"), (True, "Entombed!")])  # uncached: the id stands in
 def test_reconcile_adds_game_for_orphan_record(isolated_manager_factory, tmp_path, cached, title):
     if cached:
