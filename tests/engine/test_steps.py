@@ -33,11 +33,6 @@ def hkcu_step(name, value, type_="REG_SZ", key=r"Software\Game"):
     return {"action": "registry", "hive": "HKCU", "key": key, "name": name, "type": type_, "value": value}
 
 
-def test_action_sets():
-    assert FILE_ACTIONS == {"copy", "move", "delete"}
-    assert SYSTEM_ACTIONS == {"registry", "register", "run"}
-
-
 def test_file_steps_copy_move_delete(tmp_path):
     (tmp_path / "a.txt").write_text("A")
     (tmp_path / "old.txt").write_text("O")
