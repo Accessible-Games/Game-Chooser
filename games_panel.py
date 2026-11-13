@@ -36,8 +36,8 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
   move. While a text is being typed, Space and the digit keys belong to it (Space for 3 seconds after the last
   character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. A
   Space never moves the selection; with any modifier but Alt alone it is a plain Space, and only Alt+Space (the
-  window menu) goes on to the list control; a held Space counts once. Escape, Backspace, Enter, a sort and the
-  navigation keys end the text. Enter always acts.
+  window menu) goes on to the list control. A held Space acts once on the list; a dialog its first press opens can
+  still get the repeats. Escape, Backspace, Enter, a sort and the navigation keys end the text. Enter always acts.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
   unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
   open or the app is starting.
@@ -542,7 +542,7 @@ class GamesPanel(wx.Panel):
         space = key == wx.WXK_SPACE and event.GetModifiers() != wx.MOD_ALT
         if key in ENDS_TYPED_TEXT:  # the key itself goes on to the list as before (Enter acts below)
             self.type_ahead.clear()
-        if space and event.IsAutoRepeat():  # a held Space acts once: repeats would land on the dialog it opened
+        if space and event.IsAutoRepeat():  # a held Space acts once on the list (a dialog it opens still gets them)
             return
         if space and self.type_ahead.takes_space():
             # Part of the text being typed ("temple of"), for 3 seconds after its last character: a player
