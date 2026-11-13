@@ -1,7 +1,10 @@
 """A runtime's DLL and OCX files, copied beside the game's launch exe so a load by name finds them."""
 
 import json
+import shutil
 import time
+
+import pytest
 
 from engine import comfree, messages, run_installer, runtimes
 from engine.records import RecordStore
@@ -387,6 +390,29 @@ def test_installer_run_game_ships_its_own_copy(tmp_path):
     run(eng, "install", id="lightcars")
     assert (folder / "dx8vb.dll").read_bytes() == b"its own"
     assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == "lightcars"
+
+
+@pytest.mark.parametrize("action", ["repair", "undo"])
+@pytest.mark.parametrize("shared_folder", ["gone", "untrusted"])
+def test_installer_run_repair_and_undo_keep_the_copy_they_have_nothing_to_copy_from(tmp_path, action, shared_folder):
+    routes = {}
+    rt, g = dx8vb_entry(routes), run_mode_game(routes)
+    folder = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=writes_game(folder)))
+    run(eng, "install", id="lightcars")
+    if action == "undo":
+        eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=b"MZ setup v2", version="2.0")
+        run(eng, "update", id="lightcars")
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB
+    runtime_folder = eng.ctx.runtimes_root / "dx8vb"
+    if shared_folder == "gone":
+        shutil.rmtree(runtime_folder)
+    else:
+        eng.ctx.security.set_owner(runtime_folder, "S-1-5-21-3000-3000-3000-1003")  # another account's folder
+    eng.ctx.registry.set("HKLM", r"SOFTWARE\Classes\DxVBLibA.DirectX8", "", "REG_SZ", "DirectX8")  # present
+    run(eng, action, id="lightcars")
+    assert (folder / "dx8vb.dll").read_bytes() == DX8VB
+    assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == OWNER
 
 
 def test_untracked_installer_run_game_gets_a_note_instead(tmp_path, monkeypatch):

@@ -456,7 +456,7 @@ class InstallEngine:
         none: the notes say it needs each shared component."""
         title = title_of(entry)
         game_dir = record_folder(rec, self.ctx.libraries)
-        if not copies and not any(runtimes.is_runtime_owner(f.owner) for f in rec.files.values()):
+        if not copies and not rec.private_runtimes:
             notes = []
         elif _blocked(rec, game_dir):
             notes = runtimes.needs_shared_notes(title, [c.runtime for c in copies])
