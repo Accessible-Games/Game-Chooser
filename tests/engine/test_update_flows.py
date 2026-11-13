@@ -10,15 +10,12 @@ import shutil
 from dataclasses import asdict
 from pathlib import Path
 
-import pytest
-
 import engine.safety
 from engine import messages
 from engine.entries import mirror_url_for
-from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord, RecordedFile
-from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, make_engine, never, put, quiet, served_source, sha,
+from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, fails, make_engine, never, put, quiet, served_source, sha,
                                 snapshot, zip_bytes)
 
 DEV_URL = "https://dev.example.com/pawprints.zip"
@@ -223,9 +220,7 @@ def test_failed_apply_keeps_old_version_and_records_backups(tmp_path, monkeypatc
         return real_write(source, target, backup_to, game_dir)
 
     monkeypatch.setattr(engine.safety, "_write_file", write_file)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "update")
-    assert ei.value.message == messages.FILES_NOT_CHANGED.format(title="Pawprints")
+    assert fails(run, eng, "update").message == messages.FILES_NOT_CHANGED.format(title="Pawprints")
     rec = record(eng)
     assert rec.source.version == "1.0"                                       # not claimed as v2
     assert rec.files["pawprints.ini"].sha256 == sha(V2["pawprints.ini"])     # what is on disk now
@@ -245,9 +240,7 @@ def test_failed_new_step_keeps_old_version_recorded(tmp_path):
     lib = tmp_path / "Games"
     eng, game = install_v1(tmp_path, elevator=FakeElevator(exit_codes={str(lib / "Pawprints" / "fix.exe"): 2}))
     publish(eng, {**V2, "fix.exe": b"fix"}, steps=[{"action": "run", "path": "fix.exe"}])
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "update")
-    assert ei.value.message == messages.STEP_RUN_FAILED.format(name="fix.exe", code=2)
+    assert fails(run, eng, "update").message == messages.STEP_RUN_FAILED.format(name="fix.exe", code=2)
     rec = record(eng)
     assert rec.source.version == "1.0" and rec.files["pawprints.exe"].sha256 == sha(V2["pawprints.exe"])
     assert rec.previous["backups"][0]["original"] == "pawprints.ini"
@@ -263,9 +256,7 @@ def test_update_refuses_records_it_does_not_manage(tmp_path):
     eng.ctx.records.save(rec)
     publish(eng, V2)
     before = snapshot(game)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "update")
-    assert ei.value.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Pawprints")
+    assert fails(run, eng, "update").message == messages.INSTALL_NOT_CHANGEABLE.format(title="Pawprints")
     assert snapshot(game) == before
 
 
@@ -350,9 +341,7 @@ def test_undo_tries_recorded_url_then_mirror_path(tmp_path):
 
 def test_undo_with_nothing_to_undo_refuses(tmp_path):
     eng, game = install_v1(tmp_path)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    assert ei.value.message == messages.NOTHING_TO_UNDO.format(title="Pawprints")
+    assert fails(run, eng, "undo").message == messages.NOTHING_TO_UNDO.format(title="Pawprints")
 
 
 # ---- repair ------------------------------------------------------------------
@@ -485,9 +474,7 @@ def test_uninstall_undoes_system_steps_but_not_runtimes(tmp_path):
     assert not any("dx8vb" in args for _, args, _ in elevator.calls)
 
     eng.ctx.entries["dx8vb"] = {"id": "dx8vb", "kind": "runtime", "title": "DirectX 8", "sources": []}
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "uninstall", id="dx8vb")
-    assert ei.value.message == messages.INSTALL_NOT_CHANGEABLE.format(title="DirectX 8")
+    assert fails(run, eng, "uninstall", id="dx8vb").message == messages.INSTALL_NOT_CHANGEABLE.format(title="DirectX 8")
     assert (runtime_dir / "dx8vb.dll").exists() and record(eng, "dx8vb") == runtime
 
 
@@ -536,8 +523,7 @@ def test_failed_update_backup_survives_a_retry_after_an_earlier_update(tmp_path,
     put(game, "pawprints.ini", b"second edit")
     publish(eng, V3, version="3.0")
     stop = failing_write(monkeypatch, "c.wav")
-    with pytest.raises(InstallFailed):
-        run(eng, "update")                                    # the ini was moved aside and v3's written
+    fails(run, eng, "update")                                 # the ini was moved aside and v3's written
     stop()
     assert run(eng, "update").backups == 0
     assert record(eng).source.version == "3.0"
@@ -551,9 +537,7 @@ def test_failed_undo_retried_still_puts_the_players_copy_back(tmp_path, monkeypa
     publish(eng, V2)
     run(eng, "update")
     stop = failing_write(monkeypatch, "a.wav")
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "undo")
-    assert ei.value.message == messages.FILES_NOT_CHANGED.format(title="Pawprints")
+    assert fails(run, eng, "undo").message == messages.FILES_NOT_CHANGED.format(title="Pawprints")
     assert (game / "pawprints.ini").read_bytes() == V1["pawprints.ini"]   # the undo got this far
     assert record(eng).previous is not None
     stop()
@@ -613,9 +597,7 @@ def test_repair_of_a_record_without_specs_falls_back_to_the_catalog(tmp_path):
 
     del eng.ctx.entries["pawprints-music"]
     before = snapshot(game)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "repair")
-    assert ei.value.message == messages.REPAIR_NOT_POSSIBLE.format(title="Pawprints")
+    assert fails(run, eng, "repair").message == messages.REPAIR_NOT_POSSIBLE.format(title="Pawprints")
     assert snapshot(game) == before
 
 
@@ -691,9 +673,7 @@ def test_path_conflict_refuses_before_undoing_dropped_steps(tmp_path):
     (game / "sounds" / "b.wav").mkdir()                     # a folder where v2 ships a file
     publish(eng, V2)                                        # v2 no longer sets Mode
     before = record(eng)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "update")
-    assert ei.value.message == messages.UPDATE_PATH_CONFLICT.format(path="sounds/b.wav", kind="folder")
+    assert fails(run, eng, "update").message == messages.UPDATE_PATH_CONFLICT.format(path="sounds/b.wav", kind="folder")
     assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Mode") == (True, "old", "REG_SZ")
     assert record(eng) == before
 
@@ -707,9 +687,8 @@ def test_repair_names_the_extra_whose_download_changed(tmp_path):
     eng.ctx.fetcher.routes[music_url] = b"a different file"
     (game / "music" / "theme.ogg").unlink()
     before = snapshot(game)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "repair")
-    assert ei.value.message == messages.REPAIR_EXTRA_CHANGED.format(extra="Pawprints Music", title="Pawprints")
+    error = fails(run, eng, "repair")
+    assert error.message == messages.REPAIR_EXTRA_CHANGED.format(extra="Pawprints Music", title="Pawprints")
     assert snapshot(game) == before
 
 
@@ -718,9 +697,7 @@ def test_repair_offline_says_try_again_later(tmp_path):
     eng.ctx.fetcher.routes.clear()                        # every address unreachable
     (game / "pawprints.exe").unlink()
     before = snapshot(game)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "repair")
-    assert ei.value.message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
+    assert fails(run, eng, "repair").message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
     assert snapshot(game) == before
 
 
@@ -728,17 +705,14 @@ def test_repair_when_the_games_download_changed_and_the_mirror_is_unreachable(tm
     eng, game = install_v1(tmp_path, url=DEV_URL)
     eng.ctx.fetcher.routes[DEV_URL] = zip_bytes(V2)       # changed; the mirror never had it
     (game / "pawprints.exe").unlink()
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "repair")
-    assert ei.value.message == messages.REPAIR_FILE_CHANGED.format(title="Pawprints")
+    assert fails(run, eng, "repair").message == messages.REPAIR_FILE_CHANGED.format(title="Pawprints")
 
 
 def test_adding_extras_offline_says_try_again_later(tmp_path):
     eng, game = install_v1(tmp_path, optional=())
     eng.ctx.fetcher.routes.clear()
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "extras", extras=("pawprints-voices",))
-    assert ei.value.message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
+    error = fails(run, eng, "extras", extras=("pawprints-voices",))
+    assert error.message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
 
 
 def test_fresh_install_whose_library_cant_be_created_leaves_the_old_steps_alone(tmp_path):
@@ -748,9 +722,8 @@ def test_fresh_install_whose_library_cant_be_created_leaves_the_old_steps_alone(
     blocker = tmp_path / "unplugged"
     blocker.write_bytes(b"not a folder")  # a library path under a file can't be created
     eng.ctx.libraries = [{"id": "Other", "path": str(blocker / "Games")}]
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("install", "pawprints", "Other"), quiet, never)
-    assert ei.value.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=blocker / "Games")
+    error = fails(eng.run, InstallRequest("install", "pawprints", "Other"), quiet, never)
+    assert error.message == messages.LIBRARY_FOLDER_NOT_CREATED.format(path=blocker / "Games")
     assert eng.ctx.registry.values != {} and record(eng).steps == [{**reg_step("Path", "here"), "undo": {
         "existed": False, "previous": None, "previous_type": None}}]
 
@@ -786,9 +759,7 @@ def test_a_failed_uninstall_can_be_finished_by_uninstalling_again(tmp_path, monk
             raise PermissionError(13, "The process cannot access the file", str(self))
         return real_unlink(self, missing_ok=missing_ok)
     monkeypatch.setattr(Path, "unlink", unlink)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "uninstall")
-    assert ei.value.message == messages.UNINSTALL_FAILED.format(title="Pawprints")
+    assert fails(run, eng, "uninstall").message == messages.UNINSTALL_FAILED.format(title="Pawprints")
     rec = record(eng)
     assert rec.uninstalled and "pawprints.exe" in rec.files and locked.exists()
     monkeypatch.setattr(Path, "unlink", real_unlink)  # the game was closed

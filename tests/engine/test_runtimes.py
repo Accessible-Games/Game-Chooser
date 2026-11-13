@@ -13,7 +13,6 @@ import pytest
 
 from engine import comfree, messages, run_installer, runtimes
 from engine.comfree import PrivateComUnavailable, com_manifest_xml, has_embedded_manifest, write_private_com
-from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from engine.messages import Progress
 from engine.records import RecordedFile, RecordStore
@@ -21,7 +20,7 @@ from engine.runtimes import (MARKER_NAME, default_runtimes_root, detect_present,
                              marker_present, missing_runtimes, recorded_private, register_and_mark_args,
                              runtime_present, write_marker_args)
 from tests.engine.fakes import (ADMINISTRATORS, MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry,
-                                FakeSecurity, ZipExtractor, make_engine, never, quiet, served_source, sha, snapshot,
+                                FakeSecurity, ZipExtractor, fails, make_engine, never, quiet, served_source, sha, snapshot,
                                 split_chain, zip_bytes)
 
 DX8VB = b"MZ fake dx8vb.dll"
@@ -177,12 +176,9 @@ def test_dependency_cycle_refused_plainly(tmp_path):
     a, b = plain_runtime(routes, "a", ["b"]), plain_runtime(routes, "b", ["a"])
     g = game(routes, dependencies=["a"])
     eng, lib = setup(tmp_path, [a, b, g], routes)
-    with pytest.raises(InstallFailed) as ei:
-        missing_runtimes(g, eng.ctx.entries, eng.ctx.records, eng.ctx.registry)
-    assert ei.value.message == messages.DEPENDENCY_CYCLE.format(title="Entombed")
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.DEPENDENCY_CYCLE.format(title="Entombed")
+    error = fails(missing_runtimes, g, eng.ctx.entries, eng.ctx.records, eng.ctx.registry)
+    assert error.message == messages.DEPENDENCY_CYCLE.format(title="Entombed")
+    assert fails(run, eng, "install").message == messages.DEPENDENCY_CYCLE.format(title="Entombed")
     assert eng.ctx.fetcher.requests == [] and not (lib / "Entombed").exists()
 
 
@@ -191,13 +187,9 @@ def test_missing_or_non_runtime_dependency_refused_plainly(tmp_path):
     other = game(routes, id="other", title="Other", dependencies=())
     g = game(routes, dependencies=["nope"])
     eng, lib = setup(tmp_path, [g, other], routes)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.DEPENDENCY_UNAVAILABLE.format(title="Entombed")
+    assert fails(run, eng, "install").message == messages.DEPENDENCY_UNAVAILABLE.format(title="Entombed")
     eng.ctx.entries["entombed"] = game(routes, dependencies=["other"])
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.DEPENDENCY_UNAVAILABLE.format(title="Entombed")
+    assert fails(run, eng, "install").message == messages.DEPENDENCY_UNAVAILABLE.format(title="Entombed")
     assert eng.ctx.fetcher.requests == []
 
 
@@ -276,9 +268,7 @@ def test_declined_elevation_fails_install_plainly(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(decline=True))
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.ELEVATION_DECLINED.format(what=DX8VB_TITLE)
+    assert fails(run, eng, "install").message == messages.ELEVATION_DECLINED.format(what=DX8VB_TITLE)
     assert eng.ctx.records.load("dx8vb") is None and eng.ctx.records.load("entombed") is None
     assert not (eng.ctx.runtimes_root / "dx8vb").exists() and not (lib / "Entombed").exists()
     assert g["sources"][0]["url"] not in eng.ctx.fetcher.requests
@@ -289,9 +279,7 @@ def test_failed_register_fails_install_and_leaves_no_record_and_the_locked_folde
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
     folder = eng.ctx.runtimes_root / "dx8vb"
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
+    assert fails(run, eng, "install").message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
     assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
     # The folder was made and sealed by the elevated command, so the player can't remove it (R39). Without a
     # marker it counts as absent, and a retry adopts it.
@@ -403,9 +391,7 @@ def test_player_owned_folder_is_refused_for_a_registering_runtime_and_left_alone
     folder.mkdir(parents=True)  # owned by the player (FakeSecurity's default): matching files aren't enough
     (folder / "dx8vb.dll").write_bytes(DX8VB)
     before = snapshot(folder)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
     assert snapshot(folder) == before and eng.ctx.elevator.calls == []
     assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
 
@@ -458,10 +444,9 @@ def test_folder_that_doesnt_match_is_refused_and_left_alone(tmp_path):
     (folder / "other.dll").write_bytes(b"other")
     eng.ctx.security.set_owner(folder, ADMINISTRATORS)
     before = snapshot(folder)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
-    assert "temporary" not in ei.value.message
+    error = fails(run, eng, "install")
+    assert error.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert "temporary" not in error.message
     assert snapshot(folder) == before and eng.ctx.elevator.calls == []
     assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
 
@@ -474,9 +459,7 @@ def test_failed_install_removes_only_what_it_added_to_a_folder_it_found(tmp_path
     folder = eng.ctx.runtimes_root / "bass"
     folder.mkdir(parents=True)
     (folder / "readme.txt").write_bytes(b"someone else's note")
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message.startswith(messages.STEP_FILE_MISSING.format(path="setup.exe"))
+    assert fails(run, eng, "install").message.startswith(messages.STEP_FILE_MISSING.format(path="setup.exe"))
     assert snapshot(folder) == {"readme.txt": b"someone else's note"}
     assert eng.ctx.records.load("bass") is None
 
@@ -486,9 +469,7 @@ def test_after_a_failed_register_the_locked_folder_stays_and_a_retry_adopts_it(t
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 3}))
     folder = eng.ctx.runtimes_root / "dx8vb"
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
+    assert fails(run, eng, "install").message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
     assert snapshot(folder) == {"dx8vb.dll": DX8VB}  # sealed: nothing the player could remove; no marker
     assert eng.ctx.records.load("dx8vb") is None
 
@@ -512,9 +493,7 @@ def test_found_folder_with_an_extra_file_isnt_adopted_for_a_lock_down(tmp_path):
     for made in (folder, folder / "dx8vb.dll"):
         eng.ctx.security.set_owner(made, ADMINISTRATORS)
     before = snapshot(folder)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
     assert snapshot(folder) == before and eng.ctx.elevator.calls == []
 
 
@@ -527,9 +506,7 @@ def test_found_folder_holding_a_player_owned_matching_file_isnt_adopted_for_a_lo
     (folder / "dx8vb.dll").write_bytes(DX8VB)  # the right bytes, but the player's file (FakeSecurity's default)
     eng.ctx.security.set_owner(folder, ADMINISTRATORS)  # an administrator made the folder, not Game Chooser
     before = snapshot(folder)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
     assert snapshot(folder) == before and eng.ctx.elevator.calls == []
 
 
@@ -542,9 +519,7 @@ def test_found_folder_with_a_stale_marker_isnt_adopted_for_a_lock_down(tmp_path)
     (folder / "dx8vb.dll").unlink()  # the marker lists a file that is gone: it would say "installed" again
     eng.ctx.security.set_owner(folder, ADMINISTRATORS)  # as soon as the file is copied back, before regsvr32
     before = snapshot(folder)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
     assert snapshot(folder) == before and eng.ctx.elevator.calls == []
 
 
@@ -759,9 +734,7 @@ def test_failed_register_writes_no_marker(tmp_path):
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"regsvr32.exe": 5}))
     folder = eng.ctx.runtimes_root / "dx8vb"
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
+    assert fails(run, eng, "install").message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
     assert eng.ctx.elevator.calls[1] == regsvr32(eng, folder) and not (folder / MARKER_NAME).exists()
     assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root, eng.ctx.security)
 
@@ -825,11 +798,10 @@ def test_staging_file_swapped_during_the_prompt_is_caught_and_nothing_is_registe
 
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=swap))
     folder = eng.ctx.runtimes_root / "dx8vb"
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
+    error = fails(run, eng, "install")
     # The elevated chain checks each copy against the download's checksum before anyone may read the folder
     # (R44): the planted bytes are deleted again, the chain stops, and the folder stays sealed with no marker.
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
+    assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
     assert folder.is_dir() and not (folder / "dx8vb.dll").exists() and not (folder / MARKER_NAME).exists()
     assert eng.ctx.records.load("dx8vb") is None and not (lib / "Entombed").exists()
@@ -849,9 +821,7 @@ def test_swapped_staging_file_is_still_caught_unelevated_if_the_chains_check_let
             (folder / "dx8vb.dll").write_bytes(b"MZ planted")
         return process
     eng.ctx.elevator.start = start
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
     assert not (folder / MARKER_NAME).exists() and eng.ctx.records.load("dx8vb") is None
 
@@ -866,9 +836,8 @@ def test_folder_planted_during_the_prompt_stops_the_elevated_command_and_registe
 
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(on_start=plant))
     folder = eng.ctx.runtimes_root / "dx8vb"
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
+    error = fails(run, eng, "install")
+    assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
     assert snapshot(folder) == {} and eng.ctx.records.load("dx8vb") is None
 
@@ -894,9 +863,8 @@ def test_junction_planted_at_the_folder_or_a_parent_during_the_prompt_stops_the_
         _winapi.CreateJunction(str(victim), str(path))
 
     eng, lib = setup(tmp_path, [rt, g], routes, runtimes_root=root, elevator=FakeElevator(on_start=swap))
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=root / "dx8vb")
+    error = fails(run, eng, "install")
+    assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=root / "dx8vb")
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
     assert list(victim.iterdir()) == [] and eng.ctx.records.load("dx8vb") is None  # nothing made inside it
 
@@ -948,9 +916,7 @@ def test_junction_planted_inside_a_found_folder_during_the_prompt_is_refused(tmp
     folder = adoptable_folder(eng, files={} if name == "dx8vb.dll" else None)
     eng.ctx.elevator.on_start = lambda exe, args, elevated: (
         _winapi.CreateJunction(str(victim), str(folder / name)) if exe == "cmd.exe" else None)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == getattr(messages, outcome).format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == getattr(messages, outcome).format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]  # regsvr32 never ran
     assert snapshot(victim) == {"dx8vb.dll": b"the victim's own file"}  # nothing written through the junction
     assert eng.ctx.records.load("dx8vb") is None
@@ -963,9 +929,7 @@ def test_unexpected_file_planted_in_a_found_folder_during_the_prompt_is_refused(
     folder = adoptable_folder(eng)
     eng.ctx.elevator.on_start = lambda exe, args, elevated: (
         (folder / "dx8vbhelper.dll").write_bytes(b"MZ extra") if exe == "cmd.exe" else None)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
@@ -976,9 +940,7 @@ def test_hard_linked_file_in_a_found_folder_is_refused(tmp_path):
     folder = adoptable_folder(eng)
     eng.ctx.elevator.on_start = lambda exe, args, elevated: (
         os.link(folder / "dx8vb.dll", tmp_path / "elsewhere.dll") if exe == "cmd.exe" else None)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_CHANGED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
@@ -1029,9 +991,7 @@ def test_declined_lock_down_fails_plainly(tmp_path):
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(decline=True))
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.ELEVATION_DECLINED.format(what=DX8VB_TITLE)
+    assert fails(run, eng, "install").message == messages.ELEVATION_DECLINED.format(what=DX8VB_TITLE)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
@@ -1040,9 +1000,8 @@ def test_failed_lock_down_registers_nothing(tmp_path):
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, elevator=FakeElevator(exit_codes={"cmd.exe": 5}))
     folder = eng.ctx.runtimes_root / "dx8vb"
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
+    error = fails(run, eng, "install")
+    assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
     assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
@@ -1065,9 +1024,7 @@ def test_junction_at_the_runtime_folder_is_refused(tmp_path):
     eng.ctx.runtimes_root.mkdir(parents=True)
     link = eng.ctx.runtimes_root / "dx8vb"
     _winapi.CreateJunction(str(real), str(link))
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_LINKED.format(title=DX8VB_TITLE, path=link)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_LINKED.format(title=DX8VB_TITLE, path=link)
     assert list(real.iterdir()) == [] and eng.ctx.elevator.calls == []
 
 
@@ -1082,9 +1039,7 @@ def test_junction_at_a_parent_folder_is_refused(tmp_path):
     root.parent.mkdir()
     _winapi.CreateJunction(str(real), str(root))
     eng, lib = setup(tmp_path, [rt, g], routes, runtimes_root=root)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_LINKED.format(title=DX8VB_TITLE, path=root)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_LINKED.format(title=DX8VB_TITLE, path=root)
     assert list(real.iterdir()) == [] and eng.ctx.elevator.calls == []
 
 
@@ -1097,9 +1052,7 @@ def test_folder_owned_by_another_account_is_refused_and_left_alone(tmp_path):
     (folder / "readme.txt").write_bytes(b"theirs")
     eng.ctx.security.set_owner(folder, "S-1-5-21-2000-2000-2000-1002")
     before = snapshot(folder)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
+    assert fails(run, eng, "install").message == messages.RUNTIME_FOLDER_NOT_OURS.format(title=DX8VB_TITLE, path=folder)
     assert snapshot(folder) == before and eng.ctx.elevator.calls == []
 
 
@@ -1115,9 +1068,7 @@ def test_failure_after_registering_in_a_found_folder_leaves_the_registration(tmp
     rt, g = failing_after_register(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes)
     folder = adoptable_folder(eng)  # it may already have been registered by another account
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message.startswith(messages.STEP_FILE_MISSING.format(path="setup.exe"))
+    assert fails(run, eng, "install").message.startswith(messages.STEP_FILE_MISSING.format(path="setup.exe"))
     assert eng.ctx.elevator.calls == [*lock_down(eng, folder, existing={"dx8vb.dll"}),
                                       ("regsvr32.exe", f'/s "{folder / "dx8vb.dll"}"', True)]  # not the last step; no /u
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB
@@ -1128,8 +1079,7 @@ def test_failure_after_registering_in_a_folder_it_made_unregisters(tmp_path):
     rt, g = failing_after_register(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes)
     folder = eng.ctx.runtimes_root / "dx8vb"
-    with pytest.raises(InstallFailed):
-        run(eng, "install")
+    fails(run, eng, "install")
     assert eng.ctx.elevator.calls[-1] == ("regsvr32.exe", f'/u /s "{folder / "dx8vb.dll"}"', True)
     assert snapshot(folder) == {"dx8vb.dll": DX8VB}  # the sealed folder stays (R39), with no marker
 
@@ -1167,13 +1117,12 @@ def test_installer_runtime_that_exits_with_an_error_fails_and_its_new_files_are_
     eng, lib = setup(tmp_path, [rt, g], routes)
     left = eng.ctx.runtimes_root / "vb6-runtime" / "half-installed.dll"
 
-    def fails(exe, args, elevated):
+    def failing(exe, args, elevated):
         left.write_bytes(b"MZ half")
         eng.ctx.elevator.exit_codes[exe] = 4
-    eng.ctx.elevator.on_start = fails
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.INSTALLER_FAILED.format(title=VB6_TITLE, code=4) and not left.exists()
+    eng.ctx.elevator.on_start = failing
+    error = fails(run, eng, "install")
+    assert error.message == messages.INSTALLER_FAILED.format(title=VB6_TITLE, code=4) and not left.exists()
 
 
 def test_installer_runtime_still_missing_fails(tmp_path, monkeypatch):
@@ -1181,9 +1130,7 @@ def test_installer_runtime_still_missing_fails(tmp_path, monkeypatch):
     rt, g = vb6(routes), game(routes, dependencies=["vb6-runtime"])
     monkeypatch.setenv("GC_VB6", str(tmp_path / "system"))
     eng, lib = setup(tmp_path, [rt, g], routes)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.FAILED.format(title=VB6_TITLE)
+    assert fails(run, eng, "install").message == messages.FAILED.format(title=VB6_TITLE)
     assert eng.ctx.records.load("vb6-runtime") is None and not (lib / "Entombed").exists()
 
 
@@ -1328,9 +1275,7 @@ def test_runtimes_last_register_step_with_an_unsafe_path_is_refused_before_it_ru
     rt, g = dx8vb(routes), game(routes)
     rt["sources"][0]["steps"] = [{"action": "register", "path": "../evil.dll"}]
     eng, lib = setup(tmp_path, [rt, g], routes)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message.startswith(messages.STEP_UNSAFE_PATH)
+    assert fails(run, eng, "install").message.startswith(messages.STEP_UNSAFE_PATH)
     assert not any("evil.dll" in args for _, args, _ in eng.ctx.elevator.calls)
 
 
@@ -1346,10 +1291,9 @@ def test_runtime_note_still_reaches_the_player_when_the_game_then_fails(tmp_path
     g = game(routes, files={"entombed.exe": b"exe 2"}, version="2.0")
     eng.ctx.entries["entombed"] = g
     del routes[g["sources"][0]["url"]]  # the game's download is unreachable
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, action)
+    error = fails(run, eng, action)
     unreachable = messages.NO_SOURCE.format(title="Entombed", reasons=messages.SOURCE_UNREACHABLE)
-    assert ei.value.message == "\n\n".join([unreachable, messages.DEVELOPER_CHANGED_UNVERIFIED])
+    assert error.message == "\n\n".join([unreachable, messages.DEVELOPER_CHANGED_UNVERIFIED])
 
 
 @pytest.mark.parametrize("shared", [True, False], ids=["shared", "private"])
@@ -1363,9 +1307,7 @@ def test_full_disk_while_unpacking_a_runtime_gets_plain_words(tmp_path, private_
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=shared, extractor=FullDisk())
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
+    assert fails(run, eng, "install").message == messages.DISK_FULL.format(title="Entombed")
 
 
 def test_full_disk_while_copying_a_private_runtime_into_the_game_gets_plain_words(tmp_path, private_com,
@@ -1375,9 +1317,7 @@ def test_full_disk_while_copying_a_private_runtime_into_the_game_gets_plain_word
     monkeypatch.setattr(runtimes, "_copy_into", full_disk)
     routes = {}
     eng, lib = setup(tmp_path, [dx8vb(routes), game(routes)], routes, register_shared_components=False)
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install")
-    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
+    assert fails(run, eng, "install").message == messages.DISK_FULL.format(title="Entombed")
 
 
 def run_mode_game(routes, setup_exe=b"MZ fake game setup", silent=True, version="1.0", **fields):
@@ -1496,9 +1436,7 @@ def test_preference_off_bad_runtime_download_leaves_the_installer_unstarted(tmp_
     folder = tmp_path / "Games" / "Light Cars"
     eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=False,
                      elevator=FakeElevator(on_start=writes_game(folder)))
-    with pytest.raises(InstallFailed) as ei:
-        run(eng, "install", id="lightcars")
-    assert ei.value.message.startswith(f"{DX8VB_TITLE} couldn't be downloaded.")
+    assert fails(run, eng, "install", id="lightcars").message.startswith(f"{DX8VB_TITLE} couldn't be downloaded.")
     assert eng.ctx.elevator.calls == [] and not folder.exists() and eng.ctx.records.load("lightcars") is None
 
 

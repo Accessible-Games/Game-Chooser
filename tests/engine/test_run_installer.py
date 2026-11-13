@@ -9,14 +9,14 @@ from pathlib import Path
 import pytest
 
 from engine import messages, run_installer
-from engine.errors import Cancelled, InstallFailed
+from engine.errors import Cancelled
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord
 from engine.run_installer import (UNINSTALL_KEYS, files_created_during, folder_from_uninstall_entry,
                                   installer_command, new_uninstall_entries, silent_args_for, snapshot_folder,
                                   snapshot_uninstall_keys)
-from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeUninstallKeys, make_engine,
-                                never, put, quiet, served_source, sha, snapshot, watch_with, zip_bytes)
+from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeUninstallKeys, fails,
+                                make_engine, never, put, quiet, served_source, sha, snapshot, watch_with, zip_bytes)
 
 SETUP = b"MZ fake setup program"
 
@@ -182,9 +182,7 @@ def test_interactive_announces_before_launch(tmp_path):
 def test_interactive_without_a_ui_fails_plainly_before_running(tmp_path):
     routes = {}
     eng, lib = setup_engine(tmp_path, [run_game(routes)], routes)
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message == messages.INSTALLER_NEEDS_PLAYER.format(title="Light Cars")
+    assert fails(install, eng).message == messages.INSTALLER_NEEDS_PLAYER.format(title="Light Cars")
     assert eng.ctx.elevator.calls == [] and eng.ctx.records.load("lightcars") is None
 
 
@@ -284,9 +282,7 @@ def test_nothing_found_and_player_gives_up_fails_plainly(tmp_path):
     routes = {}
     ui = FakeInstallerUI(locate=None)
     eng, lib = setup_engine(tmp_path, [run_game(routes)], routes, ui=ui)
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
+    assert fails(install, eng).message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
     assert eng.ctx.records.load("lightcars") is None and not (lib / "Light Cars").exists()
 
 
@@ -294,9 +290,7 @@ def test_player_located_drive_root_is_not_accepted(tmp_path):
     routes = {}
     ui = FakeInstallerUI(locate=Path(tmp_path.anchor))
     eng, lib = setup_engine(tmp_path, [run_game(routes)], routes, ui=ui)
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
+    assert fails(install, eng).message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
 
 
 def test_silent_installer_error_code_fails_and_removes_its_files(tmp_path):
@@ -311,9 +305,7 @@ def test_silent_installer_error_code_fails_and_removes_its_files(tmp_path):
         place(exe, args, elevated)
     elevator.on_start = on_start
     eng, lib = setup_engine(tmp_path, [e], routes, elevator=elevator)
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message == messages.INSTALLER_FAILED.format(title="Light Cars", code=5)
+    assert fails(install, eng).message == messages.INSTALLER_FAILED.format(title="Light Cars", code=5)
     assert not target.exists() and eng.ctx.records.load("lightcars") is None
     assert elevator.shown == [True]  # an installer keeps its window: the player may need to see it (I2)
 
@@ -390,9 +382,7 @@ def test_declined_elevation_fails_plainly(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno", "elevation": True})
     eng, lib = setup_engine(tmp_path, [e], routes, elevator=FakeElevator(decline=True))
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
+    assert fails(install, eng).message == messages.ELEVATION_DECLINED.format(what="Light Cars")
 
 
 def test_system_steps_of_a_run_source_are_applied_and_recorded(tmp_path):
@@ -428,9 +418,7 @@ def test_web_game_is_not_installed_by_the_engine(tmp_path):
     e = {"id": "webgame", "kind": "game", "title": "Web Game", "sources": [
         {"label": "Site", "url": "https://example.com/play", "platform": "web", "install": {"method": "url"}}]}
     eng, lib = setup_engine(tmp_path, [e], {})
-    with pytest.raises(InstallFailed) as ei:
-        install(eng, "webgame")
-    assert ei.value.message == messages.WEB_GAME_NOT_INSTALLED.format(title="Web Game")
+    assert fails(install, eng, "webgame").message == messages.WEB_GAME_NOT_INSTALLED.format(title="Web Game")
     assert eng.ctx.fetcher.requests == []
 
 
@@ -471,9 +459,7 @@ def test_a_bad_extra_download_fails_before_the_installer_starts(tmp_path):
     e, x = run_game_with_patch(routes, patch_route=False)
     target = tmp_path / "Games" / "Light Cars"
     eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, {"lc.exe": b"exe"}))
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message.startswith(messages.NO_SOURCE.format(title="Patch", reasons="").strip())
+    assert fails(install, eng).message.startswith(messages.NO_SOURCE.format(title="Patch", reasons="").strip())
     assert eng.ctx.elevator.calls == [] and not target.exists() and eng.ctx.records.load("lightcars") is None
 
 
@@ -502,9 +488,7 @@ def test_run_mode_extra_is_refused_plainly(tmp_path):
     x = run_game(routes, id="lc-patch", title="Patch", setup=b"patch setup", installer={"type": "inno"},
                  kind="extra", extends=["lightcars"])
     eng, lib = setup_engine(tmp_path, [e, x], routes)
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message == messages.EXTRA_NOT_SUPPORTED.format(extra="Patch")
+    assert fails(install, eng).message == messages.EXTRA_NOT_SUPPORTED.format(extra="Patch")
     assert not (lib / "Light Cars").exists()
 
 
@@ -585,9 +569,8 @@ def test_run_mode_update_refuses_while_earlier_set_aside_files_remain(tmp_path):
     eng, routes, target = installed_run_game(tmp_path)
     publish_v2(eng, routes)
     left = put(eng.ctx.work_root / ".setaside" / "lightcars", "cfg.ini", b"older copy")
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert ei.value.message == messages.SETASIDE_LEFT_OVER.format(title="Light Cars", path=left.parent)
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, never)
+    assert error.message == messages.SETASIDE_LEFT_OVER.format(title="Light Cars", path=left.parent)
     assert left.read_bytes() == b"older copy" and len(eng.ctx.elevator.calls) == 1
 
 
@@ -604,8 +587,7 @@ def test_cancelled_update_restores_player_files_and_removes_only_new_ones(tmp_pa
         put(target, "new.dll", b"new")
         (target / "saves" / "slot1.sav").unlink()
     eng.ctx.elevator.on_start = installer
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("update", "lightcars"), quiet, lambda: bool(started))
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, lambda: bool(started))
     after = snapshot(target)
     assert after.pop("cfg.ini.new") == b"installer's half-written ini"
     assert after == before
@@ -614,7 +596,7 @@ def test_cancelled_update_restores_player_files_and_removes_only_new_ones(tmp_pa
     aside = eng.ctx.work_root / ".setaside" / "lightcars.new"
     assert snapshot(aside) == {"new.dll": b"new"}
     assert not (eng.ctx.work_root / ".setaside" / "lightcars").exists()  # the player's copies: back, discarded
-    assert ei.value.message == "\n\n".join([messages.INSTALLER_CANCELLED.format(title="Light Cars"),
+    assert error.message == "\n\n".join([messages.INSTALLER_CANCELLED.format(title="Light Cars"),
                                              messages.NEW_FILES_SET_ASIDE.format(title="Light Cars", path=aside)])
     assert eng.ctx.records.load("lightcars").source.version == "1.0"
 
@@ -627,17 +609,15 @@ def test_failed_update_sets_new_files_aside_and_a_retry_neither_clears_nor_refus
         eng.ctx.elevator.exit_codes[exe] = 7
         put(target, "saves" / Path("slot2.sav"), b"written by the game during the window")
     eng.ctx.elevator.on_start = failing
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("update", "lightcars"), quiet, never)
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, never)
     aside = eng.ctx.work_root / ".setaside" / "lightcars.new"
-    assert ei.value.message == "\n\n".join([messages.INSTALLER_FAILED.format(title="Light Cars", code=7),
+    assert error.message == "\n\n".join([messages.INSTALLER_FAILED.format(title="Light Cars", code=7),
                                              messages.NEW_FILES_SET_ASIDE.format(title="Light Cars", path=aside)])
     assert (aside / "saves" / "slot2.sav").read_bytes() == b"written by the game during the window"
     assert not (target / "saves" / "slot2.sav").exists() and (target / "saves" / "slot1.sav").read_bytes() == b"save"
     # A second failure keeps the earlier file too; a retry that works leaves the folder for the player.
     eng.ctx.elevator.exit_codes.clear()
-    with pytest.raises(InstallFailed):
-        eng.run(InstallRequest("update", "lightcars"), quiet, never)
+    fails(eng.run, InstallRequest("update", "lightcars"), quiet, never)
     assert snapshot(aside) == {"saves/slot2.sav": b"written by the game during the window",
                            "saves/slot2 (2).sav": b"written by the game during the window"}
     eng.ctx.elevator.exit_codes.clear()
@@ -687,9 +667,8 @@ def test_untracked_run_install_cannot_be_updated(tmp_path):
     rec.tracked = False
     eng.ctx.records.save(rec)
     publish_v2(eng, routes)
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert ei.value.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Light Cars")
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, never)
+    assert error.message == messages.INSTALL_NOT_CHANGEABLE.format(title="Light Cars")
 
 
 # ---- uninstall -------------------------------------------------------------------------------------------
@@ -738,9 +717,8 @@ def test_vendor_uninstall_refuses_before_undoing_anything_while_set_aside_files_
     eng.ctx.records.save(rec)
     eng.ctx.registry.set("HKCU", r"Software\LC", "P", "REG_SZ", "v")
     left = put(eng.ctx.work_root / ".setaside" / "lightcars", "cfg.ini", b"older copy")
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert ei.value.message == messages.SETASIDE_LEFT_OVER.format(title="Light Cars", path=left.parent)
+    error = fails(eng.run, InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert error.message == messages.SETASIDE_LEFT_OVER.format(title="Light Cars", path=left.parent)
     assert eng.ctx.registry.get("HKCU", r"Software\LC", "P")[0] is True
     assert eng.ctx.records.load("lightcars") == rec and len(eng.ctx.elevator.calls) == 1
 
@@ -906,9 +884,7 @@ def test_located_folder_inside_another_games_folder_is_refused(tmp_path):
     eng, lib = setup_engine(tmp_path, [run_game(routes)], routes, ui=ui)
     eng.ctx.records.save(InstallRecord("othergame", "game", "Games", "Other Game", "other.exe",
                                        InstalledSource("u", "s", 1, None, None, 0, "1"), {}, {}, [], "zip"))
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
+    assert fails(install, eng).message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
 
 
 def test_registry_folder_holding_another_games_folder_is_skipped(tmp_path):
@@ -924,9 +900,7 @@ def test_registry_folder_holding_another_games_folder_is_skipped(tmp_path):
                             on_start=on_start, uninstall_reader=keys)
     eng.ctx.records.save(InstallRecord("oldgame", "game", "", str(dev / "OldGame"), "old.exe",
                                        InstalledSource("u", "s", 1, None, None, 0, "1"), {}, {}, [], "run"))
-    with pytest.raises(InstallFailed) as ei:
-        install(eng)
-    assert ei.value.message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
+    assert fails(install, eng).message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
 
 
 def test_file_written_to_but_created_before_the_window_is_not_claimed(tmp_path):
@@ -1094,9 +1068,8 @@ def test_cancel_of_an_installer_that_wont_stop_cleans_nothing(tmp_path, monkeypa
         place(exe, args, elevated)
     eng, lib = setup_engine(tmp_path, [run_game(routes, installer={"type": "inno", "elevation": True})], routes,
                             on_start=on_start, process_watch=watch_with(unstoppable=True))
-    with pytest.raises(InstallFailed) as ei:
-        install(eng, cancel=lambda: bool(started))
-    assert ei.value.message == messages.INSTALLER_STILL_RUNNING.format(title="Light Cars")
+    error = fails(install, eng, cancel=lambda: bool(started))
+    assert error.message == messages.INSTALLER_STILL_RUNNING.format(title="Light Cars")
     assert (target / "lc.exe").exists()  # not cleaned up under a running installer
     assert eng.ctx.process_watch.made[0].terminated
 
@@ -1113,9 +1086,8 @@ def test_cancelled_update_that_wont_stop_keeps_the_copies(tmp_path, monkeypatch)
         put(target, "cfg.ini", b"volume=7")
     eng.ctx.elevator.on_start = installer
     eng.ctx.process_watch = watch_with(unstoppable=True)
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("update", "lightcars"), quiet, lambda: bool(started))
-    assert ei.value.message == "\n\n".join([messages.INSTALLER_STILL_RUNNING.format(title="Light Cars"),
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, lambda: bool(started))
+    assert error.message == "\n\n".join([messages.INSTALLER_STILL_RUNNING.format(title="Light Cars"),
                                             messages.SETASIDE_KEPT.format(title="Light Cars", path=setaside(eng))])
     assert (setaside(eng) / "cfg.ini").read_bytes() == b"volume=9 mine"
 
@@ -1126,9 +1098,8 @@ def test_update_file_step_that_would_delete_a_players_file_is_refused(tmp_path):
     eng, routes, target = installed_run_game(tmp_path)
     publish_v2(eng, routes, steps=[{"action": "delete", "path": "saves"}])
     eng.ctx.elevator.on_start = lambda exe, args, elevated: put(target, "lc.exe", b"exe v2")
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert ei.value.message.startswith(messages.STEP_TOUCHES_OTHER_FILES.format(title="Light Cars"))
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, never)
+    assert error.message.startswith(messages.STEP_TOUCHES_OTHER_FILES.format(title="Light Cars"))
     assert (target / "saves" / "slot1.sav").read_bytes() == b"save"
 
 
@@ -1243,9 +1214,8 @@ def test_update_whose_installer_never_started_leaves_no_copies_and_can_be_retrie
     eng, routes, target = installed_run_game(tmp_path, elevation=True)
     publish_v2(eng, routes, elevation=True)
     eng.ctx.elevator.decline = True
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert ei.value.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
+    error = fails(eng.run, InstallRequest("update", "lightcars"), quiet, never)
+    assert error.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
     assert not setaside(eng).exists()
     assert (target / "cfg.ini").read_bytes() == b"volume=9 mine"
     eng.ctx.elevator.decline = False
@@ -1257,9 +1227,8 @@ def test_update_whose_installer_never_started_leaves_no_copies_and_can_be_retrie
 def test_vendor_uninstall_whose_uninstaller_never_started_puts_files_back_and_can_be_retried(tmp_path):
     eng, routes, target = installed_run_game(tmp_path, vendor=True, elevation=True)
     eng.ctx.elevator.decline = True
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert ei.value.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
+    error = fails(eng.run, InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert error.message == messages.ELEVATION_DECLINED.format(what="Light Cars")
     assert not setaside(eng).exists()
     assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save", "unins000.exe": b"uninstaller"}
     eng.ctx.elevator.decline = False
@@ -1286,9 +1255,7 @@ def test_cancelled_update_whose_tree_wasnt_seen_to_finish_says_where_the_copies_
     publish_v2(eng, routes)
     cancel = hangs_once_started(eng, lambda exe, args, elevated: put(target, "cfg.ini", b"volume=7"))
     eng.ctx.process_watch = watch_with(observed=False)
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("update", "lightcars"), quiet, cancel)
-    assert ei.value.message == "\n\n".join([
+    assert fails(eng.run, InstallRequest("update", "lightcars"), quiet, cancel).message == "\n\n".join([
         messages.INSTALLER_CANCELLED.format(title="Light Cars"),
         messages.SETASIDE_KEPT_TO_BE_SAFE.format(title="Light Cars", path=setaside(eng))])
     assert (target / "cfg.ini").read_bytes() == b"volume=9 mine"  # put back
@@ -1299,9 +1266,7 @@ def test_cancelled_vendor_uninstall_whose_tree_wasnt_seen_to_finish_says_where_t
     eng, routes, target = installed_run_game(tmp_path, vendor=True)
     cancel = hangs_once_started(eng, lambda exe, args, elevated: None)
     eng.ctx.process_watch = watch_with(observed=False)
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("uninstall", "lightcars"), quiet, cancel)
-    assert ei.value.message == "\n\n".join([
+    assert fails(eng.run, InstallRequest("uninstall", "lightcars"), quiet, cancel).message == "\n\n".join([
         messages.UNINSTALLER_CANCELLED.format(title="Light Cars"),
         messages.SETASIDE_NOT_PUT_BACK.format(title="Light Cars", path=setaside(eng))])
     assert snapshot(setaside(eng)) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
@@ -1320,9 +1285,7 @@ def test_cancelled_vendor_uninstall_whose_files_couldnt_be_put_back_says_so(tmp_
             raise OSError("disk full")
         return real_copy(src, dst, **kw)
     monkeypatch.setattr(run_installer.shutil, "copy2", copy2)
-    with pytest.raises(InstallFailed) as ei:
-        eng.run(InstallRequest("uninstall", "lightcars"), quiet, cancel)
-    assert ei.value.message == "\n\n".join([
+    assert fails(eng.run, InstallRequest("uninstall", "lightcars"), quiet, cancel).message == "\n\n".join([
         messages.UNINSTALLER_CANCELLED.format(title="Light Cars"),
         messages.SETASIDE_KEPT.format(title="Light Cars", path=setaside(eng))])
 
@@ -1408,8 +1371,7 @@ def test_a_failed_vendor_uninstall_can_be_finished_by_uninstalling_again(tmp_pat
     def declined(exe, args, elevated):
         raise ElevationDeclined("The administrator prompt was declined.")
     elevator.on_start = declined
-    with pytest.raises(InstallFailed):
-        eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    fails(eng.run, InstallRequest("uninstall", "lightcars"), quiet, never)
     rec = eng.ctx.records.load("lightcars")
     assert rec.uninstalled and rec.vendor_uninstaller and "unins000.exe" in rec.files
     assert snapshot(target)["cfg.ini"] == b"volume=9 mine" and snapshot(target)["saves/slot1.sav"] == b"save"
