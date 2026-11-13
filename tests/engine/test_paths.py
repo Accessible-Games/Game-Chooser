@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from engine.errors import UnsafePath
-from engine.paths import (backup_dir_name, is_engine_dir, norm_key,
+from engine.paths import (backup_dir_name, is_engine_dir, norm_key, walk_files,
                           safe_join, sanitize_title, unique_path)
 
 
@@ -37,3 +37,9 @@ def test_unique_path(tmp_path):
     (tmp_path / "a (2).txt").write_text("x")
     assert unique_path(tmp_path / "a.txt") == tmp_path / "a (3).txt"
     assert unique_path(tmp_path / "new.txt") == tmp_path / "new.txt"
+
+
+def test_walk_files_enters_a_backup_folder_unless_told_not_to(tmp_path):
+    (tmp_path / backup_dir_name(date(2026, 11, 4))).mkdir()
+    (tmp_path / backup_dir_name(date(2026, 11, 4)) / "cfg.ini").write_text("the player's")
+    assert [p.name for p in walk_files(tmp_path)] == ["cfg.ini"]

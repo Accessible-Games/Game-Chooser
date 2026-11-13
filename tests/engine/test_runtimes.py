@@ -12,7 +12,7 @@ from xml.dom import minidom
 
 import pytest
 
-from engine import comfree, messages, run_installer
+from engine import comfree, messages, run_installer, runtimes
 from engine.comfree import PrivateComUnavailable, com_manifest_xml, has_embedded_manifest, write_private_com
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
@@ -1177,6 +1177,22 @@ def test_installer_runtime_runs_untracked_then_is_checked(tmp_path, monkeypatch)
     assert (lib / "Entombed" / "entombed.exe").exists()
 
 
+def test_installer_runtime_that_exits_with_an_error_fails_and_its_new_files_are_removed(tmp_path, monkeypatch):
+    routes = {}
+    rt, g = vb6(routes), game(routes, dependencies=["vb6-runtime"])
+    monkeypatch.setenv("GC_VB6", str(tmp_path / "system"))
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    left = eng.ctx.runtimes_root / "vb6-runtime" / "half-installed.dll"
+
+    def fails(exe, args, elevated):
+        left.write_bytes(b"MZ half")
+        eng.ctx.elevator.exit_codes[exe] = 4
+    eng.ctx.elevator.on_start = fails
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.INSTALLER_FAILED.format(title=VB6_TITLE, code=4) and not left.exists()
+
+
 def test_installer_runtime_still_missing_fails(tmp_path, monkeypatch):
     routes = {}
     rt, g = vb6(routes), game(routes, dependencies=["vb6-runtime"])
@@ -1324,6 +1340,17 @@ def test_runtime_whose_developer_file_changed_is_installed_with_the_note(tmp_pat
     assert r.notes == [messages.DEVELOPER_CHANGED_UNVERIFIED]
 
 
+def test_runtimes_last_register_step_with_an_unsafe_path_is_refused_before_it_runs(tmp_path):
+    routes = {}
+    rt, g = dx8vb(routes), game(routes)
+    rt["sources"][0]["steps"] = [{"action": "register", "path": "../evil.dll"}]
+    eng, lib = setup(tmp_path, [rt, g], routes)
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message.startswith(messages.STEP_UNSAFE_PATH)
+    assert not any("evil.dll" in args for _, args, _ in eng.ctx.elevator.calls)
+
+
 @pytest.mark.parametrize("action", ["install", "update"])
 def test_runtime_note_still_reaches_the_player_when_the_game_then_fails(tmp_path, action):
     routes = {}
@@ -1353,6 +1380,18 @@ def test_full_disk_while_unpacking_a_runtime_gets_plain_words(tmp_path, private_
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, register_shared_components=shared, extractor=FullDisk())
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, "install")
+    assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
+
+
+def test_full_disk_while_copying_a_private_runtime_into_the_game_gets_plain_words(tmp_path, private_com,
+                                                                                    monkeypatch):
+    def full_disk(root, tree, copy):
+        raise OSError(errno.ENOSPC, "No space left on device")
+    monkeypatch.setattr(runtimes, "_copy_into", full_disk)
+    routes = {}
+    eng, lib = setup(tmp_path, [dx8vb(routes), game(routes)], routes, register_shared_components=False)
     with pytest.raises(InstallFailed) as ei:
         run(eng, "install")
     assert ei.value.message == messages.DISK_FULL.format(title="Entombed")
