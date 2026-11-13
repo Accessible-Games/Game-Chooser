@@ -116,3 +116,9 @@ def test_install_warning():
     # never tells players to pay or register for what can't be bought
     assert install_warning(p("one-time", price=5, currency="USD", url="https://x/buy", no_longer_sold=True)) == \
         "Price: Buy once. The full version can no longer be bought."
+
+
+def test_a_pricing_address_is_read_as_an_entry_link_is():
+    assert purchase_link(p("one-time", url="HTTPS://x/buy")) == ("Buy", "HTTPS://x/buy")
+    assert purchase_link(p("one-time", url="https://x/a b")) is None
+    assert donate_link(p("free", donate_url="https://")) is None
