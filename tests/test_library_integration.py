@@ -22,6 +22,13 @@ def _seed_records(factory, *records):
         store.save(rec)
 
 
+def _restart(factory, tmp_path, *records, games=None):
+    """A first start with one library at tmp_path, then the install records are saved, then a restart"""
+    factory(config={"libraries": [{"id": "main", "path": str(tmp_path)}]})
+    _seed_records(factory, *records)
+    return factory(games=games)
+
+
 def _games_json(owner):
     """games.json as saved; `owner` is a manager or the factory fixture"""
     path = owner.games_file if hasattr(owner, "games_file") else owner.app_dir / "games.json"
@@ -66,11 +73,8 @@ def test_plain_games_round_trip_without_catalog_keys(isolated_manager):
 
 def test_catalog_game_with_missing_exe_is_kept(isolated_manager_factory, tmp_path):
     config = {"libraries": [{"id": "main", "path": str(tmp_path / "unplugged")}]}
-    games = [{"title": "Entombed", "launch_path": "Entombed/e.exe", "library_id": "main",
-              "catalog_id": "entombed", "installed_source": {"url": "u", "sha256": "s", "size": 1},
-              "installed_extras": []}]
     _seed_records(isolated_manager_factory, _record())
-    m = isolated_manager_factory(games=games, config=config)
+    m = isolated_manager_factory(games=_catalog_row(), config=config)
     assert not m.library_reachable("main")
     assert [g.catalog_id for g in m.games] == ["entombed"]
     assert m.catalog_game("entombed") is m.games[0]
@@ -101,10 +105,7 @@ def test_add_catalog_game_replaces_and_saves_then_remove(isolated_manager):
 
 
 def test_reconcile_adds_game_for_orphan_record(isolated_manager_factory, tmp_path):
-    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
-    isolated_manager_factory(config=config)
-    _seed_records(isolated_manager_factory, _record())
-    m = isolated_manager_factory()
+    m = _restart(isolated_manager_factory, tmp_path, _record())
     game = m.catalog_game("entombed")
     assert game is not None
     assert game.title == "entombed"  # the entry isn't cached: the id stands in for the title
@@ -127,18 +128,12 @@ def test_reconcile_uses_cached_entry_for_title(isolated_manager_factory, tmp_pat
 
 
 def test_reconcile_skips_uninstalled_records(isolated_manager_factory, tmp_path):
-    isolated_manager_factory(config={"libraries": [{"id": "main", "path": str(tmp_path)}]})
-    _seed_records(isolated_manager_factory, _record(uninstalled=True))
-    m = isolated_manager_factory()
-    assert m.games == []
+    assert _restart(isolated_manager_factory, tmp_path, _record(uninstalled=True)).games == []
 
 
 def test_reconcile_unlinks_game_whose_record_is_gone(isolated_manager_factory, tmp_path):
     config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
-    games = [{"title": "Entombed", "launch_path": "Entombed/e.exe", "library_id": "main",
-              "catalog_id": "entombed", "installed_source": {"url": "u", "sha256": "s", "size": 1},
-              "installed_extras": ["patch"]}]
-    m = isolated_manager_factory(games=games, config=config)
+    m = isolated_manager_factory(games=[{**_catalog_row()[0], "installed_extras": ["patch"]}], config=config)
     assert len(m.games) == 1
     game = m.games[0]
     assert not game.catalog_id
@@ -201,13 +196,10 @@ def test_corrupt_games_json_is_copied_before_reconcile_writes(isolated_manager_f
 
 def test_unreadable_record_keeps_the_games_catalog_link(isolated_manager_factory, tmp_path):
     config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
-    games = [{"title": "Entombed", "launch_path": "Entombed/e.exe", "library_id": "main",
-              "catalog_id": "entombed", "installed_source": {"url": "u", "sha256": "s", "size": 1},
-              "installed_extras": []}]
     installs = isolated_manager_factory.config_dir / "installs"
     installs.mkdir(parents=True)
     (installs / "entombed.json").write_text("{not json", encoding="utf-8")
-    m = isolated_manager_factory(games=games, config=config)
+    m = isolated_manager_factory(games=_catalog_row(), config=config)
     assert m.games[0].catalog_id == "entombed" and m.games[0].library_id == "main"
     assert _games_json(m)[0]["catalog_id"] == "entombed"
 
@@ -226,13 +218,10 @@ def _runtime(catalog_id="dx8vb", folder="C:/ProgramData/GameChooser/runtimes/dx8
 
 
 def test_reconcile_skips_runtime_records(isolated_manager_factory, tmp_path):
-    isolated_manager_factory(config={"libraries": [{"id": "main", "path": str(tmp_path)}]})
     dx8vb = _runtime(folder=str(tmp_path / "runtimes" / "dx8vb"))
     vb6 = _runtime("vb6-runtime", folder=str(tmp_path / "runtimes" / "vb6-runtime"), tracked=False)
     vb6.method = "run"
-    _seed_records(isolated_manager_factory, dx8vb, vb6)
-    for _ in range(2):  # at every start
-        m = isolated_manager_factory()
+    for m in (_restart(isolated_manager_factory, tmp_path, dx8vb, vb6), isolated_manager_factory()):  # every start
         assert m.games == [] and m.catalog_game("dx8vb") is None and m.catalog_game("vb6-runtime") is None
     assert not (isolated_manager_factory.app_dir / "games.json").exists()  # nothing changed, nothing written
     assert m.records.load("dx8vb") == dx8vb and m.records.load("vb6-runtime") == vb6
@@ -242,12 +231,9 @@ def test_reconcile_skips_runtime_records(isolated_manager_factory, tmp_path):
 def test_reconcile_unlinks_a_game_that_names_a_runtime_record(isolated_manager_factory, tmp_path):
     """A hand-edited games.json row with a runtime's id has no game record: it is kept, as a game added by hand,
     and the runtime's record is never touched."""
-    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
     games = [{"title": "DX", "launch_path": "DX/dx.exe", "library_id": "main", "catalog_id": "dx8vb"}]
-    isolated_manager_factory(config=config)
     runtime = _runtime(folder=str(tmp_path / "runtimes" / "dx8vb"))
-    _seed_records(isolated_manager_factory, runtime)
-    m = isolated_manager_factory(games=games)
+    m = _restart(isolated_manager_factory, tmp_path, runtime, games=games)
     assert [(g.title, g.catalog_id, g.library_id) for g in m.games] == [("DX", "", "")]
     assert m.records.load("dx8vb") == runtime
 
@@ -268,14 +254,11 @@ def _catalog_row():
 
 def test_reconcile_keeps_a_game_whose_uninstall_stopped_partway(isolated_manager_factory, tmp_path):
     from engine.records import RecordedFile
-    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
-    isolated_manager_factory(config=config)
     left = _record(uninstalled=True, files={"e.exe": RecordedFile("e.exe", "a" * 64, "entombed")})
     vendor = _record("pawprints", folder="Pawprints", uninstalled=True, vendor_uninstaller='"C:/u.exe" /S')
-    _seed_records(isolated_manager_factory, left, vendor)
     rows = _catalog_row() + [{**_catalog_row()[0], "title": "Pawprints", "launch_path": "Pawprints/p.exe",
                               "catalog_id": "pawprints"}]
-    m = isolated_manager_factory(games=rows)
+    m = _restart(isolated_manager_factory, tmp_path, left, vendor, games=rows)
     assert [(g.catalog_id, g.library_id, g.launch_path) for g in m.games] == [
         ("entombed", "main", "Entombed/e.exe"), ("pawprints", "main", "Pawprints/p.exe")]  # still uninstallable
     assert _games_json(isolated_manager_factory) == rows  # nothing changed, nothing written
@@ -285,12 +268,9 @@ def test_reconcile_finishes_an_uninstall_whose_result_was_not_applied(isolated_m
     """The uninstall finished (nothing of the install is left) but the app quit before it reached games.json:
     the game leaves the list (an uninstall the player confirmed); its record, which keeps the player's files'
     folder known, stays."""
-    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
-    isolated_manager_factory(config=config)
     done = _record(uninstalled=True, files={})
-    _seed_records(isolated_manager_factory, done)
     hand = {"title": "Hand", "launch_path": "C:/Games/hand.exe", "library_id": ""}
-    m = isolated_manager_factory(games=_catalog_row() + [hand])
+    m = _restart(isolated_manager_factory, tmp_path, done, games=_catalog_row() + [hand])
     assert [(g.title, g.catalog_id) for g in m.games] == [("Hand", "")]
     assert [g["title"] for g in _games_json(isolated_manager_factory)] == ["Hand"]
     assert m.records.load("entombed") == done
