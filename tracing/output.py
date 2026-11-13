@@ -4,9 +4,9 @@ import re
 import shutil
 from pathlib import Path
 
-from tracing.clock import TICKS_PER_SECOND, filetime_to_iso, filetime_to_local_stamp
+from tracing.clock import filetime_to_iso, filetime_to_local_stamp
 from tracing.model import SessionInfo
-from tracing.split import SessionResult
+from tracing.split import SessionResult, _t
 
 KNOWN_LIMITS = [
     "Work a game hands to a process outside its own process tree (a COM server started by Windows, a service, "
@@ -27,10 +27,6 @@ def session_folder_name(info: SessionInfo) -> str:
     catalog_id = info.game["catalog_id"]
     name = safe_name(catalog_id) if catalog_id else safe_name(info.game["title"])
     return f"{name}-{filetime_to_local_stamp(info.launch_before)}"
-
-
-def _t(time: int, zero: int) -> float:
-    return round((time - zero) / TICKS_PER_SECOND, 6)
 
 
 def _process_entry(proc, zero: int) -> dict:

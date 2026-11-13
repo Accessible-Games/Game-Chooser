@@ -10,7 +10,7 @@ from pathlib import Path
 
 from tracing import messages, paths
 from tracing.runfiles import RunDir, leftover_runs
-from tracing.splitrun import split_run_dir
+from tracing.splitrun import report_split, split_run_dir
 
 COMMANDS = ("--trace-recorder", "--trace-split", "--trace-stop", "--trace-probe", "--trace-check")
 DEFAULT_WORKLOAD = paths.REPO_DIR / "tests" / "catalog_fixtures" / "games" / "trace-test" / "trace-test.bat"
@@ -159,11 +159,7 @@ def _split(args, compiled: bool) -> int:
             print(f"{run.path}: {error}")
             failed = True
             continue
-        for folder in result.folders:
-            print(f"Wrote {folder}")
-        for problem in result.problems:
-            print(f"Problem: {problem}")
-            failed = True
+        failed = report_split(result.folders, result.problems, print) or failed
     return 1 if failed else 0
 
 
@@ -232,7 +228,7 @@ def _build_recorder(args) -> "Recorder":
     from tracing.procmon import WindowsProcmon
     from tracing.recorder import Recorder
     run = RunDir(Path(args.trace_recorder))
-    traces_dir = run.path.parent.parent
+    traces_dir = run.traces_dir
     return Recorder(
         run, _app_alive_check(args.app_pid), WindowsProcmon(Path(args.procmon)), windows_snapshot,
         lambda r: split_run_dir(r, traces_dir, read_capture), lambda: leftover_runs(traces_dir, _recorder_is_alive),

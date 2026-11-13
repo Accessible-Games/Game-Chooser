@@ -141,7 +141,8 @@ Build: see `.claude/rules/build.md`.
     client then keep the last membership)
   - `runfiles.py` - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` - split a run folder
   - `split.py` - attribute events to sessions and merge writes; `attribution.py` - the process tree
-  - `kinds.py` - event to write kind; `virtualstore.py` - the VirtualStore path
+  - `kinds.py` - event to write kind, the write kinds and the rename and delete operation names the other
+    modules use; `virtualstore.py` - the VirtualStore path
   - `output.py` - writes `session.json` and `events.jsonl`; `model.py`, `clock.py`, `paths.py`
   - `probe.py` - the `--trace-probe` command
   - `check_trace_test.py` - `python -m tracing.check_trace_test <session folder>` checks a session of the

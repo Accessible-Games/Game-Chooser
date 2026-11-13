@@ -83,6 +83,11 @@ class RunDir:
         self.path = Path(path)
 
     @property
+    def traces_dir(self) -> Path:
+        """The traces folder this run sits in (traces/_runs/<run>, as new_run makes it)."""
+        return self.path.parent.parent
+
+    @property
     def status_path(self) -> Path:
         return self.path / "status.json"
 
@@ -205,6 +210,9 @@ class RunDir:
                 problems.append(f"{item.name}: the session file couldn't be read ({exc}), so that session is "
                                 "missing.")
         return sorted(sessions, key=lambda s: s.launch_before), problems
+
+    def read_split(self) -> dict | None:
+        return _read_dict(self.split_path)
 
     def write_split(self, record: dict) -> None:
         _atomic_write(self.split_path, json.dumps(record))

@@ -10,14 +10,15 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
+from tracing.kinds import DISPOSITION_OPERATIONS, RENAME_OPERATIONS
+
 log = logging.getLogger(__name__)
 
 READY_RETRY_SECONDS = 0.5
 
 # Procmon's display names of the operations a capture keeps.
 CAPTURE_OPERATIONS = (
-    "CreateFile", "WriteFile", "SetRenameInformationFile", "SetRenameInformationEx",
-    "SetRenameInformationExBypassAccessCheck", "SetDispositionInformationFile", "SetDispositionInformationEx",
+    "CreateFile", "WriteFile", *RENAME_OPERATIONS, *DISPOSITION_OPERATIONS,
     "RegCreateKey", "RegSetValue", "RegDeleteValue", "RegDeleteKey",
     # Kept so every process appears in the PML's process table, even one that writes nothing (a launcher).
     "Process Create", "Process Start", "Process Exit",

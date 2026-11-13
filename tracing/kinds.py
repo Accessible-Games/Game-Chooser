@@ -7,8 +7,9 @@ WRITE_KINDS = (
 
 _RETRIED_RESULTS = ("FAST IO DISALLOWED", "REPARSE")
 _CREATING_DISPOSITIONS = ("Create", "Overwrite", "OverwriteIf", "Supersede")
-_RENAMES = ("SetRenameInformationFile", "SetRenameInformationEx", "SetRenameInformationExBypassAccessCheck")
-_DISPOSITIONS = ("SetDispositionInformationFile", "SetDispositionInformationEx")
+# Process Monitor's operation names (procmon.py captures them, pml.py decodes the renames)
+RENAME_OPERATIONS = ("SetRenameInformationFile", "SetRenameInformationEx", "SetRenameInformationExBypassAccessCheck")
+DISPOSITION_OPERATIONS = ("SetDispositionInformationFile", "SetDispositionInformationEx")
 _REGISTRY = {"RegSetValue": "reg_set_value", "RegDeleteValue": "reg_delete_value", "RegDeleteKey": "reg_delete_key"}
 
 
@@ -19,9 +20,9 @@ def classify(operation: str, result: str, details: dict) -> str | None:
         return _classify_create(result, details)
     if operation == "WriteFile":
         return "file_write"
-    if operation in _RENAMES:
+    if operation in RENAME_OPERATIONS:
         return "rename"
-    if operation in _DISPOSITIONS:
+    if operation in DISPOSITION_OPERATIONS:
         return "delete" if details.get("Delete") == "True" else None
     if operation == "RegCreateKey":
         if details.get("Disposition") == "REG_CREATED_NEW_KEY" or result != "SUCCESS":
