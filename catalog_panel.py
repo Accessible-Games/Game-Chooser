@@ -239,9 +239,9 @@ class CatalogPanel(wx.Panel):
         if row is None:
             return None
         menu = wx.Menu()
-        action = menu.Append(wx.ID_ANY, action_label(row))
+        action = menu.Append(wx.ID_ANY, wx.Control.EscapeMnemonics(action_label(row)))
         menu.Bind(wx.EVT_MENU, lambda e: self.on_action(), action)
         for label, url in link_items(row.entry):
-            item = menu.Append(wx.ID_ANY, label)
+            item = menu.Append(wx.ID_ANY, wx.Control.EscapeMnemonics(label))
             menu.Bind(wx.EVT_MENU, lambda e, link=url: webbrowser.open(link), item)
         return menu

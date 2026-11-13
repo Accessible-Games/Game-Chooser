@@ -17,6 +17,7 @@ log = logging.getLogger(__name__)
 __all__ = ["InstallChoice", "InstallConfirmDialog", "UninstallDialog", "RemoveLibraryDialog"]
 
 _WRAP = 450
+_text = wx.Control.EscapeMnemonics  # a title or folder with "&" in a label is shown, not taken as an access key
 
 
 class InstallConfirmDialog(wx.Dialog):
@@ -51,7 +52,7 @@ class InstallConfirmDialog(wx.Dialog):
         self._build_dependencies(root)
 
         for warning in plan.warnings:
-            text = wx.StaticText(self, label=warning)
+            text = wx.StaticText(self, label=_text(warning))
             text.Wrap(_WRAP)
             root.Add(text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
 
@@ -76,19 +77,19 @@ class InstallConfirmDialog(wx.Dialog):
     def _build_where(self, root):
         plan = self.plan
         if self.fixed_library is not None:
-            text = wx.StaticText(self, label=messages.CONFIRM_INSTALLS_INTO.format(
-                library=library_choice_label(self.fixed_library)))
+            text = wx.StaticText(self, label=_text(messages.CONFIRM_INSTALLS_INTO.format(
+                library=library_choice_label(self.fixed_library))))
             root.Add(text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
         elif len(plan.libraries) >= 2:
             self._radio = wx.RadioBox(self, label=messages.CONFIRM_WHERE,
-                                      choices=library_choice_labels(plan.libraries), majorDimension=1,
-                                      style=wx.RA_SPECIFY_COLS)
+                                      choices=[_text(c) for c in library_choice_labels(plan.libraries)],
+                                      majorDimension=1, style=wx.RA_SPECIFY_COLS)
             self._radio.SetSelection(default_library_index(plan))
             self._radio.Bind(wx.EVT_RADIOBOX, lambda e: self._update_blocked())
             root.Add(self._radio, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
         elif plan.libraries:
-            text = wx.StaticText(self, label=messages.CONFIRM_INSTALLS_INTO.format(
-                library=library_choice_label(plan.libraries[0])))
+            text = wx.StaticText(self, label=_text(messages.CONFIRM_INSTALLS_INTO.format(
+                library=library_choice_label(plan.libraries[0]))))
             root.Add(text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
         else:
             row = wx.BoxSizer(wx.HORIZONTAL)
@@ -121,7 +122,7 @@ class InstallConfirmDialog(wx.Dialog):
         box = wx.StaticBox(self, label=messages.CONFIRM_EXTRAS_BOX)
         sizer = wx.StaticBoxSizer(box, wx.VERTICAL)
         for extra in self.plan.extras:
-            check = wx.CheckBox(box, label=extra_label(extra))
+            check = wx.CheckBox(box, label=_text(extra_label(extra)))
             if extra.required:
                 check.SetValue(True)
                 check.Disable()
@@ -134,12 +135,12 @@ class InstallConfirmDialog(wx.Dialog):
     def _build_dependencies(self, root):
         for line in self.plan.dependencies:
             if line.installs:
-                check = wx.CheckBox(self, label=line.text)
+                check = wx.CheckBox(self, label=_text(line.text))
                 check.SetValue(True)
                 check.Disable()
                 root.Add(check, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
             else:
-                text = wx.StaticText(self, label=line.text)
+                text = wx.StaticText(self, label=_text(line.text))
                 text.Wrap(_WRAP)
                 root.Add(text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
 
@@ -156,7 +157,7 @@ class InstallConfirmDialog(wx.Dialog):
 
     def _update_intro(self):
         chosen = set(chosen_optional(self.plan, self._checked()))
-        self.intro.SetLabel(intro_text(self.plan, chosen, self._entry_titles))
+        self.intro.SetLabelText(intro_text(self.plan, chosen, self._entry_titles))
         self.intro.Wrap(_WRAP)
         self._relayout()
 
@@ -236,10 +237,10 @@ class _UninstallConfirm(wx.Dialog):
     def __init__(self, parent, title: str, text: str, checkbox_label: str, ok: str):
         super().__init__(parent, title=title, style=wx.DEFAULT_DIALOG_STYLE)
         root = wx.BoxSizer(wx.VERTICAL)
-        self.text = wx.StaticText(self, label=text)
+        self.text = wx.StaticText(self, label=_text(text))
         self.text.Wrap(_WRAP)
         root.Add(self.text, 0, wx.ALL | wx.EXPAND, 10)
-        self.delete_box = wx.CheckBox(self, label=checkbox_label)
+        self.delete_box = wx.CheckBox(self, label=_text(checkbox_label))
         self.delete_box.SetValue(False)
         root.Add(self.delete_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
         buttons = wx.BoxSizer(wx.HORIZONTAL)

@@ -409,7 +409,7 @@ class GamesPanel(wx.Panel):
         row = self.selected_row()
         if row is None and self.action_btn.HasFocus():
             self.focus_list()  # never leave focus on a control that is about to be disabled (not under a dialog)
-        self.action_btn.SetLabel(action_label(row) if row else self.idle_label)
+        self.action_btn.SetLabelText(action_label(row) if row else self.idle_label)
         self.action_btn.Enable(row is not None)
         self.description.set_text(description_text(row.entry) if row else "")
         self.action_sizer_slot.Layout()

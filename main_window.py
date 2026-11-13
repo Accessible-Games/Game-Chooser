@@ -651,7 +651,7 @@ class MainFrame(wx.Frame):
                     item = menu.Append(wx.ID_ANY, label)
                     menu.Bind(wx.EVT_MENU, handler, item)
             for action in self._catalog_menu_items(game):
-                item = menu.Append(wx.ID_ANY, action.label.replace("&", "&&"))
+                item = menu.Append(wx.ID_ANY, wx.Control.EscapeMnemonics(action.label))
                 item.Enable(action.enabled)
                 menu.Bind(wx.EVT_MENU, lambda e, a=action, g=game: self.on_catalog_action(a, g), item)
             menu.AppendSeparator()
@@ -1084,9 +1084,7 @@ class MainFrame(wx.Frame):
         # (two folders both named Games) are separate items, told apart by their path.
         for lib in self.library_manager.config["libraries"]:
             library_id = lib["id"]
-            label = library_label(lib)
-            # Escape & so it isn't treated as a mnemonic marker
-            text = f"{label} ({lib['path']})".replace("&", "&&")
+            text = wx.Control.EscapeMnemonics(f"{library_label(lib)} ({lib['path']})")
             menu_item = self.libraries_menu.AppendCheckItem(wx.ID_ANY, text)
             self.library_menu_items.append((library_id, menu_item))
             self.Bind(wx.EVT_MENU, lambda evt, lid=library_id: self.on_toggle_library(evt, lid), menu_item)
