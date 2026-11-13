@@ -1,9 +1,11 @@
 import json
 
+import pytest
+
 from engine import messages
 from engine.index import DEFAULT_CATALOG_URL
 from engine.records import InstalledSource, InstallRecord, RecordStore
-from models import Game
+from models import Game, is_web_path
 
 
 def _record(catalog_id="entombed", library_id="main", folder="Entombed", **kw):
@@ -293,3 +295,9 @@ def test_reconcile_finishes_an_uninstall_whose_result_was_not_applied(isolated_m
     assert [g["title"] for g in _games_json(isolated_manager_factory)] == ["Hand"]
     assert m.records.load("entombed") == done
     assert [g.title for g in isolated_manager_factory().games] == ["Hand"]  # and it doesn't come back
+
+
+@pytest.mark.parametrize("path, web", [("https://example.com/game", True), ("HTTP://example.com/game", True),
+                                       ("HTTPS://", True), ("httpd-sim/game.exe", False), ("C:/Games/x.exe", False)])
+def test_a_web_address_is_http_or_https_in_any_case(path, web):
+    assert is_web_path(path) is web and Game(launch_path=path).is_web is web
