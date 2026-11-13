@@ -160,7 +160,7 @@ class GameDialog(wx.Dialog):
         self.platform_ctrl = wx.ComboBox(panel, choices=platforms, style=wx.CB_DROPDOWN | wx.CB_READONLY)
 
         # Determine initial platform
-        if self.game.launch_path.startswith("http"):
+        if self.game.is_web:
             initial_platform = "Web Game"
         elif self.game.platforms:
             initial_platform = self.game.platforms[0]
@@ -229,12 +229,6 @@ class GameDialog(wx.Dialog):
 
     def _get_display_path(self):
         """Get the path to display in the field (a hand-added game always has an absolute path)"""
-        if not self.game.launch_path:
-            return ""
-
-        if self.game.launch_path.startswith("http"):
-            return self.game.launch_path
-
         return self.game.launch_path
 
     def on_platform_change(self, event):
@@ -370,7 +364,7 @@ class GameDialog(wx.Dialog):
                 }
 
             # For non-web games, also check resolved absolute paths
-            if not path.startswith('http') and not game.launch_path.startswith('http'):
+            if not path.startswith('http') and not game.is_web:
                 try:
                     if game.library_id:
                         # Library game - resolve to absolute path

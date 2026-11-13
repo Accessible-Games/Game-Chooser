@@ -74,10 +74,6 @@ class PathManager:
         Returns:
             Absolute path as string or None if library not found
         """
-        # Handle special cases
-        if launch_path.startswith("http"):
-            return launch_path
-
         if not library_id:
             return launch_path
 

@@ -50,10 +50,6 @@ from library_manager import LibraryError
 log = logging.getLogger(__name__)
 
 
-def _is_web(game) -> bool:
-    return game.launch_path.startswith("http")
-
-
 class InstallService:
     def __init__(self, manager, listener: QueueListener, installer_ui, fetcher=None, extractor=None,
                  elevator=None, registry=None):
@@ -107,7 +103,7 @@ class InstallService:
         UI thread only. A game with a queued or running job is left alone: the job owns its record."""
         changed = 0
         for game in list(self.manager.games):
-            if not game.catalog_id or _is_web(game) or self.queue.job_for(game.catalog_id) is not None:
+            if not game.catalog_id or game.is_web or self.queue.job_for(game.catalog_id) is not None:
                 continue
             try:
                 changed += self._adopt(game.catalog_id)
@@ -160,7 +156,7 @@ class InstallService:
     def installed_ids(self) -> set[str]:
         """Catalog ids shown as installed: a game's install record that isn't uninstalled, or a catalog web game.
         A shared runtime's record is never a game's."""
-        ids = {g.catalog_id for g in self.manager.games if g.catalog_id and _is_web(g)}
+        ids = {g.catalog_id for g in self.manager.games if g.catalog_id and g.is_web}
         ids |= {cid for cid, rec in self.manager.records.game_records().items() if not rec.uninstalled}
         return ids
 
@@ -286,7 +282,7 @@ class InstallService:
             reachable = self.manager.library_reachable(game.library_id) if game.library_id else True
             record = records.get(game.catalog_id) if game.catalog_id else None
             result[(game.library_id, game.launch_path)] = game_status(
-                str(full_path) if full_path else None, _is_web(game), record, self.entry_for(game), platform,
+                str(full_path) if full_path else None, game.is_web, record, self.entry_for(game), platform,
                 library_reachable=reachable)
         return result
 
@@ -308,7 +304,7 @@ class InstallService:
         for game in self.manager.catalog_games_in(library_id):
             if is_uninstallable(self.manager.records.load_game(game.catalog_id)):
                 tracked.append(game)
-            elif not _is_web(game):
+            elif not game.is_web:
                 kept.append(game)
         return tracked, kept
 

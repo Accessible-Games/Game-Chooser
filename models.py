@@ -42,6 +42,10 @@ class Game:
     def is_catalog(self):
         return bool(self.catalog_id)
 
+    @property
+    def is_web(self):
+        return self.launch_path.lower().startswith(("http://", "https://"))
+
     def to_dict(self):
         data = {
             "title": self.title,

@@ -305,7 +305,7 @@ class GameLibraryManager:
         changed = False
         finished = []
         for game in self.games:
-            if not game.catalog_id or game.launch_path.startswith("http"):
+            if not game.catalog_id or game.is_web:
                 continue  # web games have no install record by design
             rec = records.get(game.catalog_id)
             if rec is None:
@@ -399,6 +399,8 @@ class GameLibraryManager:
     
     def get_full_path(self, game):
         """Construct full path from relative path and library"""
+        if game.is_web:
+            return game.launch_path
         return self.path_manager.get_full_path(
             game.launch_path,
             self.config["libraries"],

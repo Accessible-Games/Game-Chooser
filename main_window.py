@@ -766,7 +766,7 @@ class MainFrame(wx.Frame):
             return
 
         # Skip web games - no local folder to open
-        if game.launch_path.startswith("http"):
+        if game.is_web:
             return
 
         # Get full path to game
@@ -797,7 +797,7 @@ class MainFrame(wx.Frame):
     def launch_game(self, game):
         """Launch a specific game"""
         # Check platform compatibility for non-web games
-        if not game.launch_path.startswith("http"):
+        if not game.is_web:
             # Get current platform
             current_system = platform.system()
 
@@ -823,7 +823,7 @@ class MainFrame(wx.Frame):
                     )
                 return
 
-        if game.launch_path.startswith("http"):
+        if game.is_web:
             # Web game
             webbrowser.open(game.launch_path)
         else:
@@ -928,7 +928,7 @@ class MainFrame(wx.Frame):
         current_platform = platform_map.get(current_system, current_system)
         rows = self.library_view.displayed
         compatible = [row for row in rows
-                      if row.game.launch_path.startswith("http") or current_platform in row.game.platforms]
+                      if row.game.is_web or current_platform in row.game.platforms]
         if rows:
             none_left = (f"No games compatible with {current_platform} in the current filtered list.",
                          "No Compatible Games")
