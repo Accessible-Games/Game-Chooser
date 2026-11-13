@@ -57,7 +57,6 @@ def test_fresh_install(tmp_path):
     assert (lib / "Entombed" / "entombed.exe").exists() and not (lib / ".gamechooser-staging" / "entombed").exists()
     rec = records.load("entombed")
     assert rec.files["entombed.exe"].owner == "entombed" and rec.folder == "Entombed"
-    assert r.game["launch_path"] == "Entombed/entombed.exe" and r.game["catalog_id"] == "entombed"
     assert not any(ctx.work_root.rglob("*.zip"))            # download deleted
     assert isinstance(r, JobResult) and r.action == "install" and r.title == "Entombed" and r.notes == []
     assert r.game == {
@@ -163,7 +162,6 @@ def test_system_steps_run_after_rename_with_final_paths(tmp_path):
     fake_elev = WatchingElevator()
     engine, ctx, lib = setup(tmp_path, [e], routes, elevator=fake_elev)
     engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert fake_elev.calls[0][1] == f'/s "{lib / "Entombed" / "dx.dll"}"'
     assert fake_elev.calls[0] == ("regsvr32.exe", f'/s "{lib / "Entombed" / "dx.dll"}"', True)
     assert placed_when_run == [True]
     assert ctx.registry.get("HKCU", r"Software\Entombed", "Path") == (True, "x", "REG_SZ")
@@ -563,24 +561,20 @@ def _install_entombed(tmp_path, files, launch=None):
     return ctx.records.load("entombed")
 
 
-def test_install_with_hint_is_from_catalog(tmp_path):
-    rec = _install_entombed(tmp_path, {"entombed.exe": b"a", "bin/other.exe": b"b"},
-                            {"windows": {"path": "bin/other.exe"}})
-    assert rec.launch_path == "bin/other.exe" and rec.launch_from_catalog is True
-
-
-def test_install_without_hint_is_guessed(tmp_path):
-    rec = _install_entombed(tmp_path, {"entombed.exe": b"a"})
-    assert rec.launch_path == "entombed.exe" and rec.launch_from_catalog is False
-
-
-def test_garbled_hint_falls_back_and_is_guessed(tmp_path):
-    rec = _install_entombed(tmp_path, {"entombed.exe": b"a"}, {"windows": {"path": "nope/missing.exe"}})
-    assert rec.launch_path == "entombed.exe" and rec.launch_from_catalog is False
-
-
 PAGE_FILES = {"index.html": b"<a href='page2.html'>next</a>", "page2.html": b"<a href='index.html'>back</a>"}
 HTA_FILES = {"jumpgame.hta": b"<html><hta:application applicationname='Jump'></html>", "jump1.wav": b"RIFF"}
+
+
+@pytest.mark.parametrize("files, hint, launch_path, from_catalog", [
+    ({"entombed.exe": b"a", "bin/other.exe": b"b"}, "bin/other.exe", "bin/other.exe", True),
+    ({"entombed.exe": b"a"}, None, "entombed.exe", False),
+    ({"entombed.exe": b"a"}, "nope/missing.exe", "entombed.exe", False),
+    ({**HTA_FILES, "tools/helper.exe": b"MZ"}, None, "tools/helper.exe", False),
+], ids=["install_with_hint_is_from_catalog", "install_without_hint_is_guessed",
+        "garbled_hint_falls_back_and_is_guessed", "an_hta_beside_an_exe_is_not_the_guess"])
+def test_launch_path_from_the_catalog_or_guessed(tmp_path, files, hint, launch_path, from_catalog):
+    rec = _install_entombed(tmp_path, files, {"windows": {"path": hint}} if hint else None)
+    assert rec.launch_path == launch_path and rec.launch_from_catalog is from_catalog
 
 
 @pytest.mark.parametrize("files, launch", [(PAGE_FILES, "index.html"), (HTA_FILES, "jumpgame.hta")],
@@ -600,11 +594,6 @@ def test_pages_or_an_hta_alone_without_a_launch_path_fail_as_no_program(tmp_path
     error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert error.message.startswith(messages.NO_EXE.format(title="Entombed"))
     assert ctx.records.load("entombed") is None
-
-
-def test_an_hta_beside_an_exe_is_not_the_guess(tmp_path):
-    rec = _install_entombed(tmp_path, {**HTA_FILES, "tools/helper.exe": b"MZ"})
-    assert rec.launch_path == "tools/helper.exe" and rec.launch_from_catalog is False
 
 
 def _tar_gz(files: dict[str, bytes]) -> bytes:
