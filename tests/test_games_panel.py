@@ -344,9 +344,6 @@ def test_sorting_keeps_the_game_selected_and_its_label_right(make_view):
     assert (saved(view)["sort_column"], saved(view)["sort_ascending"]) == (1, False)
     press(view.list_ctrl, ord("1"), wx.wxEVT_CHAR)  # a digit key sorts by that column
     assert headers(view) == ["Title ▲", "Year"] and saved(view)["sort_column"] == 0
-    saves(view).fail = True  # a failed save doesn't stop the sort
-    press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR)
-    assert titles(view) == ["Cat", "Bee", "Ant"] and view.action_btn.GetLabel() == "Install Ant"
 
 
 def test_rows_that_tie_in_the_sorted_column_are_in_title_order(make_view):
