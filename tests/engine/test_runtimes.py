@@ -69,7 +69,6 @@ def setup(tmp_path, entries, routes, **ctx):
 
 
 def dx8vb_catalog(tmp_path, **ctx):
-    """Entombed and the runtime it needs, DirectX 8 for Visual Basic: the engine, the library and both entries."""
     routes = {}
     rt, g = dx8vb(routes), game(routes)
     eng, lib = setup(tmp_path, [rt, g], routes, **ctx)

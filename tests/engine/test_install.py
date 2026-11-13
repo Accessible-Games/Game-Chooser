@@ -37,7 +37,6 @@ def setup(tmp_path, entries, routes, **ctx):
 
 
 def entombed_catalog(tmp_path, **overrides):
-    """Entombed alone in the catalog: the engine, its context, the library and the entry."""
     routes = {}
     e = game(routes)
     engine, ctx, lib = setup(tmp_path, [e], routes, **overrides)

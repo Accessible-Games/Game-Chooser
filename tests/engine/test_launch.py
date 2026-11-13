@@ -21,7 +21,6 @@ def touch(root: Path, rel: str) -> Path:
 
 
 def link_to(outside: Path, link: Path) -> None:
-    """A directory symlink, or a junction where this account may not make one."""
     try:
         os.symlink(outside, link, target_is_directory=True)
     except OSError:
@@ -180,12 +179,13 @@ class _Process:
         self.pid = pid
 
 
-def test_start_program_runs_the_exe_in_its_folder_and_returns_the_process_id():
+@pytest.mark.parametrize("process, pid", [(None, None), (_Process(4242), 4242)], ids=["no process", "a process"])
+def test_start_program_runs_the_exe_in_its_folder_and_returns_the_process_id(process, pid):
     calls = []
-    pid = start_program("C:/Games/X/x.exe", "C:/Games/X",
-                        popen=lambda args, cwd: calls.append((args, cwd)) or _Process(4242),
-                        shell_open=lambda *a: pytest.fail("no shell needed"))
-    assert calls == [(["C:/Games/X/x.exe"], "C:/Games/X")] and pid == 4242
+    started = start_program("C:/Games/X/x.exe", "C:/Games/X",
+                            popen=lambda args, cwd: calls.append((args, cwd)) or process,
+                            shell_open=lambda *a: pytest.fail("no shell needed"))
+    assert calls == [(["C:/Games/X/x.exe"], "C:/Games/X")] and started == pid
 
 
 @pytest.mark.parametrize("shell_gives", [5151, None], ids=["a process", "no process"])

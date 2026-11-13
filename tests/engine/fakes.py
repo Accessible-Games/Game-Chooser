@@ -46,7 +46,6 @@ def snapshot(root: Path) -> dict[str, bytes]:
 
 
 def fails(call, *args, **kwargs) -> InstallFailed:
-    """Runs `call(*args, **kwargs)`, which must raise InstallFailed; returns the error."""
     with pytest.raises(InstallFailed) as ei:
         call(*args, **kwargs)
     return ei.value
