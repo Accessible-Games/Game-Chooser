@@ -107,8 +107,9 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   - A letter or a digit continues the text when it comes within 1 second of the key before it (a Space
     included). Later than that a letter starts a new text and a digit sorts, so a title that starts with a
     digit can't be reached by typing ("area 51" can).
-  - A Space never moves the selection: it only extends the text, and the next character does the jump ("a h"
-    finds "A Hero's Call"). It belongs to the text for 3 seconds after the last character that is not a Space
+  - A plain Space never moves the selection: it only extends the text, and the next character does the jump
+    ("a h" finds "A Hero's Call"). A Space with Shift, Ctrl or Alt held is not handled by the view: its key-down
+    goes on to the list control. It belongs to the text for 3 seconds after the last character that is not a Space
     (a player waits for the screen reader to finish the row), and Spaces do not push that limit out. After
     those 3 seconds Space is the action again. After typing, Enter is the key that always acts.
   - Escape, Backspace, Up, Down, Home, End, Page Up and Page Down end the text at once (also from the number
@@ -117,8 +118,8 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   - A key with Ctrl alone or Alt alone is never text. With both down it is AltGr and is text: wx hands over a
     letter outside the system code page that way (the Polish e with ogonek under code page 1252), and a letter
     inside it with neither.
-  - Space mid-text is taken in the key-down handler (`on_list_key`), never skipped on to `on_char`: wx turns a
-    Space key-down that reaches the list control into an activation.
+  - A plain Space mid-text is taken in the key-down handler (`on_list_key`), never skipped on to `on_char`: wx
+    turns a plain Space key-down that reaches the list control into an activation.
   - Not on the macOS DataView control: there every key but a sorting digit is left to the control.
 - `restore_sash()` puts the splitter where it was saved, else in the middle; `MainFrame.load_saved_state` calls
   it for both views once the window has its size. A sash left to wx stays at the minimum pane size and does not

@@ -35,7 +35,8 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
 - Typing in the list jumps to the next title that starts with what was typed (type-ahead), as the player's own
   move. While a text is being typed, Space and the digit keys belong to it (Space for 3 seconds after the last
   character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. A
-  Space never moves the selection. Escape, Backspace and the navigation keys end the text. Enter always acts.
+  plain Space never moves the selection (one with a modifier goes on to the list control). Escape, Backspace
+  and the navigation keys end the text. Enter always acts.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
   unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
   open or the app is starting.
@@ -454,8 +455,8 @@ class GamesPanel(wx.Panel):
     def _type(self, char):
         """Add a character to the text being typed and jump to the title that text leads to. The jump is the
         player's own move: the selection event does the rest, as after an arrow key (label, description,
-        remembered game). A text no title starts with moves nothing. Nor does a Space, ever: it only extends
-        the text, and the next character does the jump ("a h" finds "A Hero's Call")."""
+        remembered game). A text no title starts with moves nothing. Nor does a Space added here: it only
+        extends the text, and the next character does the jump ("a h" finds "A Hero's Call")."""
         text = self.type_ahead.add(char)
         if char == " ":
             return
