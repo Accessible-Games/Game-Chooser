@@ -63,14 +63,15 @@ def test_leftover_runs(tmp_path):
     done = new_run(tmp_path, FT + 2 * S, 3)
     empty = new_run(tmp_path, FT + 3 * S, 4)
     nostatus = new_run(tmp_path, FT + 4 * S, 6)
-    for run, pid in ((dead, 11), (live, 22), (done, 33), (empty, 44)):
-        run.write_status("capturing", recorder_pid=pid)
-    for run in (dead, live, done, nostatus):
+    reused = new_run(tmp_path, FT + 5 * S, 7)  # its recorder's pid was given to another program
+    for run, pid, start in ((dead, 11, 7), (live, 22, 7), (done, 33, 7), (empty, 44, 7), (reused, 22, 8)):
+        run.write_status("capturing", recorder_pid=pid, recorder_start=start)
+    for run in (dead, live, done, nostatus, reused):
         run.capture_path.write_bytes(b"x")
     (done.path / "split.json").write_text("{}", encoding="utf-8")
-    found = leftover_runs(tmp_path, lambda pid: pid == 22)
-    assert sorted(r.path for r in found) == sorted([dead.path, nostatus.path])
-    assert leftover_runs(tmp_path / "missing", lambda pid: False) == []
+    found = leftover_runs(tmp_path, lambda pid, start: (pid, start) == (22, 7))
+    assert sorted(r.path for r in found) == sorted([dead.path, nostatus.path, reused.path])
+    assert leftover_runs(tmp_path / "missing", lambda pid, start: False) == []
 
 
 class FlakyReplace:

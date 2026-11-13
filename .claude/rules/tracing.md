@@ -28,7 +28,8 @@ Build: see `.claude/rules/build.md`.
   tracing build is always on), `--trace-recorder RUN --app-pid N --procmon EXE` (the elevated recorder, started by
   the app), `--trace-split [RUN...]` (split leftover runs after a crash; prints "No runs to split." when there are none;
   a named RUN that has `split.json` and no capture left prints "already split, nothing to do"; a named RUN whose
-  capture was kept is split again; without RUN only runs with no `split.json` are split),
+  capture was kept is split again; without RUN only runs with no `split.json` whose recorder is gone are split,
+  checked as `--trace-stop` checks it: `runfiles.leftover_runs`),
   `--trace-stop [RUN] [--close-games]` (end the run in progress while traced programs are still open; see Ending a
   run below), `-h`/`--help` beside any command (print the help and run nothing; alone it is not a tracing command),
   `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds),

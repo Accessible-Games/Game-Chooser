@@ -14,7 +14,7 @@ from typing import Callable
 
 from tracing.clock import now_filetime
 from tracing.recorder import CLOSE_WAIT_SECONDS
-from tracing.runfiles import RunDir
+from tracing.runfiles import IsAlive, RunDir, leftover_runs, recorder_alive, run_dirs
 
 ACK_SECONDS = 30.0  # how long a capturing recorder gets to take the request
 POLL_SECONDS = 0.5
@@ -25,9 +25,6 @@ CLOSE_NOTE = (f"The traced games are asked to close; any still open after {CLOSE
               "ended. Unsaved game progress is lost. A game started through the administrator prompt is left open.")
 NOTHING = "No tracing run is in progress."
 _PROGRESS = {"stopping": "The recorder is ending the run.", "splitting": "Splitting the capture."}
-
-
-IsAlive = Callable[[int, int | None], bool]  # (pid, start time or None): that very process is still running
 
 
 def _read_status(run: RunDir) -> dict | None:
@@ -41,21 +38,8 @@ def _read_status(run: RunDir) -> dict | None:
     return None
 
 
-def _recorder_alive(status: dict | None, is_alive: IsAlive) -> bool:
-    """The recorder the status names, by pid and start time (a pid alone may be another program by now)."""
-    pid = status.get("recorder_pid") if status else None
-    return pid is not None and is_alive(pid, status.get("recorder_start"))
-
-
 def _ended(run: RunDir, status: dict | None) -> bool:
     return run.is_split() or (status is not None and status.get("state") == "done")
-
-
-def _runs(traces_dir: Path) -> list[RunDir]:
-    runs_dir = Path(traces_dir) / "_runs"
-    if not runs_dir.is_dir():
-        return []
-    return [RunDir(item) for item in sorted(runs_dir.iterdir()) if item.is_dir()]
 
 
 def _gone(run: RunDir) -> str:
@@ -82,13 +66,13 @@ def stop_command(traces_dir: Path, run_path: Path | None, close_games: bool, *, 
         if _ended(run, status):
             out(f"{run.path}: already ended, nothing to do")
             return 0
-        if not _recorder_alive(status, is_alive):
+        if not recorder_alive(status, is_alive):
             out(_gone(run))
             return 1
         return _stop(run, status, close_games, is_alive, clock, sleep, now, out)
-    runs = [(run, _read_status(run)) for run in _runs(traces_dir)]
+    runs = [(run, _read_status(run)) for run in run_dirs(traces_dir)]
     live = [(run, status) for run, status in runs
-            if status is not None and not _ended(run, status) and _recorder_alive(status, is_alive)]
+            if status is not None and not _ended(run, status) and recorder_alive(status, is_alive)]
     if len(live) > 1:
         out("More than one tracing run is in progress. Name the one to end: --trace-stop RUN")
         for run, _status in live:
@@ -98,8 +82,7 @@ def stop_command(traces_dir: Path, run_path: Path | None, close_games: bool, *, 
         run, status = live[0]
         return _stop(run, status, close_games, is_alive, clock, sleep, now, out)
     # No recorder to ask. A capture left by a dead recorder is said, not split here: --trace-split does that.
-    dead = [run for run, status in runs
-            if run.capture_files() and not run.is_split() and not _recorder_alive(status, is_alive)]
+    dead = leftover_runs(traces_dir, is_alive)
     for run in dead:
         out(_gone(run))
     if not dead:
@@ -143,7 +126,7 @@ def _wait(run: RunDir, status: dict, is_alive, clock, sleep, out) -> int:
             out(_PROGRESS[state])
         if state == "done":
             break
-        if not _recorder_alive(status, is_alive):
+        if not recorder_alive(status, is_alive):
             break
         if not taken:
             if state not in ("starting", "capturing") or run.read_stop() is not None:

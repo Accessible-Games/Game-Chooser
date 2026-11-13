@@ -216,19 +216,23 @@ def new_run(traces_dir: Path, now_ft: int, pid: int) -> RunDir:
     return RunDir(path)
 
 
-def leftover_runs(traces_dir: Path, is_alive: Callable[[int], bool]) -> list[RunDir]:
+IsAlive = Callable[[int, int | None], bool]  # (pid, start time or None): that very process is still running
+
+
+def run_dirs(traces_dir: Path) -> list[RunDir]:
     runs_dir = Path(traces_dir) / "_runs"
     if not runs_dir.is_dir():
         return []
-    leftovers = []
-    for item in sorted(runs_dir.iterdir()):
-        if not item.is_dir():
-            continue
-        run = RunDir(item)
-        if not run.capture_files() or run.is_split():
-            continue
-        status = run.read_status()
-        pid = status.get("recorder_pid") if status else None
-        if pid is None or not is_alive(pid):
-            leftovers.append(run)
-    return leftovers
+    return [RunDir(item) for item in sorted(runs_dir.iterdir()) if item.is_dir()]
+
+
+def recorder_alive(status: dict | None, is_alive: IsAlive) -> bool:
+    """The recorder the status names, by pid and start time (a pid alone may be another program by now)."""
+    pid = status.get("recorder_pid") if status else None
+    return pid is not None and is_alive(pid, status.get("recorder_start"))
+
+
+def leftover_runs(traces_dir: Path, is_alive: IsAlive) -> list[RunDir]:
+    """Runs with a capture that is not split and whose recorder is gone."""
+    return [run for run in run_dirs(traces_dir)
+            if run.capture_files() and not run.is_split() and not recorder_alive(run.read_status(), is_alive)]

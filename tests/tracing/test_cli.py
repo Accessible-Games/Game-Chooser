@@ -168,7 +168,7 @@ def test_stop_asks_whether_the_recorder_is_alive(tmp_path, monkeypatch, capsys):
     run.write_status("capturing", recorder_pid=4321)
     run.capture_path.write_bytes(b"pml")
     asked = []
-    monkeypatch.setattr(cli, "_is_alive", lambda pid: asked.append(pid) or False)
+    monkeypatch.setattr(cli, "_recorder_is_alive", lambda pid, start: asked.append(pid) or False)
     assert cli.run_command(["--trace-stop", "--traces-dir", str(tmp_path)], False) == 1
     assert 4321 in asked and "the recorder is no longer running" in capsys.readouterr().out
 
@@ -230,3 +230,17 @@ def test_a_recorder_is_alive_only_as_the_process_that_started_then():
     assert cli._recorder_is_alive(me, started) is True
     assert cli._recorder_is_alive(me, started + 1) is False  # the pid, but another process
     assert cli._recorder_is_alive(me, None) is True  # a status without a start time: by pid alone
+
+
+@pytest.mark.windows
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows only")
+def test_split_takes_a_run_whose_recorder_pid_went_to_another_program(tmp_path, monkeypatch):
+    import os
+    from tracing.live import process_start_time
+    calls = []
+    monkeypatch.setattr(cli, "split_run_dir", lambda run, d, r: calls.append(run.path) or SplitResult([], []))
+    run = new_run(tmp_path, 133_000_000_000_000_000, 5)
+    run.write_status("capturing", recorder_pid=os.getpid(), recorder_start=process_start_time(os.getpid()) + 1)
+    run.capture_path.write_bytes(b"pml")
+    assert cli.run_command(["--trace-split", "--traces-dir", str(tmp_path)], False) == 0
+    assert calls == [run.path]

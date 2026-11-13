@@ -147,7 +147,7 @@ def _record_early_failure(run_path: Path, error) -> int:
 def _split(args, compiled: bool) -> int:
     from tracing.pml import read_capture
     traces_dir = paths.traces_dir(compiled, args.traces_dir)
-    runs = [RunDir(Path(r)) for r in args.trace_split] or leftover_runs(traces_dir, _is_alive)
+    runs = [RunDir(Path(r)) for r in args.trace_split] or leftover_runs(traces_dir, _recorder_is_alive)
     if not runs:
         print("No runs to split.")
     failed = False
@@ -259,7 +259,7 @@ def _build_recorder(args) -> "Recorder":
     traces_dir = run.path.parent.parent
     return Recorder(
         run, _app_alive_check(args.app_pid), WindowsProcmon(Path(args.procmon)), windows_snapshot,
-        lambda r: split_run_dir(r, traces_dir, read_capture), lambda: leftover_runs(traces_dir, _is_alive),
+        lambda r: split_run_dir(r, traces_dir, read_capture), lambda: leftover_runs(traces_dir, _recorder_is_alive),
         lambda: shutil.disk_usage(run.path).free, time.monotonic, time.sleep,
         # --close-games closes only what runs as the app's user with no more rights than the app: both are read
         # here, once, from the app's own process (the one that started this recorder and named itself).
