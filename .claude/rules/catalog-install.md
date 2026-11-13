@@ -107,7 +107,8 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   launch file. The path in games.json is not trusted: `..`, an absolute path elsewhere or another `.hta` in the
   folder is refused. Windows only: on another system
   the platform check refuses first, and failing that `start_hta` raises, shown as "Failed to launch game: This game
-  only runs on Windows." A game added by hand never runs an `.hta`: `PathManager.is_executable` and `GameDialog` do
-  not accept one, and one picked in the Locate dialog is refused ("Failed to launch game: " then
-  `messages.HTA_NOT_ALLOWED`); nothing is run.
+  only runs on Windows." A game added by hand never runs an `.hta`: `PathManager.is_executable` does not accept one,
+  so Add Game and the Locate dialog refuse it ("Invalid Executable", `library_actions.executable_problem`); should
+  games.json name one anyway, the launch is refused ("Failed to launch game: " then `messages.HTA_NOT_ALLOWED`) and
+  nothing is run.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.

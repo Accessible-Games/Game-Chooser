@@ -38,14 +38,15 @@ from engine.folders import library_label
 from engine.launch import LaunchCancelled, launch_kind
 from games_panel import GamesPanel
 from catalog_panel import CatalogPanel
-from dialogs import GameDialog, PreferencesDialog, FirstTimeSetupDialog
+from dialogs import EXECUTABLE_WILDCARD, GameDialog, PreferencesDialog, FirstTimeSetupDialog
 from engine import messages
 from engine.entries import current_platform as catalog_platform, platform_label
 from engine.records import record_folder
 from engine.status import update_available
 from install_dialogs import InstallConfirmDialog, UninstallDialog
 import library_actions
-from library_actions import catalog_menu_items, delete_kind, is_editable, launch_problem, start_launch_file
+from library_actions import (catalog_menu_items, delete_kind, executable_problem, is_editable, launch_problem,
+                             start_launch_file)
 from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener, run_in_background
 from wx_bridge import call_after as _call_after  # wx.CallAfter that does nothing once the app is gone
 
@@ -745,12 +746,15 @@ class MainFrame(wx.Frame):
                     return
                 with self.modal_dialog():
                     self._tell(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE)
-                    with wx.FileDialog(self, "Locate Game Executable") as dlg:
+                    with wx.FileDialog(self, "Locate Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
                         located = dlg.ShowModal() == wx.ID_OK
                         new_path = dlg.GetPath()
-                    # Any path on disk will do; it is no longer tied to a library
+                    # Any file Add Game accepts will do; the game is no longer tied to a library
+                    problem = located and executable_problem(new_path, platform_label(catalog_platform()))
+                    if problem:
+                        self._tell(*problem)
                     live = self._live_game(game)
-                    if located and live is not None:
+                    if located and not problem and live is not None:
                         live.launch_path = new_path
                         live.library_id = ""
                         self._save_games()  # the view finds it again by the Game object, under its new id

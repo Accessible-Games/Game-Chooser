@@ -12,6 +12,7 @@ from catalog_view import homepage_item, link_items
 from engine import messages
 from engine.launch import is_hta, start_game
 from engine.records import record_folder
+from path_manager import PathManager
 
 # Context menu actions for catalog-installed games, in menu order after "Delete"
 UPDATE, UNDO, EXTRAS, REPAIR, UNINSTALL, LINK = "update", "undo", "extras", "repair", "uninstall", "link"
@@ -117,6 +118,17 @@ def launch_problem(game, library_reachable: bool, record, entry: dict | None) ->
     if game.catalog_id:
         return "repair" if is_tracked(record) and entry is not None else "catalog"
     return "locate"
+
+
+def executable_problem(path: str, platform: str) -> tuple[str, str] | None:
+    """(text, caption) saying why Add Game or Locate refuses `path` as a game added by hand's file, or None when
+    PathManager.is_executable accepts it. `platform` ("Windows", "macOS") names the types the text lists."""
+    if not Path(path).exists():
+        return messages.FILE_MISSING.format(path=path), messages.LAUNCH_NOT_FOUND_TITLE
+    if PathManager.is_executable(Path(path)):
+        return None
+    types = ".exe, .bat" if platform == "Windows" else ".app"
+    return messages.INVALID_EXECUTABLE.format(platform=platform, types=types), messages.INVALID_EXECUTABLE_TITLE
 
 
 def _same_file(a: Path, b: Path) -> bool:

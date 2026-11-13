@@ -95,3 +95,43 @@ def test_a_games_list_that_cannot_be_saved_is_told_and_the_change_still_shows(is
     MainFrame._save_games(frame)
     assert shown == [True]
     assert told == ([] if saves else [messages.GAMES_NOT_SAVED.format(path=isolated_manager.games_file)])
+
+
+
+class PickedFile:
+    """wx.FileDialog in which the player picks `path` and presses OK"""
+
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def ShowModal(self):
+        return wx.ID_OK
+
+    def GetPath(self):
+        return str(self.path)
+
+
+@pytest.mark.parametrize("name, accepted", [("game.exe", True), ("play.bat", True), ("readme.txt", False),
+                                            ("menu.hta", False)])
+def test_locate_accepts_only_the_files_add_game_accepts(frame, monkeypatch, tmp_path, name, accepted):
+    picked = tmp_path / "picked" / name
+    picked.parent.mkdir()
+    picked.write_bytes(b"MZ")
+    gone = frame.game.launch_path = frame.game.launch_path + ".gone"
+    frame.library_manager.library_reachable = lambda library_id: True
+    frame.service.entry_for = lambda game: None
+    frame._live_game = lambda game: game
+    frame._save_games = lambda: frame.boxes.append("saved")
+    monkeypatch.setattr(wx, "FileDialog", lambda *args, **kwargs: PickedFile(picked))
+    MainFrame.launch_game(frame, frame.game)
+    assert frame.boxes[0][0] == messages.LAUNCH_NOT_FOUND_TITLE
+    if accepted:
+        assert frame.game.launch_path == str(picked) and frame.boxes[1:] == ["saved"]
+    else:
+        assert frame.game.launch_path == gone and [box[0] for box in frame.boxes[1:]] == ["Invalid Executable"]

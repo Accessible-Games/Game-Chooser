@@ -29,11 +29,15 @@ from engine import messages
 from engine.folders import library_label
 from install_dialogs import RemoveLibraryDialog
 from install_prefs import check_install_prefs, current_catalog_url, register_shared_components
-from library_actions import library_row_name
+from library_actions import executable_problem, library_row_name
 from wx_bridge import run_in_background
 from models import Game, is_web_path
 from validation_service import ValidationService
 from smart_list import SmartList, Column
+
+# The file picker of Add Game and Locate: the files PathManager.is_executable accepts first
+EXECUTABLE_WILDCARD = ("Executable files (*.exe)|*.exe|Batch files (*.bat)|*.bat|All files (*.*)|*.*"
+                       if platform.system() == "Windows" else "Applications (*.app)|*.app|All files (*.*)|*.*")
 
 
 class FirstTimeSetupDialog(wx.Dialog):
@@ -247,13 +251,7 @@ class GameDialog(wx.Dialog):
 
     def on_browse(self, event):
         """Browse for executable file"""
-        system = platform.system()
-        if system == "Windows":
-            wildcard = "Executable files (*.exe)|*.exe|Batch files (*.bat)|*.bat|All files (*.*)|*.*"
-        else:  # macOS
-            wildcard = "Applications (*.app)|*.app|All files (*.*)|*.*"
-
-        with wx.FileDialog(self, "Select Game Executable", wildcard=wildcard) as dlg:
+        with wx.FileDialog(self, "Select Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.path_ctrl.SetValue(dlg.GetPath())
 
@@ -286,24 +284,9 @@ class GameDialog(wx.Dialog):
                 wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
                 return
 
-            # Validate executable file exists and is supported
-            from path_manager import PathManager
-            path_obj = Path(path)
-
-            # Check if file exists
-            if not path_obj.exists():
-                wx.MessageBox(f"File does not exist: {path}",
-                             "File Not Found", wx.OK | wx.ICON_ERROR)
-                return
-
-            # Use PathManager's robust executable validation
-            if not PathManager.is_executable(path_obj):
-                if platform_val == "Windows":
-                    valid_exts_str = ".exe, .bat"
-                else:  # macOS
-                    valid_exts_str = ".app"
-                wx.MessageBox(f"File is not a valid executable.\n\nSupported types for {platform_val}: {valid_exts_str}",
-                             "Invalid Executable", wx.OK | wx.ICON_ERROR)
+            problem = executable_problem(path, platform_val)  # the file exists and is a game executable
+            if problem:
+                wx.MessageBox(*problem, wx.OK | wx.ICON_ERROR)
                 return
 
         # Validate year if provided

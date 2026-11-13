@@ -62,6 +62,7 @@ paths:
 ## Paths and executable detection
 - Paths inside a library use forward slashes internally and are library-relative; `GameLibraryManager.get_full_path`
   joins one to its library's folder (a web address or an absolute path is returned as it is).
-- Executable detection (`PathManager.is_executable`, used by `GameDialog`): a file ending in `.exe` or `.bat`, or
+- Executable detection (`PathManager.is_executable`, used by Add Game and Locate through
+  `library_actions.executable_problem`): a file ending in `.exe` or `.bat`, or
   a folder ending in `.app` (a macOS bundle). Nothing else counts: `.cmd` is not accepted, the executable bit is
   not checked and there is no Linux case.
