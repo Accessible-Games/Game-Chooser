@@ -175,9 +175,7 @@ class GameDialog(wx.Dialog):
         self.path_label = wx.StaticText(panel, label="Launch Path:")
         sizer.Add(self.path_label, pos=(2, 0), flag=wx.ALIGN_CENTER_VERTICAL)
 
-        # For editing, convert relative path to absolute for display
-        display_path = self._get_display_path()
-        self.path_ctrl = wx.TextCtrl(panel, value=display_path)
+        self.path_ctrl = wx.TextCtrl(panel, value=self.game.launch_path)
         self.browse_btn = wx.Button(panel, label="Browse...")
         self.browse_btn.Bind(wx.EVT_BUTTON, self.on_browse)
 
@@ -226,10 +224,6 @@ class GameDialog(wx.Dialog):
 
         # Update UI based on initial platform
         self._update_path_ui()
-
-    def _get_display_path(self):
-        """Get the path to display in the field (a hand-added game always has an absolute path)"""
-        return self.game.launch_path
 
     def on_platform_change(self, event):
         """Handle platform selection change"""
