@@ -920,30 +920,35 @@ def is_private_file(copies: list[PrivateCopy]):
 
 
 def finish_private(tree: Path, exe: Path, copies: list[PrivateCopy], title: str) -> tuple[list[str], list[str]]:
-    """Once the exe is known: move the copies beside it and write its manifest (engine.comfree).
+    """Once the exe is known: move the copies beside it and write its manifest (see _make_private). Returns
+    the notes, and the ids of the runtimes made private (for the record's `private_runtimes`)."""
+    return _make_private(tree, exe, copies, title, lambda copy: _move_beside(copy, tree, exe.parent))
 
-    If that can't work (an embedded manifest, no readable type library, private COM turned off), the
-    copies are removed and the notes say the game needs each shared component. Returns those notes,
-    and the ids of the runtimes made private (for the record's `private_runtimes`).
-    """
+
+def _make_private(root: Path, exe: Path, copies: list[PrivateCopy], title: str, place,
+                  keep=lambda usable: None) -> tuple[list[str], list[str]]:
+    """Put each usable copy beside `exe` in `root` with `place(copy)`, write the exe's manifest (engine.comfree),
+    then `keep(usable)`. If that can't work (an embedded manifest, no readable type library, private COM turned
+    off), the manifest and copies are removed again. Returns the notes (the game needs each shared component
+    it goes without) and the ids of the runtimes made private."""
     usable = [c for c in copies if c.usable]
     notes = needs_shared_notes(title, [c.runtime for c in copies if not c.usable])
     if not usable:
         return notes, []
-    beside = exe.parent
+    wrote = False
     try:
-        dlls = []
         for copy in usable:
-            if beside != tree:
-                _move_beside(copy, tree, beside)
-            dlls += [safe_join(beside, rel) for rel in copy.dlls]
-        if not comfree.PRIVATE_COM_SUPPORTED:
-            raise comfree.PrivateComUnavailable("private COM is turned off")
+            place(copy)
+        dlls = [safe_join(exe.parent, rel) for copy in usable for rel in copy.dlls]
         # Looked up when called, so the reader can be replaced (tests; a later injectable reader).
-        comfree.write_private_com(tree, exe, dlls, reader=comfree.read_com_info)
+        comfree.write_private_com(root, exe, dlls, reader=comfree.read_com_info)
+        wrote = True
+        keep(usable)
     except (comfree.PrivateComUnavailable, UnsafePath, OSError, TypeError):
+        if wrote:
+            _unlink_quietly(exe.with_name(exe.name + ".manifest"))
         for copy in usable:
-            _remove_copy(copy, tree)
+            _remove_copy(copy, root)
         return notes + needs_shared_notes(title, [c.runtime for c in usable]), []
     return notes, [c.runtime["id"] for c in usable]
 
@@ -951,6 +956,8 @@ def finish_private(tree: Path, exe: Path, copies: list[PrivateCopy], title: str)
 def _move_beside(copy: PrivateCopy, tree: Path, beside: Path) -> None:
     """Move a copy's files from the tree's top to the exe's folder, keeping their layout. Where the game
     already has a file of that name there, the game's is kept and the copy dropped."""
+    if beside == tree:
+        return
     old_dirs, copy.dirs = copy.dirs, []
     for path in list(copy.files):
         dest = beside / path.relative_to(tree)
@@ -979,37 +986,17 @@ def private_after_installer(ctx, rec: InstallRecord, game_dir: Path, copies: lis
     and the notes say the game needs each shared component. Returns those notes.
     """
     _remove_recorded_private(rec, game_dir)
-    usable = [c for c in copies if c.usable]
-    notes = needs_shared_notes(title, [c.runtime for c in copies if not c.usable])
-    if usable:
-        exe = game_dir / rec.launch_path
-        manifest = exe.with_name(exe.name + ".manifest")
-        wrote_manifest = False
-        try:
-            for copy in usable:
-                _copy_into(copy.root, exe.parent, copy)
-            dlls = [safe_join(exe.parent, rel) for copy in usable for rel in copy.dlls]
-            if not comfree.PRIVATE_COM_SUPPORTED:
-                raise comfree.PrivateComUnavailable("private COM is turned off")
-            comfree.write_private_com(game_dir, exe, dlls, reader=comfree.read_com_info)
-            wrote_manifest = True
-            added = {path: copy.runtime["id"] for copy in usable for path in copy.files}
-            added[manifest] = usable[0].runtime["id"]
-            recorded = {}
-            for path, runtime_id in added.items():
-                rel = path.relative_to(game_dir).as_posix()
-                recorded[norm_key(rel)] = RecordedFile(rel, hash_file(path), runtime_owner(runtime_id))
-            rec.files.update(recorded)
-            rec.private_runtimes = [c.runtime["id"] for c in usable]
-        except (comfree.PrivateComUnavailable, UnsafePath, OSError, TypeError):
-            if wrote_manifest:
-                _unlink_quietly(manifest)
-            for copy in usable:
-                _remove_copy(copy, game_dir)
-            notes += needs_shared_notes(title, [c.runtime for c in usable])
-            rec.private_runtimes = []
-    else:
-        rec.private_runtimes = []
+    exe = game_dir / rec.launch_path
+
+    def keep(usable: list[PrivateCopy]) -> None:
+        added = {path: copy.runtime["id"] for copy in usable for path in copy.files}
+        added[exe.with_name(exe.name + ".manifest")] = usable[0].runtime["id"]
+        rels = {path: path.relative_to(game_dir).as_posix() for path in added}
+        rec.files.update({norm_key(rels[path]): RecordedFile(rels[path], hash_file(path), runtime_owner(runtime_id))
+                          for path, runtime_id in added.items()})
+
+    notes, rec.private_runtimes = _make_private(game_dir, exe, copies, title,
+                                                lambda copy: _copy_into(copy.root, exe.parent, copy), keep)
     ctx.records.save(rec)
     return notes
 
