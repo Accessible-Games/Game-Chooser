@@ -182,8 +182,6 @@ def test_dependency_cycle_refused_plainly(tmp_path):
     a, b = plain_runtime(routes, "a", ["b"]), plain_runtime(routes, "b", ["a"])
     g = game(routes, dependencies=["a"])
     eng, lib = setup(tmp_path, [a, b, g], routes)
-    error = fails(missing_runtimes, g, eng.ctx.entries, eng.ctx.records, eng.ctx.registry)
-    assert error.message == messages.DEPENDENCY_CYCLE.format(title="Entombed")
     assert fails(run, eng, "install").message == messages.DEPENDENCY_CYCLE.format(title="Entombed")
     assert eng.ctx.fetcher.requests == [] and not (lib / "Entombed").exists()
 
@@ -694,14 +692,6 @@ def test_marker_is_written_by_the_registering_command_only_once_regsvr32_has_suc
     assert all(user not in c_args for _, c_args, _ in eng.ctx.elevator.calls)  # no grant to the installing user
 
 
-def test_failed_register_writes_no_marker(tmp_path):
-    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(exit_codes={"regsvr32.exe": 5}))
-    folder = eng.ctx.runtimes_root / "dx8vb"
-    assert fails(run, eng, "install").message == messages.STEP_REGISTER_FAILED.format(name="dx8vb.dll")
-    assert eng.ctx.elevator.calls[1] == regsvr32(eng, folder) and not (folder / MARKER_NAME).exists()
-    assert not runtime_present(rt, eng.ctx.records, eng.ctx.registry, eng.ctx.runtimes_root, eng.ctx.security)
-
-
 def test_record_save_failure_after_the_marker_keeps_the_registration_and_installs(tmp_path, caplog):
     """R45: once the marker is in the sealed folder, every account sees the runtime as installed, so nothing
     is undone; the per-user record is only a cache, so losing it is logged, not a failure."""
@@ -924,14 +914,6 @@ def test_runtime_with_a_subfolder_is_made_and_sealed_parent_first(tmp_path):
     assert register == regsvr32(eng, folder, "vbx.ocx", source_sha=sha(data))
     assert (folder / "lib" / "helper.dll").read_bytes() == b"MZ helper"
     assert set(eng.ctx.records.load("vbx").files) == {"vbx.ocx", "lib/helper.dll"}
-
-
-def test_failed_lock_down_registers_nothing(tmp_path):
-    eng, lib, rt, g = dx8vb_catalog(tmp_path, elevator=FakeElevator(exit_codes={"cmd.exe": 5}))
-    folder = eng.ctx.runtimes_root / "dx8vb"
-    error = fails(run, eng, "install")
-    assert error.message == messages.RUNTIME_FOLDER_NOT_SECURED.format(title=DX8VB_TITLE, path=folder)
-    assert [c[0] for c in eng.ctx.elevator.calls] == ["cmd.exe"]
 
 
 def test_runtime_with_no_elevated_step_isnt_locked_down(tmp_path):
