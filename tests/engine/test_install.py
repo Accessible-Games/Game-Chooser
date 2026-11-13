@@ -36,6 +36,14 @@ def setup(tmp_path, entries, routes, **ctx):
     return engine, engine.ctx, tmp_path / "Games"
 
 
+def entombed_catalog(tmp_path, **overrides):
+    """Entombed alone in the catalog: the engine, its context, the library and the entry."""
+    routes = {}
+    e = game(routes)
+    engine, ctx, lib = setup(tmp_path, [e], routes, **overrides)
+    return engine, ctx, lib, e
+
+
 def leftovers(ctx, lib):
     """Anything the install left behind in the library's staging folder or the work folder."""
     staging = lib / ".gamechooser-staging"
@@ -43,9 +51,7 @@ def leftovers(ctx, lib):
 
 
 def test_fresh_install(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     records = ctx.records
     seen = []
     r = engine.run(InstallRequest("install", "entombed", "Games", lib), seen.append, never)
@@ -221,9 +227,7 @@ def test_no_exe_fails_with_defender_note(tmp_path):
 
 
 def test_cancel_during_download_leaves_nothing(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     with pytest.raises(Cancelled):
         engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, lambda: True)
     assert list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"])
@@ -231,9 +235,7 @@ def test_cancel_during_download_leaves_nothing(tmp_path):
 
 
 def test_cancel_after_download_leaves_nothing(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     asked = []
 
     def cancel():
@@ -247,9 +249,7 @@ def test_cancel_after_download_leaves_nothing(tmp_path):
 
 
 def test_existing_unrecorded_folder_is_refused_before_download(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     records, libs, fetcher = ctx.records, ctx.libraries, ctx.fetcher
     (lib / "Entombed").mkdir()
     (lib / "Entombed" / "mine.txt").write_text("player")
@@ -262,9 +262,7 @@ def test_existing_unrecorded_folder_is_refused_before_download(tmp_path):
 
 
 def test_existing_folder_differing_only_in_case_is_refused(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     (lib / "ENTOMBED").mkdir()
     if not (lib / "Entombed").exists():
         pytest.skip("case-sensitive file system")
@@ -273,9 +271,7 @@ def test_existing_folder_differing_only_in_case_is_refused(tmp_path):
 
 
 def test_own_recorded_folder_is_not_blocked_and_is_installed_over_as_an_update(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     engine.run(InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert blocked_reason(e, lib, ctx.records, ctx.libraries) is None
     (lib / "Entombed" / "save.dat").write_bytes(b"player")
@@ -302,9 +298,7 @@ def test_duplicate_title_gets_developer_suffix(tmp_path):
 
 
 def test_leftover_staging_is_cleared(tmp_path):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     old = lib / ".gamechooser-staging" / "entombed" / "raw"
     old.mkdir(parents=True)
     (old / "junk.exe").write_bytes(b"junk")
@@ -343,8 +337,6 @@ def test_changed_developer_files_note_once_and_record_the_real_file(tmp_path):
 
 
 def test_folder_appearing_during_install_is_not_merged(tmp_path):
-    routes = {}
-    e = game(routes)
     lib = tmp_path / "Games"
 
     class RacingExtractor(ZipExtractor):
@@ -353,7 +345,7 @@ def test_folder_appearing_during_install_is_not_merged(tmp_path):
             (lib / "Entombed" / "mine.txt").write_text("player")
             return super().extract(archive, dest, install, cancel)
 
-    engine, ctx, lib = setup(tmp_path, [e], routes, extractor=RacingExtractor())
+    engine, ctx, lib, e = entombed_catalog(tmp_path, extractor=RacingExtractor())
     error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert error.message == messages.FOLDER_EXISTS.format(folder="Entombed", library="Games")
     assert [p.name for p in (lib / "Entombed").iterdir()] == ["mine.txt"]
@@ -361,8 +353,6 @@ def test_folder_appearing_during_install_is_not_merged(tmp_path):
 
 
 def test_extract_error_cleans_staging(tmp_path):
-    routes = {}
-    e = game(routes)
 
     class BrokenExtractor(ZipExtractor):
         def extract(self, archive, dest, install, cancel):
@@ -370,7 +360,7 @@ def test_extract_error_cleans_staging(tmp_path):
             (Path(dest) / "half.dat").write_bytes(b"half")
             raise ExtractError(messages.EXTRACT_FAILED)
 
-    engine, ctx, lib = setup(tmp_path, [e], routes, extractor=BrokenExtractor())
+    engine, ctx, lib, e = entombed_catalog(tmp_path, extractor=BrokenExtractor())
     error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert error.message == messages.EXTRACT_FAILED
     assert list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and leftovers(ctx, lib) == []
@@ -477,9 +467,7 @@ def test_other_file_error_names_the_file_and_the_systems_words(tmp_path, monkeyp
 
 @pytest.mark.parametrize("stuck", ["staging", "work"])
 def test_temp_folder_that_cannot_be_emptied_stops_the_install(tmp_path, monkeypatch, stuck):
-    routes = {}
-    e = game(routes)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
+    engine, ctx, lib, e = entombed_catalog(tmp_path)
     folder = lib / ".gamechooser-staging" / "entombed" if stuck == "staging" else ctx.work_root / "entombed"
     (folder / "raw").mkdir(parents=True)
     (folder / "raw" / "locked.exe").write_bytes(b"stale")
