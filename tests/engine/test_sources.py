@@ -78,6 +78,8 @@ def test_unreachable_dev_then_mirror_has_no_note(tmp_path):
     ff = FakeFetcher({mirror(): GOOD})
     f = run(entry(src(DEV), src(mirror())), ff, tmp_path)
     assert f.note is None and f.position == 1
+    f = run(entry(src(DEV), src(mirror())), FakeFetcher({DEV: BAD, mirror(): GOOD}), tmp_path / "changed")
+    assert files(tmp_path / "changed") == [f.path.name]  # the changed developer file is gone once the mirror verifies
 
 
 def test_all_unreachable_gives_one_reason_each(tmp_path):
