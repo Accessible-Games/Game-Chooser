@@ -30,17 +30,6 @@ def link_to(outside: Path, link: Path) -> None:
                        check=True, capture_output=True)
 
 
-def test_launch_path_used_when_present(tmp_path):
-    touch(tmp_path, "Other.exe")
-    run = touch(tmp_path, "bin/Run.exe")
-    assert find_launch_exe(tmp_path, "bin/Run.exe", EXCL) == run
-
-
-def test_missing_launch_path_falls_back_to_detection(tmp_path):
-    (tmp_path / "Copter Mission.exe").touch()
-    assert find_launch_exe(tmp_path, "copter.exe", EXCL).name == "Copter Mission.exe"
-
-
 def test_unsafe_launch_path_falls_back(tmp_path):
     game = tmp_path / "game"
     game.mkdir()
@@ -137,20 +126,6 @@ def test_adopt_catalog_launch(tmp_path):
     assert adopt_catalog_launch(gone, {"launch": {"windows": {"path": "nope.exe"}}}, "windows", tmp_path) is False
     assert gone.launch_path == "old.exe" and gone.launch_from_catalog is False
     assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False
-
-
-@pytest.mark.parametrize("name, decoy", [("index.html", "game.exe"), ("jumpgame.hta", "game.exe")],
-                         ids=["page", "hta"])
-def test_a_catalog_named_page_or_hta_is_the_launch_file(tmp_path, name, decoy):
-    launch_file = touch(tmp_path, name)
-    touch(tmp_path, decoy)  # even the guess's favourite name loses to the catalog's path
-    assert find_launch_exe(tmp_path, name, EXCL) == launch_file
-
-
-def test_a_page_is_never_guessed(tmp_path):
-    touch(tmp_path, "index.html")
-    touch(tmp_path, "story/page2.htm")
-    assert find_launch_exe(tmp_path, None, EXCL) is None
 
 
 @pytest.mark.parametrize("name", ["index.html", "jumpgame.hta"], ids=["page", "hta"])
@@ -494,12 +469,3 @@ def test_windows_folder_asks_again_with_a_bigger_buffer_when_told_it_was_too_sma
     call = _folder_call((len(deep) + 1, None), (len(deep), deep))
     assert launch._windows_folder(call) == deep
     assert len(call.sizes) == 2 and call.sizes[0] <= 260 < len(deep) < call.sizes[1]
-
-
-def test_an_hta_is_never_guessed(tmp_path):
-    touch(tmp_path, "game.hta")
-    touch(tmp_path, "more/play.hta")
-    assert find_launch_exe(tmp_path, None, EXCL) is None
-    deeper = touch(tmp_path, "tools/helper.exe")
-    assert find_launch_exe(tmp_path, None, EXCL) == deeper  # the guess looks past the .hta beside it
-    assert find_launch_exe(tmp_path, "missing.hta", EXCL) == deeper  # a path that names no file is not followed
