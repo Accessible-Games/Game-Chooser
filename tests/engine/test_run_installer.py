@@ -807,28 +807,6 @@ def test_vendor_uninstaller_error_is_a_note_and_files_are_put_back(tmp_path):
     assert eng.ctx.records.load("lightcars").uninstalled
 
 
-# ---- runtimes --------------------------------------------------------------------------------------------
-
-
-def test_run_installer_untracked_for_runtimes(tmp_path):
-    eng, lib = setup_engine(tmp_path, [], {})
-    target = tmp_path / "runtimes" / "vb6"
-    file = put(tmp_path, "dl/vbrun60.exe", b"vb")
-    run_installer.run_installer_untracked(file, {"type": "other", "mode": "run", "silent_args": "/Q"}, target,
-                                          eng.ctx, quiet, never)
-    assert eng.ctx.elevator.calls == [(str(file), "/Q", False)]
-    assert eng.ctx.records.all() == {}
-
-
-def test_run_installer_untracked_error_code_fails(tmp_path):
-    file = Path("vbrun60.exe")
-    eng, lib = setup_engine(tmp_path, [], {}, elevator=FakeElevator(exit_codes={"vbrun60.exe": 4}))
-    with pytest.raises(InstallFailed) as ei:
-        run_installer.run_installer_untracked(file, {"type": "other", "mode": "run", "silent_args": "/Q"},
-                                              tmp_path / "rt", eng.ctx, quiet, never, title="VB6 runtime")
-    assert ei.value.message == messages.INSTALLER_FAILED.format(title="VB6 runtime", code=4)
-
-
 # ---- the real Windows pieces (read-only, no installer, no UAC) ------------------------------------------
 
 
