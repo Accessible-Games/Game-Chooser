@@ -36,7 +36,8 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
   move. While a text is being typed, Space and the digit keys belong to it (Space for 3 seconds after the last
   character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. A
   Space never moves the selection; with any modifier but Alt alone it is a plain Space, and only Alt+Space (the
-  window menu) goes on to the list control. Escape, Backspace and the navigation keys end the text. Enter always acts.
+  window menu) goes on to the list control; a held Space counts once. Escape, Backspace, Enter, a sort and the
+  navigation keys end the text. Enter always acts.
 - The view moves focus on its own in one case only, to its list: the control that has focus is about to become
   unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
   open or the app is starting.
@@ -56,11 +57,11 @@ from description_field import DescriptionField
 from engine import messages
 from progress_area import ProgressArea
 
-# The keys that end a text being typed in the list: Escape, Backspace and the keys that move through the list
-# (with Num Lock off the number pad sends its own codes for those)
+# The keys that end a text being typed in the list: Escape, Backspace, Enter and the keys that move through the
+# list (with Num Lock off the number pad sends its own codes for those)
 ENDS_TYPED_TEXT = frozenset(getattr(wx, f"WXK_{prefix}{name}") for prefix in ("", "NUMPAD_")
                             for name in ("UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN")
-                            ) | {wx.WXK_ESCAPE, wx.WXK_BACK}
+                            ) | {wx.WXK_ESCAPE, wx.WXK_BACK, wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER}
 
 
 class GamesPanel(wx.Panel):
@@ -420,7 +421,8 @@ class GamesPanel(wx.Panel):
 
     def sort_by(self, column):
         """A header click or a digit key: sort by that column; the same column again, the other way round.
-        The selected game stays selected."""
+        The selected game stays selected, and a text being typed ends."""
+        self.type_ahead.clear()
         if column == self.sort_column:
             self.sort_ascending = not self.sort_ascending
         else:
@@ -538,8 +540,10 @@ class GamesPanel(wx.Panel):
         # Any Space but Alt+Space (the window menu) is a plain one: Ctrl+Space reaching the list control clears
         # the selection, and the button still names the game
         space = key == wx.WXK_SPACE and event.GetModifiers() != wx.MOD_ALT
-        if key in ENDS_TYPED_TEXT:  # the key itself goes on to the list as before
+        if key in ENDS_TYPED_TEXT:  # the key itself goes on to the list as before (Enter acts below)
             self.type_ahead.clear()
+        if space and event.IsAutoRepeat():  # a held Space acts once: repeats would land on the dialog it opened
+            return
         if space and self.type_ahead.takes_space():
             # Part of the text being typed ("temple of"), for 3 seconds after its last character: a player
             # waits for the screen reader to finish the row. Taken here, never skipped on to on_char: wx turns

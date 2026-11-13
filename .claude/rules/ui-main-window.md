@@ -113,10 +113,11 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
     native list clear the selection while the button still named the game, and Enter then acted on nothing.
     A Space belongs to the text for 3 seconds after the last character that is not a Space
     (a player waits for the screen reader to finish the row), and Spaces do not push that limit out. After
-    those 3 seconds Space is the action again. After typing, Enter is the key that always acts.
-  - Escape, Backspace, Up, Down, Home, End, Page Up and Page Down end the text at once (also from the number
-    pad with Num Lock off, which sends its own key codes): what is typed next is a new text, and Space acts on
-    the row the player moved to. The key itself goes on to the list.
+    those 3 seconds Space is the action again. After typing, Enter is the key that always acts. A held Space
+    counts once (`IsAutoRepeat`): its repeats would land on the dialog the first one opened.
+  - Escape, Backspace, Enter, Up, Down, Home, End, Page Up and Page Down end the text at once (also from the
+    number pad with Num Lock off, which sends its own key codes), and so does a sort: what is typed next is a new
+    text, and Space acts on the row the player moved to. The key itself goes on to the list (Enter acts).
   - A key with Ctrl alone or Alt alone is never text. With both down it is AltGr and is text: wx hands over a
     letter outside the system code page that way (the Polish e with ogonek under code page 1252), and a letter
     inside it with neither.

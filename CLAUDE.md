@@ -28,8 +28,9 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   unit-tested. Three are tested in part, on a frame that is never shown or a stand-in for the main window (these
   tests skip when wxPython is not installed or there is no display): `games_panel.py`, the games view both tabs
   are built from (`tests/test_games_panel.py`); in `catalog_panel.py`, what its action button does while a job
-  runs and how its columns sort (`tests/test_catalog_panel.py`); in `main_window.py`, the Library list's own
-  keys and the message boxes of `launch_game` and `on_open_folder` (`tests/test_main_window.py`).
+  runs, how its columns sort and an "&" in its labels (`tests/test_catalog_panel.py`); in `main_window.py`, the
+  Library list's own key (Del) and four message boxes of `launch_game` and `on_open_folder`
+  (`tests/test_main_window.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).

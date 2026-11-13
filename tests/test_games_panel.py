@@ -134,9 +134,21 @@ def tree_nodes(view):
     return nodes
 
 
-def key_event(key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False, shift=False, unicode=None):
-    """A key event as wx gives it: a character's unicode key is its key code unless `unicode` is given"""
-    event = wx.KeyEvent(event_type)
+class KeyEvent(wx.KeyEvent):
+    """wx leaves a made-up key event's auto-repeat flag unset (it reads as anything): here it is `repeat`"""
+
+    repeat = False
+
+    def IsAutoRepeat(self):
+        return self.repeat
+
+
+def key_event(key_code, event_type=wx.wxEVT_KEY_DOWN, ctrl=False, alt=False, shift=False, unicode=None,
+              repeat=False):
+    """A key event as wx gives it: a character's unicode key is its key code unless `unicode` is given; `repeat`
+    for a key-down Windows repeats while the key is held"""
+    event = KeyEvent(event_type)
+    event.repeat = repeat
     event.SetKeyCode(key_code)
     if event_type == wx.wxEVT_CHAR:
         event.SetUnicodeKey(key_code if unicode is None else unicode)
@@ -958,6 +970,34 @@ def test_a_typed_text_ends_on_a_key_that_ends_a_thought(make_view, key):
     player_selects(view, 2)  # where an arrow key takes the player
     type_text(view, " ")
     assert acted == ["Bravo"]
+
+
+def test_a_held_space_acts_once(make_view):
+    """On the Catalog tab the first press opens the install confirmation; a repeat must not land on its button"""
+    acted = []
+    view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
+    type_text(view, "temple")
+    now[0] += 1.2
+    assert press(view.list_ctrl, wx.WXK_SPACE, repeat=True)  # held mid-text: never the action
+    now[0] += 3.5
+    type_text(view, " ")
+    for _ in range(3):  # taken, so the list control never turns them into an activation
+        assert press(view.list_ctrl, wx.WXK_SPACE, repeat=True)
+    assert acted == ["Temple Of Doom"]
+
+
+@pytest.mark.parametrize("end", ["RETURN", "NUMPAD_ENTER", "sort"])
+def test_enter_and_a_sort_end_a_typed_text(make_view, end):
+    """Enter acts and a digit sorts, and after either a Space within 3 seconds of the last letter acts too"""
+    acted = []
+    view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
+    type_text(view, "t")
+    if end == "sort":
+        view.sort_by(1)
+    else:
+        assert press(view.list_ctrl, getattr(wx, f"WXK_{end}")) and acted == ["Temple Of Doom"]
+    type_text(view, " ")
+    assert acted[-1] == "Temple Of Doom" and not view.type_ahead.typing()
 
 
 def test_a_character_typed_with_altgr_is_text(make_view):
