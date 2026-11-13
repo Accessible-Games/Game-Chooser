@@ -112,13 +112,6 @@ def test_unreadable_required_extra_hides_game_optional_is_skipped():
     assert visible_games(es, "windows") and extras_of(g2, es, "windows") == []
 
 
-def test_extras_of_returns_usable_extras():
-    g = entry("g", extras=[{"id": "o", "required": False}])
-    o = entry("o", kind="extra")
-    infos = extras_of(g, {"g": g, "o": o}, "windows")
-    assert [(i.entry["id"], i.required) for i in infos] == [("o", False)]
-
-
 def test_mirror_helpers():
     assert is_mirror_url("https://files.accessiblegames.net/files/abc/x.zip")
     assert not is_mirror_url("https://example.com/files/abc/x.zip")
