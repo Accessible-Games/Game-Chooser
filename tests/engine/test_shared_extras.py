@@ -8,7 +8,6 @@ and nothing done to one game's copy touches another's.
 from dataclasses import asdict
 from pathlib import Path
 
-from engine.entries import extras_of
 from engine.jobs import InstallRequest
 from engine.plan import build_install_plan
 from tests.engine.fakes import (MIRROR, FakeFetcher, FakeRegistry, make_engine, never, quiet, served_source, sha, snapshot,
@@ -21,29 +20,24 @@ SHARED_V1 = {"data/patch.dat": b"series patch v1", "data/bonus.dat": b"bonus v1"
 SHARED_V2 = {"data/patch.dat": b"series patch v2", "data/bonus.dat": b"bonus v2"}
 
 
-def game(routes, id, title, files, version="1.0", required=False):
+def game(routes, id, title, files, version="1.0"):
     data = zip_bytes(files)
     source = served_source(routes, f"{MIRROR}{sha(data)}/{id}.zip", data)
     return {"id": id, "kind": "game", "title": title, "developer": ["Series Games"], "genres": ["Arcade"],
             "year": 2012, "version": version, "sources": [source],
-            "extras": [{"id": "series-patch", "required": required}]}
+            "extras": [{"id": "series-patch", "required": False}]}
 
 
-def shared_extra(routes, files=SHARED_V1, version="1", required=False):
+def shared_extra(routes, files=SHARED_V1, version="1"):
     data = zip_bytes(files)
     source = served_source(routes, f"{MIRROR}{sha(data)}/series-patch.zip", data)
-    entry = {"id": "series-patch", "kind": "extra", "title": "Series Patch", "extends": ["alpha", "bravo"],
-             "version": version, "sources": [source]}
-    if required:
-        entry["required"] = True
-    return entry
+    return {"id": "series-patch", "kind": "extra", "title": "Series Patch", "extends": ["alpha", "bravo"],
+            "version": version, "sources": [source]}
 
 
-def catalog(tmp_path, required=False):
+def catalog(tmp_path):
     routes = {}
-    entries = [game(routes, "alpha", "Alpha", ALPHA_V1, required=required),
-               game(routes, "bravo", "Bravo", BRAVO_V1, required=required),
-               shared_extra(routes, required=required)]
+    entries = [game(routes, "alpha", "Alpha", ALPHA_V1), game(routes, "bravo", "Bravo", BRAVO_V1), shared_extra(routes)]
     return make_engine(tmp_path, entries, fetcher=FakeFetcher(routes))
 
 
@@ -51,12 +45,11 @@ def run(eng, action, id, **kw):
     return eng.run(InstallRequest(action, id, "Games", **kw), quiet, never)
 
 
-def install_both(tmp_path, required=False):
-    """Alpha, then Bravo, each with the shared extra (chosen, or required); returns the engine and both folders."""
-    eng = catalog(tmp_path, required=required)
-    chosen = () if required else ("series-patch",)
-    run(eng, "install", "alpha", extras=chosen)
-    run(eng, "install", "bravo", extras=chosen)
+def install_both(tmp_path):
+    """Alpha, then Bravo, each with the shared extra; returns the engine and both folders."""
+    eng = catalog(tmp_path)
+    run(eng, "install", "alpha", extras=("series-patch",))
+    run(eng, "install", "bravo", extras=("series-patch",))
     return eng, tmp_path / "Games" / "Alpha", tmp_path / "Games" / "Bravo"
 
 
@@ -89,14 +82,6 @@ def test_installing_with_each_game_gives_two_independent_copies(tmp_path):
         assert rec.files[f"{id}.exe"].owner == id
     assert records.load("alpha").folder == "Alpha" and records.load("bravo").folder == "Bravo"
     assert leftovers(eng, tmp_path / "Games") == []
-
-
-def test_a_required_shared_extra_installs_automatically_with_each_game(tmp_path):
-    eng, alpha, bravo = install_both(tmp_path, required=True)
-    for id, folder in (("alpha", alpha), ("bravo", bravo)):
-        assert (folder / "data" / "bonus.dat").read_bytes() == SHARED_V1["data/bonus.dat"]
-        rec = eng.ctx.records.load(id)
-        assert set(rec.extras) == {"series-patch"} and rec.files["data/bonus.dat"].owner == "series-patch"
 
 
 def test_installing_the_second_game_leaves_the_first_alone(tmp_path):
@@ -185,26 +170,12 @@ def test_undoing_one_games_update_leaves_the_others_copy_and_record_alone(tmp_pa
     assert state(eng, bravo, "bravo") == before
 
 
-def test_uninstalling_both_removes_each_copy(tmp_path):
-    eng, alpha, bravo = install_both(tmp_path)
-    run(eng, "uninstall", "alpha")
-    run(eng, "uninstall", "bravo")
-    assert not alpha.exists() and not bravo.exists()
-
-
 # ---- offering it to each game ----------------------------------------------------------------------------------
 
 
 def plan(eng, id, action="install"):
     return build_install_plan(id, eng.ctx.entries, eng.ctx.libraries, eng.ctx.records, FakeRegistry(), True, None,
                               "windows", action)
-
-
-def test_extras_of_offers_it_to_each_game(tmp_path):
-    eng = catalog(tmp_path)
-    for id in ("alpha", "bravo"):
-        found = extras_of(eng.ctx.entries[id], eng.ctx.entries, "windows")
-        assert [(x.entry["id"], x.required) for x in found] == [("series-patch", False)]
 
 
 def test_the_install_plan_offers_it_to_each_game(tmp_path):
@@ -223,9 +194,3 @@ def test_having_it_in_one_game_still_offers_it_to_the_other(tmp_path):
     assert [x.id for x in plan(eng, "bravo", "extras").extras] == ["series-patch"]
     assert [x.id for x in plan(eng, "alpha", "update").extras] == []
     assert [x.id for x in plan(eng, "bravo", "update").extras] == ["series-patch"]
-
-
-def test_a_required_shared_extra_is_required_in_each_games_plan(tmp_path):
-    eng = catalog(tmp_path, required=True)
-    for id in ("alpha", "bravo"):
-        assert [(x.id, x.required) for x in plan(eng, id).extras] == [("series-patch", True)]

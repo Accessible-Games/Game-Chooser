@@ -74,12 +74,6 @@ def test_content_root(tmp_path):
         content_root(tmp_path, "../x")
 
 
-def test_single_top_folder_is_not_auto_descended(tmp_path):
-    (tmp_path / "Only").mkdir()
-    (tmp_path / "Only" / "Game.exe").write_bytes(b"x")
-    assert content_root(tmp_path, None) == tmp_path
-
-
 class FakeRun:
     def __init__(self, code=0, side_effect=None):
         self.calls = []

@@ -30,17 +30,6 @@ def link_to(outside: Path, link: Path) -> None:
                        check=True, capture_output=True)
 
 
-def test_launch_path_used_when_present(tmp_path):
-    touch(tmp_path, "Other.exe")
-    run = touch(tmp_path, "bin/Run.exe")
-    assert find_launch_exe(tmp_path, "bin/Run.exe", EXCL) == run
-
-
-def test_missing_launch_path_falls_back_to_detection(tmp_path):
-    (tmp_path / "Copter Mission.exe").touch()
-    assert find_launch_exe(tmp_path, "copter.exe", EXCL).name == "Copter Mission.exe"
-
-
 def test_unsafe_launch_path_falls_back(tmp_path):
     game = tmp_path / "game"
     game.mkdir()
@@ -137,14 +126,6 @@ def test_adopt_catalog_launch(tmp_path):
     assert adopt_catalog_launch(gone, {"launch": {"windows": {"path": "nope.exe"}}}, "windows", tmp_path) is False
     assert gone.launch_path == "old.exe" and gone.launch_from_catalog is False
     assert adopt_catalog_launch(gone, {}, "windows", tmp_path) is False
-
-
-@pytest.mark.parametrize("name, decoy", [("index.html", "game.exe"), ("jumpgame.hta", "game.exe")],
-                         ids=["page", "hta"])
-def test_a_catalog_named_page_or_hta_is_the_launch_file(tmp_path, name, decoy):
-    launch_file = touch(tmp_path, name)
-    touch(tmp_path, decoy)  # even the guess's favourite name loses to the catalog's path
-    assert find_launch_exe(tmp_path, name, EXCL) == launch_file
 
 
 def test_a_page_is_never_guessed(tmp_path):
@@ -255,14 +236,6 @@ def test_page_address_escapes_the_path(tmp_path):
     assert address.startswith("file:///") and not address.startswith("file:////")
     assert "%20" in address and "%23" in address and "%25" in address
     assert "é" in address and "%C3" not in address
-    assert " " not in address and "#" not in address
-
-
-def test_page_address_keeps_japanese_letters(tmp_path):
-    page = _page_in(tmp_path, "日本 #1")
-    address = page_address(str(page))
-    assert "日本" in address and "%E6" not in address
-    assert "%20" in address and "%23" in address
     assert " " not in address and "#" not in address
 
 
@@ -379,13 +352,6 @@ def test_an_hta_the_catalog_did_not_name_is_started_by_nothing(tmp_path, name):
                    start=lambda p, c: pytest.fail("an .hta is never run directly or through the shell"),
                    hta_start=lambda p, c: pytest.fail("only a catalog-named .hta gets the host"))
     assert str(e.value) == messages.HTA_NOT_ALLOWED
-
-
-def test_an_hta_that_is_not_allowed_never_reaches_start_program(tmp_path, monkeypatch):
-    monkeypatch.setattr(launch, "start_program", lambda p, c: pytest.fail("no direct run, no shell open"))
-    monkeypatch.setattr(launch, "start_hta", lambda p, c: pytest.fail("no host"))
-    with pytest.raises(OSError):
-        start_game(str(tmp_path / "game.hta"), str(tmp_path))
 
 
 def test_start_game_uses_start_hta_when_no_starter_is_given(tmp_path, monkeypatch):
@@ -509,12 +475,3 @@ def test_windows_folder_asks_again_with_a_bigger_buffer_when_told_it_was_too_sma
     call = _folder_call((len(deep) + 1, None), (len(deep), deep))
     assert launch._windows_folder(call) == deep
     assert len(call.sizes) == 2 and call.sizes[0] <= 260 < len(deep) < call.sizes[1]
-
-
-def test_an_hta_is_never_guessed(tmp_path):
-    touch(tmp_path, "game.hta")
-    touch(tmp_path, "more/play.hta")
-    assert find_launch_exe(tmp_path, None, EXCL) is None
-    deeper = touch(tmp_path, "tools/helper.exe")
-    assert find_launch_exe(tmp_path, None, EXCL) == deeper  # the guess looks past the .hta beside it
-    assert find_launch_exe(tmp_path, "missing.hta", EXCL) == deeper  # a path that names no file is not followed

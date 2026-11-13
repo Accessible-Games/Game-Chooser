@@ -103,7 +103,7 @@ def test_hash_tree_skips_engine_dirs_and_folds_case(tmp_path):
 
 
 def test_record_folder_and_owner(tmp_path):
-    libs = [{"id": "Main", "path": str(tmp_path / "lib")}]
+    libs = [{"id": "Other", "path": str(tmp_path / "other")}, {"id": "Main", "path": str(tmp_path / "lib")}]
     rel = make_record()
     assert record_folder(rel, libs) == tmp_path / "lib" / "Entombed"
     assert record_folder(make_record(library_id="Gone"), libs) is None
@@ -117,12 +117,6 @@ def test_record_folder_and_owner(tmp_path):
     assert found is not None and found.catalog_id == "entombed"
     assert store.owner_of_folder(tmp_path / "ELSEWHERE", libs).catalog_id == "abs"
     assert store.owner_of_folder(tmp_path / "lib" / "Other", libs) is None
-
-
-def test_record_folder_by_id(tmp_path):
-    libs = [{"id": "a1", "path": str(tmp_path / "A")}, {"id": "b2", "path": str(tmp_path / "B")}]
-    assert record_folder(make_record(library_id="b2"), libs) == tmp_path / "B" / "Entombed"
-    assert record_folder(make_record(library_id="zz"), libs) is None
 
 
 def test_library_view_leaves_runtime_records_alone(tmp_path):

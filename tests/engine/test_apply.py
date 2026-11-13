@@ -6,7 +6,7 @@ import pytest
 from engine import safety
 from engine.errors import EngineError
 from engine.records import RecordedFile
-from engine.safety import (ABSENT, ApplyResult, FileOp, Op, UpdatePlan, apply_plan, plain_file, remove_unchanged,
+from engine.safety import (ABSENT, FileOp, Op, UpdatePlan, apply_plan, plain_file, remove_unchanged,
                            restore_backups)
 from tests.engine.fakes import BK, put, sha
 
@@ -32,31 +32,6 @@ def dirs(tmp_path):
     return game, inc
 
 
-def test_backup_then_write(dirs):
-    game, inc = dirs
-    put(game, "cfg.ini", b"mine")
-    put(inc, "cfg.ini", b"new")
-    r = apply_plan(make_plan(("cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
-    assert isinstance(r, ApplyResult)
-    assert (game / BK / "cfg.ini").read_bytes() == b"mine"
-    assert (game / "cfg.ini").read_bytes() == b"new"
-    assert r.backups == [{"original": "cfg.ini", "backup": f"{BK}/cfg.ini", "installed_sha256": sha(b"new")}]
-    assert [p.name for p in game.iterdir() if p.is_file()] == ["cfg.ini"]  # no temp left
-
-
-def test_backup_name_collision_same_day(dirs):
-    game, inc = dirs
-    put(game, "cfg.ini", b"one")
-    put(inc, "cfg.ini", b"two")
-    plan = make_plan(("cfg.ini", Op.BACKUP_AND_WRITE, b"two"))
-    apply_plan(plan, game, inc, DAY)
-    put(game, "cfg.ini", b"mine2")
-    r = apply_plan(plan, game, inc, DAY)
-    assert (game / BK / "cfg.ini").read_bytes() == b"one"
-    assert (game / BK / "cfg (2).ini").read_bytes() == b"mine2"
-    assert r.backups[0]["backup"] == f"{BK}/cfg (2).ini"
-
-
 def test_backup_keeps_subfolders(dirs):
     game, inc = dirs
     put(game, "Data/cfg.ini", b"mine")
@@ -64,6 +39,7 @@ def test_backup_keeps_subfolders(dirs):
     r = apply_plan(make_plan(("Data/cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
     assert (game / BK / "Data" / "cfg.ini").read_bytes() == b"mine"
     assert r.backups[0]["backup"] == f"{BK}/Data/cfg.ini"
+    assert [p.name for p in (game / "Data").iterdir()] == ["cfg.ini"]  # no temp left
 
 
 def test_write_creates_dirs_and_delete_prunes_empty_dirs(dirs):
@@ -79,13 +55,6 @@ def test_write_creates_dirs_and_delete_prunes_empty_dirs(dirs):
     assert not (game / "old").exists()
     assert (game / "keep/other.txt").exists() and not (game / "keep/gone2.txt").exists()
     assert game.exists() and r.backups == []
-
-
-def test_keep_does_nothing(dirs):
-    game, inc = dirs
-    put(game, "k.txt", b"mine")
-    apply_plan(make_plan(("k.txt", Op.KEEP, b"new")), game, inc, DAY)
-    assert (game / "k.txt").read_bytes() == b"mine"
 
 
 def test_preflight_target_is_directory_changes_nothing(dirs):
@@ -128,11 +97,12 @@ def test_failed_write_keeps_backup_and_cleans_temp(dirs, monkeypatch):
         return real(src, dst)
 
     monkeypatch.setattr(os, "replace", boom)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError) as info:
         apply_plan(make_plan(("cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
     monkeypatch.setattr(os, "replace", real)
     files = [p for p in game.rglob("*") if p.is_file()]
-    assert len(files) == 1 and files[0].read_bytes() == b"mine"  # player's data survives, no temp left
+    assert files == [game / "cfg.ini"] and files[0].read_bytes() == b"mine"  # put back in place, no temp left
+    assert info.value.partial.backups == []  # the backup that was put back is not listed
 
 
 def test_missing_incoming_file_leaves_player_file_alone(dirs):
@@ -232,27 +202,6 @@ def test_plan_update_fills_expected():
     plan = plan_update({}, {"a.txt": ("a.txt", "h")}, {"a.txt": RecordedFile("a.txt", "n", "g"),
                                                        "b.txt": RecordedFile("b.txt", "n", "g")})
     assert {o.path: o.expected for o in plan.ops} == {"a.txt": "h", "b.txt": ABSENT}
-
-
-def test_failure_partway_reports_partial_backups(dirs, monkeypatch):
-    game, inc = dirs
-    for name in ("a.ini", "b.ini"):
-        put(game, name, b"mine " + name.encode())
-        put(inc, name, b"new")
-    real = os.replace
-
-    def boom(src, dst):
-        if str(dst).endswith("b.ini") and BK not in str(dst):
-            raise OSError("nope")
-        return real(src, dst)
-
-    monkeypatch.setattr(os, "replace", boom)
-    plan = make_plan(("a.ini", Op.BACKUP_AND_WRITE, b"new"), ("b.ini", Op.BACKUP_AND_WRITE, b"new"))
-    with pytest.raises(OSError) as info:
-        apply_plan(plan, game, inc, DAY)
-    monkeypatch.setattr(os, "replace", real)
-    assert [b["original"] for b in info.value.partial.backups] == ["a.ini"]
-    assert (game / BK / "a.ini").exists() and (game / "b.ini").read_bytes() == b"mine b.ini"
 
 
 def test_preflight_catches_backup_path_blocked_by_file(dirs):

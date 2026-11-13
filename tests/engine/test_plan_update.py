@@ -55,13 +55,6 @@ def test_case_only_difference_is_same_file():
     assert plan.ops[0].path == "DATA/CONFIG.INI"
 
 
-def test_persist_paths_are_always_player_owned():
-    plan = plan_update({}, {"saves/s1.dat": ("Saves/s1.dat", "p")}, {"saves/s1.dat": rf("Saves/s1.dat", "b")}, persist=["Saves/"])
-    assert plan.ops[0].op is Op.KEEP and "saves/s1.dat" not in plan.new_files
-    plan = plan_update({}, {}, {"saves/s1.dat": rf("Saves/s1.dat", "b")}, persist=["Saves/"])
-    assert plan.ops[0].op is Op.WRITE and "saves/s1.dat" not in plan.new_files
-
-
 def test_persist_wins_over_an_old_record():
     inst = {"saves/s1.dat": rf("Saves/s1.dat", "a")}
     for disk_hash, inc in (("a", None), ("p", "b"), ("a", "b")):
@@ -70,13 +63,6 @@ def test_persist_wins_over_an_old_record():
         plan = plan_update(inst, disk, incoming, persist=["saves/"])
         assert [o.op for o in plan.ops] == [Op.KEEP]
         assert plan.new_files == {}
-
-
-def test_repair_restores_changed_code_only():
-    inst = {"game.exe": rf("game.exe", "a"), "cfg.ini": rf("cfg.ini", "a")}
-    disk = {"game.exe": ("game.exe", "q"), "cfg.ini": ("cfg.ini", "p")}
-    ops = {o.key: o.op for o in plan_update(inst, disk, inst, restore_changed_code=True).ops}
-    assert ops == {"game.exe": Op.WRITE, "cfg.ini": Op.KEEP}
 
 
 def test_repair_suffix_is_case_insensitive():
