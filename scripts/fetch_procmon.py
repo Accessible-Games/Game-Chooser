@@ -5,13 +5,13 @@ The zip is checked against a pinned SHA256. Process Monitor is never committed o
 is git-ignored, and only the tracing build copies it into its own dist folder.
 """
 
-import hashlib
 import shutil
 import sys
 import tempfile
-import urllib.request
 import zipfile
 from pathlib import Path
+
+from fetch_tools import download  # scripts/ is on the path when this script runs
 
 ROOT = Path(__file__).resolve().parent.parent
 PROCMON_DIR = ROOT / "tracing-tools" / "procmon"
@@ -26,14 +26,11 @@ def main() -> None:
     PROCMON_DIR.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as tmp_name:
         archive = Path(tmp_name) / "ProcessMonitor.zip"
-        req = urllib.request.Request(PROCMON_URL, headers={"User-Agent": "GameChooser-fetch-procmon/0.1"})
-        with urllib.request.urlopen(req, timeout=60) as resp, open(archive, "wb") as out:
-            shutil.copyfileobj(resp, out)
-        actual = hashlib.sha256(archive.read_bytes()).hexdigest()
-        print(f"{PROCMON_URL}\n  SHA256 {actual}")
-        if actual != PROCMON_SHA256:
-            raise SystemExit("SHA256 mismatch for ProcessMonitor.zip: Sysinternals may have released a new version. "
-                             "Check its signature, then update PROCMON_SHA256.")
+        try:
+            download(PROCMON_URL, archive, PROCMON_SHA256)
+        except SystemExit as mismatch:
+            raise SystemExit(f"{mismatch}. Sysinternals may have released a new version. Check its signature, then "
+                             "update PROCMON_SHA256.") from None
         with zipfile.ZipFile(archive) as zf:
             names = zf.namelist()
             for name in FILES:
