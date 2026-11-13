@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -144,3 +145,16 @@ def test_library_view_leaves_runtime_records_alone(tmp_path):
     store.delete_game("broken")  # an unreadable record may be the game's: it goes
     store.delete_game("entombed")
     assert not (tmp_path / "broken.json").exists() and store.load("entombed") is None
+
+
+def test_a_save_that_fails_keeps_the_old_record_and_leaves_no_temp_file(tmp_path, monkeypatch):
+    store = RecordStore(tmp_path)
+    store.save(make_record())
+
+    def full_disk(*args):
+        raise OSError("No space left on device")
+    monkeypatch.setattr(os, "replace", full_disk)
+    with pytest.raises(OSError):
+        store.save(make_record(folder="Moved"))
+    assert store.load("entombed") == make_record()
+    assert [p.name for p in tmp_path.iterdir()] == ["entombed.json"]
