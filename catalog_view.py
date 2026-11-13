@@ -12,8 +12,8 @@ from urllib.parse import urlsplit
 
 from engine import messages
 from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, is_web_game
-from engine.pricing import (can_play_free, description_lines, donate_link, price_text, pricing_of, purchase_link,
-                            shown_price)
+from engine.pricing import (can_play_free, description_lines, donate_link, http_url, price_text, pricing_of,
+                            purchase_link, shown_price)
 from language_names import language_name
 
 _UNKNOWN = {"genre": "Unknown Genre", "developer": "Unknown Developer", "year": "Unknown Year"}
@@ -335,18 +335,6 @@ def markdown_to_text(md: str) -> str:
     return text.rstrip()
 
 
-def _http(url) -> str | None:
-    """`url` when it is an http(s) address with a host (and no spaces), else None."""
-    if not isinstance(url, str) or any(c.isspace() for c in url):
-        return None
-    try:
-        parts = urlsplit(url)
-        host = parts.hostname
-    except ValueError:
-        return None
-    return url if parts.scheme in ("http", "https") and host else None
-
-
 def _host(url: str) -> str:
     """The site's name for a link without a label: its host name, without "www."."""
     host = urlsplit(url).hostname or url
@@ -357,7 +345,7 @@ def _own_links(entry: dict) -> list[tuple[str, str]]:
     links = entry.get("links")
     result = []
     for link in links if isinstance(links, list) else []:  # a version 1 links object is skipped
-        url = _http(link.get("url")) if isinstance(link, dict) else None
+        url = http_url(link.get("url")) if isinstance(link, dict) else None
         if url is None:
             continue
         label = link.get("label")
@@ -413,13 +401,13 @@ def description_text(entry: dict | None) -> str:
     return "\n\n".join(part for part in (body, details, links) if part)
 
 
-_LINK_LINE = re.compile(r"^.+?: (https?://\S+)$")
+_LINK_LINE = re.compile(r"^.+?: (\S+)$")
 
 
 def link_at_line(line: str) -> str | None:
     """The address on a "label: url" line, or None."""
     match = _LINK_LINE.match(line.strip())
-    return match.group(1) if match else None
+    return http_url(match.group(1)) if match else None
 
 
 def initial_tab(saved: str | None, is_first_run: bool) -> str:
