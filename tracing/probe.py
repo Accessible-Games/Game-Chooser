@@ -51,11 +51,6 @@ def cli_relaunch(compiled: bool, out_dir: Path, workload: Path) -> Relaunch:
     return exe, leading + ["--trace-probe", str(out_dir), "--workload", str(workload)], paths.app_dir(compiled)
 
 
-def capture_files(out_dir: Path) -> list[Path]:
-    """capture.pml, then the files Process Monitor rolled over to (capture-1.pml, ...), in order."""
-    return RunDir(out_dir).capture_files()
-
-
 def summarize(processes: list[ProcInfo], events: Iterator[RawEvent], session: SessionInfo) -> dict:
     """Operation counts over the whole capture, and the processes and events of the workload's tree."""
     root = find_root(processes, session)
@@ -159,7 +154,7 @@ def _capture_and_read(out_dir: Path, procmon: Path, workload: Path, control: Win
         raise RuntimeError(f"Process Monitor did not stop within {STOP_TIMEOUT} s")
 
     capture_raw_details(RAW_OPERATIONS)
-    files = capture_files(out_dir)
+    files = RunDir(out_dir).capture_files()  # capture.pml, then capture-1.pml, ... in order
     processes, events = read_capture(files)
     session = SessionInfo("probe", process.pid, root_start, before, after, {"workload": str(workload)}, {}, ())
     summary = summarize(processes, events, session)
