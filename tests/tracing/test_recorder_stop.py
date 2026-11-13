@@ -1,15 +1,13 @@
 """The recorder taking a stop request (--trace-stop), with and without closing the traced games."""
 import os
 
-from tests.tracing.test_recorder import Clock, FakeProcmon
+from tests.tracing import test_recorder
+from tests.tracing.test_recorder import Clock
 from tracing import closing, messages, recorder
 from tracing.closing import Closer, Identity
 from tracing.live import LiveProc
 from tracing.model import SessionInfo
-from tracing.runfiles import RunDir
-from tracing.splitrun import SplitResult
 
-GIB = 1024**3
 NOW = 133_500_000_000_000_000
 APP_PID = 42
 GAME = r"C:\Games\Foo"
@@ -96,22 +94,9 @@ def session(sid, pid, start, game_dir=GAME):
 def make(tmp_path, *, sessions=(), closer=True, app_until=10_000.0, dies_at=None):
     clock = Clock()
     world = World(clock)
-    run = RunDir(tmp_path / "run")
-    (run.path / "sessions").mkdir(parents=True)
-    for info in sessions:
-        run.write_session(info)
-    pm = FakeProcmon(clock, True, dies_at, run)
-    states = []
-    real = run.write_status
-
-    def spy(state, **kwargs):
-        states.append(state)
-        real(state, **kwargs)
-
-    run.write_status = spy
-    rec = recorder.Recorder(run, lambda: clock.t < app_until, pm, world.snapshot, lambda r: SplitResult([], []),
-                            lambda: [], lambda: 10 * GIB, clock, clock.sleep,
-                            closer=_closer(world, closer), now=lambda: NOW, protected_pids=(APP_PID,))
+    rec, run, pm, states, _splits, _ = test_recorder.make(
+        tmp_path, sessions=sessions, app_until=app_until, dies_at=dies_at, snapshot=world.snapshot, clock=clock,
+        closer=_closer(world, closer), now=lambda: NOW, protected_pids=(APP_PID,))
     return rec, run, pm, states, world, clock
 
 
