@@ -117,32 +117,35 @@ def test_launch_on_an_installed_game_is_the_same_with_or_without_a_job_for_it(ma
     assert panel.frame.launched == ["Alpha", "Alpha"] and panel.frame.told == [] and panel.service.submitted == []
 
 
-def priced(id, genre, **pricing):
-    return {**entry(id, genre), "pricing": pricing}
+def priced(id, genre, developer, tag, **pricing):
+    return {**entry(id, genre), "developer": [developer], "tags": [tag], "pricing": pricing}
 
 
-PRICED = [priced("alpha", "Puzzle", model="one-time", price=10, currency="USD"),
-          priced("bravo", "Action", model="one-time", price=5, currency="USD"),
-          priced("charlie", "Puzzle", model="free")]
+# Every column, and Price both ways, puts these four in an order of its own, so a column that sorts nothing, or
+# by another column's key, shows. By title: Alpha, Bravo, Charlie, Delta. Alpha and Delta tie on the genre.
+PRICED = [priced("alpha", "Action", "Cy", "Zombies", model="one-time", price=5, currency="USD"),
+          priced("bravo", "Puzzle", "Ann", "Horror", model="one-time", price=10, currency="USD"),
+          priced("charlie", "Board", "Bob", "Arcade", model="free"),
+          priced("delta", "Action", "Dee", "Maze", model="one-time", price=7, currency="USD")]
 
 
 def test_the_catalog_list_sorts_by_each_column_and_remembers_it(make_panel):
     view = make_panel(entries=PRICED).view
-    assert titles(view) == ["Alpha", "Bravo", "Charlie"]
+    assert titles(view) == ["Alpha", "Bravo", "Charlie", "Delta"]
     assert headers(view) == ["Title ▲", "Developer", "Genre", "Price", "Details"]
     click_header(view, 3)  # Price: free first, then by amount ("Buy once, $10" is before "Buy once, $5" as text)
-    assert titles(view) == ["Charlie", "Bravo", "Alpha"] and headers(view)[3] == "Price ▲"
+    assert titles(view) == ["Charlie", "Alpha", "Delta", "Bravo"] and headers(view)[3] == "Price ▲"
     assert (saved(view)["catalog_sort_column"], saved(view)["catalog_sort_ascending"]) == (3, True)
     click_header(view, 3)
-    assert titles(view) == ["Alpha", "Bravo", "Charlie"] and headers(view)[3] == "Price ▼"
-    press(view.list_ctrl, ord("3"), wx.wxEVT_CHAR)  # a digit key: Genre, rows that tie in title order
-    assert titles(view) == ["Bravo", "Alpha", "Charlie"] and headers(view)[2] == "Genre ▲"
-    for digit in "25":  # Developer and Details sort too (all the same here: title order)
-        press(view.list_ctrl, ord(digit), wx.wxEVT_CHAR)
-        assert titles(view) == ["Alpha", "Bravo", "Charlie"]
+    assert titles(view) == ["Bravo", "Delta", "Alpha", "Charlie"] and headers(view)[3] == "Price ▼"
+    for digit, column, order in (("3", "Genre", ["Alpha", "Delta", "Charlie", "Bravo"]),  # a tie: in title order
+                                 ("2", "Developer", ["Bravo", "Charlie", "Alpha", "Delta"]),
+                                 ("5", "Details", ["Charlie", "Bravo", "Delta", "Alpha"])):
+        press(view.list_ctrl, ord(digit), wx.wxEVT_CHAR)  # a digit key
+        assert titles(view) == order and headers(view)[int(digit) - 1] == f"{column} ▲"
     assert saved(view)["catalog_sort_column"] == 4
 
 
 def test_the_catalog_list_starts_in_the_saved_sort(make_panel):
     view = make_panel(entries=PRICED, saved={"catalog_sort_column": 3, "catalog_sort_ascending": False}).view
-    assert titles(view) == ["Alpha", "Bravo", "Charlie"] and headers(view)[3] == "Price ▼"
+    assert titles(view) == ["Bravo", "Delta", "Alpha", "Charlie"] and headers(view)[3] == "Price ▼"

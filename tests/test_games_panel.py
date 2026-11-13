@@ -758,17 +758,16 @@ def test_the_filter_is_applied_before_the_config_is_saved(make_view):
 
 
 def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(make_view):
+    """Real keyboard focus, which a frame that is never shown does hold within its own thread"""
     view = make_view()
     view.set_rows(rows(ALPHA))
-    focus = []
-    view.list.control.SetFocus = lambda: focus.append(True)
-    view.action_btn.HasFocus = lambda: True
+    view.action_btn.SetFocus()
     view.set_busy(True)  # a job starts: the button stays, so focus stays on it
-    assert focus == []
-    view.action_btn.HasFocus = lambda: False
-    view.progress_area.has_focus_inside = lambda: True  # on Cancel, say, when the job ends
+    assert view.action_btn.HasFocus()
+    view.progress_area.cancel_btn.SetFocus()  # the player is on Cancel when the job ends
+    assert view.progress_area.cancel_btn.HasFocus()
     view.set_busy(False)
-    assert focus == [True]
+    assert view.list_ctrl.HasFocus()
 
 
 def test_a_selection_event_while_a_dialog_is_open_is_not_the_players(make_view):
