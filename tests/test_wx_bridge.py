@@ -3,6 +3,7 @@
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -36,11 +37,6 @@ class FakeFrame:
         raise AttributeError(name)
 
 
-class FakeJob:
-    def __init__(self, id):
-        self.id = id
-
-
 def in_thread(fn, *args):
     out = {}
     thread = threading.Thread(target=lambda: out.setdefault("value", fn(*args)), daemon=True)
@@ -51,7 +47,7 @@ def in_thread(fn, *args):
 def test_listener_posts_every_queue_event_to_the_frames_handler():
     post, frame = Recorder(), FakeFrame()
     listener = WxQueueListener(frame, post=post)
-    j = FakeJob(1)
+    j = SimpleNamespace(id=1)
     listener.job_started(j)
     listener.job_progress(j, "P")
     listener.job_finished(j, "R")
@@ -136,7 +132,7 @@ def test_the_first_answer_wins():
 def test_listener_records_each_job_end_before_posting_it():
     post = Recorder()
     listener = WxQueueListener(FakeFrame(), post=post)
-    a, b, c = FakeJob(1), FakeJob(2), FakeJob(3)
+    a, b, c = (SimpleNamespace(id=i) for i in (1, 2, 3))
     listener.job_started(a)
     listener.job_progress(a, "P")
     listener.queue_changed(1)
@@ -148,7 +144,7 @@ def test_listener_records_each_job_end_before_posting_it():
 
 def test_each_job_end_is_applied_once():
     outcomes = wx_bridge.JobOutcomes()
-    a, b, c = FakeJob(1), FakeJob(2), FakeJob(3)
+    a, b, c = (SimpleNamespace(id=i) for i in (1, 2, 3))
     outcomes.add("finished", a, "R")
     outcomes.add("failed", b, "M")
     outcomes.add("cancelled", c)
