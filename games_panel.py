@@ -44,7 +44,6 @@ What differs between the tabs is a setting of `GamesPanel` or lives in the tab's
 does, its context menu, the Catalog's status line).
 """
 
-import logging
 import random
 
 import wx
@@ -56,8 +55,6 @@ from catalog_view import (TypeAhead, action_label, action_verb, description_text
 from description_field import DescriptionField
 from engine import messages
 from progress_area import ProgressArea
-
-log = logging.getLogger(__name__)
 
 # The keys that end a text being typed in the list: Escape, Backspace and the keys that move through the list
 # (with Num Lock off the number pad sends its own codes for those)
@@ -194,10 +191,8 @@ class GamesPanel(wx.Panel):
     def save_config(self):
         """Write the config. A save that fails is logged and never stops what the player was doing: the change
         stays in memory and is written with the next save that works."""
-        try:
-            self.frame.library_manager.save_config()
-        except OSError as e:
-            log.warning("Couldn't save the config: %s", e)
+        manager = self.frame.library_manager
+        manager.save_or_keep(manager.save_config, "the config")
 
     def _get_virtual_item(self, index):
         return self.displayed[index] if 0 <= index < len(self.displayed) else None

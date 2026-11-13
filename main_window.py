@@ -694,6 +694,11 @@ class MainFrame(wx.Frame):
             except Exception:
                 log.exception("Couldn't refresh after the games changed")
 
+    def _save_games(self):
+        """The player changed a game (Add, Edit, Delete, Locate): write games.json, then show the change"""
+        self.library_manager.save_games()
+        self.games_changed()
+
     def _run_job_done_hooks(self, job):
         for hook in list(self.job_done_hooks):
             try:
@@ -833,8 +838,7 @@ class MainFrame(wx.Frame):
                     if located and live is not None:
                         live.launch_path = new_path
                         live.library_id = ""
-                        self.library_manager.save_games()
-                        self.games_changed()  # the view finds it again by the Game object, under its new id
+                        self._save_games()  # the view finds it again by the Game object, under its new id
                 return
 
             # Tracing watches a program launch only; a web page is never observed
@@ -937,8 +941,7 @@ class MainFrame(wx.Frame):
 
         with self.modal_dialog(), GameDialog(self, self.library_manager, game) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
-                self.library_manager.save_games()
-                self.games_changed()
+                self._save_games()
 
     def on_delete_game(self, event):
         """Delete selected game"""
@@ -966,10 +969,9 @@ class MainFrame(wx.Frame):
                 if g is live:
                     del games[i]
                     break
-            self.library_manager.save_games()
             # The selection stays on the deleted game's row number, also when another game has the same launch
             # path and so takes over its row id (catalog_view.pick_index)
-            self.games_changed()
+            self._save_games()
 
     def _forget_game(self, game):
         """Delete an untracked catalog install: its record goes and it leaves the list; its files stay"""
@@ -1134,8 +1136,7 @@ class MainFrame(wx.Frame):
         with self.modal_dialog(), GameDialog(self, self.library_manager) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.library_manager.games.append(dlg.game)
-                self.library_manager.save_games()
-                self.games_changed()
+                self._save_games()
 
     def on_toggle_filter_platform(self, event):
         """Toggle platform filter in tree"""
