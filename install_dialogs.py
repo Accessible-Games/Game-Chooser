@@ -191,10 +191,9 @@ class InstallConfirmDialog(wx.Dialog):
     # ---- events --------------------------------------------------------------------------------------------------
 
     def on_browse(self, event):
-        dlg = wx.DirDialog(self, messages.CONFIRM_BROWSE_PROMPT, defaultPath=self._folder.GetValue())
-        if dlg.ShowModal() == wx.ID_OK:
-            self._folder.SetValue(dlg.GetPath())
-        dlg.Destroy()
+        with wx.DirDialog(self, messages.CONFIRM_BROWSE_PROMPT, defaultPath=self._folder.GetValue()) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self._folder.SetValue(dlg.GetPath())
         self._folder.SetFocus()
 
     def on_ok(self, event):

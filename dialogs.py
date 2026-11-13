@@ -88,27 +88,24 @@ class FirstTimeSetupDialog(wx.Dialog):
 
     def on_add_library(self, event):
         """Open directory picker to add library"""
-        dlg = wx.DirDialog(self, "Choose Game Library Directory")
-        if dlg.ShowModal() == wx.ID_OK:
-            try:
-                self.library_manager.add_library(dlg.GetPath())
-            except LibraryError as e:
-                wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
-        dlg.Destroy()
+        with wx.DirDialog(self, "Choose Game Library Directory") as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                try:
+                    self.library_manager.add_library(dlg.GetPath())
+                except LibraryError as e:
+                    wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
 
     def on_add_game(self, event):
         """Open add game dialog"""
-        dlg = GameDialog(self, self.library_manager)
-        if dlg.ShowModal() == wx.ID_OK:
-            self.library_manager.games.append(dlg.game)
-            self.library_manager.save_games()
-        dlg.Destroy()
+        with GameDialog(self, self.library_manager) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.library_manager.games.append(dlg.game)
+                self.library_manager.save_games()
 
     def on_preferences(self, event):
         """Open preferences dialog"""
-        dlg = PreferencesDialog(self, self.library_manager, getattr(self.parent_frame, "service", None))
-        dlg.ShowModal()
-        dlg.Destroy()
+        with PreferencesDialog(self, self.library_manager, getattr(self.parent_frame, "service", None)) as dlg:
+            dlg.ShowModal()
 
     def on_close(self, event):
         """Handle close button (X) click"""
@@ -258,10 +255,9 @@ class GameDialog(wx.Dialog):
         else:  # macOS
             wildcard = "Applications (*.app)|*.app|All files (*.*)|*.*"
 
-        dlg = wx.FileDialog(self, "Select Game Executable", wildcard=wildcard)
-        if dlg.ShowModal() == wx.ID_OK:
-            self.path_ctrl.SetValue(dlg.GetPath())
-        dlg.Destroy()
+        with wx.FileDialog(self, "Select Game Executable", wildcard=wildcard) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.path_ctrl.SetValue(dlg.GetPath())
 
     def on_ok(self, event):
         """Validate and save changes"""
@@ -631,12 +627,10 @@ class PreferencesDialog(wx.Dialog):
 
     def on_add_library(self, event):
         """Add a new library path (applies immediately)"""
-        dlg = wx.DirDialog(self, "Choose Game Library Directory")
-        with self._modal():
-            chosen = dlg.ShowModal() == wx.ID_OK
+        with self._modal(), wx.DirDialog(self, "Choose Game Library Directory") as dlg:
+            chosen, path = dlg.ShowModal() == wx.ID_OK, dlg.GetPath()
         if chosen:
-            self._change_libraries(self.library_manager.add_library, dlg.GetPath())
-        dlg.Destroy()
+            self._change_libraries(self.library_manager.add_library, path)
 
     def on_change_library_folder(self, event):
         """Point the selected library at another folder (applies immediately)"""
@@ -647,12 +641,10 @@ class PreferencesDialog(wx.Dialog):
             # its queued uninstalls find the game folders through the library when they run
             self._tell(messages.LIBRARY_BEING_REMOVED)
             return
-        dlg = wx.DirDialog(self, "Choose the library's new folder", defaultPath=selected["path"])
-        with self._modal():
-            chosen = dlg.ShowModal() == wx.ID_OK
+        with self._modal(), wx.DirDialog(self, "Choose the library's new folder", defaultPath=selected["path"]) as dlg:
+            chosen, path = dlg.ShowModal() == wx.ID_OK, dlg.GetPath()
         if chosen:
-            self._change_libraries(self.library_manager.change_library_folder, selected["id"], dlg.GetPath())
-        dlg.Destroy()
+            self._change_libraries(self.library_manager.change_library_folder, selected["id"], path)
 
     def on_remove_library(self, event):
         """Remove the selected library (applies immediately). One holding catalog installs is removed once they
@@ -725,14 +717,10 @@ class PreferencesDialog(wx.Dialog):
             if found is None:
                 return
             lib, tracked, kept = found
-            dlg = RemoveLibraryDialog(self, library_label(lib), [g.title or g.catalog_id for g in tracked],
-                                      player_files, [g.title or g.catalog_id for g in kept])
-            try:
-                with self._modal():
-                    confirmed = dlg.ShowModal() == wx.ID_OK
+            with self._modal(), RemoveLibraryDialog(self, library_label(lib), [g.title or g.catalog_id for g in tracked],
+                                                    player_files, [g.title or g.catalog_id for g in kept]) as dlg:
+                confirmed = dlg.ShowModal() == wx.ID_OK
                 delete_player_data = dlg.delete_player_data()
-            finally:
-                dlg.Destroy()
             if confirmed:
                 self._change_libraries(self.service.remove_library, library_id, delete_player_data)
         finally:

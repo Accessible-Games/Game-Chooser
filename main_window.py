@@ -496,10 +496,8 @@ class MainFrame(wx.Frame):
     def check_libraries(self):
         """Check if first run and show setup dialog"""
         if self.library_manager.is_first_run:
-            dlg = FirstTimeSetupDialog(self, self.library_manager)
-            with self.modal_dialog():
+            with self.modal_dialog(), FirstTimeSetupDialog(self, self.library_manager) as dlg:
                 dlg.ShowModal()
-            dlg.Destroy()
 
             # Refresh UI in case they added stuff
             self.games_changed()
@@ -827,20 +825,16 @@ class MainFrame(wx.Frame):
                     return
                 with self.modal_dialog():
                     self._tell(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE)
-
-                    # File dialog to relocate
-                    dlg = wx.FileDialog(self, "Locate Game Executable")
-                    if dlg.ShowModal() == wx.ID_OK:
+                    with wx.FileDialog(self, "Locate Game Executable") as dlg:
+                        located = dlg.ShowModal() == wx.ID_OK
                         new_path = dlg.GetPath()
-
-                        # Any path on disk will do; it is no longer tied to a library
-                        live = self._live_game(game)
-                        if live is not None:
-                            live.launch_path = new_path
-                            live.library_id = ""
-                            self.library_manager.save_games()
-                            self.games_changed()  # the view finds it again by the Game object, under its new id
-                    dlg.Destroy()
+                    # Any path on disk will do; it is no longer tied to a library
+                    live = self._live_game(game)
+                    if located and live is not None:
+                        live.launch_path = new_path
+                        live.library_id = ""
+                        self.library_manager.save_games()
+                        self.games_changed()  # the view finds it again by the Game object, under its new id
                 return
 
             # Tracing watches a program launch only; a web page is never observed
@@ -941,17 +935,11 @@ class MainFrame(wx.Frame):
             self.focus_active_list()
             return
 
-        dlg = GameDialog(self, self.library_manager, game)
+        with self.modal_dialog(), GameDialog(self, self.library_manager, game) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.library_manager.save_games()
+                self.games_changed()
 
-        # Block spurious selection events (and game-changing refreshes) while modal dialog is active
-        with self.modal_dialog():
-            try:
-                if dlg.ShowModal() == wx.ID_OK:
-                    self.library_manager.save_games()
-                    self.games_changed()
-            finally:
-                dlg.Destroy()
-    
     def on_delete_game(self, event):
         """Delete selected game"""
         if self.active_tab() != "library":
@@ -968,17 +956,9 @@ class MainFrame(wx.Frame):
             self._forget_game(game)
             return
 
-        # Show custom delete dialog
-        dlg = DeleteGameDialog(self, game.title)
-
-        # Block spurious selection events (and game-changing refreshes) while modal dialog is active.
-        # The queued refreshes run after this handler returns, so after the removal below.
-        with self.modal_dialog():
-            try:
-                result = dlg.ShowModal()
-            finally:
-                dlg.Destroy()
-
+        # The queued refreshes run after this handler returns, so after the removal below
+        with self.modal_dialog(), DeleteGameDialog(self, game.title) as dlg:
+            result = dlg.ShowModal()
         if result == wx.ID_YES:
             live = self._live_game(game)
             games = self.library_manager.games
@@ -1089,12 +1069,8 @@ class MainFrame(wx.Frame):
     def confirm_install(self, plan, fixed_library=None):
         """The confirmation dialog for a plan (install, update or extras): the player's InstallChoice, or None
         when they cancelled"""
-        with self.modal_dialog():
-            dlg = InstallConfirmDialog(self, plan, self.service, fixed_library=fixed_library)
-            try:
-                return dlg.get_choice() if dlg.ShowModal() == wx.ID_OK else None
-            finally:
-                dlg.Destroy()
+        with self.modal_dialog(), InstallConfirmDialog(self, plan, self.service, fixed_library=fixed_library) as dlg:
+            return dlg.get_choice() if dlg.ShowModal() == wx.ID_OK else None
 
     def _confirm_change(self, game, action):
         """Update or Extras: the confirmation dialog for that plan, with the game's library fixed"""
@@ -1143,14 +1119,9 @@ class MainFrame(wx.Frame):
         try:
             if live is None or not live.catalog_id or self._library_unreachable(live) or self._game_busy(live):
                 return
-            confirmed = delete_player_data = False
-            with self.modal_dialog():
-                dlg = UninstallDialog(self, live.title, player_files)
-                try:
-                    confirmed = dlg.ShowModal() == wx.ID_OK
-                    delete_player_data = dlg.delete_player_data()
-                finally:
-                    dlg.Destroy()
+            with self.modal_dialog(), UninstallDialog(self, live.title, player_files) as dlg:
+                confirmed = dlg.ShowModal() == wx.ID_OK
+                delete_player_data = dlg.delete_player_data()
             live = self._live_game(live)
             if confirmed and live is not None and live.catalog_id:
                 self._submit_catalog("uninstall", live, delete_player_data=delete_player_data)
@@ -1159,17 +1130,12 @@ class MainFrame(wx.Frame):
     
     def on_add_game(self, event):
         """Add a new game"""
-        dlg = GameDialog(self, self.library_manager)
-
         # Block spurious selection events (and game-changing refreshes) while modal dialog is active
-        with self.modal_dialog():
-            try:
-                if dlg.ShowModal() == wx.ID_OK:
-                    self.library_manager.games.append(dlg.game)
-                    self.library_manager.save_games()
-                    self.games_changed()
-            finally:
-                dlg.Destroy()
+        with self.modal_dialog(), GameDialog(self, self.library_manager) as dlg:
+            if dlg.ShowModal() == wx.ID_OK:
+                self.library_manager.games.append(dlg.game)
+                self.library_manager.save_games()
+                self.games_changed()
 
     def on_toggle_filter_platform(self, event):
         """Toggle platform filter in tree"""
@@ -1257,19 +1223,16 @@ class MainFrame(wx.Frame):
         Preferences holds library ids, never a Game, so finished installs are applied while it is open (it is
         marked holds_no_games, and isn't opened in modal_dialog()): a library whose last uninstall finishes
         leaves its list at once. The prompts it opens still defer them, through modal_dialog()."""
-        dlg = PreferencesDialog(self, self.library_manager, self.service)
-        catalog_changed = False
-        hook = dlg.on_job_done
-        self.job_done_hooks.append(hook)
-        try:
-            dlg.ShowModal()
-            catalog_changed = dlg.catalog_url_changed()  # Apply may have saved a new address, even before Cancel
-            # Refresh even on Cancel: Apply may already have saved changes.
-            # Deferred to avoid blocking the dialog close.
-            wx.CallAfter(self.refresh_ui_after_preferences, catalog_changed)
-        finally:
-            self.job_done_hooks.remove(hook)
-            dlg.Destroy()
+        with PreferencesDialog(self, self.library_manager, self.service) as dlg:
+            hook = dlg.on_job_done
+            self.job_done_hooks.append(hook)
+            try:
+                dlg.ShowModal()
+                # Refresh even on Cancel: Apply may already have saved changes (a new address too).
+                # Deferred to avoid blocking the dialog close.
+                wx.CallAfter(self.refresh_ui_after_preferences, dlg.catalog_url_changed())
+            finally:
+                self.job_done_hooks.remove(hook)
 
     def refresh_ui_after_preferences(self, catalog_changed=False):
         """Refresh UI after preferences dialog closes; a new catalog address fetches the catalog again"""
