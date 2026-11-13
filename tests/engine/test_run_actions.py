@@ -178,16 +178,10 @@ def test_repair_runs_the_recorded_system_steps_under_the_update_rules(tmp_path):
 # ---- undo ----------------------------------------------------------------------------------------------------
 
 
-def test_run_update_is_an_undo_point(tmp_path):
-    eng, routes, target = updated_run_game(tmp_path)
-    rec = record(eng)
-    assert rec.previous["source"]["sha256"] == sha(SETUP) and rec.previous["backups"] == []
-    assert rec.source.sha256 == sha(SETUP_V2)
-
-
 def test_undo_after_a_run_update_reinstalls_the_previous_installer(tmp_path):
     eng, routes, target = updated_run_game(tmp_path)
     previous = record(eng).previous
+    assert previous["backups"] == []  # a run update backs nothing up
     r = run(eng, "undo")
     assert r.action == "undo" and (target / "lc.exe").read_bytes() == b"exe v1"
     assert_players_files_kept(target)
