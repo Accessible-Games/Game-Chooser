@@ -452,3 +452,23 @@ def test_installer_run_game_in_private_mode_with_an_unusable_copy_still_gets_the
     assert r.notes == [messages.NEEDS_SHARED_COMPONENT.format(title="Light Cars", component=DX8VB_TITLE)]
     assert (folder / "dx8vb.dll").read_bytes() == DX8VB and not (folder / "lightcars.exe.manifest").exists()
     assert eng.ctx.records.load("lightcars").files["dx8vb.dll"].owner == OWNER
+
+
+def test_installer_run_game_whose_private_runtime_changes_gets_the_new_ones_copies_and_manifest(tmp_path,
+                                                                                                private_com):
+    routes = {}
+    data = b"MZ dx9vb"
+    dx9vb = {"id": "dx9vb", "kind": "runtime", "title": "DX9", "version": "1",
+             "sources": [served_source(routes, f"{MIRROR}{sha(data)}/dx9vb.dll", data, method="none",
+                                       steps=[{"action": "register", "path": "dx9vb.dll"}])],
+             "detect": {"registry": {"hive": "HKCR", "key": "DxVBLibA.DirectX9"}}}
+    folder = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup(tmp_path, [dx8vb_entry(routes), dx9vb, run_mode_game(routes)], routes,
+                     register_shared_components=False, elevator=FakeElevator(on_start=writes_game(folder)))
+    run(eng, "install", id="lightcars")
+    eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=b"MZ setup v2", version="2.0",
+                                                 dependencies=["dx9vb"])
+    run(eng, "update", id="lightcars")
+    rec = eng.ctx.records.load("lightcars")
+    assert not (folder / "dx8vb.dll").exists() and rec.private_runtimes == ["dx9vb"]
+    assert rec.files["dx9vb.dll"].owner == rec.files["lightcars.exe.manifest"].owner == "runtime:dx9vb"
