@@ -62,10 +62,10 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
 from . import comfree, messages
-from .entries import platform_sources, runs_installer, title_of
+from .entries import dependency_order, platform_sources, runs_installer, title_of
 from .errors import Cancelled, ElevationDeclined, ExtractError, InstallFailed, StepError, UnsafePath, check_cancel
 from .messages import Progress
-from .paths import norm_key, safe_join
+from .paths import norm_key, safe_join, same_folder
 from .records import (RUNTIME_OWNER_PREFIX, InstalledSource, InstallRecord, RecordedFile, hash_tree,
                       is_runtime_owner, runtime_owner)
 from .run_installer import run_installer_untracked
@@ -405,35 +405,6 @@ def _write_marker(folder: Path, marker: dict) -> None:
         log.warning("Couldn't write the runtime marker in %s", folder, exc_info=True)
 
 
-def dependency_order(entry: dict, entries: dict) -> list[dict]:
-    """Every runtime `entry` depends on, recursively, each once, deepest first.
-
-    Raises InstallFailed (plain words) on a cycle, or on a dependency that isn't a runtime in the catalog.
-    """
-    title = title_of(entry)
-    order: list[dict] = []
-    done: set[str] = set()
-    path = [entry["id"]]
-
-    def visit(item: dict) -> None:
-        for dep_id in item.get("dependencies") or []:
-            if dep_id in done:
-                continue
-            if dep_id in path:
-                raise InstallFailed(messages.DEPENDENCY_CYCLE.format(title=title))
-            dep = entries.get(dep_id)
-            if dep is None or dep.get("kind") != "runtime":
-                raise InstallFailed(messages.DEPENDENCY_UNAVAILABLE.format(title=title))
-            path.append(dep_id)
-            visit(dep)
-            path.pop()
-            done.add(dep_id)
-            order.append(dep)
-
-    visit(entry)
-    return order
-
-
 def missing_runtimes(entry: dict, entries: dict, records, registry, root: Path | None = None,
                      security=None) -> list[dict]:
     """The runtimes `entry` needs that aren't present, deepest first (see dependency_order)."""
@@ -444,8 +415,8 @@ def missing_runtimes(entry: dict, entries: dict, records, registry, root: Path |
 # ---- what to do about them --------------------------------------------------------------------------------
 
 
-def _is_installer_runtime(entry: dict, platform: str) -> bool:
-    sources = platform_sources(entry, platform)
+def _is_installer_runtime(entry: dict, platform: str | None) -> bool:
+    sources = platform_sources(entry, platform) if platform else entry.get("sources") or []
     return bool(sources) and all(runs_installer(s) for s in sources)
 
 
@@ -464,18 +435,19 @@ class RuntimePlan:
 
 def plan_runtimes(entry: dict, ctx) -> RuntimePlan:
     """Decide, before anything is downloaded, what happens to each of the game's missing runtimes."""
-    missing = missing_runtimes(entry, ctx.entries, ctx.records, ctx.registry, ctx.runtimes_root, ctx.security)
-    if ctx.register_shared_components:
-        return RuntimePlan(shared=missing)
     plan = RuntimePlan()
-    for runtime in missing:
-        if _is_installer_runtime(runtime, ctx.platform):
-            plan.skipped.append(runtime)
-        elif is_com_runtime(runtime):
-            plan.private.append(runtime)
-        else:
-            plan.shared.append(runtime)
+    for runtime in missing_runtimes(entry, ctx.entries, ctx.records, ctx.registry, ctx.runtimes_root, ctx.security):
+        getattr(plan, runtime_route(runtime, ctx.register_shared_components, ctx.platform)).append(runtime)
     return plan
+
+
+def runtime_route(runtime: dict, register_shared: bool, platform: str | None) -> str:
+    """The RuntimePlan list a missing runtime goes in; without a `platform`, all its sources count."""
+    if register_shared:
+        return "shared"
+    if _is_installer_runtime(runtime, platform):
+        return "skipped"
+    return "private" if is_com_runtime(runtime) else "shared"
 
 
 def _register_names(runtime: dict) -> set[str]:
@@ -1140,8 +1112,7 @@ def _shared_source(ctx, runtime: dict, title: str) -> CopySource:
         data = _read_marker(folder)
         if isinstance(data, dict):
             files = data["files"]
-        elif (record is not None and record.kind == "runtime"
-              and os.path.normcase(os.path.abspath(record.folder)) == os.path.normcase(os.path.abspath(folder))):
+        elif record is not None and record.kind == "runtime" and same_folder(record.folder, folder):
             files = {f.path: f.sha256 for f in record.files.values()}
         else:
             files = _sealed_files(ctx, folder)

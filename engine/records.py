@@ -11,7 +11,7 @@ import typing
 from dataclasses import MISSING, asdict, dataclass, fields
 from pathlib import Path
 
-from .paths import is_engine_dir, norm_key
+from .paths import is_engine_dir, norm_key, same_folder
 from .sources import hash_file
 
 log = logging.getLogger(__name__)
@@ -145,11 +145,6 @@ def _check_id(catalog_id: str) -> str:
     return catalog_id
 
 
-def _same_path(a: Path, b: Path) -> bool:
-    return os.path.normcase(os.path.normpath(str(a))).lower() == \
-        os.path.normcase(os.path.normpath(str(b))).lower()
-
-
 class RecordStore:
     def __init__(self, root: Path):
         self.root = Path(root)
@@ -226,6 +221,6 @@ class RecordStore:
     def owner_of_folder(self, folder: Path, libraries: list[dict]) -> InstallRecord | None:
         for record in self.all().values():
             candidate = record_folder(record, libraries)
-            if candidate is not None and _same_path(candidate, folder):
+            if candidate is not None and same_folder(candidate, folder):
                 return record
         return None

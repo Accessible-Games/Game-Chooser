@@ -1,5 +1,6 @@
 """Path helpers: safe joining, naming, and engine-owned directory names."""
 
+import os
 import re
 from datetime import date
 from pathlib import Path, PurePosixPath, PureWindowsPath
@@ -49,6 +50,10 @@ def is_engine_dir(name: str) -> bool:
 
 def is_code(path) -> bool:
     return PurePosixPath(str(path).replace("\\", "/")).suffix.lower() in EXECUTABLE_CODE_SUFFIXES
+
+
+def same_folder(a, b) -> bool:
+    return os.path.normcase(os.path.abspath(a)).lower() == os.path.normcase(os.path.abspath(b)).lower()
 
 
 def norm_key(rel: str) -> str:

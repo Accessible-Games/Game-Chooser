@@ -11,7 +11,8 @@ import sys
 from dataclasses import dataclass
 from urllib.parse import quote
 
-from engine.errors import DependencyError
+from . import messages
+from .errors import InstallFailed
 
 KNOWN_KINDS = frozenset({"game", "extra", "runtime", "access-mod"})
 KNOWN_METHODS = frozenset({"zip", "7z", "installer", "cab", "tar", "none", "url"})
@@ -150,25 +151,32 @@ def is_readable(entry: dict) -> bool:
     return isinstance(sources, list) and all(_source_is_readable(s) for s in sources)
 
 
-def resolve_dependencies(entry_id: str, entries: dict) -> list[str]:
-    """Dependency ids in install order (depth first, each once)."""
-    order: list[str] = []
-    path: list[str] = []
+def dependency_order(entry: dict, entries: dict) -> list[dict]:
+    """Every runtime `entry` depends on, recursively, each once, deepest first.
 
-    def visit(current: str) -> None:
-        entry = entries.get(current)
-        if entry is None:
-            raise DependencyError(f"missing dependency: {current}")
-        if current in path:
-            raise DependencyError("dependency cycle: " + " -> ".join(path + [current]))
-        path.append(current)
-        for dep in entry.get("dependencies") or []:
-            if dep not in order:
-                visit(dep)
-                order.append(dep)
-        path.pop()
+    Raises InstallFailed (plain words) on a cycle, or on a dependency that isn't a runtime in the catalog.
+    """
+    title = title_of(entry)
+    order: list[dict] = []
+    done: set[str] = set()
+    path = [entry["id"]]
 
-    visit(entry_id)
+    def visit(item: dict) -> None:
+        for dep_id in item.get("dependencies") or []:
+            if dep_id in done:
+                continue
+            if dep_id in path:
+                raise InstallFailed(messages.DEPENDENCY_CYCLE.format(title=title))
+            dep = entries.get(dep_id)
+            if dep is None or dep.get("kind") != "runtime":
+                raise InstallFailed(messages.DEPENDENCY_UNAVAILABLE.format(title=title))
+            path.append(dep_id)
+            visit(dep)
+            path.pop()
+            done.add(dep_id)
+            order.append(dep)
+
+    visit(entry)
     return order
 
 
@@ -180,14 +188,11 @@ def _game_is_visible(entry: dict, entries: dict, platform: str) -> bool:
     if entry.get("kind") != "game" or not _usable(entry, platform):
         return False
     try:
-        deps = resolve_dependencies(entry["id"], entries)
-    except DependencyError:
+        deps = dependency_order(entry, entries)
+    except InstallFailed:
         return False
-    for dep_id in deps:
-        dep = entries[dep_id]
-        if dep.get("kind") != "runtime" or not _usable(dep, platform):
-            return False
-    return all(
+    # Each runtime must be usable here too, though an install only needs it in the catalog (see dependency_order).
+    return all(_usable(dep, platform) for dep in deps) and all(
         _usable(entries.get(x.get("id")), platform)
         for x in _extras(entry)
         if x.get("required")
@@ -220,6 +225,12 @@ def extras_of(entry: dict, entries: dict, platform: str) -> list[ExtraInfo]:
 
 def title_of(entry: dict) -> str:
     return entry.get("title") or entry["id"]
+
+
+def is_web_game(entry: dict, platform: str) -> bool:
+    """True if every source for `platform` is a link: a web game, never installed."""
+    sources = platform_sources(entry, platform)
+    return bool(sources) and all((s.get("install") or {}).get("method") == "url" for s in sources)
 
 
 def runs_installer(source: dict) -> bool:

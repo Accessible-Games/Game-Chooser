@@ -52,10 +52,6 @@ class ElevationDeclined(EngineError):
     pass
 
 
-class DependencyError(EngineError):
-    pass
-
-
 class UnsafePath(ValueError, EngineError):
     pass
 

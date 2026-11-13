@@ -47,13 +47,13 @@ from urllib.parse import unquote, urlparse
 from exception_manager import ExceptionManager
 
 from . import messages, run_actions, run_installer, runtimes
-from .entries import (current_platform, extras_of, game_fields, is_mirror_url, mirror_url_for, platform_sources,
-                      runs_installer, title_of)
+from .entries import (current_platform, extras_of, game_fields, is_mirror_url, is_web_game, mirror_url_for,
+                      platform_sources, runs_installer, title_of)
 from .errors import EngineError, InstallFailed, NoVerifiedSource, StepError, UnsafePath, check_cancel
 from .folders import library_label, target_folder
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key, safe_join
+from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key, safe_join, same_folder
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
 from .recycle import send_to_recycle_bin
 from .installer_watch import ProcessWatch, watch_process
@@ -134,13 +134,9 @@ class EngineContext:
 Fetch = Callable[[dict, Path], Fetched]
 
 
-def _same_folder(a: Path, b: Path) -> bool:
-    return os.path.normcase(os.path.abspath(a)).lower() == os.path.normcase(os.path.abspath(b)).lower()
-
-
 def _library_label(library_path: Path, libraries: list[dict]) -> str:
     for lib in libraries:
-        if lib.get("path") and _same_folder(Path(lib["path"]), library_path):
+        if lib.get("path") and same_folder(Path(lib["path"]), library_path):
             return library_label(lib)
     return str(library_path)
 
@@ -292,7 +288,7 @@ class InstallEngine:
     def _library(self, req: InstallRequest) -> tuple[str, Path]:
         for lib in self.ctx.libraries:
             if req.library_path is not None:
-                if lib.get("path") and _same_folder(Path(lib["path"]), Path(req.library_path)):
+                if lib.get("path") and same_folder(Path(lib["path"]), Path(req.library_path)):
                     return lib["id"], Path(req.library_path)
             elif lib.get("id") == req.library_id:
                 return lib["id"], Path(lib["path"])
@@ -319,7 +315,7 @@ class InstallEngine:
             # A new library's folder may not exist yet; only the staging folder inside it is hidden.
             staging_root.mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            if _same_folder(library_path, self.ctx.work_root):
+            if same_folder(library_path, self.ctx.work_root):
                 raise InstallFailed(messages.WORK_FOLDER_NOT_CREATED.format(path=library_path)) from e
             raise InstallFailed(messages.LIBRARY_FOLDER_NOT_CREATED.format(path=library_path)) from e
         _hide(staging_root)
@@ -413,8 +409,7 @@ class InstallEngine:
 
         A web game is refused before anything is downloaded.
         """
-        sources = platform_sources(entry, self.ctx.platform)
-        if sources and all(_method(s) == "url" for s in sources):
+        if is_web_game(entry, self.ctx.platform):
             raise InstallFailed(messages.WEB_GAME_NOT_INSTALLED.format(title=title_of(entry)))
         folder = work / "fetched"
         _clear_or_fail(folder)

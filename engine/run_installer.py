@@ -32,7 +32,7 @@ from .errors import Cancelled, ElevationDeclined, InstallFailed, StepError, Unsa
 from .installer_watch import ProcessWatch, watch_process  # noqa: F401  (re-exported)
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import STAGING_DIR_NAME, is_code, is_engine_dir, norm_key, unique_path
+from .paths import STAGING_DIR_NAME, is_code, same_folder, is_engine_dir, norm_key, unique_path
 from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is_runtime_owner, record_folder
 from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link, remove_unchanged
 from .sources import hash_file
@@ -138,10 +138,6 @@ def _claimed(folder: Path, start: float, end: float, before: set[str] | None, sl
 def files_created_during(folder: Path, start: float, end: float, before: set[str] | None,
                          slack: float = 2.0) -> list[str]:
     return sorted(_claimed(folder, start, end, before, slack))
-
-
-def _same(a: Path, b: Path) -> bool:
-    return os.path.normcase(os.path.abspath(a)) == os.path.normcase(os.path.abspath(b))
 
 
 def _personal_folders() -> list[str]:
@@ -571,7 +567,7 @@ def _matching_uninstaller(new_entries: list[dict], folder: Path, title: str) -> 
     """The uninstaller of the new entry for `folder`, or of the new entry named like the game."""
     for values in new_entries:
         named = folder_from_uninstall_entry(values)
-        if named is not None and _same(named, folder):
+        if named is not None and same_folder(named, folder):
             return vendor_uninstaller(values)
     for values in new_entries:
         if folder_from_uninstall_entry(values) is None and names_title(values, title):
@@ -638,7 +634,7 @@ def _where(folder: Path, library_id: str, library_path: Path, libraries: list[di
             continue
         root = Path(os.path.abspath(lib["path"]))
         absolute = Path(os.path.abspath(folder))
-        if inside(absolute, root) and not _same(absolute, root):
+        if inside(absolute, root) and not same_folder(absolute, root):
             return lib["id"], Path(os.path.relpath(absolute, root)).as_posix()
     return "", str(Path(os.path.abspath(folder)))
 
