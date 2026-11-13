@@ -635,25 +635,29 @@ class InstallEngine:
                 # install can go ahead: with the library's drive unplugged, the old game stays as it is.
                 notes = self._forget_steps(record, folder or library_path / record.folder)
             notes += self._install_runtimes(deps, work, progress, cancel)
-            fetched = self._fetch_game(entry, work, progress, cancel)
-            if runs_installer(fetched.source):
-                # Downloaded and unpacked before the installer starts, so a bad download changes nothing.
-                private = runtimes.unpack_private(ctx, deps.private, staging, work,
-                                                  self._catalog_fetch(progress, cancel), progress, cancel)
-                unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
-                                               progress, cancel)
-                result = self._install_run(entry, fetched, unpacked, staging, "install", lambda item: (
-                    run_installer.install(ctx, item, target, library_id, library_path, progress, cancel)), cancel,
-                    private=private)
-                result.notes[:0] = notes
-                result.notes += _went_without(title, deps)
-                return result
-            staged = self._stage(entry, extras, target.name, staging, work,
-                                 _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
-                                 _launch_hint(entry, ctx.platform), progress, cancel, private=deps.private)
-            check_cancel(cancel)
-            return self._place(entry, staged, target, library_id, library_path, staging,
-                               [*notes, *_went_without(title, deps)])
+            try:
+                fetched = self._fetch_game(entry, work, progress, cancel)
+                if runs_installer(fetched.source):
+                    # Downloaded and unpacked before the installer starts, so a bad download changes nothing.
+                    private = runtimes.unpack_private(ctx, deps.private, staging, work,
+                                                      self._catalog_fetch(progress, cancel), progress, cancel)
+                    unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
+                                                   progress, cancel)
+                    result = self._install_run(entry, fetched, unpacked, staging, "install", lambda item: (
+                        run_installer.install(ctx, item, target, library_id, library_path, progress, cancel)),
+                        cancel, private=private)
+                    result.notes[:0] = notes
+                    result.notes += _went_without(title, deps)
+                    return result
+                staged = self._stage(entry, extras, target.name, staging, work,
+                                     _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
+                                     _launch_hint(entry, ctx.platform), progress, cancel, private=deps.private)
+                check_cancel(cancel)
+                return self._place(entry, staged, target, library_id, library_path, staging,
+                                   [*notes, *_went_without(title, deps)])
+            except InstallFailed as e:
+                # What already changed (old steps undone, runtimes installed) stays, so its notes go too.
+                raise InstallFailed("\n\n".join([e.message, *notes])) from e
 
     def _install_runtimes(self, deps: runtimes.RuntimePlan, work: Path, progress, cancel) -> list[str]:
         """Install the game's missing runtimes machine-wide, before the game is downloaded. Returns their
@@ -783,30 +787,35 @@ class InstallEngine:
         prior = _snapshot(rec)
         with self._work_folder(game_id) as work:
             runtime_notes = self._install_runtimes(deps, work, progress, cancel)
-            fetched = self._fetch_game(entry, work, progress, cancel)
-            if runs_installer(fetched.source):
-                if extras or rec.extras:  # applied by Game Chooser after the installer, so checked first
-                    self._require_writable(rec, game_dir, title)
+            try:
+                fetched = self._fetch_game(entry, work, progress, cancel)
+                if runs_installer(fetched.source):
+                    if extras or rec.extras:  # applied by Game Chooser after the installer, so checked first
+                        self._require_writable(rec, game_dir, title)
+                    with self._staging_folder(self._staging_root(rec, game_dir), game_id) as staging:
+                        private = runtimes.unpack_private(ctx, deps.private, staging, work,
+                                                          self._catalog_fetch(progress, cancel), progress, cancel)
+                        unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
+                                                       progress, cancel)
+                        result = self._install_run(entry, fetched, unpacked, staging, action, lambda item: (
+                            run_installer.update(ctx, item, rec, game_dir, progress, cancel, previous=prior,
+                                                 spare_steps=_extra_steps(unpacked))), cancel, prior,
+                            private=private)
+                        result.notes += [*runtime_notes, *_went_without(title, deps)]
+                        return result
+                self._require_writable(rec, game_dir, title)
                 with self._staging_folder(self._staging_root(rec, game_dir), game_id) as staging:
-                    private = runtimes.unpack_private(ctx, deps.private, staging, work,
-                                                      self._catalog_fetch(progress, cancel), progress, cancel)
-                    unpacked = self._unpack_extras(extras, staging, work, self._catalog_fetch(progress, cancel),
-                                                   progress, cancel)
-                    result = self._install_run(entry, fetched, unpacked, staging, action, lambda item: (
-                        run_installer.update(ctx, item, rec, game_dir, progress, cancel, previous=prior,
-                                             spare_steps=_extra_steps(unpacked))), cancel, prior, private=private)
-                    result.notes += [*runtime_notes, *_went_without(title, deps)]
-                    return result
-            self._require_writable(rec, game_dir, title)
-            with self._staging_folder(self._staging_root(rec, game_dir), game_id) as staging:
-                staged = self._stage(entry, extras, game_dir.name, staging, work,
-                                     _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
-                                     _launch_hint(entry, ctx.platform), progress, cancel, private=deps.private,
-                                     installed=(rec, game_dir))
-                check_cancel(cancel)
-                plan, result, steps, notes = self._change_folder(
-                    rec, game_dir, staged.tree, _incoming(staged.tree, staged.owners, game_id), rec.files,
-                    staged.system_steps(), prior, title, persist=entry.get("persist") or [])
+                    staged = self._stage(entry, extras, game_dir.name, staging, work,
+                                         _prefetched(self._catalog_fetch(progress, cancel), game_id, fetched),
+                                         _launch_hint(entry, ctx.platform), progress, cancel, private=deps.private,
+                                         installed=(rec, game_dir))
+                    check_cancel(cancel)
+                    plan, result, steps, notes = self._change_folder(
+                        rec, game_dir, staged.tree, _incoming(staged.tree, staged.owners, game_id), rec.files,
+                        staged.system_steps(), prior, title, persist=entry.get("persist") or [])
+            except InstallFailed as e:
+                # The runtimes installed stay, so their notes go with the failure.
+                raise InstallFailed("\n\n".join([e.message, *runtime_notes])) from e
 
         # A failed earlier attempt at this change may already have moved the player's copy aside and
         # written this version's file; that backup belongs to this undo point too.

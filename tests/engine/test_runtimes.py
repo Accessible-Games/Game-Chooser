@@ -1324,6 +1324,24 @@ def test_runtime_whose_developer_file_changed_is_installed_with_the_note(tmp_pat
     assert r.notes == [messages.DEVELOPER_CHANGED_UNVERIFIED]
 
 
+@pytest.mark.parametrize("action", ["install", "update"])
+def test_runtime_note_still_reaches_the_player_when_the_game_then_fails(tmp_path, action):
+    routes = {}
+    rt = dx8vb(routes)
+    rt["sources"][0].update(label="Developer", url="https://dev.example.com/dx8vb.dll")
+    routes[rt["sources"][0]["url"]] = b"MZ the developer re-uploaded this"
+    eng, lib = setup(tmp_path, [rt, game(routes, dependencies=())], routes)
+    if action == "update":
+        run(eng, "install")
+    g = game(routes, files={"entombed.exe": b"exe 2"}, version="2.0")
+    eng.ctx.entries["entombed"] = g
+    del routes[g["sources"][0]["url"]]  # the game's download is unreachable
+    with pytest.raises(InstallFailed) as ei:
+        run(eng, action)
+    unreachable = messages.NO_SOURCE.format(title="Entombed", reasons=messages.SOURCE_UNREACHABLE)
+    assert ei.value.message == "\n\n".join([unreachable, messages.DEVELOPER_CHANGED_UNVERIFIED])
+
+
 @pytest.mark.parametrize("shared", [True, False], ids=["shared", "private"])
 def test_full_disk_while_unpacking_a_runtime_gets_plain_words(tmp_path, private_com, shared):
     class FullDisk(ZipExtractor):
