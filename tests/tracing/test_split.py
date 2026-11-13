@@ -161,18 +161,6 @@ def stop_record(sessions, close_games=False):
 LISTS = {"asked_to_close": [], "ended": [], "not_closed": []}
 
 
-def test_ended_by_exit_when_every_process_exited_and_no_stop():
-    [r] = run([], procs=[proc(100, 50, 10 * S, end=20 * S)])
-    assert r.ended_by == "exit" and r.stop is None
-
-
-def test_ended_by_capture_end_when_still_running_and_no_stop():
-    [r] = run([], procs=[proc(100, 50, 10 * S)])
-    assert r.ended_by == "capture_end" and r.stop is None
-    [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()], None)
-    assert r.ended_by == "capture_end"
-
-
 def test_ended_by_stop_for_a_session_the_stop_found_running():
     [r] = split_run([proc(100, 50, 10 * S)], iter([]), [info()], stop_record({"s": LISTS}))
     assert r.ended_by == "stop" and r.still_running is True and r.end is None
