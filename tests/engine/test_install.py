@@ -587,38 +587,22 @@ def test_garbled_hint_falls_back_and_is_guessed(tmp_path):
 
 
 PAGE_FILES = {"index.html": b"<a href='page2.html'>next</a>", "page2.html": b"<a href='index.html'>back</a>"}
-
-
-def test_install_with_a_page_launch_path(tmp_path):
-    rec = _install_entombed(tmp_path, PAGE_FILES, {"windows": {"path": "index.html"}})
-    assert rec.launch_path == "index.html" and rec.launch_from_catalog is True
-    assert set(rec.files) == {"index.html", "page2.html"}
-    folder = tmp_path / "Games" / "Entombed"
-    assert (folder / "index.html").is_file() and (folder / "page2.html").is_file()
-
-
-def test_pages_alone_without_a_launch_path_fail_as_no_program(tmp_path):
-    routes = {}
-    e = game(routes, files=PAGE_FILES)
-    engine, ctx, lib = setup(tmp_path, [e], routes)
-    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert error.message.startswith(messages.NO_EXE.format(title="Entombed"))
-    assert ctx.records.load("entombed") is None
-
-
 HTA_FILES = {"jumpgame.hta": b"<html><hta:application applicationname='Jump'></html>", "jump1.wav": b"RIFF"}
 
 
-def test_install_with_an_hta_launch_path(tmp_path):
-    rec = _install_entombed(tmp_path, HTA_FILES, {"windows": {"path": "jumpgame.hta"}})
-    assert rec.launch_path == "jumpgame.hta" and rec.launch_from_catalog is True
-    assert set(rec.files) == {"jumpgame.hta", "jump1.wav"}
-    assert (tmp_path / "Games" / "Entombed" / "jumpgame.hta").is_file()
+@pytest.mark.parametrize("files, launch", [(PAGE_FILES, "index.html"), (HTA_FILES, "jumpgame.hta")],
+                         ids=["page", "hta"])
+def test_install_with_a_page_or_hta_launch_path(tmp_path, files, launch):
+    rec = _install_entombed(tmp_path, files, {"windows": {"path": launch}})
+    assert rec.launch_path == launch and rec.launch_from_catalog is True
+    assert set(rec.files) == set(files)
+    assert all((tmp_path / "Games" / "Entombed" / name).is_file() for name in files)
 
 
-def test_an_hta_alone_without_a_launch_path_fails_as_no_program(tmp_path):
+@pytest.mark.parametrize("files", [PAGE_FILES, HTA_FILES], ids=["pages", "hta"])
+def test_pages_or_an_hta_alone_without_a_launch_path_fail_as_no_program(tmp_path, files):
     routes = {}
-    e = game(routes, files=HTA_FILES)
+    e = game(routes, files=files)
     engine, ctx, lib = setup(tmp_path, [e], routes)
     error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
     assert error.message.startswith(messages.NO_EXE.format(title="Entombed"))
