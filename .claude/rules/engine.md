@@ -40,8 +40,8 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   its system steps undone and cleared from the record, then only the link and the record go: nothing behind the
   link is touched (`GAME_FOLDER_LINK_REMOVED` says where the files are, `GAME_FOLDER_LINK_BROKEN` that the target
   is gone). While a vendor uninstaller is still there (`uninstall_keys.is_missing_program`), its Windows entry runs
-  through the link, so it refuses and changes nothing (`GAME_FOLDER_LINK_VENDOR`). Update, Repair and Undo still work through such a link, changing only the game's
-  own files.
+  through the link, so it refuses and changes nothing (`GAME_FOLDER_LINK_VENDOR`). Update, Repair and Undo still
+  work through such a link, changing only the game's own files.
 - **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
   refused); **run_installer.py** / **run_actions.py** / **installer_watch.py** - installers that run.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain
@@ -65,8 +65,8 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   further requires each runtime to be usable here); `paths.same_folder` and `folder_key` (as text),
   `same_on_disk`, `is_link`, `is_code`, `walk_files` (skips only linked folders and those `skip` names: backups are
   the player's), `write_atomic` (temp file, then replace; the temp file goes if that fails); `pricing.http_url` (an
-  http or https address with a host and no spaces); `safety.plain_file` ("is this still the recorded file", read errors raised) and
-  `remove_unchanged`; `runtimes.runtime_route` (shared, private or skipped); `errors.check_cancel`.
+  http or https address with a host and no spaces); `safety.plain_file` ("is this still the recorded file", read
+  errors raised) and `remove_unchanged`; `runtimes.runtime_route` (shared, private or skipped); `errors.check_cancel`.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan (the price warning on installs, `first_run_download_size` added to the size), and
   target-folder naming (`<library>/<Title>`).
