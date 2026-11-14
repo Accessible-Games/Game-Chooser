@@ -86,6 +86,16 @@ def same_folder(a, b) -> bool:
     return folder_key(a) == folder_key(b)
 
 
+def same_on_disk(a, b) -> bool:
+    """True if `a` and `b` are the same existing file or folder, however spelled or linked. False when either is
+    missing or its drive gives no usable ID (some network drives give every file the ID 0)."""
+    try:
+        sa, sb = os.stat(a), os.stat(b)
+    except OSError:
+        return False
+    return sa.st_ino != 0 and (sa.st_dev, sa.st_ino) == (sb.st_dev, sb.st_ino)
+
+
 def norm_key(rel: str) -> str:
     return rel.replace("\\", "/").lower()
 

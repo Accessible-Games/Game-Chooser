@@ -49,6 +49,16 @@ def test_empty_player_list_skips_recycle(tmp_path):
     assert fake.calls == [] and not game.exists()
 
 
+@pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
+def test_a_game_folder_already_gone_is_no_error(tmp_path, delete_player_data):
+    game = tmp_path / "game"
+    put(game, "game.exe", b"exe")
+    p = plan_uninstall(FakeRecord({"game.exe": b"exe"}), game)
+    (game / "game.exe").unlink()
+    game.rmdir()  # as a vendor uninstaller may leave it
+    assert apply_uninstall(p, game, delete_player_data, recycle=FakeRecycle()) == 0
+
+
 def test_changed_file_is_kept_and_counted_at_apply_time(tmp_path):
     game, rec = setup(tmp_path)
     p = plan_uninstall(rec, game)
@@ -69,7 +79,8 @@ def test_changed_file_is_recycled_when_asked(tmp_path):
 
 
 @pytest.mark.windows
-def test_junction_is_never_followed_or_removed(tmp_path):
+@pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
+def test_junction_is_never_followed_or_removed(tmp_path, delete_player_data):
     import _winapi
     outside = tmp_path / "outside"
     put(outside, "keep.txt", b"not yours")
@@ -82,7 +93,7 @@ def test_junction_is_never_followed_or_removed(tmp_path):
         p = plan_uninstall(rec, game)
         assert p.player_files == ["Saves"]
         fake = FakeRecycle()
-        kept = apply_uninstall(p, game, True, recycle=fake)
+        kept = apply_uninstall(p, game, delete_player_data, recycle=fake)
         assert fake.calls == [] and kept == 1
         assert (outside / "keep.txt").read_bytes() == b"not yours" and (outside / "emptydir").is_dir()
         assert (game / "Saves").exists() and game.exists()

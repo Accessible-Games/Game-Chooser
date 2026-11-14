@@ -18,8 +18,10 @@ paths:
 - Stored in `config["libraries"]` as `{"id": <secrets.token_hex(6)>, "path": <folder>}`. The id is stable; games
   reference `library_id`, so pointing a library at another folder keeps its games.
 - `GameLibraryManager.add_library(path)`, `change_library_folder(id, path)`, `remove_library(id)` (config only),
-  `library_by_id`, `library_reachable`. `_check_folder` raises `LibraryError` for a missing folder, a duplicate, or
-  a folder inside or containing another library.
+  `library_by_id`, `library_reachable`. `_check_folder` raises `LibraryError` for a missing folder, a duplicate, a
+  folder inside or containing another library, or a folder that is, or is inside, a game record's folder, as text
+  or on disk (`paths.same_on_disk`) (`LIBRARY_IN_GAME_FOLDER`; the library being moved by Change folder takes its
+  own games with it).
 - Preferences > Library Paths: **Add**, **Change folder**, **Remove**. Remove on a library holding catalog
   installs uninstalls them first (`InstallService.remove_library`, `RemoveLibraryDialog`, optional delete of the
   player's files); the library goes when the last uninstall result is applied.

@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -64,6 +65,31 @@ def test_add_library_refuses_duplicate_and_nested(isolated_manager, tmp_path):
         isolated_manager.add_library(str(tmp_path / "missing"))
     assert str(e.value) == messages.LIBRARY_FOLDER_MISSING
     assert len(isolated_manager.config["libraries"]) == 2
+
+
+def test_a_library_is_never_an_installed_games_folder_or_inside_one(isolated_manager, tmp_path):
+    from engine.records import InstalledSource, InstallRecord
+
+    lib = isolated_manager.add_library(_folder(tmp_path, "Games"))
+    outside = _folder(tmp_path, "Program Files", "Foo")  # an installer put it outside every library
+    _folder(tmp_path, "Games", "Bar", "Saves")
+    source = InstalledSource("https://files.accessiblegames.net/files/x/g.zip", "x", 1, "x", 1, 0, "1")
+    for cid, library_id, folder in (("foo", "", outside), ("bar", lib["id"], "Bar")):
+        isolated_manager.records.save(InstallRecord(
+            catalog_id=cid, kind="game", library_id=library_id, folder=folder, launch_path="g.exe", source=source,
+            extras={}, files={}, steps=[], method="run"))
+    other = isolated_manager.add_library(_folder(tmp_path, "Other"))
+    sub = _folder(tmp_path, "Program Files", "Foo", "Sub")
+    for path in (outside, sub, *(["\\\\?\\" + sub] if os.name == "nt" else [])):  # the last: another spelling
+        with pytest.raises(LibraryError) as e:
+            isolated_manager.add_library(path)
+        assert str(e.value) == messages.LIBRARY_IN_GAME_FOLDER.format(path=outside)
+        with pytest.raises(LibraryError) as e:
+            isolated_manager.change_library_folder(other["id"], path)
+        assert str(e.value) == messages.LIBRARY_IN_GAME_FOLDER.format(path=outside)
+    assert [x["path"] for x in isolated_manager.config["libraries"]] == [lib["path"], other["path"]]
+    # A library's own games move with it, so they never stop it moving (as onto a part of itself).
+    isolated_manager.change_library_folder(lib["id"], str(tmp_path / "Games" / "Bar" / "Saves"))
 
 
 def test_change_folder_keeps_games(isolated_manager, tmp_path):

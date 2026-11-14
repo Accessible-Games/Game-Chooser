@@ -27,8 +27,8 @@ from engine import messages
 from engine.folders import library_label
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex
 from engine.jobs import game_fields_for
-from engine.paths import folder_key, norm_key, write_atomic
-from engine.records import RecordStore
+from engine.paths import folder_key, norm_key, same_on_disk, write_atomic
+from engine.records import RecordStore, record_folder
 from install_prefs import current_catalog_url
 from library_actions import is_uninstall_unfinished
 from models import Game
@@ -347,6 +347,13 @@ class GameLibraryManager:
                 raise LibraryError(messages.LIBRARY_INSIDE.format(label=library_label(lib)))
             if _is_inside(existing, new):
                 raise LibraryError(messages.LIBRARY_CONTAINS.format(label=library_label(lib)))
+        for rec in self.records.game_records().values():
+            game = record_folder(rec, self.config["libraries"])
+            # A game in the library being moved moves with it.
+            if game is not None and rec.library_id != ignoring and (
+                    new == folder_key(game) or _is_inside(new, folder_key(game))
+                    or any(same_on_disk(f, game) for f in (Path(path), *Path(path).parents))):
+                raise LibraryError(messages.LIBRARY_IN_GAME_FOLDER.format(path=game))
 
     def add_library(self, path):
         """Add a library folder and return it; raises LibraryError if it can't be one"""

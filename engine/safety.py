@@ -386,7 +386,11 @@ def _entry_path(game_dir: Path, rel: str) -> Path:
 
 def _prune_all_empty(root: Path) -> None:
     """Remove every empty folder under `root`, never entering or removing links."""
-    for entry in list(os.scandir(root)):
+    try:
+        entries = list(os.scandir(root))
+    except OSError:  # gone (a vendor uninstaller may remove the whole folder) or unreadable: nothing to prune
+        return
+    for entry in entries:
         path = Path(entry.path)
         if entry.is_dir(follow_symlinks=False) and not is_link(path):
             _prune_all_empty(path)
@@ -424,8 +428,8 @@ def apply_uninstall(plan: UninstallPlan, game_dir: Path, delete_player_data: boo
         to_recycle = [p for p in player if not is_link(p) and not _has_link_component(p, game_dir)]
         if to_recycle:
             recycle(to_recycle)
-        _prune_all_empty(game_dir)
         kept = len(player) - len(to_recycle)
+    _prune_all_empty(game_dir)  # An empty folder holds nothing of the player's, whatever the box says.
     try:
         game_dir.rmdir()
     except OSError:
