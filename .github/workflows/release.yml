@@ -83,7 +83,7 @@ jobs:
           overwrite: true
 
   macos:
-    # macos-latest is macOS 26 on Apple Silicon. The runner's macOS version does not limit who can run the app:
+    # macos-latest is the newest macOS image on Apple Silicon. Its macOS version does not limit who can run the app:
     # Nuitka takes the minimum macOS from uv's Python, not from the build machine.
     runs-on: macos-latest
     env:
@@ -115,8 +115,8 @@ jobs:
         run: bash build_macos.sh
 
       # A missing module or dylib makes the app exit at once, so after 15 seconds it must still be running. That is
-      # all this checks: no window check, since there is no documented way on a hosted runner to see the app's window
-      # without Accessibility or Screen Recording permission. It runs from a copy with HOME pointed at an empty folder
+      # all this checks: no way to see the app's window without Accessibility or Screen Recording permission was found
+      # with evidence that it works on a hosted runner. It runs from a copy with HOME pointed at an empty folder
       # (the config folder and games.json live under HOME on macOS); the copy must not differ from the build after.
       - name: Smoke start
         run: |
@@ -217,6 +217,6 @@ jobs:
             Then open the Apple menu, choose System Settings, and choose Privacy & Security in the sidebar.
             Scroll down to the Security section and choose Open Anyway.
             This button is there for about an hour after you tried to open the app.
-            macOS asks you to confirm: choose the button that opens the app, then enter your login password.
+            macOS asks once more whether to open the app; choose Open, then enter your login password and choose OK.
             After that, Game Chooser opens like any other app.
         run: gh release create "$GITHUB_REF_NAME" "$WIN" "$MAC" SHA256SUMS.txt --verify-tag --generate-notes --prerelease --notes "$NOTES"
