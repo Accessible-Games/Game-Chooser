@@ -7,6 +7,8 @@ sounds/b.wav.
 """
 
 import shutil
+
+import pytest
 from dataclasses import asdict
 from pathlib import Path
 
@@ -45,11 +47,11 @@ def extra(routes, id, files, steps=None):
             "version": "1", "sources": [source]}
 
 
-def install_v1(tmp_path, url=None, steps=None, optional=("pawprints-music",), play=True, **ctx):
+def install_v1(tmp_path, url=None, steps=None, optional=("pawprints-music",), play=True, files=V1, fields=None, **ctx):
     """Pawprints v1 installed with its required extra and `optional`, then played (see the module doc)."""
     routes = {}
     entries = [
-        pawprints(routes, V1, "1.0", url=url, steps=steps),
+        pawprints(routes, files, "1.0", url=url, steps=steps, **(fields or {})),
         extra(routes, "pawprints-patch", {"data/patch.dat": b"patch v1"}),
         extra(routes, "pawprints-music", {"music/theme.ogg": b"theme"}),
         extra(routes, "pawprints-voices", {"voices/hi.ogg": b"hi", "sounds/a.wav": b"a"}),
@@ -467,6 +469,33 @@ def test_uninstall_works_after_the_game_left_the_catalog(tmp_path):
     del eng.ctx.entries["pawprints"]
     r = run(eng, "uninstall")
     assert r.title == "Pawprints" and not game.exists() and record(eng) is None
+
+
+@pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
+@pytest.mark.parametrize("folder, fields", [
+    ("saves", None),                                    # 2D Platformer's saves, Frantic Fire's sounds
+    ("data/saves", None),                               # Rhythm Rage NVGT's
+    ("Saves", {"persist": ["Saves/"]}),                 # a persist folder that the archive ships empty
+], ids=["empty folder", "nested empty folder", "empty persist folder"])
+def test_uninstall_removes_empty_folders_from_the_archive(tmp_path, folder, fields, delete_player_data):
+    eng, game = install_v1(tmp_path, play=False, files={**V1, "data/level.dat": b"level", f"{folder}/": b""},
+                           fields=fields)
+    assert (game / folder).is_dir()
+    run(eng, "uninstall", delete_player_data=delete_player_data)
+    assert not game.exists() and record(eng) is None
+    assert (tmp_path / "Games").is_dir() and eng.ctx.recycle.calls == []
+
+
+def test_uninstall_keeps_the_players_files_and_their_folders(tmp_path):
+    eng, game = install_v1(tmp_path, play=False, files={**V1, "data/level.dat": b"level", "data/saves/": b"",
+                                                        "logs/": b""}, fields={"persist": ["data/saves/"]})
+    put(game, "data/saves/1.sav", b"the player's save")
+    put(game, "notes.txt", b"the player's own file")
+    run(eng, "uninstall")
+    assert snapshot(game) == {"data/saves/1.sav": b"the player's save", "notes.txt": b"the player's own file"}
+    assert not (game / "logs").exists() and not (game / "sounds").exists()
+    rec = record(eng)
+    assert rec.uninstalled and rec.files == {}
 
 
 def test_uninstall_after_keeping_data_can_remove_it_later(tmp_path):
