@@ -40,14 +40,24 @@ breaks Nuitka's signature. `collect_licenses.py` takes Python's license from `li
 pywin32 there. A new component built into the Mac app needs an entry in `THIRD_PARTY-macos.md`.
 
 ## Release workflow
-`.github/workflows/release.yml` (Windows x64 only, on `windows-latest`) runs when a tag starting with `v` is pushed:
-`uv sync --locked`, `scripts/fetch_tools.py` (before the tests, or the `tools` tests skip), `pytest`, the normal
-build (which checks the shipped files itself), and a smoke start: a copy of the build, with `APPDATA` pointed at an
-empty folder, must still be running after 15 seconds with a main window titled `Game Chooser (`... (a missing DLL
-leaves Windows' error box, titled after `game-chooser.exe`, which keeps the process alive). It then zips the folder
-as `GameChooser-<tag>-windows-x64.zip` (one top-level `GameChooser` folder) with a `SHA256SUMS.txt`, and publishes
-both as a GitHub pre-release with generated notes. Running it by hand (`workflow_dispatch`) is a dry run: no release,
-the zip (named with the short commit hash) is kept as a workflow artifact.
+`.github/workflows/release.yml` runs when a tag starting with `v` is pushed, in three jobs. `windows` (on
+`windows-latest`) and `macos` (on `macos-latest`, Apple Silicon) each run `uv sync --locked`, `scripts/fetch_tools.py`
+(before the tests, or the `tools` tests skip), `pytest`, the normal build (which checks the shipped files itself),
+a smoke start and the packaging, and upload their zip as an artifact (`archive: false`, so it is named after the
+file). Windows' smoke start: a copy of the build, with `APPDATA` pointed at an empty folder, must still be running
+after 15 seconds with a main window titled `Game Chooser (`... (a missing DLL leaves Windows' error box, titled after
+`game-chooser.exe`, which keeps the process alive); the folder is zipped as `GameChooser-<tag>-windows-x64.zip` (one
+top-level `GameChooser` folder). The Mac smoke start runs a copy of the app with `HOME` pointed at an empty folder;
+it must still be running after 15 seconds (no window check) and the copy must not differ from the build afterwards.
+The app is zipped with `ditto -c -k --keepParent` as `GameChooser-<tag>-macos-arm64.zip` (never 7zz or `zip`, which
+lose the signature and symlinks), and its signature is checked before zipping and again in the unpacked zip.
+`publish` (needs both) downloads the two zips (`skip-decompress`, or download-artifact unpacks them), finds them
+(failing when either is missing or not a single file), writes one `SHA256SUMS.txt`, and publishes all three as a
+GitHub pre-release with generated notes after a fixed paragraph: the Windows zip is for 64-bit Windows, the Mac app
+is for Apple Silicon and not notarized, and how to open it through System Settings, Privacy & Security, Open Anyway.
+Only that job may write to the repository. Running it by hand (`workflow_dispatch`) is a dry run: everything except
+creating the release, with the zips (named with the short commit hash) and `SHA256SUMS.txt` kept as workflow
+artifacts.
 
 ## Scripts, tools and dependencies
 - **build_macos.sh** - the macOS build (above). **scripts/** - `check_no_tracing.py`, `collect_licenses.py`, `fetch_procmon.py`, `fetch_tools.py`,
