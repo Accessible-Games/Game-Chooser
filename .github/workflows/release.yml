@@ -81,6 +81,7 @@ jobs:
           path: ${{ env.ZIP }}
           archive: false
           if-no-files-found: error
+          overwrite: true
 
       - name: Publish the release
         if: github.event_name == 'push'
