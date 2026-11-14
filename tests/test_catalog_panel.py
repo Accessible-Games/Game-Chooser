@@ -60,7 +60,8 @@ class Service:
 
 
 @pytest.fixture
-def make_panel(app, isolated_manager_factory):
+def make_panel(app, isolated_manager_factory, monkeypatch):
+    monkeypatch.setattr("catalog_panel.current_platform", lambda: "windows")  # the entries have a windows source only
     frames = []
 
     def make(installed=(), entries=None, saved=None):
