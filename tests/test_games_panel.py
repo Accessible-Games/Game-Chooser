@@ -211,6 +211,20 @@ def test_label_and_description_follow_the_row_when_its_number_stays_but_the_game
         ("Install", False, "")
 
 
+def test_the_action_button_grows_to_a_longer_label(make_view):
+    """The window was last laid out with a short label (as when it is restored after a launch); the player then
+    moves to a long title. The button must show all of it, not keep the short label's width."""
+    view = make_view()
+    view.GetParent().SendSizeEvent()  # the frame's one child fills it, as the shown window's page does
+    view.set_rows(rows(entry("simon"), entry("begger your neighbor")))
+    player_selects(view, 1)
+    view.Layout()
+    player_selects(view, 0)
+    button = view.action_btn
+    assert button.GetLabel() == "Install Begger Your Neighbor"
+    assert button.GetSize().width >= button.GetBestSize().width
+
+
 def test_tree_gains_a_node_for_a_new_value_and_keeps_its_selection(make_view):
     view = make_view()
     view.set_rows(rows(ALPHA, BRAVO))
@@ -731,6 +745,23 @@ def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(m
     view.set_busy(False)
     assert view.list_ctrl.HasFocus() and not view.progress_area.IsShown()
     assert view.action_btn.IsShown() and view.action_btn.IsEnabled()  # the button stays after the job
+
+
+def test_the_progress_area_grows_for_done_and_keeps_its_status_line_whole(make_view):
+    """Done shows while an installer runs: the area makes room for it instead of narrowing the status line"""
+    view = make_view()
+    view.GetParent().SetSize((1200, 600))  # room for the button, the gauge, the status line, Done and Cancel
+    view.GetParent().SendSizeEvent()  # the frame's one child fills it, as the shown window's page does
+    view.set_rows(rows(ALPHA))
+    view.set_busy(True)
+    area = view.progress_area
+    status = area.status.GetSize().width
+    area.show_done_button(lambda: None)
+    assert area.status.GetSize().width == status
+    assert area.done_btn.GetSize().width >= area.done_btn.GetBestSize().width
+    assert area.cancel_btn.GetRect().GetRight() < area.GetSize().width
+    area.hide_done_button()
+    assert area.status.GetSize().width == status and area.cancel_btn.GetRect().GetRight() < area.GetSize().width
 
 
 def test_a_selection_event_while_a_dialog_is_open_is_not_the_players(make_view):

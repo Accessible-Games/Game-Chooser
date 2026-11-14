@@ -61,7 +61,9 @@ is a setting of the class (the table below) or the tab's own code.
 Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free parts, rows, filters,
 `pick_index` and the type-ahead matching, by `tests/test_catalog_view.py`):
 - After every refill or sort the action label and the description are set directly, never left to a selection
-  event: wx fires none when the selected row number stays the same and another game moves into it.
+  event: wx fires none when the selected row number stays the same and another game moves into it. Then the
+  whole view is laid out (`self.Layout()`): laying out only the button's own sizer keeps the width the last
+  full layout gave it, which cut a longer label short.
 - Every programmatic select also sets the list's focused item (not on the macOS DataView control), so the arrow
   keys start from the selected game.
 - A list is refilled in three ways only: `set_rows` (the games changed), `refill()` (what the rows show changed:
