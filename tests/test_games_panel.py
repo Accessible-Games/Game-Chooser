@@ -809,6 +809,8 @@ def test_the_filter_is_applied_before_the_config_is_saved(make_view):
     assert seen[-1] == ["Bravo", "Alpha"]
 
 
+@pytest.mark.skipif(DATAVIEW, reason="on macOS a window that is never shown holds no keyboard focus "
+                                     "(only a key window does); the next test stands in for it")
 def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(make_view):
     """Real keyboard focus, which a frame that is never shown does hold within its own thread"""
     view = make_view()
@@ -821,6 +823,27 @@ def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(m
     view.set_busy(False)
     assert view.list_ctrl.HasFocus() and not view.progress_area.IsShown()
     assert view.action_btn.IsShown() and view.action_btn.IsEnabled()  # the button stays after the job
+
+
+def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside_stood_in(make_view):
+    """The rule of the test above with the focus stood in, so it also runs where a hidden window holds none"""
+    view = make_view()
+    view.set_rows(rows(ALPHA))
+    focus = []
+    view.list.control.SetFocus = lambda: focus.append(True)
+    view.set_busy(True)
+    view.progress_area.has_focus_inside = lambda: True  # the player is on Cancel when the job ends
+    view.frame.dialog_active = True
+    view.set_busy(False)
+    assert focus == [] and not view.progress_area.IsShown()  # never while a dialog is open
+    view.frame.dialog_active = False
+    view.set_busy(True)
+    view.set_busy(False)
+    assert focus == [True] and not view.progress_area.IsShown()
+    view.progress_area.has_focus_inside = lambda: False
+    view.set_busy(True)
+    view.set_busy(False)
+    assert focus == [True]  # focus was elsewhere: it stays there
 
 
 def test_the_progress_area_grows_for_done_in_a_window_wide_enough(make_view):
