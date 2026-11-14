@@ -408,7 +408,7 @@ def test_added_extra_runs_only_its_own_steps_and_records_them(tmp_path):
 def test_uninstall_keeps_player_data_and_marks_record(tmp_path):
     eng, game = install_v1(tmp_path)
     r = run(eng, "uninstall")
-    assert r.action == "uninstall" and r.kept_player_files == 5 and r.game is None
+    assert r.action == "uninstall" and r.game is None
     rec = record(eng)
     assert rec.uninstalled and rec.files == {} and rec.steps == []
     assert snapshot(game) == {**PLAYER_FILES, "pawprints.ini": EDITED_INI, "bass.dll": SELF_UPDATED_DLL}
@@ -417,8 +417,7 @@ def test_uninstall_keeps_player_data_and_marks_record(tmp_path):
 
 def test_uninstall_with_box_ticked_recycles_and_deletes_record(tmp_path):
     eng, game = install_v1(tmp_path)
-    r = run(eng, "uninstall", delete_player_data=True)
-    assert r.kept_player_files == 0
+    run(eng, "uninstall", delete_player_data=True)
     assert not game.exists() and record(eng) is None
     recycled = sorted(p.relative_to(game).as_posix() for call in eng.ctx.recycle.calls for p in call)
     assert recycled == sorted([*PLAYER_FILES, "pawprints.ini", "bass.dll"])
@@ -449,13 +448,13 @@ def test_uninstall_undoes_system_steps_but_not_runtimes(tmp_path):
     eng.ctx.records.save(runtime)
     eng.ctx.registry.set("HKCU", r"Software\DirectX", "Version", "REG_SZ", "8")
 
-    r = run(eng, "uninstall")
+    run(eng, "uninstall")
     assert ("regsvr32.exe", f'/u /s "{dll}"', True) in elevator.calls and present_at_unregister == [True]
     assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Path") == (False, None, None)
     assert eng.ctx.registry.get("HKCU", r"Software\DirectX", "Version") == (True, "8", "REG_SZ")
     assert (runtime_dir / "dx8vb.dll").read_bytes() == b"runtime"
     assert record(eng, "dx8vb") == runtime
-    assert not game.exists() and record(eng) is None and r.kept_player_files == 0
+    assert not game.exists() and record(eng) is None
     assert not any("dx8vb" in args for _, args, _ in elevator.calls)
 
     eng.ctx.entries["dx8vb"] = {"id": "dx8vb", "kind": "runtime", "title": "DirectX 8", "sources": []}
@@ -473,8 +472,8 @@ def test_uninstall_works_after_the_game_left_the_catalog(tmp_path):
 def test_uninstall_after_keeping_data_can_remove_it_later(tmp_path):
     eng, game = install_v1(tmp_path)
     run(eng, "uninstall")
-    r = run(eng, "uninstall", delete_player_data=True)
-    assert r.kept_player_files == 0 and not game.exists() and record(eng) is None
+    run(eng, "uninstall", delete_player_data=True)
+    assert not game.exists() and record(eng) is None
 
 
 # ---- failures, retries and catalog changes -------------------------------------

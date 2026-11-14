@@ -10,6 +10,7 @@ pywin32 is imported inside the functions, so `import engine` works without it.
 """
 
 import os
+from contextlib import suppress
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
 
@@ -115,8 +116,6 @@ def write_private_com(game_dir: Path, exe: Path, dlls: list[Path], reader=read_c
     try:
         manifest.write_text(com_manifest_xml(described), encoding="utf-8")
     except OSError as e:
-        try:
+        with suppress(OSError):
             manifest.unlink(missing_ok=True)
-        except OSError:
-            pass
         raise PrivateComUnavailable(f"{manifest.name} couldn't be written") from e

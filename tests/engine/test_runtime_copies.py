@@ -206,9 +206,9 @@ def test_uninstall_keeps_a_changed_copy(tmp_path):
     eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     (lib / "Entombed" / "dx8vb.dll").write_bytes(b"the player's own dx8vb")
-    r = run(eng, "uninstall")
+    run(eng, "uninstall")
     assert (lib / "Entombed" / "dx8vb.dll").read_bytes() == b"the player's own dx8vb"
-    assert r.kept_player_files == 1 and not (lib / "Entombed" / "entombed.exe").exists()
+    assert not (lib / "Entombed" / "entombed.exe").exists()
 
 
 def test_repair_recreates_a_missing_copy(tmp_path):
@@ -430,6 +430,39 @@ def test_a_copy_with_nothing_to_copy_from_that_cant_be_kept_gets_a_note(tmp_path
     folder = lib / "Entombed"
     assert (folder / "dxlib.dll").exists() and not (folder / "lib" / "helper.dll").exists()
     assert r.notes == [not_copied(component="DXLIB")]
+
+
+@pytest.mark.parametrize("players", [False, True], ids=["removed", "the-players-own-file"])
+@pytest.mark.parametrize("action", ["repair", "update", "undo"])
+def test_a_copy_the_installer_removes_with_nothing_to_copy_from_gets_a_note(tmp_path, monkeypatch, action, players):
+    monkeypatch.setenv("GC_DXLIB", str(tmp_path / "system"))
+    routes = {}
+    rt = {**layered_runtime(routes), "detect": {"file": "%GC_DXLIB%\\dxlib.dll"}}
+    folder = tmp_path / "Games" / "Light Cars"
+    eng, lib = setup(tmp_path, [rt, run_mode_game(routes, dependencies=["dxlib"])], routes,
+                     elevator=FakeElevator(on_start=writes_game(folder)))
+    run(eng, "install", id="lightcars")
+    for version in {"repair": [], "update": ["2.0"], "undo": ["2.0"]}[action]:
+        eng.ctx.entries["lightcars"] = run_mode_game(eng.ctx.fetcher.routes, setup_exe=version.encode(),
+                                                     version=version, dependencies=["dxlib"])
+    if action == "undo":
+        run(eng, "update", id="lightcars")
+    assert (folder / "lib" / "helper.dll").exists()
+    if players:
+        (folder / "lib" / "helper.dll").write_bytes(b"the player's own helper")  # kept, so nothing is lost
+    shutil.rmtree(eng.ctx.runtimes_root / "dxlib")
+    (tmp_path / "system").mkdir()
+    (tmp_path / "system" / "dxlib.dll").write_bytes(b"MZ dxlib")  # present by its detect hint
+    writes = writes_game(folder)
+
+    def removes_the_copy(exe, args, elevated):
+        writes(exe, args, elevated)
+        if not players:
+            (folder / "lib" / "helper.dll").unlink(missing_ok=True)
+    eng.ctx.elevator.on_start = removes_the_copy
+    r = run(eng, action, id="lightcars")
+    assert (folder / "lib" / "helper.dll").exists() == players
+    assert (not_copied("Light Cars", "DXLIB") in r.notes) != players
 
 
 def test_untracked_installer_run_game_gets_a_note_instead(tmp_path, monkeypatch):

@@ -41,7 +41,6 @@ class InstallPlan:
     extras: list[ExtraChoice] = field(default_factory=list)
     dependencies: list[DependencyLine] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
-    interactive: bool = False
     base_size: int | None = None
     first_run_size: int = 0  # bytes the game downloads itself the first time it starts
 
@@ -123,7 +122,6 @@ def _choose_library(plan: InstallPlan, libraries: list[dict], last_library: str 
 
 
 def _warnings(entry: dict, action: str, interactive: bool) -> list[str]:
-    """The price (installs only), then a guided installer."""
     warnings = []
     price = install_warning(pricing_of(entry)) if action == "install" else None
     if price:
@@ -166,6 +164,5 @@ def build_install_plan(entry_id: str, entries: dict, libraries: list[dict], reco
         plan.warnings.append(problem.message)
     else:
         plan.dependencies = [dependency_line(r, register_shared_components, platform) for r in missing]
-    plan.interactive = _is_interactive(entry, platform)
-    plan.warnings += _warnings(entry, action, plan.interactive)
+    plan.warnings += _warnings(entry, action, _is_interactive(entry, platform))
     return plan

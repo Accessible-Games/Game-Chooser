@@ -59,7 +59,6 @@ def _remove(path: Path) -> None:
 
 
 def _overlaps(a: Path, b: Path) -> bool:
-    """True if `a` and `b` are the same path or one is inside the other (compared case-insensitively)."""
     a, b = (PurePath(os.path.normcase(p.resolve())) for p in (a, b))
     return a == b or a in b.parents or b in a.parents
 
@@ -92,8 +91,6 @@ def run_file_steps(steps: list[dict], dir: Path) -> None:
             continue
         try:
             _run_file_step(step, Path(dir), action)
-        except StepError:
-            raise
         except (OSError, KeyError) as e:
             raise StepError(messages.STEP_FILE_FAILED) from e
 

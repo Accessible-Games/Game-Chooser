@@ -42,10 +42,7 @@ class FileOp:
     key: str
     path: str
     op: Op
-    reason: str
-    # What the file on disk looked like at planning time: its sha256, or ABSENT.
-    # None means "not recorded"; apply_plan then skips its last-moment re-check.
-    expected: str | None = None
+    expected: str  # what the file on disk looked like at planning time: its sha256, or ABSENT
 
 
 @dataclass
@@ -92,9 +89,9 @@ def plan_update(
         disk = on_disk.get(key)
         new = incoming.get(key)
         path = new.path if new else disk[0] if disk else inst.path
-        op, reason = _decide(key, path, inst, disk, new, persist, restore_changed_code)
+        op = _decide(key, path, inst, disk, new, persist, restore_changed_code)
         if op is not None:
-            plan.ops.append(FileOp(key, path, op, reason, disk[1] if disk else ABSENT))
+            plan.ops.append(FileOp(key, path, op, disk[1] if disk else ABSENT))
         if new is not None and not matches_persist(key, persist):
             plan.new_files[key] = new
     return plan
@@ -103,38 +100,33 @@ def plan_update(
 def _decide(key, path, inst, disk, new, persist, restore_code):
     if matches_persist(key, persist):
         if disk is not None:
-            return Op.KEEP, "persist path is player data"
-        return (Op.WRITE, "persist default, nothing on disk") if new else (None, "")
+            return Op.KEEP  # a persist path is player data
+        return Op.WRITE if new else None  # a persist default, with nothing on disk
 
     if disk is None:
-        return (Op.WRITE, "missing on disk") if new else (None, "gone and not shipped")
+        return Op.WRITE if new else None
 
     d = disk[1]
-    if inst is not None and d == inst.sha256:
+    if inst is not None and d == inst.sha256:  # unchanged since install
         if new is None:
-            return Op.DELETE, "unchanged and removed by new version"
+            return Op.DELETE
         if new.sha256 == d:
-            return Op.KEEP, "unchanged and same"
-        return Op.WRITE, "unchanged, new version differs"
+            return Op.KEEP
+        return Op.WRITE
 
     # Player-owned: changed since install, or never recorded.
     if new is None:
-        return Op.KEEP, "player-owned and not shipped"
+        return Op.KEEP
     if new.sha256 == d:
-        return Op.KEEP, "already equals new version"
+        return Op.KEEP
     if inst is not None and new.sha256 == inst.sha256 and not (restore_code and is_code(path)):
-        return Op.KEEP, "player changed, new version same as installed"
+        return Op.KEEP
     if is_code(path):
-        return Op.WRITE, "code replaced without copy"
-    return Op.BACKUP_AND_WRITE, "player-owned file replaced"
+        return Op.WRITE  # code is replaced without a copy
+    return Op.BACKUP_AND_WRITE
 
 
 # ---- applying a plan -------------------------------------------------------
-
-
-@dataclass
-class ApplyResult:
-    backups: list[dict] = field(default_factory=list)
 
 
 def _rel(path: Path, root: Path) -> str:
@@ -234,17 +226,12 @@ def preflight(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date
             continue
         if target.is_dir():
             raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=op.path, kind="folder"))
-        parent = target.parent
-        while parent != game_dir and game_dir in parent.parents:
-            if parent.exists() and not parent.is_dir():
-                raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=_rel(parent, game_dir), kind="file"))
-            parent = parent.parent
-        backup_target = safe_join(game_dir / backup_dir_name(today), op.path)
-        parent = backup_target.parent
-        while parent != game_dir and game_dir in parent.parents:
-            if parent.exists() and not parent.is_dir():
-                raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=_rel(parent, game_dir), kind="file"))
-            parent = parent.parent
+        for base in (game_dir, game_dir / backup_dir_name(today)):  # the target's folders, then its backup's
+            parent = safe_join(base, op.path).parent
+            while parent != game_dir and game_dir in parent.parents:
+                if parent.exists() and not parent.is_dir():
+                    raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=_rel(parent, game_dir), kind="file"))
+                parent = parent.parent
         if not safe_join(incoming_root, op.path).is_file():
             raise FileNotFoundError(f"Incoming file is missing: {op.path}")
 
@@ -272,33 +259,33 @@ def _write_file(source: Path, target: Path, backup_to: Path | None, game_dir: Pa
         tmp.unlink(missing_ok=True)
 
 
-def apply_plan(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date) -> ApplyResult:
-    """Apply `plan`. If it fails partway, the exception carries `.partial`: the ApplyResult for the
-    backups already made, so the caller can still record them."""
+def apply_plan(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date) -> list[dict]:
+    """Apply `plan`; returns the backups it made. If it fails partway, the exception carries `.partial`:
+    the backups already made, so the caller can still record them."""
     game_dir, incoming_root = Path(game_dir), Path(incoming_root)
-    result = ApplyResult()
+    backups: list[dict] = []
     try:
         preflight(plan, game_dir, incoming_root, today)
         for op in plan.ops:
-            _apply_op(op, plan, game_dir, incoming_root, today, result)
+            _apply_op(op, plan, game_dir, incoming_root, today, backups)
     except BaseException as exc:
-        exc.partial = result
+        exc.partial = backups
         raise
-    return result
+    return backups
 
 
 def _apply_op(op: FileOp, plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date,
-              result: ApplyResult) -> None:
+              backups: list[dict]) -> None:
     if op.op is Op.KEEP:
         return
     target = safe_join(game_dir, op.path)
     # Re-check the disk just before acting: the game may have written something since planning.
-    state = _current_state(target) if op.expected is not None else None
+    state = _current_state(target)
     if state in ("<link>", "<other>"):
         if op.op is Op.DELETE:
             return
         raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=op.path, kind="folder"))
-    changed = state is not None and state != op.expected
+    changed = state != op.expected
 
     if op.op is Op.DELETE:
         if not changed:
@@ -317,7 +304,7 @@ def _apply_op(op: FileOp, plan: UpdatePlan, game_dir: Path, incoming_root: Path,
         return
     backup = unique_path(safe_join(game_dir / backup_dir_name(today), op.path))
     _write_file(source, target, backup, game_dir)
-    result.backups.append({
+    backups.append({
         "original": op.path.replace("\\", "/"),
         "backup": _rel(backup, game_dir),
         "installed_sha256": plan.new_files[op.key].sha256,

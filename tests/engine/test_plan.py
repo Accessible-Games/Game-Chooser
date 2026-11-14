@@ -130,10 +130,8 @@ def test_warnings(tmp_path):
     assert plan(tmp_path, game(flags=["demo"], links={"purchase": "https://x/buy"})).warnings == []  # v1 shapes
     interactive = plan(tmp_path, game([source(method="installer", installer={"type": "other", "mode": "run"})]))
     assert "You'll be guided through this game's own installer." in interactive.warnings
-    assert interactive.interactive
     silent = plan(tmp_path, game([source(method="installer", installer={"type": "inno", "mode": "run"})]))
-    assert not silent.interactive and silent.warnings == []
-    assert not plan(tmp_path, game()).interactive
+    assert silent.warnings == []
 
 
 def test_download_size_sums_and_unknown(tmp_path):

@@ -9,6 +9,7 @@ import threading
 import time
 import traceback
 from collections import deque
+from contextlib import suppress
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -199,9 +200,7 @@ class InstallQueue:
                 self._cond.notify_all()
 
     def _log(self, text: str) -> None:
-        try:
+        with suppress(OSError):
             self._log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self._log_path, "a", encoding="utf-8") as f:
                 f.write(f"[{datetime.now().isoformat(timespec='seconds')}] {text.rstrip()}\n")
-        except OSError:
-            pass

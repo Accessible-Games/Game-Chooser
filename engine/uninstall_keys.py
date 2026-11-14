@@ -84,7 +84,6 @@ def _command_path(text: str) -> str:
 
 
 def split_command(command: str) -> tuple[str, str]:
-    """(program, arguments) of a command line such as an UninstallString."""
     exe = _command_path(command)
     rest = command.strip()
     rest = rest[len(exe) + 2:] if rest.startswith('"') else rest[len(exe):]
@@ -139,6 +138,5 @@ def vendor_uninstaller(values: dict) -> str | None:
 
 
 def inside(path: Path, folder: Path) -> bool:
-    """True if `path` is `folder` or inside it (compared case-insensitively)."""
     path, folder = (Path(os.path.normcase(os.path.abspath(p))) for p in (path, folder))
     return path == folder or folder in path.parents

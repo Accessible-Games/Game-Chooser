@@ -701,3 +701,22 @@ def test_extras_on_a_folder_needing_admin_refuse_with_words_that_fit_any_change(
     error = fails(run, eng, "extras", extras=("lc-music",))
     assert error.message == messages.FOLDER_NEEDS_ADMIN.format(title="Light Cars", path=folder)
     assert "update" not in messages.FOLDER_NEEDS_ADMIN.lower()
+
+
+def test_failed_repair_leaves_the_undo_point_as_it_was(tmp_path):
+    eng, routes, target = updated_run_game(tmp_path)
+    rec = record(eng)
+    put(target, "Game Chooser backup 2026-11-04/v2.txt", b"the player's v2.txt")
+    rec.previous = {**rec.previous, "backups": [{"original": "v2.txt", "backup": "Game Chooser backup 2026-11-04/v2.txt",
+                                                 "installed_sha256": sha(b"new in v2")}]}
+    eng.ctx.records.save(rec)
+    before = record(eng).previous
+    elevator, place = eng.ctx.elevator, eng.ctx.elevator.on_start
+
+    def failing(exe, args, elevated):
+        place(exe, args, elevated)
+        put(target, "v2.txt", b"rewritten by the repair's installer")
+        elevator.exit_codes[exe] = 5
+    elevator.on_start = failing
+    fails(run, eng, "repair")
+    assert record(eng).previous == before

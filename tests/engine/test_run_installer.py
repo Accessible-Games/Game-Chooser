@@ -34,7 +34,8 @@ def run_game(routes, installer=None, setup=SETUP, id="lightcars", title="Light C
 
 def setup_engine(tmp_path, entries, routes, on_start=None, ui=None, **ctx):
     elevator = ctx.pop("elevator", None) or FakeElevator(on_start=on_start)
-    eng = make_engine(tmp_path, entries, fetcher=FakeFetcher(routes), elevator=elevator, installer_ui=ui, **ctx)
+    eng = make_engine(tmp_path, entries, fetcher=FakeFetcher(routes), elevator=elevator,
+                      installer_ui=ui or FakeInstallerUI(), **ctx)
     return eng, tmp_path / "Games"
 
 
@@ -175,13 +176,6 @@ def test_interactive_announces_before_launch(tmp_path):
     assert ui.announced == [("Light Cars", target)]
     assert eng.ctx.elevator.calls[0][1] == ""
     assert eng.ctx.records.load("lightcars").tracked
-
-
-def test_interactive_without_a_ui_fails_plainly_before_running(tmp_path):
-    routes = {}
-    eng, lib = setup_engine(tmp_path, [run_game(routes)], routes)
-    assert fails(install, eng).message == messages.INSTALLER_NEEDS_PLAYER.format(title="Light Cars")
-    assert eng.ctx.elevator.calls == [] and eng.ctx.records.load("lightcars") is None
 
 
 def test_located_in_target_claims_only_new_files(tmp_path, monkeypatch):
@@ -617,9 +611,9 @@ def test_run_mode_install_updated_by_an_archive_uses_the_three_checksum_rule(tmp
 
 def test_own_record_uninstall_of_a_run_install(tmp_path):
     eng, routes, target = installed_run_game(tmp_path)
-    r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
-    assert r.kept_player_files == 2 and len(eng.ctx.elevator.calls) == 1
+    assert len(eng.ctx.elevator.calls) == 1
 
 
 def test_vendor_uninstall_sets_aside_player_files(tmp_path):
@@ -629,10 +623,9 @@ def test_vendor_uninstall_sets_aside_player_files(tmp_path):
         import shutil
         shutil.rmtree(target)  # takes the player's saves with it
     eng.ctx.elevator.on_start = uninstaller
-    r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     assert eng.ctx.elevator.calls[-1] == (str(target / "unins000.exe"), "/SILENT", True)
     assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
-    assert r.kept_player_files == 2
     rec = eng.ctx.records.load("lightcars")
     assert rec.uninstalled and rec.files == {}
     assert not (eng.ctx.work_root / ".setaside" / "lightcars").exists()
@@ -928,8 +921,8 @@ def test_vendor_uninstaller_runs_when_the_record_cant_remove_the_files(tmp_path,
         for rel in ("lc.exe", "sfx/a.wav", "unins000.exe"):
             (target / rel).unlink()
     eng.ctx.elevator.on_start = uninstaller
-    r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
-    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"} and r.kept_player_files == 2
+    eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
+    assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
 
 
 # Finding 5 (R22): the player's code files aren't set aside on update.
@@ -945,21 +938,6 @@ def test_update_replaces_a_players_changed_exe_without_a_copy(tmp_path):
     rec = eng.ctx.records.load("lightcars")
     assert rec.files["lc.exe"].sha256 == sha(b"exe v2")
     assert "mod.dll" not in rec.files and (target / "mod.dll").read_bytes() == b"the player's mod"
-
-
-# Finding 6 (R22): a silent installer whose programs run on doesn't block forever.
-
-def test_silent_installer_whose_children_run_on_finishes_after_the_grace_period(tmp_path, monkeypatch):
-    monkeypatch.setattr(run_installer, "GRACE_SECONDS", 0.2)
-    routes = {}
-    target = tmp_path / "Games" / "Light Cars"
-    eng, lib = setup_engine(tmp_path, [run_game(routes, installer={"type": "inno"})], routes,
-                            on_start=writes(target, {"lc.exe": b"exe"}),
-                            process_watch=watch_with(children_running=True))  # it started the game
-    started = time.monotonic()
-    install(eng)
-    assert time.monotonic() - started < 10 and eng.ctx.records.load("lightcars").tracked
-    assert not eng.ctx.process_watch.made[0].terminated  # the game it started is left running
 
 
 def test_silent_installer_offers_done_when_there_is_a_ui(tmp_path):

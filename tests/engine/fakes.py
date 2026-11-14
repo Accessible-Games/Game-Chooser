@@ -581,6 +581,7 @@ def make_engine(tmp_path: Path, entries, **ctx_overrides):
         recycle=FakeRecycle(),
         process_watch=FakeWatch,
         uninstall_reader=FakeUninstallKeys(),
+        installer_ui=FakeInstallerUI(),
     )
     values.update(ctx_overrides)
     values.setdefault("security", FakeSecurity(values["elevator"]))

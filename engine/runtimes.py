@@ -1260,13 +1260,14 @@ def _keep_recorded(rec: InstallRecord, game_dir: Path, tree: Path, runtime_id: s
 
 
 def copies_after_installer(ctx, entry: dict, rec: InstallRecord, game_dir: Path, copies: list[PrivateCopy],
-                           title: str, ids: list[str] | None = None) -> list[str]:
+                           title: str, ids: list[str] | None = None, had: dict | None = None) -> list[str]:
     """For a tracked game whose installer has run: copy its runtimes' DLL and OCX files beside its launch exe in
     `game_dir`, record them with their runtime as owner, and save the record. Returns the notes.
 
     A copy already recorded and unchanged stays; a recorded copy no runtime copies any more is removed where
     unchanged (a changed one is the player's now), except a private copy's, and a runtime's that has nothing
-    to copy from this time. With no launch exe recorded, nothing is copied and the notes say so."""
+    to copy from this time. With no launch exe recorded, nothing is copied and the notes say so. A copy in
+    `had` (the record's files before the installer ran) that is gone, with nothing to copy it from, gets a note."""
     sources = copy_sources(ctx, entry, copies, title, ids)
     rec.runtime_copies = [s.runtime["id"] for s in sources]
     if not rec.launch_path:
@@ -1292,6 +1293,10 @@ def copies_after_installer(ctx, entry: dict, rec: InstallRecord, game_dir: Path,
     for dest, (runtime_id, sha) in placed.items():
         rel = dest.relative_to(game_dir).as_posix()
         rec.files[norm_key(rel)] = RecordedFile(rel, sha, runtime_owner(runtime_id))
+    for key, f in (had or {}).items():
+        gone = [s.runtime for s in sources if s.folder is None and runtime_owner(s.runtime["id"]) == f.owner]
+        if gone and key not in rec.files and not os.path.lexists(game_dir / f.path):
+            notes[gone[0]["id"]] = messages.RUNTIME_FILES_NOT_COPIED.format(title=title, component=title_of(gone[0]))
     ctx.records.save(rec)
     return list(notes.values())
 
