@@ -92,8 +92,6 @@ def run_file_steps(steps: list[dict], dir: Path) -> None:
             continue
         try:
             _run_file_step(step, Path(dir), action)
-        except StepError:
-            raise
         except (OSError, KeyError) as e:
             raise StepError(messages.STEP_FILE_FAILED) from e
 
