@@ -50,10 +50,16 @@ def _reg_quote(text: str) -> str:
 
 class RegistryAccess:
     def __init__(self, elevator: Elevator, hkcu=None):
-        if hkcu is None:
-            import winreg as hkcu
-        self._winreg = hkcu  # Used for every HKCU call and for HKLM reads.
+        self._hkcu = hkcu
         self._elevator = elevator
+
+    @property
+    def _winreg(self):
+        """Used for every HKCU call and for HKLM reads. Imported on first use: macOS has no winreg."""
+        if self._hkcu is None:
+            import winreg
+            self._hkcu = winreg
+        return self._hkcu
 
     def _type_name(self, type_: int) -> str:
         for name in _TYPE_NAMES:

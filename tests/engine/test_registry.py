@@ -1,3 +1,5 @@
+import sys
+
 import pytest
 
 from engine.errors import ElevationDeclined, StepError
@@ -117,3 +119,8 @@ def test_can_restore(reg):
     assert not reg.can_restore("HKLM", "REG_BINARY", b"\x01")
     assert reg.can_restore("HKCU", "REG_SZ", r'"C:\G\g.exe" %1')
     assert not reg.can_restore("HKCU", "REG_MULTI_SZ", ["a", "b"])
+
+
+def test_creating_it_needs_no_winreg(fake_elev, monkeypatch):
+    monkeypatch.setitem(sys.modules, "winreg", None)  # as on macOS, where importing winreg fails
+    RegistryAccess(fake_elev)
