@@ -140,7 +140,6 @@ class GameLibraryManager:
             }
         }
         
-        upgraded = False
         if self.config_file.exists():
             try:
                 with open(self.config_file, 'r', encoding="utf-8") as f:
@@ -151,21 +150,13 @@ class GameLibraryManager:
                         if isinstance(loaded.get(section), dict):
                             for state_key, value in default_config[section].items():
                                 loaded[section].setdefault(state_key, value)
-                    # The only old-file handling: ids are assigned once and then saved, so they stay stable
-                    upgraded = loaded.pop("exceptions", None) is not None
-                    for lib in loaded["libraries"]:
-                        upgraded |= lib.pop("name", None) is not None
-                        if "id" not in lib:
-                            lib["id"] = secrets.token_hex(6)
-                            upgraded = True
+                    if not all(isinstance(lib, dict) and "id" in lib for lib in loaded["libraries"]):
+                        raise ValueError("a library that is not an object with an id")
                     self.config = loaded
             except _LOAD_ERRORS as e:
                 log.warning("config.json couldn't be read, so the default settings are used: %s", e)
                 self.config = default_config
-                upgraded = False
                 self._damaged(self.config_file, messages.CONFIG_FILE_DAMAGED, messages.CONFIG_FILE_DAMAGED_NOT_COPIED)
-            if upgraded:
-                self.save_or_keep(self.save_config, "the upgraded config.json")
         else:
             self.config = default_config
             self.save_config()

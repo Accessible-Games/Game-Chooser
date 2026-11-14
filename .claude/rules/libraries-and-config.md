@@ -24,9 +24,8 @@ paths:
   installs uninstalls them first (`InstallService.remove_library`, `RemoveLibraryDialog`, optional delete of the
   player's files); the library goes when the last uninstall result is applied.
 - A library whose folder is unreachable (unplugged drive) shows Status "Library not found"; launching explains it.
-- The only handling of an older config is in `load_config`: it drops the `exceptions` key and the library `name`,
-  and assigns an id to a library without one (saved once, so it stays stable). The no-migration rule is in
-  CLAUDE.md (Migration).
+- An older config is not upgraded: a library that is not an object with an `id` makes the config damaged (below),
+  and old keys stay in the file. The no-migration rule is in CLAUDE.md (Migration).
 - `reconcile_catalog_records()` runs at startup to keep games.json and the install records (games' only) in step:
   a record with no game gets one; a game whose record is gone (or unsafe id) becomes a game added by hand; a game
   whose uninstall stopped partway stays linked; one whose uninstall finished but never reached games.json leaves

@@ -103,26 +103,15 @@ def test_unreachable_library_and_missing_exes_are_kept(isolated_manager_factory,
     assert m2.library_reachable("unknown") is False
 
 
-def test_old_alpha_config_loads(isolated_manager_factory, tmp_path):
+def test_a_games_json_row_with_an_unknown_key_is_kept(isolated_manager_factory):
     games = [{"title": "Old", "launch_path": "Old/play.exe", "library_name": "Games", "platforms": ["Windows"]}]
-    config = {"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}], "exceptions": ["x/"]}
-    m = isolated_manager_factory(games=games, config=config)
-    assert set(m.config["libraries"][0]) == {"id", "path"} and "exceptions" not in m.config and len(m.games) == 1
+    m = isolated_manager_factory(games=games)
     # the row is kept, but it no longer belongs to a library: unlaunchable until relocated
-    assert m.games[0].library_id == "" and not hasattr(m.games[0], "library_name")
+    assert len(m.games) == 1 and m.games[0].library_id == "" and not hasattr(m.games[0], "library_name")
 
 
 def test_get_full_path_old_name_rows_resolve_to_launch_path(isolated_manager):
     assert isolated_manager.get_full_path(Game(title="Old", launch_path="Old/play.exe")) == "Old/play.exe"
-
-
-def test_ids_are_assigned_once(isolated_manager_factory, tmp_path):
-    config = {"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}]}
-    first = isolated_manager_factory(config=config).config["libraries"][0]["id"]
-    # the id given while loading the old file was saved, so a restart sees the same one
-    assert isolated_manager_factory().config["libraries"][0]["id"] == first
-    saved = json.loads((isolated_manager_factory.config_dir / "config.json").read_text())
-    assert saved["libraries"] == [{"id": first, "path": str(tmp_path / "Games")}]
 
 
 def test_libraries_on_other_drives_are_not_nested(isolated_manager_factory, tmp_path):
@@ -134,25 +123,6 @@ def test_libraries_on_other_drives_are_not_nested(isolated_manager_factory, tmp_
     lib = m.add_library(_folder(tmp_path, "Games"))
     m.change_library_folder(lib["id"], _folder(tmp_path, "Games2"))
     assert len(m.config["libraries"]) == 2
-
-
-def test_failed_upgrade_save_keeps_loaded_config(isolated_manager_factory, tmp_path, monkeypatch):
-    from library_manager import GameLibraryManager
-
-    old = {"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}]}
-    (isolated_manager_factory.config_dir).mkdir(exist_ok=True)
-    (isolated_manager_factory.config_dir / "config.json").write_text(json.dumps(old), encoding="utf-8")
-    attempts = []
-
-    def fail(self):
-        attempts.append(1)
-        raise OSError("read-only")
-
-    monkeypatch.setattr(GameLibraryManager, "save_config", fail)
-    m = GameLibraryManager()
-    assert attempts, "the upgrade save was never attempted"
-    assert len(m.config["libraries"]) == 1 and len(m.config["libraries"][0]["id"]) == 12
-    assert m.config["libraries"][0]["path"] == old["libraries"][0]["path"]
 
 
 # ---- a damaged games.json or config.json is copied, never lost ------------------------------------------------
