@@ -390,7 +390,7 @@ class GamesPanel(wx.Panel):
         self.action_btn.SetLabelText(action_label(row) if row else self.idle_label)
         self.action_btn.Enable(row is not None)
         self.description.set_text(description_text(row.entry) if row else "")
-        self.action_sizer_slot.Layout()
+        self.Layout()  # the whole view: the slot alone keeps the width the last label gave it
         if self.on_shown is not None:
             self.on_shown()
 

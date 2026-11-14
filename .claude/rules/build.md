@@ -37,8 +37,8 @@ build (which checks the shipped files itself), and a smoke start: a copy of the 
 empty folder, must still be running after 15 seconds with a main window titled `Game Chooser (`... (a missing DLL
 leaves Windows' error box, titled after `game-chooser.exe`, which keeps the process alive). It then zips the folder
 as `GameChooser-<tag>-windows-x64.zip` (one top-level `GameChooser` folder) with a `SHA256SUMS.txt`, and publishes
-both as a GitHub release with generated notes. Running it by hand (`workflow_dispatch`) is a dry run: no release, the
-zip (named with the short commit hash) is kept as a workflow artifact.
+both as a GitHub pre-release with generated notes. Running it by hand (`workflow_dispatch`) is a dry run: no release,
+the zip (named with the short commit hash) is kept as a workflow artifact.
 
 ## Scripts, tools and dependencies
 - **scripts/** - `check_no_tracing.py`, `collect_licenses.py`, `fetch_procmon.py`, `fetch_tools.py`,

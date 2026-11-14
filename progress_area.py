@@ -115,14 +115,14 @@ class ProgressArea(wx.Panel):
         self._on_done = on_done
         if not self.done_btn.IsShown():
             self.done_btn.Show()
-            self.Layout()
+            self.GetParent().Layout()  # the area itself would only squeeze Done into the width it had
 
     def hide_done_button(self):
         self._on_done = None
         if self.done_btn.IsShown():
             moved = self.done_btn.HasFocus()
             self.done_btn.Hide()
-            self.Layout()
+            self.GetParent().Layout()
             if moved:  # focus was already here; keep it in the area rather than lose it
                 self.cancel_btn.SetFocus()
 
