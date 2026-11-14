@@ -77,20 +77,16 @@ class InstallConfirmDialog(wx.Dialog):
 
     def _build_where(self, root):
         plan = self.plan
-        if self.fixed_library is not None:
-            text = wx.StaticText(self, label=_text(messages.CONFIRM_INSTALLS_INTO.format(
-                library=library_choice_label(self.fixed_library))))
-            root.Add(text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
-        elif len(plan.libraries) >= 2:
+        if self.fixed_library is None and len(plan.libraries) >= 2:
             self._radio = wx.RadioBox(self, label=messages.CONFIRM_WHERE,
                                       choices=[_text(c) for c in library_choice_labels(plan.libraries)],
                                       majorDimension=1, style=wx.RA_SPECIFY_COLS)
             self._radio.SetSelection(default_library_index(plan))
             self._radio.Bind(wx.EVT_RADIOBOX, lambda e: self._update_blocked())
             root.Add(self._radio, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
-        elif plan.libraries:
+        elif self.fixed_library is not None or plan.libraries:  # the fixed library, or the only one
             text = wx.StaticText(self, label=_text(messages.CONFIRM_INSTALLS_INTO.format(
-                library=library_choice_label(plan.libraries[0]))))
+                library=library_choice_label(self._library()))))
             root.Add(text, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM | wx.EXPAND, 10)
         else:
             row = wx.BoxSizer(wx.HORIZONTAL)
