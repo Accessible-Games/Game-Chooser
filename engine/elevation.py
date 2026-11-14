@@ -66,8 +66,7 @@ class _ShellProcess:
             self._handle.Close()
             self._handle = None
 
-    def close(self) -> None:
-        self._close_handle()
+    close = _close_handle
 
 
 class _JobProcess(_ShellProcess):
