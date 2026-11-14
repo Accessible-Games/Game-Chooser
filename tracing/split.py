@@ -1,5 +1,6 @@
 """Splits one system-wide capture into per-session lines, attributing events by process tree."""
 import ntpath
+import re
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -7,10 +8,29 @@ from tracing.attribution import UNKNOWN_PID, find_root, session_tree
 from tracing.clock import TICKS_PER_SECOND
 from tracing.kinds import classify
 from tracing.model import ProcInfo, RawEvent, SessionInfo
-from tracing.virtualstore import virtual_store_path
 
 MAX_VALUE_CHARS = 256
 PROBLEM_NO_ROOT = "The game's first process isn't in the capture, so no events could be attributed to this session."
+
+_REGISTRY_PREFIX = re.compile(r"^HKLM\\SOFTWARE\\(.+)$", re.I)
+_NOT_VIRTUALIZED = ("classes\\", "microsoft\\windows\\", "microsoft\\windows nt\\")
+_FILE_PREFIX = re.compile(r"^[A-Za-z]:\\(?:Program Files|Program Files \(x86\)|Windows|ProgramData)\\", re.I)
+
+
+def virtual_store_path(path: str, virtualized: bool, local_appdata: str) -> str | None:
+    """Where Windows redirects a virtualized (non-elevated, legacy 32-bit) process's write under UAC VirtualStore."""
+    if not virtualized or "\\virtualstore\\" in path.lower():
+        return None
+    match = _REGISTRY_PREFIX.match(path)
+    if match:
+        rest = match.group(1)
+        if rest.lower().startswith(_NOT_VIRTUALIZED):
+            return None
+        return "HKCU\\Software\\Classes\\VirtualStore\\MACHINE\\SOFTWARE\\" + rest
+    if _FILE_PREFIX.match(path):
+        return local_appdata.rstrip("\\") + "\\VirtualStore\\" + path[3:]
+    return None
+
 
 _ORDER = {"process_start": 0, "file_write": 1, "mark": 2, "process_exit": 3}
 

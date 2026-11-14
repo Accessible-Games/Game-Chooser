@@ -143,9 +143,10 @@ Build: see `.claude/rules/build.md`.
     client then keep the last membership; the recorder for 60 s at most, `SNAPSHOT_WARNING_SECONDS`, then
     counts every game as exited, so a run whose app has closed still ends)
   - `runfiles.py` - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` - split a run folder
-  - `split.py` - attribute events to sessions and merge writes; `attribution.py` - the process tree
+  - `split.py` - attribute events to sessions and merge writes, and the VirtualStore path;
+    `attribution.py` - the process tree
   - `kinds.py` - event to write kind, the write kinds and the rename and delete operation names the other
-    modules use; `virtualstore.py` - the VirtualStore path
+    modules use
   - `output.py` - writes `session.json` and `events.jsonl`; `model.py`, `clock.py`, `paths.py`
   - `probe.py` - the `--trace-probe` command
   - `check_trace_test.py` - `python -m tracing.check_trace_test <session folder>` checks a session of the
