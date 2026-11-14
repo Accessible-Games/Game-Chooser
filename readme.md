@@ -22,14 +22,9 @@ If you have games scattered across multiple folders, external drives, or differe
 
 ### First Launch
 
-When you first open Game Chooser, you'll see a welcome screen with four options:
-
-1. **Add Library** - Point to a folder containing games (recommended for most users)
-2. **Add Game** - Manually add a single game or web game
-3. **Preferences** - Configure libraries and exception filters
-4. **Exit** - Close the app
-
-**Most users should start with "Add Library"** to let the app scan and discover your games automatically.
+When you first open Game Chooser, it opens on the **Catalog** tab. Choose a game and press Install: the first
+install asks for the folder to install games into, and that folder becomes your first library. You can also add a
+library in **Preferences** (**Ctrl+,**), or add a single game or web game with **Add Game** (**Ctrl+N**).
 
 ### Adding Game Libraries
 

@@ -15,15 +15,10 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""
-Dialog classes for Game Chooser application
-"""
-
 from pathlib import Path
 
 import wx
 import platform
-from contextlib import nullcontext
 from library_manager import LibraryError
 from engine import messages
 from engine.folders import library_label
@@ -32,99 +27,12 @@ from install_prefs import check_install_prefs, current_catalog_url, register_sha
 from library_actions import executable_problem, library_row_name
 from wx_bridge import run_in_background
 from models import Game, is_web_path
-from validation_service import ValidationService
+from validation_service import validate_title, validate_url, validate_year
 from smart_list import SmartList, Column
 
 # The file picker of Add Game and Locate: the files library_actions.executable_problem accepts first
 EXECUTABLE_WILDCARD = ("Executable files (*.exe)|*.exe|Batch files (*.bat)|*.bat|All files (*.*)|*.*"
                        if platform.system() == "Windows" else "Applications (*.app)|*.app|All files (*.*)|*.*")
-
-
-class FirstTimeSetupDialog(wx.Dialog):
-    """First-time setup dialog shown when no config exists"""
-
-    def __init__(self, parent, library_manager):
-        super().__init__(parent, title="Welcome to Game Chooser",
-                        style=wx.CAPTION | wx.CLOSE_BOX | wx.SYSTEM_MENU)
-
-        self.library_manager = library_manager
-        self.parent_frame = parent
-        self.initial_library_count = len(library_manager.config["libraries"])
-
-        self.init_ui()
-        self.CenterOnParent()
-
-        # Handle close button (X) click
-        self.Bind(wx.EVT_CLOSE, self.on_close)
-
-    def init_ui(self):
-        """Initialize the dialog UI"""
-        panel = wx.Panel(self)
-        main_sizer = wx.BoxSizer(wx.VERTICAL)
-
-        # Welcome message
-        welcome_text = wx.StaticText(panel,
-            label="Welcome to Game Chooser!\n\nChoose how you'd like to get started:")
-        main_sizer.Add(welcome_text, 0, wx.ALL, 20)
-
-        # Buttons
-        add_library_btn = wx.Button(panel, label="Add Library")
-        add_library_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
-        main_sizer.Add(add_library_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 20)
-
-        add_game_btn = wx.Button(panel, label="Add Game")
-        add_game_btn.Bind(wx.EVT_BUTTON, self.on_add_game)
-        main_sizer.Add(add_game_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 20)
-
-        preferences_btn = wx.Button(panel, label="Preferences")
-        preferences_btn.Bind(wx.EVT_BUTTON, self.on_preferences)
-        main_sizer.Add(preferences_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 20)
-
-        exit_btn = wx.Button(panel, label="Exit")
-        exit_btn.Bind(wx.EVT_BUTTON, self.on_exit)
-        main_sizer.Add(exit_btn, 0, wx.EXPAND | wx.LEFT | wx.RIGHT | wx.BOTTOM, 20)
-
-        panel.SetSizer(main_sizer)
-        main_sizer.Fit(panel)
-        self.SetClientSize(panel.GetSize())
-
-    def on_add_library(self, event):
-        """Open directory picker to add library"""
-        with wx.DirDialog(self, "Choose Game Library Directory") as dlg:
-            if dlg.ShowModal() == wx.ID_OK:
-                try:
-                    self.library_manager.add_library(dlg.GetPath())
-                except LibraryError as e:
-                    wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
-
-    def on_add_game(self, event):
-        """Open add game dialog"""
-        with GameDialog(self, self.library_manager) as dlg:
-            if dlg.ShowModal() == wx.ID_OK:
-                self.library_manager.games.append(dlg.game)
-                self.parent_frame._save_games()
-
-    def on_preferences(self, event):
-        """Open preferences dialog"""
-        with PreferencesDialog(self, self.library_manager, getattr(self.parent_frame, "service", None)) as dlg:
-            dlg.ShowModal()
-
-    def on_close(self, event):
-        """Handle close button (X) click"""
-        # Check if libraries were added during this session
-        current_library_count = len(self.library_manager.config["libraries"])
-        libraries_added = current_library_count > self.initial_library_count
-
-        # Return custom code if libraries were added, otherwise cancel
-        if libraries_added:
-            self.EndModal(wx.ID_OK)  # Indicate libraries were added
-        else:
-            self.EndModal(wx.ID_CANCEL)
-
-    def on_exit(self, event):
-        """Exit the setup dialog"""
-        # Use the same logic as close
-        self.on_close(event)
 
 
 class GameDialog(wx.Dialog):
@@ -137,28 +45,24 @@ class GameDialog(wx.Dialog):
 
         self.game = game or Game()
         self.library_manager = library_manager
-        self.original_path = game.launch_path if game else ""
 
-        # Get existing genres and developers for combo boxes
         genres = sorted(set(g.genre for g in library_manager.games if g.genre))
         developers = sorted(set(g.developer for g in library_manager.games if g.developer))
 
         panel = wx.Panel(self)
         sizer = wx.GridBagSizer(5, 5)
 
-        # Title
-        sizer.Add(wx.StaticText(panel, label="Title:"),
-                 pos=(0, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        self.title_ctrl = wx.TextCtrl(panel, value=self.game.title)
-        sizer.Add(self.title_ctrl, pos=(0, 1), flag=wx.EXPAND)
+        def add_row(row, label, make):
+            """A label, then the field `make()` creates (in that order: Windows names a field by the text before it)"""
+            sizer.Add(wx.StaticText(panel, label=label), pos=(row, 0), flag=wx.ALIGN_CENTER_VERTICAL)
+            ctrl = make()
+            sizer.Add(ctrl, pos=(row, 1), flag=wx.EXPAND)
+            return ctrl
 
-        # Platform
-        sizer.Add(wx.StaticText(panel, label="Platform:"),
-                 pos=(1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        platforms = ["Windows", "macOS", "Web Game"]
-        self.platform_ctrl = wx.ComboBox(panel, choices=platforms, style=wx.CB_DROPDOWN | wx.CB_READONLY)
+        self.title_ctrl = add_row(0, "Title:", lambda: wx.TextCtrl(panel, value=self.game.title))
+        self.platform_ctrl = add_row(1, "Platform:", lambda: wx.ComboBox(
+            panel, choices=["Windows", "macOS", "Web Game"], style=wx.CB_DROPDOWN | wx.CB_READONLY))
 
-        # Determine initial platform
         if self.game.is_web:
             initial_platform = "Web Game"
         elif self.game.platforms:
@@ -168,9 +72,6 @@ class GameDialog(wx.Dialog):
             initial_platform = "Windows" if system == "Windows" else "macOS"
         self.platform_ctrl.SetValue(initial_platform)
 
-        sizer.Add(self.platform_ctrl, pos=(1, 1), flag=wx.EXPAND)
-
-        # Path/URL field (dynamic based on platform)
         self.path_label = wx.StaticText(panel, label="Launch Path:")
         sizer.Add(self.path_label, pos=(2, 0), flag=wx.ALIGN_CENTER_VERTICAL)
 
@@ -181,28 +82,12 @@ class GameDialog(wx.Dialog):
         sizer.Add(self.path_ctrl, pos=(2, 1), flag=wx.EXPAND)
         sizer.Add(self.browse_btn, pos=(2, 2), flag=wx.LEFT, border=5)
 
-        # Genre
-        sizer.Add(wx.StaticText(panel, label="Genre:"),
-                 pos=(3, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        self.genre_ctrl = wx.ComboBox(panel, value=self.game.genre, choices=genres)
-        sizer.Add(self.genre_ctrl, pos=(3, 1), flag=wx.EXPAND)
+        self.genre_ctrl = add_row(3, "Genre:", lambda: wx.ComboBox(panel, value=self.game.genre, choices=genres))
+        self.developer_ctrl = add_row(4, "Developer:", lambda: wx.ComboBox(panel, value=self.game.developer,
+                                                                           choices=developers))
+        # Empty means no year; a hand-edited games.json may hold a number or null
+        self.year_ctrl = add_row(5, "Year:", lambda: wx.TextCtrl(panel, value=str(self.game.year or "")))
 
-        # Developer
-        sizer.Add(wx.StaticText(panel, label="Developer:"),
-                 pos=(4, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        self.developer_ctrl = wx.ComboBox(panel, value=self.game.developer,
-                                         choices=developers)
-        sizer.Add(self.developer_ctrl, pos=(4, 1), flag=wx.EXPAND)
-
-        # Year
-        sizer.Add(wx.StaticText(panel, label="Year:"),
-                 pos=(5, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        year_val = 2000 if not self.game.year else int(self.game.year)
-        self.year_ctrl = wx.SpinCtrl(panel, value=str(year_val),
-                                    min=1000, max=9999, initial=year_val)
-        sizer.Add(self.year_ctrl, pos=(5, 1), flag=wx.EXPAND)
-
-        # Buttons
         btn_sizer = wx.StdDialogButtonSizer()
         ok_label = "Add" if self.is_new else "Save"
         ok_btn = wx.Button(panel, wx.ID_OK, ok_label)
@@ -217,88 +102,61 @@ class GameDialog(wx.Dialog):
         sizer.AddGrowableCol(1)
         panel.SetSizer(sizer)
 
-        # Event bindings
         ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
-        self.platform_ctrl.Bind(wx.EVT_COMBOBOX, self.on_platform_change)
+        self.platform_ctrl.Bind(wx.EVT_COMBOBOX, lambda event: self._update_path_ui())
 
-        # Update UI based on initial platform
-        self._update_path_ui()
-
-    def on_platform_change(self, event):
-        """Handle platform selection change"""
         self._update_path_ui()
 
     def _update_path_ui(self):
-        """Update the path field UI based on platform selection"""
         platform = self.platform_ctrl.GetValue()
 
         if platform == "Web Game":
             self.path_label.SetLabel("URL:")
             self.browse_btn.Hide()
             # If switching to web game and field is empty, prefill with https://
-            if not is_web_path(self.path_ctrl.GetValue()):
+            if not self.path_ctrl.GetValue():
                 self.path_ctrl.SetValue("https://")
         else:
             self.path_label.SetLabel("Launch Path:")
             self.browse_btn.Show()
             # If switching from web game, clear the https:// prefix
-            current_value = self.path_ctrl.GetValue()
-            if current_value == "https://":
+            if self.path_ctrl.GetValue() == "https://":
                 self.path_ctrl.SetValue("")
 
-        # Force layout update
         self.Layout()
 
     def on_browse(self, event):
-        """Browse for executable file"""
         with wx.FileDialog(self, "Select Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.path_ctrl.SetValue(dlg.GetPath())
 
     def on_ok(self, event):
-        """Validate and save changes"""
-        # Validate title
-        title = self.title_ctrl.GetValue().strip()
-        is_valid, error = ValidationService.validate_title(title)
+        """Validate (the first problem is shown in a box), then look for a duplicate"""
+        is_valid, error = validate_title(self.title_ctrl.GetValue().strip())
         if not is_valid:
-            wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
-            return
+            return wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
 
-        # Validate platform
         platform_val = self.platform_ctrl.GetValue().strip()
         if not platform_val:
-            wx.MessageBox("Platform is required", "Error", wx.OK | wx.ICON_ERROR)
-            return
+            return wx.MessageBox("Platform is required", "Error", wx.OK | wx.ICON_ERROR)
 
-        # Validate path/URL
         path = self.path_ctrl.GetValue().strip()
         if platform_val == "Web Game":
-            is_valid, error = ValidationService.validate_url(path)
+            is_valid, error = validate_url(path)
             if not is_valid:
-                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
-                return
+                return wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
         else:
-            # Validate path format
-            is_valid, error = ValidationService.validate_path(path, must_exist=False)
-            if not is_valid:
-                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
-                return
-
+            if not path:
+                return wx.MessageBox("Path cannot be empty", "Error", wx.OK | wx.ICON_ERROR)
             problem = executable_problem(path, platform_val)  # the file exists and is a game executable
             if problem:
-                wx.MessageBox(*problem, wx.OK | wx.ICON_ERROR)
-                return
+                return wx.MessageBox(*problem, wx.OK | wx.ICON_ERROR)
 
-        # Validate year if provided
-        year_val = self.year_ctrl.GetValue()
-        year_str = str(year_val) if year_val != 2000 else ""
-        if year_str:
-            is_valid, error = ValidationService.validate_year(year_str)
-            if not is_valid:
-                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
-                return
+        year_str = self.year_ctrl.GetValue().strip()
+        is_valid, error = validate_year(year_str)
+        if not is_valid:
+            return wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
 
-        # Asynchronously check for duplicates
         self._check_duplicates_async(path, platform_val, year_str)
 
     def _check_duplicates_async(self, path, platform_val, year_str):
@@ -312,33 +170,22 @@ class GameDialog(wx.Dialog):
                           "duplicate-check")
 
     def _find_duplicate_game(self, path):
-        """Find if a game with this path already exists"""
-        # Normalize the path for comparison
+        """(game, its path, True for the same text) for another game with this file, or None"""
         normalized_path = str(Path(path).resolve())
-
         for game in self.library_manager.games:
             if game == self.game:  # Skip the current game if editing
                 continue
-
-            # Check exact path match
             if game.launch_path == path:
-                return {
-                    'type': 'exact',
-                    'game': game,
-                    'match_path': path
-                }
-
+                return game, path, True
             # For non-web games, also check resolved absolute paths
             if not is_web_path(path) and not game.is_web:
                 try:
                     # A library game's path joined to its library; a game added by hand's as it is
                     game_full_path = self.library_manager.get_full_path(game)
                     if game_full_path and str(Path(game_full_path).resolve()) == normalized_path:
-                        return {'type': 'resolved', 'game': game, 'match_path': game_full_path}
+                        return game, game_full_path, False
                 except (OSError, ValueError):
-                    # Path resolution failed, skip this comparison
-                    continue
-
+                    continue  # its path can't be resolved: skip it
         return None
 
     def _on_duplicate_check_complete(self, duplicate_info, error, path, platform_val, year_str):
@@ -350,11 +197,8 @@ class GameDialog(wx.Dialog):
                           "Duplicate Check Failed", wx.OK | wx.ICON_ERROR)
             return
         if duplicate_info:
-            duplicate_game = duplicate_info['game']
-            match_type = duplicate_info['type']
-            match_path = duplicate_info['match_path']
-
-            if match_type == 'exact':
+            duplicate_game, match_path, exact = duplicate_info
+            if exact:
                 message = f"A game with this exact path already exists:\n\n" \
                          f"Title: {duplicate_game.title}\n" \
                          f"Path: {match_path}\n\n" \
@@ -368,33 +212,19 @@ class GameDialog(wx.Dialog):
 
             wx.MessageBox(message, "Duplicate Game Found", wx.OK | wx.ICON_WARNING)
             return
-
-        # No duplicates found, complete the validation
         self._complete_validation(path, platform_val, year_str)
 
     def _complete_validation(self, path, platform_val, year_str):
-        """Complete validation and save the game"""
-        # Get the current title
-        title = self.title_ctrl.GetValue().strip()
-
-        # Save validated data
-        self.game.title = title
+        """Save the checked fields into the game and close"""
+        self.game.title = self.title_ctrl.GetValue().strip()
         self.game.genre = self.genre_ctrl.GetValue().strip()
         self.game.developer = self.developer_ctrl.GetValue().strip()
-        self.game.year = year_str or ""
-
-        # Handle platform and path
-        if platform_val == "Web Game":
-            self.game.platforms = ["Web"]
-        else:
-            self.game.platforms = [platform_val]
-
+        self.game.year = year_str and str(int(year_str))  # "+2000" or "２０００" is kept as "2000"
+        self.game.platforms = ["Web"] if platform_val == "Web Game" else [platform_val]
         # A game added by hand always has an absolute path and no library
         self.game.library_id = ""
         self.game.launch_path = path
-
         self.EndModal(wx.ID_OK)
-
 
 
 class PreferencesDialog(wx.Dialog):
@@ -403,39 +233,34 @@ class PreferencesDialog(wx.Dialog):
     It holds library ids only, never a Game, so the main window applies finished installs while it is open
     (`holds_no_games`) and calls on_job_done after each, which redraws the library list from the config. The
     prompts it opens itself still wait for job results (the parent's modal_dialog()). `service` (the
-    InstallService) uninstalls a library's catalog games before Remove takes it away; without one, Remove only
-    forgets the library.
+    InstallService) uninstalls a library's catalog games before Remove takes it away.
     """
 
     holds_no_games = True
 
-    def __init__(self, parent, library_manager, service=None):
+    def __init__(self, parent, library_manager, service):
         super().__init__(parent, title="Preferences", size=(700, 500))
 
         self.library_manager = library_manager
         self.service = service
         # Nested prompts are modal dialogs that may hold games: they defer job results like any other
-        self._modal = getattr(parent, "modal_dialog", None) or nullcontext
-        self._notify = getattr(parent, "notify", None)  # the main window's notification, for a slow count
+        self._modal = parent.modal_dialog
+        self._notify = parent.notify  # the main window's notification, for a slow count
         # Runs work once no prompt is open over Preferences (the main window's; it doesn't count Preferences itself)
-        self._when_no_prompt = getattr(parent, "run_when_no_dialog", None) or (lambda fn, *args: fn(*args))
+        self._when_no_prompt = parent.run_when_no_dialog
         self._counting = False  # a Remove is counting the player's files in the background
         # The catalog address when Preferences opened, so the main window can tell if it changed (even over
         # several Applies, and even when the player then chooses Cancel)
         self.catalog_url_at_open = current_catalog_url(library_manager.config["install"])
 
-        # Create notebook
         self.notebook = wx.Notebook(self)
 
-        # Create tabs
         self.create_library_paths_tab()
         self.create_installing_tab()
 
-        # Main sizer with buttons
         main_sizer = wx.BoxSizer(wx.VERTICAL)
         main_sizer.Add(self.notebook, 1, wx.EXPAND)
         
-        # Buttons
         btn_panel = wx.Panel(self)
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
         btn_sizer.AddStretchSpacer()
@@ -453,17 +278,14 @@ class PreferencesDialog(wx.Dialog):
         
         self.SetSizer(main_sizer)
         
-        # Bind events
         ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
         apply_btn.Bind(wx.EVT_BUTTON, self.on_apply)
         
     
     def create_library_paths_tab(self):
-        """Create library paths tab"""
         tab_panel = wx.Panel(self.notebook)
         tab_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        # Library paths section
         lib_label = wx.StaticText(tab_panel, label="Game Library Paths:")
         tab_sizer.Add(lib_label, 0, wx.ALL, 5)
 
@@ -477,12 +299,10 @@ class PreferencesDialog(wx.Dialog):
             Column(title="Path", model_field="path", width=400)
         ])
 
-        # Populate library list
         self._fill_library_list()
 
         lib_sizer.Add(self.lib_list.control.control, 1, wx.EXPAND | wx.RIGHT, 5)
 
-        # Library buttons
         lib_btn_panel = wx.Panel(lib_container)
         lib_btn_sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -503,7 +323,6 @@ class PreferencesDialog(wx.Dialog):
         tab_panel.SetSizer(tab_sizer)
         self.notebook.AddPage(tab_panel, "Library Paths")
 
-        # Bind events
         add_lib_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
         change_lib_btn.Bind(wx.EVT_BUTTON, self.on_change_library_folder)
         remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
@@ -549,7 +368,7 @@ class PreferencesDialog(wx.Dialog):
         for its games' uninstalls says so. The selected library stays selected (or the row where it was)."""
         selected = self._selected_library()
         index = self.lib_list.get_selected_index()
-        removing = self.service.pending_removal if self.service is not None else set()
+        removing = self.service.pending_removal
         rows = [{"id": lib["id"], "name": library_row_name(library_label(lib), lib["id"] in removing),
                  "path": lib["path"]}
                 for lib in self.library_manager.config["libraries"]]
@@ -597,7 +416,7 @@ class PreferencesDialog(wx.Dialog):
         selected = self._selected_library()
         if not selected:
             return
-        if self.service is not None and selected["id"] in self.service.pending_removal:
+        if selected["id"] in self.service.pending_removal:
             # its queued uninstalls find the game folders through the library when they run
             self._tell(messages.LIBRARY_BEING_REMOVED)
             return
@@ -628,9 +447,6 @@ class PreferencesDialog(wx.Dialog):
             self._tell(messages.LIBRARY_FOLDER_MISSING)
             self._fill_library_list()
             return None
-        if self.service is None:
-            self._change_libraries(manager.remove_library, library_id)
-            return None
         if library_id in self.service.pending_removal:
             self._tell(messages.LIBRARY_BEING_REMOVED)
             return None
@@ -657,7 +473,7 @@ class PreferencesDialog(wx.Dialog):
         self._counting = True
         run_in_background(lambda: sum(service.player_files(cid) for cid in ids),
                           lambda count: self._counted(library_id, count), "library-player-files",
-                          slow=(lambda: notify(messages.COUNTING_LIBRARY_FILES.format(label=label))) if notify else None,
+                          slow=lambda: notify(messages.COUNTING_LIBRARY_FILES.format(label=label)),
                           default=0)
 
     def _counted(self, library_id, player_files):

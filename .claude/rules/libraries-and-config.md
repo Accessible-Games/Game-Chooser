@@ -12,7 +12,7 @@ paths:
 
 ## Files
 - **library_manager.py** - `GameLibraryManager`: config, games.json, libraries, catalog game bookkeeping
-- **validation_service.py** - title/URL/path/year validation used by `GameDialog`
+- **validation_service.py** - the title, URL and year checks `GameDialog` uses (module functions)
 
 ## Libraries (install folders)
 - Stored in `config["libraries"]` as `{"id": <secrets.token_hex(6)>, "path": <folder>}`. The id is stable; games

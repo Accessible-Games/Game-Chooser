@@ -113,11 +113,12 @@ def _whole_in_unit_of(total: int, done: int) -> tuple[int, int, str]:
     return done // _GB, round(total / _GB), "gigabytes"
 
 
+INSTALLER_WAITING = "Waiting for the installer"
 _SIMPLE_PHASES = {
     "verifying": "Verifying",
     "extracting": "Extracting",
     "finishing": "Finishing",
-    "waiting_for_installer": "Waiting for the installer",
+    "waiting_for_installer": INSTALLER_WAITING,
 }
 
 
@@ -318,7 +319,6 @@ CONFIRM_BUTTON_INSTALL = "Install"
 CONFIRM_BUTTON_UPDATE = "Update"
 CONFIRM_BUTTON_EXTRAS = "Add extras"
 CONFIRM_BUTTON_CANCEL = "Cancel"
-CONFIRM_LIBRARY_ERROR_TITLE = "Install folder"
 
 # Background installs: the progress area, notifications, the installer prompts and the close guard
 REPAIRED = "{title} is repaired"
@@ -328,12 +328,10 @@ INSTALL_PROBLEM_TITLE = "Install problem"
 PROGRESS_GAUGE_NAME = "Install progress"
 PROGRESS_STATUS_NAME = "Install status"
 PROGRESS_DONE = "Done"
-PROGRESS_CANCEL = "Cancel"
 JOB_PREPARING = "Preparing {title}"
 JOB_CANCELLING = "Cancelling {title}"
 ONE_MORE_WAITING = "1 more waiting"
 MORE_WAITING = "{count} more waiting"
-INSTALLER_WAITING = "Waiting for the installer"
 INSTALLER_TARGET_TITLE = "Installing {title}"
 INSTALLER_TARGET = "When the installer asks where to install, use: {path}\n\nThe path is on your clipboard."
 INSTALLER_TARGET_NO_CLIPBOARD = "When the installer asks where to install, use: {path}"
@@ -394,12 +392,10 @@ def failed_text(action: str, title: str) -> str:
             "extras": FAILED_EXTRAS}.get(action, FAILED).format(title=title)
 
 # The Library tab's actions for catalog games: the context menu, Uninstall, removing a library, launch problems
-MENU_UPDATE = "Update"
 MENU_UNDO = "Undo last update"
 MENU_UNDO_UNAVAILABLE = "Undo last update (not available: {reason})"
 MENU_EXTRAS = "Extras…"
 MENU_REPAIR = "Repair"
-MENU_UNINSTALL = "Uninstall"
 MENU_UPDATE_BY_HAND = "Update available: install it by hand"
 UNINSTALL_TITLE = "Uninstall {title}"
 UNINSTALL_DELETE_FILES = "Also delete files {title} created, like saves and settings ({count} files)"
