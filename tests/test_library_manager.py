@@ -5,7 +5,7 @@ import pytest
 from engine import messages
 from engine.folders import library_label
 from library_manager import LibraryError
-from path_manager import PathManager
+from models import Game
 
 
 def _seed(tmp_path):
@@ -103,26 +103,15 @@ def test_unreachable_library_and_missing_exes_are_kept(isolated_manager_factory,
     assert m2.library_reachable("unknown") is False
 
 
-def test_old_alpha_config_loads(isolated_manager_factory, tmp_path):
+def test_a_games_json_row_with_an_unknown_key_is_kept(isolated_manager_factory):
     games = [{"title": "Old", "launch_path": "Old/play.exe", "library_name": "Games", "platforms": ["Windows"]}]
-    config = {"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}], "exceptions": ["x/"]}
-    m = isolated_manager_factory(games=games, config=config)
-    assert set(m.config["libraries"][0]) == {"id", "path"} and "exceptions" not in m.config and len(m.games) == 1
+    m = isolated_manager_factory(games=games)
     # the row is kept, but it no longer belongs to a library: unlaunchable until relocated
-    assert m.games[0].library_id == "" and not hasattr(m.games[0], "library_name")
+    assert len(m.games) == 1 and m.games[0].library_id == "" and not hasattr(m.games[0], "library_name")
 
 
-def test_get_full_path_old_name_rows_resolve_to_launch_path():
-    assert PathManager.get_full_path("Old/play.exe", [{"id": "a", "path": "C:/x"}], "") == "Old/play.exe"
-
-
-def test_ids_are_assigned_once(isolated_manager_factory, tmp_path):
-    config = {"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}]}
-    first = isolated_manager_factory(config=config).config["libraries"][0]["id"]
-    # the id given while loading the old file was saved, so a restart sees the same one
-    assert isolated_manager_factory().config["libraries"][0]["id"] == first
-    saved = json.loads((isolated_manager_factory.config_dir / "config.json").read_text())
-    assert saved["libraries"] == [{"id": first, "path": str(tmp_path / "Games")}]
+def test_get_full_path_old_name_rows_resolve_to_launch_path(isolated_manager):
+    assert isolated_manager.get_full_path(Game(title="Old", launch_path="Old/play.exe")) == "Old/play.exe"
 
 
 def test_libraries_on_other_drives_are_not_nested(isolated_manager_factory, tmp_path):
@@ -134,25 +123,6 @@ def test_libraries_on_other_drives_are_not_nested(isolated_manager_factory, tmp_
     lib = m.add_library(_folder(tmp_path, "Games"))
     m.change_library_folder(lib["id"], _folder(tmp_path, "Games2"))
     assert len(m.config["libraries"]) == 2
-
-
-def test_failed_upgrade_save_keeps_loaded_config(isolated_manager_factory, tmp_path, monkeypatch):
-    from library_manager import GameLibraryManager
-
-    old = {"libraries": [{"name": "Games", "path": _folder(tmp_path, "Games")}]}
-    (isolated_manager_factory.config_dir).mkdir(exist_ok=True)
-    (isolated_manager_factory.config_dir / "config.json").write_text(json.dumps(old), encoding="utf-8")
-    attempts = []
-
-    def fail(self):
-        attempts.append(1)
-        raise OSError("read-only")
-
-    monkeypatch.setattr(GameLibraryManager, "save_config", fail)
-    m = GameLibraryManager()
-    assert attempts, "the upgrade save was never attempted"
-    assert len(m.config["libraries"]) == 1 and len(m.config["libraries"][0]["id"]) == 12
-    assert m.config["libraries"][0]["path"] == old["libraries"][0]["path"]
 
 
 # ---- a damaged games.json or config.json is copied, never lost ------------------------------------------------
@@ -194,13 +164,23 @@ def test_truncated_config_json_is_copied_and_the_app_keeps_working(isolated_mana
     assert isolated_manager_factory().config["libraries"] == [lib]
 
 
-def test_wrong_shape_config_is_treated_as_damaged(isolated_manager_factory):
+@pytest.mark.parametrize("text", ['{"libraries": ["D:/Games"]}', '{"libraries": [{"path": "D:/Games"}]}'])
+def test_wrong_shape_config_is_treated_as_damaged(isolated_manager_factory, text):
     config = isolated_manager_factory.config_dir / "config.json"
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text('{"libraries": ["D:/Games"]}', encoding="utf-8")  # valid JSON, a library that isn't an object
+    config.write_text(text, encoding="utf-8")  # valid JSON, a library that isn't an object or has no id
     m = isolated_manager_factory()
     assert m.config["libraries"] == []
-    assert config.with_name("config.json.bad").read_text(encoding="utf-8") == '{"libraries": ["D:/Games"]}'
+    assert config.with_name("config.json.bad").read_text(encoding="utf-8") == text
+
+
+@pytest.mark.parametrize("text", ['[["Hand added"]]', '["Hand added"]'])  # valid JSON, a row that isn't an object
+def test_a_games_json_row_that_is_not_an_object_is_treated_as_damaged(isolated_manager_factory, text):
+    games = isolated_manager_factory.app_dir / "games.json"
+    games.write_text(text, encoding="utf-8")
+    m = isolated_manager_factory()
+    assert m.games == [] and m.games_load_failed
+    assert games.with_name("games.json.bad").read_text(encoding="utf-8") == text
 
 
 def test_an_earlier_bad_copy_is_never_overwritten(isolated_manager_factory):

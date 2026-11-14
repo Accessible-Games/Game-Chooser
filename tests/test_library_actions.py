@@ -249,7 +249,7 @@ def test_start_launch_file_reads_no_record_for_a_file_that_is_not_an_hta(tmp_pat
 
 
 def test_a_hand_added_games_file_is_one_add_game_and_locate_both_accept(tmp_path):
-    """PathManager.is_executable decides: an .exe or .bat file, or an .app folder. Never an .hta."""
+    """executable_problem decides: an .exe or .bat file, or an .app folder. Never an .hta."""
     for name in ("game.exe", "PLAY.BAT", "readme.txt", "menu.hta"):
         (tmp_path / name).write_bytes(b"MZ")
     (tmp_path / "Game.app").mkdir()

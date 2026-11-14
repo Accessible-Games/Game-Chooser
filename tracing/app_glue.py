@@ -35,11 +35,6 @@ def _start_recorder(compiled: bool):
     return start
 
 
-def _app_exe(compiled: bool) -> str:
-    exe, lead = paths.self_command(compiled)
-    return exe if compiled else lead[0]
-
-
 def _mtime_iso(path: str) -> str | None:
     try:
         return datetime.fromtimestamp(Path(path).stat().st_mtime, tz=timezone.utc).isoformat()
@@ -63,7 +58,8 @@ def _app_build(compiled: bool) -> str | None:
 
 
 def _env(compiled: bool) -> dict:
-    app_exe = _app_exe(compiled)
+    exe, lead = paths.self_command(compiled)
+    app_exe = exe if compiled else lead[0]
     return {
         "windows": platform.platform(),
         "local_appdata": os.environ.get("LOCALAPPDATA", ""),

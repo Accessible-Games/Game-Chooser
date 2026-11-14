@@ -1,6 +1,5 @@
 """Checks a session folder made by the trace test game (tests/catalog_fixtures/games/trace-test)."""
 import json
-import sys
 from pathlib import Path
 
 from tracing.kinds import WRITE_KINDS
@@ -76,14 +75,3 @@ def report(session_dir: Path) -> int:
     problems = check(session_dir)
     print("\n".join(problems) if problems else "PASS")
     return 1 if problems else 0
-
-
-def main(argv: list[str]) -> int:
-    if len(argv) != 2:
-        print("Usage: python -m tracing.check_trace_test <session folder>")
-        return 1
-    return report(Path(argv[1]))
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv))

@@ -6,14 +6,12 @@ paths:
   - "/library_*.py"
   - "/wx_bridge.py"
   - "/main_window.py"
-  - "/language_names.py"
   - "/progress_area.py"
   - "/description_field.py"
   - "/tests/test_install_*.py"
   - "/tests/test_catalog_view.py"
   - "/tests/test_library_*.py"
   - "/tests/test_wx_bridge.py"
-  - "/tests/test_language_names.py"
 ---
 
 # Catalog, installing and launching
@@ -26,13 +24,13 @@ paths:
 - **catalog_panel.py** - the Catalog tab: its status line, Retry and what a row's action does, around a
   `GamesPanel` (`games_panel.py`, the games view both tabs share; see `.claude/rules/ui-main-window.md`);
   **catalog_view.py** - wx-free rows for both tabs (`build_rows` for catalog entries, `library_rows` for the
-  player's games), filters, `pick_index`, the type-ahead matching, description text, links;
-  **language_names.py** - ISO 639-1 codes to English names (unknown codes shown as written)
+  player's games), filters, `pick_index`, the type-ahead matching, description text, links, and the English
+  names of ISO 639-1 language codes (unknown codes shown as written)
 - **wx_bridge.py** - queue listener and installer-UI bridges to the UI thread, `run_in_background`
 
 ## Install service (`install_service.py`)
 `InstallService(manager, listener, installer_ui, ...)` ties together the index (`IndexState`), `InstallEngine`,
-`InstallQueue` (log `install.log`), `manager.records` and the libraries. Main members: `visible_games`,
+`InstallQueue` (log `install.log`), `manager.records` and the libraries. Main members:
 `installed_ids`, `plan`, `blocked`, `submit(action, entry_id, library_id, library_path, ...)`, `apply_result`,
 `job_failed`, `forget`, `player_files`, `record_for`, `entry_for`, `statuses`, `ensure_library`, `library_games`,
 `check_library_removable`, `remove_library`, `adopt_launch_paths`.
@@ -107,8 +105,8 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   launch file. The path in games.json is not trusted: `..`, an absolute path elsewhere or another `.hta` in the
   folder is refused. Windows only: on another system
   the platform check refuses first, and failing that `start_hta` raises, shown as "Failed to launch game: This game
-  only runs on Windows." A game added by hand never runs an `.hta`: `PathManager.is_executable` does not accept one,
-  so Add Game and the Locate dialog refuse it ("Invalid Executable", `library_actions.executable_problem`); should
+  only runs on Windows." A game added by hand never runs an `.hta`: `library_actions.executable_problem` refuses one,
+  so Add Game and the Locate dialog refuse it ("Invalid Executable"); should
   games.json name one anyway, the launch is refused ("Failed to launch game: " then `messages.HTA_NOT_ALLOWED`) and
   nothing is run.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.

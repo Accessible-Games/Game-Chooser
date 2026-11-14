@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from engine import jobs, messages, runtimes
-from engine.errors import Cancelled, DownloadWriteError, ExtractError, InstallFailed
+from engine.errors import Cancelled, ExtractError, InstallFailed
 from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
 from engine.messages import DEFENDER_NOTE
@@ -389,15 +389,11 @@ def test_record_save_failure_undoes_steps_and_removes_folder(tmp_path):
 
 
 class FullDiskFetcher(FakeFetcher):
-    """Like the real Fetcher when the drive fills up while a download is written: a DownloadWriteError
-    carrying the OSError."""
+    """Like the real Fetcher when the drive fills up while a download is written: the OSError."""
 
     def download(self, url, dest, progress=None, cancel=None):
         self.requests.append(url)
-        try:
-            raise OSError(errno.ENOSPC, "No space left on device", str(dest))
-        except OSError as e:
-            raise DownloadWriteError(str(e)) from e
+        raise OSError(errno.ENOSPC, "No space left on device", str(dest))
 
 
 def test_disk_full_during_download_says_so_and_tries_no_other_source(tmp_path):

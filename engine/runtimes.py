@@ -182,15 +182,14 @@ def write_marker_args(marker: Path, source_sha256: str) -> str:
     return f'/d /v:off /s /c "{_write_marker_command(marker, source_sha256)}"'
 
 
-def lock_down_commands(folder: Path, user_sid: str, staging: Path, files: dict[str, str],
+def lock_down_commands(folder: Path, staging: Path, files: dict[str, str],
                        existing: set[str] | None = None) -> list[tuple[str, str]]:
     """The elevated commands that make and fill a runtime's folder and lock it, and the two folders above
     it, down: [(exe, arguments)], one per administrator prompt (usually one; more only if the command
     line would be too long). `files` maps each of the download's files, relative to `folder` and to
     `staging` (where the player unpacked them) with forward slashes, to its sha256. `existing` is None
     when `folder` isn't there yet; else the expected entries it already holds (an Administrators-owned
-    folder being adopted). `user_sid` is checked by the caller and appears in no command: the installing
-    user gets no grant.
+    folder being adopted). The installing user gets no grant.
 
     The chain stops at the first command that fails, and never changes the owner or permissions of a
     FILE (a hard link shares them with its other names): icacls runs on folders only, one explicit path
@@ -764,7 +763,7 @@ def _lock_down(ctx, target: Path, title: str, staging: Path, incoming: dict[str,
             or any("%" in f for f in files) or not all(_HEX64.fullmatch(sha) for sha in files.values())):
         raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))  # cmd expands %
     existing = {rel for rel, _ in _depth_first_order(list(files)) if os.path.lexists(target / rel)} if found else None
-    for exe, args in lock_down_commands(target, user, staging, files, existing):
+    for exe, args in lock_down_commands(target, staging, files, existing):
         try:
             code = ctx.elevator.run(exe, args, True, show=False)
         except ElevationDeclined as e:
@@ -904,10 +903,7 @@ def _copy_into(root: Path, tree: Path, copy: PrivateCopy) -> None:
 
 def _remove_copy(copy: PrivateCopy, tree: Path) -> None:
     for path in copy.files:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        _unlink_quietly(path)
     for folder in reversed(copy.dirs):
         _prune_empty_dirs(folder, tree)
     copy.files, copy.dirs = [], []
@@ -1212,7 +1208,8 @@ def copies_in_tree(ctx, entry: dict, tree: Path, exe: Path, copies: list[Private
 
     `installed` (the record and folder of the version being replaced) keeps, for a runtime there is nothing to
     copy from this time (no shared folder, or one that can't be trusted), the copies that version recorded,
-    where they are unchanged: a Repair or Update never removes a working copy because its source is gone.
+    where they are unchanged: a Repair or Update never removes a working copy because its source is gone. One
+    that can't be kept (the drive is full) gets the runtime's "not copied" note, even if others were kept.
 
     Returns the owners to record (norm_key in `tree` -> runtime_owner(id)), the notes, and the runtime ids (for
     the record's `runtime_copies`)."""
@@ -1224,7 +1221,11 @@ def copies_in_tree(ctx, entry: dict, tree: Path, exe: Path, copies: list[Private
         for source in sources:
             runtime_id = source.runtime["id"]
             if source.folder is None or runtime_id in notes:
-                if _keep_recorded(rec, game_dir, tree, runtime_id, placed) and source.folder is None:
+                kept, lost = _keep_recorded(rec, game_dir, tree, runtime_id, placed)
+                if lost:
+                    notes[runtime_id] = messages.RUNTIME_FILES_NOT_COPIED.format(
+                        title=title, component=title_of(source.runtime))
+                elif kept and source.folder is None:
                     notes.pop(runtime_id, None)
     owners = {norm_key(dest.relative_to(tree).as_posix()): runtime_owner(runtime_id)
               for dest, (runtime_id, _) in placed.items()}
@@ -1232,10 +1233,10 @@ def copies_in_tree(ctx, entry: dict, tree: Path, exe: Path, copies: list[Private
 
 
 def _keep_recorded(rec: InstallRecord, game_dir: Path, tree: Path, runtime_id: str,
-                   placed: dict[Path, tuple[str, str]]) -> bool:
+                   placed: dict[Path, tuple[str, str]]) -> tuple[bool, bool]:
     """Copy into `tree` the runtime's recorded copies that `game_dir` still holds unchanged, where `tree` has
-    nothing at that name. True if any was kept."""
-    kept = False
+    nothing at that name. Returns (any was kept, any couldn't be)."""
+    kept = lost = False
     for recorded in rec.files.values():
         if recorded.owner != runtime_owner(runtime_id):
             continue
@@ -1248,12 +1249,14 @@ def _keep_recorded(rec: InstallRecord, game_dir: Path, tree: Path, runtime_id: s
             _copy_new(path, dest)
             if hash_file(dest) != recorded.sha256:
                 _unlink_quietly(dest)
+                lost = True
                 continue
         except (UnsafePath, TypeError, ValueError, OSError):
+            lost = True
             continue
         placed[dest] = (runtime_id, recorded.sha256)
         kept = True
-    return kept
+    return kept, lost
 
 
 def copies_after_installer(ctx, entry: dict, rec: InstallRecord, game_dir: Path, copies: list[PrivateCopy],

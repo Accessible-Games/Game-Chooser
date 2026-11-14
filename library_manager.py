@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Game Chooser - A desktop game library manager
 # Copyright (C) 2025 Alec Olson
 #
@@ -14,10 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-"""
-Game library management for Game Chooser application
-"""
 
 import json
 import logging
@@ -37,7 +32,6 @@ from engine.records import RecordStore
 from install_prefs import current_catalog_url
 from library_actions import is_uninstall_unfinished
 from models import Game
-from path_manager import PathManager
 
 
 log = logging.getLogger(__name__)
@@ -97,7 +91,6 @@ def _is_inside(path, parent):
 
 
 class GameLibraryManager:
-    """Handles all game library operations and data management"""
     
     def __init__(self):
         self.games = []
@@ -106,7 +99,6 @@ class GameLibraryManager:
         self.games_file = self.app_dir / "games.json"
         self.config_file = self.get_config_path()
         self.is_first_run = not self.config_file.exists()
-        self.path_manager = PathManager()
         # Files that couldn't be read whose damaged copy isn't kept yet: nothing writes over them until it is
         self._uncopied_damage = set()
         self._damage_copies = {}  # damaged file -> the copy kept of it
@@ -118,7 +110,6 @@ class GameLibraryManager:
         self.reconcile_catalog_records()
     
     def get_config_path(self):
-        """Get platform-specific config path"""
         system = platform.system()
         if system == "Windows":
             app_data = Path(os.environ.get('APPDATA', ''))
@@ -130,7 +121,6 @@ class GameLibraryManager:
         return config_dir / "config.json"
     
     def load_config(self):
-        """Load configuration from JSON file"""
         view = {"splitter_position": None, "sort_column": 0, "sort_ascending": True, "last_selected": None,
                 "last_search": "", "column_widths": None, "tree_selections": []}  # each tab's games view
         default_config = {
@@ -150,35 +140,23 @@ class GameLibraryManager:
             }
         }
         
-        upgraded = False
         if self.config_file.exists():
             try:
                 with open(self.config_file, 'r', encoding="utf-8") as f:
                     loaded = json.load(f)
-                    # Merge with defaults to ensure all keys exist
-                    for key in default_config:
-                        if key not in loaded:
-                            loaded[key] = default_config[key]
+                    for key, value in default_config.items():
+                        loaded.setdefault(key, value)
                     for section in ("SavedState", "install"):
                         if isinstance(loaded.get(section), dict):
                             for state_key, value in default_config[section].items():
-                                if state_key not in loaded[section]:
-                                    loaded[section][state_key] = value
-                    # The only old-file handling: ids are assigned once and then saved, so they stay stable
-                    upgraded = loaded.pop("exceptions", None) is not None
-                    for lib in loaded["libraries"]:
-                        upgraded |= lib.pop("name", None) is not None
-                        if "id" not in lib:
-                            lib["id"] = secrets.token_hex(6)
-                            upgraded = True
+                                loaded[section].setdefault(state_key, value)
+                    if not all(isinstance(lib, dict) and "id" in lib for lib in loaded["libraries"]):
+                        raise ValueError("a library that is not an object with an id")
                     self.config = loaded
             except _LOAD_ERRORS as e:
                 log.warning("config.json couldn't be read, so the default settings are used: %s", e)
                 self.config = default_config
-                upgraded = False
                 self._damaged(self.config_file, messages.CONFIG_FILE_DAMAGED, messages.CONFIG_FILE_DAMAGED_NOT_COPIED)
-            if upgraded:
-                self.save_or_keep(self.save_config, "the upgraded config.json")
         else:
             self.config = default_config
             self.save_config()
@@ -207,7 +185,6 @@ class GameLibraryManager:
         return value if item is None else [v for v in value if isinstance(v, item)]
 
     def load_games(self):
-        """Load games from JSON file"""
         self.games_load_failed = False
         if self.games_file.exists():
             try:
@@ -216,11 +193,8 @@ class GameLibraryManager:
                     self.games = [Game.from_dict(g) for g in data]
             except _LOAD_ERRORS as e:
                 log.warning("games.json couldn't be read, so the games list starts empty: %s", e)
-                self.games = []
                 self.games_load_failed = True
                 self._damaged(self.games_file, messages.GAMES_FILE_DAMAGED, messages.GAMES_FILE_DAMAGED_NOT_COPIED)
-        else:
-            self.games = []
 
     def save_games(self):
         """Save games to JSON file (atomically). OSError if it can't be saved."""
@@ -250,11 +224,7 @@ class GameLibraryManager:
         self._uncopied_damage.discard(path)
 
     def catalog_game(self, catalog_id):
-        """The game installed from this catalog entry, or None"""
-        for game in self.games:
-            if game.catalog_id == catalog_id:
-                return game
-        return None
+        return next((game for game in self.games if game.catalog_id == catalog_id), None)
 
     def add_catalog_game(self, fields):
         """Add the game for an installed catalog entry (replacing its old one) and save"""
@@ -334,11 +304,7 @@ class GameLibraryManager:
         return CatalogIndex(self.config_dir / "catalog", url, fetcher=None).load_cached().entries
 
     def library_by_id(self, library_id):
-        """The library with this id, or None"""
-        for lib in self.config["libraries"]:
-            if lib["id"] == library_id:
-                return lib
-        return None
+        return next((lib for lib in self.config["libraries"] if lib["id"] == library_id), None)
 
     def library_reachable(self, library_id):
         """True if the library's folder is there right now (a drive can be unplugged)"""
@@ -384,11 +350,9 @@ class GameLibraryManager:
         self.save_config()
     
     def get_full_path(self, game):
-        """Construct full path from relative path and library"""
-        if game.is_web:
+        """The launch file joined to its library's folder (None when that library is gone); a web address or an
+        absolute path as it is"""
+        if game.is_web or not game.library_id:
             return game.launch_path
-        return self.path_manager.get_full_path(
-            game.launch_path,
-            self.config["libraries"],
-            game.library_id
-        )
+        lib = self.library_by_id(game.library_id)
+        return str(Path(lib["path"]) / game.launch_path) if lib else None

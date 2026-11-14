@@ -488,7 +488,7 @@ def hashed(files) -> dict[str, str]:
 
 def lock_down(eng, folder: Path, files=("dx8vb.dll",), existing=None, game: str = "entombed"):
     return [(exe, args, True) for exe, args in lock_down_commands(
-        folder, eng.ctx.security.current_user(), staging_of(eng, folder, game), hashed(files), existing)]
+        folder, staging_of(eng, folder, game), hashed(files), existing)]
 
 
 BASE_GRANTS = "*S-1-5-32-544:(OI)(CI)F *S-1-5-18:(OI)(CI)F *S-1-5-32-545:(OI)(CI)RX"
@@ -517,7 +517,7 @@ def opened(path) -> str:
 def test_lock_down_command_is_exact():
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\dx8vb")
     staging = Path(r"C:\Users\p\AppData\Local\Temp\GameChooser\entombed\runtimes\dx8vb\unpacked")
-    [(exe, args)] = lock_down_commands(folder, USER_SID, staging, {"dx8vb.dll": sha(DX8VB)})
+    [(exe, args)] = lock_down_commands(folder, staging, {"dx8vb.dll": sha(DX8VB)})
     assert exe == "cmd.exe"
     gc, rt = r"C:\ProgramData\GameChooser", r"C:\ProgramData\GameChooser\runtimes"
     assert split_chain(args) == [
@@ -544,7 +544,7 @@ def test_users_may_read_the_folder_only_as_the_chains_last_act_after_every_copy_
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\vbx")
     files = {"vbx.ocx": "a" * 64, "lib/a.dll": "b" * 64, "lib/deep/b.dll": "c" * 64}
     for existing in (None, {"lib", "lib/a.dll"}):
-        [(exe, args)] = lock_down_commands(folder, USER_SID, Path(r"C:\staging"), files, existing)
+        [(exe, args)] = lock_down_commands(folder, Path(r"C:\staging"), files, existing)
         commands = split_chain(args)
         inside = [folder, folder / "lib", folder / "lib" / "deep"]
         tail = commands[-len(inside):]
@@ -566,7 +566,7 @@ def test_adoption_command_makes_nothing_that_exists_and_copies_only_missing_file
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\vbx")
     staging = Path(r"C:\Users\p\AppData\Local\Temp\GameChooser\entombed\runtimes\vbx\unpacked")
     files = {"vbx.ocx": "a" * 64, "lib/a.dll": "b" * 64, "lib/deep/b.dll": "c" * 64}
-    [(exe, args)] = lock_down_commands(folder, USER_SID, staging, files, existing={"vbx.ocx", "lib"})
+    [(exe, args)] = lock_down_commands(folder, staging, files, existing={"vbx.ocx", "lib"})
     commands = split_chain(args)
     lib, deep = folder / "lib", folder / "lib" / "deep"
     assert commands[7:] == [
@@ -597,7 +597,7 @@ def test_lock_down_never_recurses_and_touches_no_file_with_icacls():
     staging = Path(r"C:\staging")
     files = {"vbx.ocx": "a" * 64, "lib/a.dll": "b" * 64, "lib/deep/b.dll": "c" * 64, "z.txt": "d" * 64}
     for existing in (None, {"lib", "lib/a.dll"}):
-        [(exe, args)] = lock_down_commands(folder, USER_SID, staging, files, existing)
+        [(exe, args)] = lock_down_commands(folder, staging, files, existing)
         commands = split_chain(args)
         assert all(" /T" not in c and "*\"" not in c and "\\*" not in c for c in commands)  # no recursion, no wildcard
         assert all(USER_SID not in c for c in commands)  # no grant to the installing user (R42)
@@ -622,7 +622,7 @@ def test_lock_down_never_recurses_and_touches_no_file_with_icacls():
 def test_long_lock_down_is_split_into_few_invocations_each_parent_first():
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\big")
     files = {f"data/file-{i:04}.dat": f"{i:064x}" for i in range(120)}
-    invocations = lock_down_commands(folder, USER_SID, Path(r"C:\staging\big"), files)
+    invocations = lock_down_commands(folder, Path(r"C:\staging\big"), files)
     assert 1 < len(invocations) <= 8 and all(len(args) <= 8000 for _, args in invocations)
     first = split_chain(invocations[0][1])
     assert f'icacls "{folder}" /inheritance:r /grant:r {ADMIN_ONLY} /L /Q' in first

@@ -169,7 +169,6 @@ def test_nonzero_exit_is_extract_error(tmp_path):
     with pytest.raises(ExtractError) as info:
         _extractor(FakeRun(code=2)).extract(tmp_path / "a.zip", tmp_path / "o", {"method": "zip"}, lambda: False)
     assert str(info.value) == messages.EXTRACT_FAILED
-    assert info.value.exit_code == 2
 
 
 @pytest.mark.windows

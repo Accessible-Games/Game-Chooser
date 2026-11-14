@@ -24,10 +24,9 @@ def tracing_wanted(argv: list[str], compiled: bool) -> bool:
 
 
 def traces_dir_override(argv: list[str]) -> str | None:
-    """The value of --traces-dir PATH (or --traces-dir=PATH), or None."""
     for i, arg in enumerate(argv):
         if arg == "--traces-dir":
-            return argv[i + 1] if i + 1 < len(argv) else None
+            return argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("-") else None
         if arg.startswith("--traces-dir="):
             return arg.split("=", 1)[1]
     return None
@@ -89,7 +88,6 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def run_command(argv: list[str], compiled: bool) -> int | None:
-    """Run the tracing command in argv and return its exit code; None when argv holds none."""
     if not any(arg.split("=", 1)[0] in COMMANDS for arg in argv):
         return None
     try:
@@ -104,7 +102,8 @@ def run_command(argv: list[str], compiled: bool) -> int | None:
     if args.trace_split is not None:
         return _split(args, compiled)
     if args.trace_stop is not None:
-        return _stop(args, compiled)
+        return _run_stop(paths.traces_dir(compiled, args.traces_dir),
+                         Path(args.trace_stop) if args.trace_stop else None, args.close_games)
     if args.trace_check is not None:
         return _trace_check(Path(args.trace_check))
     return _run_probe(Path(args.trace_probe), paths.procmon_exe(compiled),
@@ -163,11 +162,6 @@ def _split(args, compiled: bool) -> int:
     return 1 if failed else 0
 
 
-def _stop(args, compiled: bool) -> int:
-    return _run_stop(paths.traces_dir(compiled, args.traces_dir),
-                     Path(args.trace_stop) if args.trace_stop else None, args.close_games)
-
-
 def _run_stop(traces_dir: Path, run_path: Path | None, close_games: bool) -> int:
     from tracing.stop import stop_command
     return stop_command(traces_dir, run_path, close_games, is_alive=_recorder_is_alive)
@@ -222,7 +216,7 @@ def _recorder(args, compiled: bool) -> int:
 
 
 def _build_recorder(args) -> "Recorder":
-    from tracing.closing import WindowsCloser, process_identity
+    from tracing.closing import Closer, WindowsProcesses, process_identity
     from tracing.live import windows_snapshot
     from tracing.pml import read_capture
     from tracing.procmon import WindowsProcmon
@@ -235,4 +229,4 @@ def _build_recorder(args) -> "Recorder":
         lambda: shutil.disk_usage(run.path).free, time.monotonic, time.sleep,
         # --close-games closes only what runs as the app's user with no more rights than the app: both are read
         # here, once, from the app's own process (the one that started this recorder and named itself).
-        closer=WindowsCloser(process_identity(args.app_pid)), protected_pids=(args.app_pid,))
+        closer=Closer(process_identity(args.app_pid), WindowsProcesses()), protected_pids=(args.app_pid,))

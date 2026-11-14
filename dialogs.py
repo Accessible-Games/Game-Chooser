@@ -30,7 +30,7 @@ from models import Game, is_web_path
 from validation_service import validate_title, validate_url, validate_year
 from smart_list import SmartList, Column
 
-# The file picker of Add Game and Locate: the files PathManager.is_executable accepts first
+# The file picker of Add Game and Locate: the files library_actions.executable_problem accepts first
 EXECUTABLE_WILDCARD = ("Executable files (*.exe)|*.exe|Batch files (*.bat)|*.bat|All files (*.*)|*.*"
                        if platform.system() == "Windows" else "Applications (*.app)|*.app|All files (*.*)|*.*")
 

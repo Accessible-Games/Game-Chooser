@@ -36,8 +36,9 @@ Build: see `.claude/rules/build.md`.
   `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds),
   `--trace-check FOLDER` (the trace-test acceptance check on a session folder, for a machine with only the compiled
   build: prints `PASS` or one problem per line; exit 0 pass, 1 problems, 2 not a session folder), `--traces-dir PATH`
-  (use another traces folder). Exit codes: 2 for a bad command line. `--trace-split`: 0 done, 1 when a run
-  couldn't be split or its split had a problem. `--trace-recorder`: 0, 1 when the recorder recorded a failure, 2
+  (use another traces folder; at app start a missing PATH, or an option in its place, is ignored). Exit codes: 2
+  for a bad command line. `--trace-split`: 0 done, 1 when a run couldn't be split or its split had a problem.
+  `--trace-recorder`: 0, 1 when the recorder recorded a failure, 2
   when it could not start. `--trace-probe`: 0, 1 on a missing file, a declined administrator prompt or an error
   (started unelevated, it passes on the elevated probe's code). `--trace-stop`: 0 when the run ended cleanly or no
   run was in progress ("No tracing run is in progress."), or a named RUN had already ended ("already ended, nothing
@@ -71,7 +72,7 @@ Build: see `.claude/rules/build.md`.
     writes no session. The instant between that poll and the write is not closed: such a session is split like
     any other and, if Process Monitor had already stopped, becomes a split problem (exit 1, capture kept).
   - `--close-games` (opt-in; without it no process is touched): the recorder, before stopping Process Monitor, asks
-    each running process of those sessions to close (`closing.WindowsCloser.ask_close`: WM_CLOSE to its visible
+    each running process of those sessions to close (`closing.Closer.ask_close`: WM_CLOSE to its visible
     top-level windows), waits `CLOSE_WAIT_SECONDS` (15 s, less when all are gone), ends what is left (`end`:
     TerminateProcess after checking the start time on the opened handle), then waits `END_WAIT_SECONDS` (5 s).
     Candidates come from `LiveTree.running_processes()` for the sessions listed in `stop.json`, by (pid, start),
@@ -133,7 +134,7 @@ Build: see `.claude/rules/build.md`.
   - `stop.py` - the `--trace-stop` command (unelevated): finds the run, writes the request, waits, reports
   - `closing.py` - `Closer` (the rules: start time, then who the process runs as) over `ProcessAccess`
     (`WindowsProcesses`: lazy ctypes; also how `live.py` and `cli._recorder_is_alive` open a process and read
-    its start time), `WindowsCloser`, `Identity`, `process_identity`, the `not_closed` reasons
+    its start time), `Identity`, `process_identity`, the `not_closed` reasons
   - `procmon.py` - Process Monitor's filter file, start, ready check, stop
   - `pml.py` - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`). `read_capture` swaps
     in `event_offsets` for procmon-parser's event offsets reader, which drops bits 32 to 39 of each offset and so
@@ -143,13 +144,14 @@ Build: see `.claude/rules/build.md`.
     client then keep the last membership; the recorder for 60 s at most, `SNAPSHOT_WARNING_SECONDS`, then
     counts every game as exited, so a run whose app has closed still ends)
   - `runfiles.py` - `RunDir`, `new_run`, `leftover_runs`; `splitrun.py` - split a run folder
-  - `split.py` - attribute events to sessions and merge writes; `attribution.py` - the process tree
+  - `split.py` - attribute events to sessions and merge writes, and the VirtualStore path;
+    `attribution.py` - the process tree
   - `kinds.py` - event to write kind, the write kinds and the rename and delete operation names the other
-    modules use; `virtualstore.py` - the VirtualStore path
+    modules use
   - `output.py` - writes `session.json` and `events.jsonl`; `model.py`, `clock.py`, `paths.py`
   - `probe.py` - the `--trace-probe` command
-  - `check_trace_test.py` - `python -m tracing.check_trace_test <session folder>` checks a session of the
-    trace test game (`tests/catalog_fixtures/games/trace-test`)
+  - `check_trace_test.py` - the `--trace-check` command: checks a session of the trace test game
+    (`tests/catalog_fixtures/games/trace-test`)
 - **Tests of the stop:** `test_recorder_stop.py` (the recorder, with a fake machine and closer), `test_stop.py` (the
   command, and command plus recorder through the run folder's files), `test_closing_policy.py` (who the closer
   refuses, on fake processes), `test_closing.py` and

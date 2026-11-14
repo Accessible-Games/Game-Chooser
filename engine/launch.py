@@ -192,14 +192,11 @@ def _system_dirs() -> tuple[str, str | None]:
     return system, _windows_folder(kernel32.GetSystemWow64DirectoryW)
 
 
-def hta_host(bits: int | None = None,
-             system_dirs: Callable[[], tuple[str, str | None]] | None = None) -> str:
-    """The full path of the mshta.exe that runs .hta games: the `bits`-bit one (HTA_HOST_BITS when not given) in
-    Windows' own system folder. The 32-bit host on 32-bit Windows is the one in the system folder."""
+def hta_host(system_dirs: Callable[[], tuple[str, str | None]] | None = None) -> str:
+    """The full path of the mshta.exe that runs .hta games: the HTA_HOST_BITS-bit one in Windows' own system
+    folder. The 32-bit host on 32-bit Windows is the one in the system folder."""
     system, wow64 = (system_dirs or _system_dirs)()
-    if bits is None:
-        bits = HTA_HOST_BITS
-    return ntpath.join(wow64 if bits == 32 and wow64 else system, HTA_HOST_NAME)
+    return ntpath.join(wow64 if HTA_HOST_BITS == 32 and wow64 else system, HTA_HOST_NAME)
 
 
 def start_hta(path: str, cwd: str, popen: Callable | None = None,
