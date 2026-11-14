@@ -47,12 +47,13 @@ def test_price_text(pricing, text):
 
 
 def test_nothing_shows_without_readable_pricing():
-    for pricing in (None, {}, [], "free", p("donationware"), {"price": 5}):
+    for pricing in (None, {}, p("donationware"), {"price": 5}):
         assert price_text(pricing) == ""
         assert description_lines(pricing) == []
         assert install_warning(pricing) is None
         assert not can_play_free(pricing)
     assert pricing_of({"pricing": p("donationware")}) is None and pricing_of(None) is None
+    assert pricing_of({"pricing": []}) is None and pricing_of({"pricing": "free"}) is None
     assert pricing_of({"pricing": p("free")}) == p("free")
 
 

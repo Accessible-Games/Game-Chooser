@@ -146,9 +146,7 @@ class Extractor:
         code = self.run(argv, cancel)
         if code != 0:
             log.warning("%s exited with %s", Path(argv[0]).name, code)
-            err = ExtractError(messages.EXTRACT_FAILED)
-            err.exit_code = code  # internal detail only; never shown to players
-            raise err
+            raise ExtractError(messages.EXTRACT_FAILED)
 
     def extract(self, archive: Path, dest: Path, install: dict, cancel: CancelCheck) -> Path:
         """Unpack `archive` into `dest` and return the folder that holds the game.

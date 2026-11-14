@@ -6,8 +6,7 @@ so it round-trips untouched; every other nested value is rebuilt into its datacl
 
 import json
 import logging
-import typing
-from dataclasses import MISSING, asdict, dataclass, fields
+from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
 from .paths import is_engine_dir, norm_key, same_folder, walk_files, write_atomic
@@ -69,7 +68,6 @@ class InstallRecord:
     previous: dict | None = None
     previous_unavailable: str | None = None
     uninstalled: bool = False
-    format: int = 1
     # Runtime ids the install made private COM copies of (engine.runtimes); None in older records.
     private_runtimes: list[str] | None = None
     # True when launch_path is the catalog's launch path for the entry, False when the engine guessed it.
@@ -99,20 +97,12 @@ def hash_tree(root: Path) -> dict[str, tuple[str, str]]:
 
 
 def _build(cls, data):
-    """Build dataclass `cls` from a dict: unknown keys dropped, absent nullable/defaulted keys filled."""
+    """The keyword arguments for dataclass `cls` from a dict: unknown keys dropped; an absent key without a
+    default fails when `cls` is built (TypeError)."""
     if not isinstance(data, dict):
         raise TypeError(f"{cls.__name__} must be an object")
-    hints = typing.get_type_hints(cls)
-    kwargs = {}
-    for f in fields(cls):
-        if f.name in data:
-            kwargs[f.name] = data[f.name]
-        elif f.default is MISSING and f.default_factory is MISSING:
-            if type(None) in typing.get_args(hints[f.name]):
-                kwargs[f.name] = None
-            else:
-                raise KeyError(f.name)
-    return kwargs
+    names = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in names}
 
 
 def _record_from_dict(data) -> InstallRecord:
