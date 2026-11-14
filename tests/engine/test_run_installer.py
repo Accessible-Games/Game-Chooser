@@ -70,6 +70,7 @@ def hangs_once_started(eng, then):
 # ---- commands --------------------------------------------------------------------------------------------
 
 
+@pytest.mark.windows
 def test_default_and_custom_silent_args(tmp_path):
     assert installer_command(Path("s.exe"), {"type": "inno", "mode": "run"}, Path("C:/G/X")) == (
         "s.exe", '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="C:\\G\\X"')
@@ -84,6 +85,7 @@ def test_default_and_custom_silent_args(tmp_path):
     assert installer_command(Path("i.exe"), {"type": "installshield", "mode": "run"}, Path("C:/G")) == ("i.exe", "")
 
 
+@pytest.mark.windows
 def test_folder_from_uninstall_entry():
     assert folder_from_uninstall_entry({"InstallLocation": "C:\\Games\\X\\"}) == Path("C:/Games/X")
     assert folder_from_uninstall_entry({"DisplayIcon": '"C:\\Games\\X\\x.exe",0'}) == Path("C:/Games/X")
@@ -123,6 +125,7 @@ def test_snapshot_folder_skips_engine_folders_and_tolerates_missing(tmp_path):
     assert snapshot_folder(tmp_path) == {"a/game.exe"}
 
 
+@pytest.mark.windows
 def test_preserved_mtime_still_claimed_by_birthtime(tmp_path):
     start = time.time()
     time.sleep(0.03)
@@ -195,6 +198,7 @@ def test_located_in_target_claims_only_new_files(tmp_path, monkeypatch):
     assert (target / "readme.txt").read_bytes() == b"the player's notes"
 
 
+@pytest.mark.windows
 def test_registry_diff_locates_and_records_vendor_uninstaller(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"})
@@ -217,6 +221,7 @@ def test_registry_diff_locates_and_records_vendor_uninstaller(tmp_path):
     assert r.game["launch_path"] == str(program / "lightcars.exe")
 
 
+@pytest.mark.windows
 def test_out_of_library_install_uses_absolute_paths(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"})
@@ -236,6 +241,7 @@ def test_out_of_library_install_uses_absolute_paths(tmp_path):
     assert Path(r.game["launch_path"]) == elsewhere / "bin" / "lc.exe" and "library_name" not in r.game
 
 
+@pytest.mark.windows
 def test_registry_folder_in_a_library_is_stored_relative(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"})
@@ -657,6 +663,7 @@ def test_vendor_uninstall_refuses_before_undoing_anything_while_set_aside_files_
     assert eng.ctx.records.load("lightcars") == rec and len(eng.ctx.elevator.calls) == 1
 
 
+@pytest.mark.windows
 def test_missing_vendor_uninstaller_falls_back_to_the_record(tmp_path):
     gone = tmp_path / "Games" / "Light Cars" / "unins000.exe"
     eng, routes, target = installed_run_game(tmp_path, vendor=f'"{gone}" /SILENT')
@@ -827,6 +834,7 @@ def test_file_written_to_but_created_before_the_window_is_not_claimed(tmp_path):
     assert sorted(_claimed(tmp_path, start, time.time(), None, slack=0)) == ["newgame/new.exe"]
 
 
+@pytest.mark.windows
 def test_shared_folder_with_other_content_is_untracked(tmp_path, monkeypatch):
     monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
     routes = {}
@@ -849,6 +857,7 @@ def test_shared_folder_with_other_content_is_untracked(tmp_path, monkeypatch):
 
 # Finding 3: a chained redistributable is neither the game's folder nor its uninstaller.
 
+@pytest.mark.windows
 def test_registry_prefers_the_games_entry_over_a_chained_redistributable(tmp_path):
     routes = {}
     redist = tmp_path / "Program Files" / "OpenAL"
@@ -1070,6 +1079,7 @@ def _dev_install(tmp_path, before, during):
     return eng, dev
 
 
+@pytest.mark.windows
 def test_claims_spanning_a_folder_that_was_already_there_are_untracked(tmp_path, monkeypatch):
     monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
     eng, dev = _dev_install(tmp_path, {"OldGame/old.dat": b"o"},
@@ -1081,6 +1091,7 @@ def test_claims_spanning_a_folder_that_was_already_there_are_untracked(tmp_path,
     assert (dev / "OldGame" / "newsave.sav").exists()
 
 
+@pytest.mark.windows
 def test_claims_spanning_only_new_folders_stay_tracked(tmp_path, monkeypatch):
     monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
     eng, dev = _dev_install(tmp_path, {}, {"NewGame/lc.exe": b"exe", "Common/shared.dll": b"c"})

@@ -514,6 +514,7 @@ def opened(path) -> str:
     return f'icacls "{path}" /grant {USERS_RX} /L /Q'
 
 
+@pytest.mark.windows
 def test_lock_down_command_is_exact():
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\dx8vb")
     staging = Path(r"C:\Users\p\AppData\Local\Temp\GameChooser\entombed\runtimes\dx8vb\unpacked")
@@ -592,6 +593,7 @@ def test_adoption_command_makes_nothing_that_exists_and_copies_only_missing_file
     assert not any("vbx.ocx" in c for c in commands)  # already there: not copied, not touched
 
 
+@pytest.mark.windows
 def test_lock_down_never_recurses_and_touches_no_file_with_icacls():
     folder = Path(r"C:\ProgramData\GameChooser\runtimes\vbx")
     staging = Path(r"C:\staging")
@@ -946,6 +948,7 @@ def test_failure_after_registering_in_a_folder_it_made_unregisters(tmp_path):
     assert snapshot(folder) == {"dx8vb.dll": DX8VB}  # the sealed folder stays (R39), with no marker
 
 
+@pytest.mark.windows
 def test_installer_runtime_runs_untracked_then_is_checked(tmp_path, monkeypatch):
     """It asks for a restart, as redistributables often do: the player is told, as for a game's installer."""
     routes = {}

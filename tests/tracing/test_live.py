@@ -53,6 +53,7 @@ def test_start_none_ignored():
     assert t.running() == set()
 
 
+@pytest.mark.windows
 def test_orphan_under_game_folder_counts():
     t = tree()
     t.update([LiveProc(10, 1, 100, None)])
@@ -68,6 +69,7 @@ def test_orphan_under_game_folder_counts():
     assert early.running() == set()
 
 
+@pytest.mark.windows
 @pytest.mark.parametrize("parent_pid", [10, 70])  # the root's pid, given to another program; a non-member's pid
 @pytest.mark.parametrize("folder, running", [(r"C:\Games\Foo", {"s1"}), (r"C:\Games\Other", set())])
 def test_child_of_a_reused_pid_counts_only_under_game_folder(parent_pid, folder, running):
@@ -116,6 +118,7 @@ from tracing.attribution import ROOT_SLACK  # noqa: E402
 EXE = GAME_DIR + r"\foo.exe"
 
 
+@pytest.mark.windows
 def test_root_found_by_exe_when_the_pid_is_unknown():
     t = LiveTree()
     t.add_session("s1-0", 0, None, None, 1000, exe=EXE, launch_after=1100)  # no folder rule: only the root rule

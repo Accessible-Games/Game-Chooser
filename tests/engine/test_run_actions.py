@@ -248,6 +248,7 @@ def test_undo_whose_unregister_and_installer_both_fail_keeps_the_step_recorded(t
     assert messages.UNDO_UNREGISTER_FAILED.format(name="v2.txt") in r.notes
 
 
+@pytest.mark.windows
 def test_undo_of_an_archive_update_outside_the_libraries_puts_the_backups_back(tmp_path):
     eng, routes, folder = installed_outside(tmp_path)
     publish_archive(eng, routes, {"lc.exe": b"exe v2", "cfg.ini": b"volume=7"})
@@ -262,6 +263,7 @@ def test_undo_of_an_archive_update_outside_the_libraries_puts_the_backups_back(t
     assert rec.method == "run" and rec.source.sha256 == sha(SETUP) and rec.previous is None
 
 
+@pytest.mark.windows
 def test_undo_whose_installer_failed_keeps_the_undo_point_and_can_be_retried(tmp_path):
     eng, routes, folder = installed_outside(tmp_path)
     publish_archive(eng, routes, {"lc.exe": b"exe v2", "cfg.ini": b"volume=7"})
@@ -286,6 +288,7 @@ def test_undo_whose_installer_failed_keeps_the_undo_point_and_can_be_retried(tmp
     assert record(eng).previous is None
 
 
+@pytest.mark.windows
 def test_undo_whose_step_failed_after_the_installer_still_puts_the_backups_back_on_retry(tmp_path):
     eng, routes, folder = installed_outside(tmp_path)
     rec = record(eng)
@@ -337,6 +340,7 @@ def test_undo_of_a_run_update_over_an_archive_install_rebuilds_the_archive(tmp_p
 # ---- archive changes outside the libraries -------------------------------------------------------------------
 
 
+@pytest.mark.windows
 def test_archive_update_outside_the_libraries_stages_under_the_work_folder(tmp_path):
     eng, routes, folder = installed_outside(tmp_path)
     publish_archive(eng, routes, {"lc.exe": b"exe v2", "cfg.ini": b"volume=7"})
@@ -359,6 +363,7 @@ def unwritable(monkeypatch, folder):
     monkeypatch.setattr(jobs.tempfile, "mkstemp", mkstemp)
 
 
+@pytest.mark.windows
 def test_archive_update_of_an_unwritable_folder_outside_the_libraries_refuses_plainly(tmp_path, monkeypatch):
     eng, routes, folder = installed_outside(tmp_path)
     publish_archive(eng, routes, {"lc.exe": b"exe v2", "cfg.ini": b"volume=7"})
@@ -396,6 +401,7 @@ def test_extras_on_a_run_record_are_tagged_and_removed_by_uninstall(tmp_path):
     assert snapshot(target) == {"cfg.ini": b"volume=9 mine", "saves/slot1.sav": b"save"}
 
 
+@pytest.mark.windows
 def test_extras_on_a_run_record_outside_the_libraries(tmp_path):
     eng, routes, folder = installed_outside(tmp_path)
     run(eng, "extras", extras=("lc-music",))
@@ -531,6 +537,7 @@ def test_undo_puts_the_previous_vendor_uninstaller_back(tmp_path):
     assert rec.vendor_uninstaller == vendor and (target / "unins000.exe").exists()
 
 
+@pytest.mark.windows
 def test_a_work_folder_that_cant_be_created_is_named_as_such(tmp_path):
     eng, routes, folder = installed_outside(tmp_path)
     blocker = tmp_path / "blocker"
@@ -632,6 +639,7 @@ def test_a_run_update_whose_installed_files_cant_be_copied_fails_plainly(tmp_pat
 
 # R27: a fresh install into a folder that needs administrator permission skips its required extra, plainly.
 
+@pytest.mark.windows
 def test_a_fresh_install_into_a_folder_needing_admin_records_its_required_extra_as_not_added(tmp_path, monkeypatch):
     routes = {}
     e, x = run_game_with_patch(routes)
@@ -705,6 +713,7 @@ def test_undo_says_so_when_a_newer_file_cant_be_removed(tmp_path, monkeypatch):
 
 # R29 (c): the folder-needs-administrator refusal reads right for any change.
 
+@pytest.mark.windows
 def test_extras_on_a_folder_needing_admin_refuse_with_words_that_fit_any_change(tmp_path, monkeypatch):
     eng, routes, folder = installed_outside(tmp_path)
     unwritable(monkeypatch, folder)

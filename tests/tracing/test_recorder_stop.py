@@ -1,6 +1,8 @@
 """The recorder taking a stop request (--trace-stop), with and without closing the traced games."""
 import os
 
+import pytest
+
 from tests.tracing import test_recorder
 from tests.tracing.test_recorder import Clock
 from tracing import closing, messages, recorder
@@ -320,6 +322,7 @@ def forged(sid, root_pid, root_start, before, after, **game):
     return SessionInfo(sid, root_pid, root_start, before, after, game, {}, ())
 
 
+@pytest.mark.windows
 def test_session_files_cannot_point_close_games_at_a_foreign_process(tmp_path):
     rec, run, pm, states, world, clock = make(tmp_path, closer="checked", sessions=[
         session("s1", 100, 1000),
