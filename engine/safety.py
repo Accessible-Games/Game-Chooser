@@ -234,17 +234,12 @@ def preflight(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date
             continue
         if target.is_dir():
             raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=op.path, kind="folder"))
-        parent = target.parent
-        while parent != game_dir and game_dir in parent.parents:
-            if parent.exists() and not parent.is_dir():
-                raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=_rel(parent, game_dir), kind="file"))
-            parent = parent.parent
-        backup_target = safe_join(game_dir / backup_dir_name(today), op.path)
-        parent = backup_target.parent
-        while parent != game_dir and game_dir in parent.parents:
-            if parent.exists() and not parent.is_dir():
-                raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=_rel(parent, game_dir), kind="file"))
-            parent = parent.parent
+        for base in (game_dir, game_dir / backup_dir_name(today)):  # the target's folders, then its backup's
+            parent = safe_join(base, op.path).parent
+            while parent != game_dir and game_dir in parent.parents:
+                if parent.exists() and not parent.is_dir():
+                    raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=_rel(parent, game_dir), kind="file"))
+                parent = parent.parent
         if not safe_join(incoming_root, op.path).is_file():
             raise FileNotFoundError(f"Incoming file is missing: {op.path}")
 
