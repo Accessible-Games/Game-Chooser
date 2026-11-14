@@ -1,11 +1,13 @@
 import os
+import posixpath
 import subprocess
 import sys
 import uuid
+from types import SimpleNamespace
 
 import pytest
 
-from engine import messages
+from engine import messages, steps
 from engine.errors import ElevationDeclined, StepError, UnsafePath
 from engine.registry import RegistryAccess
 from engine.steps import (FILE_ACTIONS, SYSTEM_ACTIONS, StepContext, run_file_steps, run_system_steps,
@@ -321,6 +323,25 @@ def test_file_steps_refuse_overlapping_source_and_target(tmp_path, src, dst):
             run_file_steps([{"action": action, "from": src, "to": dst}], tmp_path)
     assert (tmp_path / "a").read_text() == "A"
     assert (tmp_path / "data" / "f").read_text() == "f"
+
+
+class SpelledAsWritten:
+    """A path whose resolve() keeps the case it is written in, as macOS' realpath does (Windows' gives an existing
+    path its case on disk)"""
+
+    def __init__(self, text):
+        self.text = text
+
+    def resolve(self):
+        return self.text
+
+
+@pytest.mark.parametrize("a,b", [("/g/A", "/g/a"), ("/g/DATA", "/g/data/sub"), ("/g/data/f", "/g/DATA")])
+def test_the_overlap_check_ignores_case_where_paths_keep_it(monkeypatch, a, b):
+    """On a Mac's usual disk these are one file or folder; normcase there lowers nothing (stood in on any system)"""
+    monkeypatch.setattr(steps, "os", SimpleNamespace(path=SimpleNamespace(normcase=posixpath.normcase)))
+    assert steps._overlaps(SpelledAsWritten(a), SpelledAsWritten(b))
+    assert not steps._overlaps(SpelledAsWritten(a), SpelledAsWritten("/g/other"))
 
 
 @pytest.mark.windows

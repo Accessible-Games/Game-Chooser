@@ -671,10 +671,16 @@ def test_a_tree_rebuild_keeps_the_focus_on_the_root(make_view):
     assert titles(view) == ["Alpha"] and saves(view).count == before
 
 
-def test_a_tree_rebuild_never_selects_the_focused_value(make_view):
+def test_a_tree_rebuild_never_selects_the_focused_value(make_view, monkeypatch):
     """Escape clears the filters and leaves the tree's focus on the value; a background refresh then rebuilds the
     tree and puts the focus back. On macOS the tree's SetFocusedItem also selects, which filtered the list again
-    without the player choosing it."""
+    without the player choosing it. That tree is stood in here, so this holds on every system."""
+    focus = wx.TreeCtrl.SetFocusedItem
+
+    def focus_and_select(tree, item):  # what wx's generic tree (macOS) does
+        focus(tree, item)
+        tree.SelectItem(item, True)
+    monkeypatch.setattr(wx.TreeCtrl, "SetFocusedItem", focus_and_select)
     view = make_view()
     view.set_rows(rows(ALPHA, BRAVO))
     tree = view.tree_ctrl
