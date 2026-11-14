@@ -136,9 +136,7 @@ class TraceClient:
             run = self._run
         marked = []
         for session_id in sorted(self._tree.running()):
-            info = self._sessions.get(session_id)
-            if info is None or run is None:
-                continue
+            info = self._sessions[session_id]
             info = dataclasses.replace(info, marks=info.marks + (now,))
             self._sessions[session_id] = info
             run.write_session(info)
