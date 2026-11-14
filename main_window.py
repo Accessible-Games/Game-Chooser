@@ -105,9 +105,6 @@ class MainFrame(wx.Frame):
         if self.library_manager.load_problems:
             wx.CallAfter(self.run_when_no_dialog, self._tell_load_problems)
 
-        # Update title
-        self.update_title()
-
         # Status column, then the catalog index from the network (the saved copy is already in use)
         self.refresh_statuses()
         self.start_index_fetch()
@@ -1018,8 +1015,7 @@ class MainFrame(wx.Frame):
         self.library_manager.config["SavedState"]["tree_filters"] = keys
         # The view rebuilds the tree, filters again (a selection under a category that went no longer applies)
         # and then saves the config
-        self.library_view.set_tree_keys(keys)
-        self.update_filter_menu_state()
+        self.library_view.set_tree_keys(keys)  # the clicked check item already ticked or unticked itself
 
     def update_filter_menu_state(self):
         for key, item in self.filter_items.items():
@@ -1046,11 +1042,7 @@ class MainFrame(wx.Frame):
             self.hidden_libraries.discard(library_id)
         else:
             self.hidden_libraries.add(library_id)
-
-        # Update menu state
-        for item_id, item in self.library_menu_items:
-            if item_id == library_id:
-                item.Check(library_id not in self.hidden_libraries)
+        # (the clicked check item already ticked or unticked itself)
 
         # Filter first, save second: a save that fails never stops the filter
         self.library_manager.config["SavedState"]["hidden_libraries"] = sorted(self.hidden_libraries)

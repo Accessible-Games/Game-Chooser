@@ -231,7 +231,6 @@ class _UninstallConfirm(wx.Dialog):
         self.text.Wrap(_WRAP)
         root.Add(self.text, 0, wx.ALL | wx.EXPAND, 10)
         self.delete_box = wx.CheckBox(self, label=_text(checkbox_label))
-        self.delete_box.SetValue(False)
         root.Add(self.delete_box, 0, wx.LEFT | wx.RIGHT | wx.BOTTOM, 10)
         _add_buttons(self, root, ok)
         self.SetSizerAndFit(root)
