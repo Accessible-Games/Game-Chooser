@@ -159,7 +159,7 @@ TRUNCATED_CONFIG = b'{"libraries": [{"id": "abc123abc123", "path": "D:/Games"}],
 
 def test_truncated_games_json_is_copied_and_the_app_keeps_working(isolated_manager_factory):
     from models import Game
-    games = isolated_manager_factory.app_dir / "games.json"
+    games = isolated_manager_factory.games_file
     games.write_bytes(TRUNCATED_GAMES)
     m = isolated_manager_factory()
     bad = games.with_name("games.json.bad")
@@ -202,7 +202,7 @@ def test_wrong_shape_config_is_treated_as_damaged(isolated_manager_factory, text
 
 @pytest.mark.parametrize("text", ['[["Hand added"]]', '["Hand added"]'])  # valid JSON, a row that isn't an object
 def test_a_games_json_row_that_is_not_an_object_is_treated_as_damaged(isolated_manager_factory, text):
-    games = isolated_manager_factory.app_dir / "games.json"
+    games = isolated_manager_factory.games_file
     games.write_text(text, encoding="utf-8")
     m = isolated_manager_factory()
     assert m.games == [] and m.games_load_failed
@@ -210,7 +210,7 @@ def test_a_games_json_row_that_is_not_an_object_is_treated_as_damaged(isolated_m
 
 
 def test_an_earlier_bad_copy_is_never_overwritten(isolated_manager_factory):
-    games = isolated_manager_factory.app_dir / "games.json"
+    games = isolated_manager_factory.games_file
     first = games.with_name("games.json.bad")
     first.write_bytes(b"an earlier damaged list")
     games.write_bytes(TRUNCATED_GAMES)
@@ -224,7 +224,7 @@ def test_an_earlier_bad_copy_is_never_overwritten(isolated_manager_factory):
 def test_damaged_file_is_never_saved_over_while_no_copy_can_be_kept(isolated_manager_factory, monkeypatch):
     import library_manager
     from models import Game
-    games = isolated_manager_factory.app_dir / "games.json"
+    games = isolated_manager_factory.games_file
     config = isolated_manager_factory.config_dir / "config.json"
     config.parent.mkdir(parents=True, exist_ok=True)
     games.write_bytes(TRUNCATED_GAMES)
@@ -285,3 +285,12 @@ def test_a_saved_value_is_read_only_when_it_has_the_right_kind(isolated_manager_
     m = isolated_manager_factory(config={"libraries": [], "SavedState": saved})
     assert m.saved("x", kind, item=item) == expected
     assert m.saved("x", kind, "default", item=item) == ("default" if expected is None else expected)
+
+
+def test_games_json_is_beside_the_app_on_windows_and_with_config_json_elsewhere(isolated_manager, monkeypatch):
+    import library_manager
+
+    monkeypatch.setattr(library_manager.platform, "system", lambda: "Windows")
+    assert isolated_manager.get_games_path() == isolated_manager.app_dir / "games.json"
+    monkeypatch.setattr(library_manager.platform, "system", lambda: "Darwin")
+    assert isolated_manager.get_games_path() == isolated_manager.config_file.parent / "games.json"

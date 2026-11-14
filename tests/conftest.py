@@ -36,35 +36,45 @@ def make_zip(tmp_path):
 
 @pytest.fixture
 def isolated_manager_factory(tmp_path, monkeypatch):
-    """Build GameLibraryManagers against tmp APPDATA and sys.argv[0].
+    """Build GameLibraryManagers against tmp APPDATA, HOME and sys.argv[0].
 
     Callable many times against the same files (a restart). Seed games.json or
     config.json with the ``games`` / ``config`` args (raw JSON values, written
-    before construction), or write the files in ``factory.app_dir`` /
+    before construction), or write ``factory.games_file`` and the files in
     ``factory.config_dir`` yourself.
     """
     import json
+    import platform
 
     appdata = tmp_path / "appdata"
+    home = tmp_path / "home"
     app_dir = tmp_path / "app"
     appdata.mkdir()
+    home.mkdir()
     app_dir.mkdir()
     monkeypatch.setenv("APPDATA", str(appdata))
+    monkeypatch.setenv("HOME", str(home))
     monkeypatch.setattr(sys, "argv", [str(app_dir / "game-chooser.py")])
+    if platform.system() == "Windows":
+        config_dir = appdata / "GameChooser"
+        games_file = app_dir / "games.json"
+    else:
+        config_dir = home / "Library" / "Application Support" / "GameChooser"
+        games_file = config_dir / "games.json"
+    config_dir.mkdir(parents=True)
 
     def factory(games=None, config=None):
         from library_manager import GameLibraryManager
 
-        config_dir = appdata / "GameChooser"
-        config_dir.mkdir(exist_ok=True)
         if games is not None:
-            (app_dir / "games.json").write_text(json.dumps(games), encoding="utf-8")
+            games_file.write_text(json.dumps(games), encoding="utf-8")
         if config is not None:
             (config_dir / "config.json").write_text(json.dumps(config), encoding="utf-8")
         return GameLibraryManager()
 
     factory.app_dir = app_dir
-    factory.config_dir = appdata / "GameChooser"
+    factory.config_dir = config_dir
+    factory.games_file = games_file
     return factory
 
 

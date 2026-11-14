@@ -96,8 +96,8 @@ class GameLibraryManager:
         self.games = []
         self.config = {}
         self.app_dir = Path(os.path.dirname(os.path.abspath(sys.argv[0])))
-        self.games_file = self.app_dir / "games.json"
         self.config_file = self.get_config_path()
+        self.games_file = self.get_games_path()
         self.is_first_run = not self.config_file.exists()
         # Files that couldn't be read whose damaged copy isn't kept yet: nothing writes over them until it is
         self._uncopied_damage = set()
@@ -119,6 +119,12 @@ class GameLibraryManager:
         
         config_dir.mkdir(parents=True, exist_ok=True)
         return config_dir / "config.json"
+    
+    def get_games_path(self):
+        """Beside the app on Windows; elsewhere with config.json, since a macOS app bundle must not be written to"""
+        if platform.system() == "Windows":
+            return self.app_dir / "games.json"
+        return self.config_file.parent / "games.json"
     
     def load_config(self):
         view = {"splitter_position": None, "sort_column": 0, "sort_ascending": True, "last_selected": None,

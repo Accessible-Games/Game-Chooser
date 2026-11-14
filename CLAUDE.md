@@ -126,7 +126,8 @@ a desktop game with no `library_id` (one added by hand, or a catalog game an ins
 or an `http://` or `https://` URL (any case) for web games: `is_web`, the one test of that.
 
 ## Where data lives
-- `games.json` - next to the app (the `sys.argv[0]` directory); git-ignored. It and `config.json` are written
+- `games.json` - on Windows next to the app (the `sys.argv[0]` directory; git-ignored), elsewhere in the config dir
+  (a macOS app bundle must not be written to; `get_games_path`). It and `config.json` are written
   atomically (temp file, then `os.replace`). What happens to one that can't be read is in
   `.claude/rules/libraries-and-config.md`.
 - Config dir: Windows `%APPDATA%\GameChooser\`, macOS `~/Library/Application Support/GameChooser/` (other systems

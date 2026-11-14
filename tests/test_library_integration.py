@@ -32,7 +32,7 @@ def _restart(factory, tmp_path, *records, games=None):
 
 def _games_json(owner):
     """games.json as saved; `owner` is a manager or the factory fixture"""
-    path = owner.games_file if hasattr(owner, "games_file") else owner.app_dir / "games.json"
+    path = owner.games_file
     return json.loads(path.read_text())
 
 
@@ -170,7 +170,7 @@ def test_an_uninstalled_record_never_takes_a_game_added_by_hand(isolated_manager
 def test_reconcile_saves_only_when_it_changed_something(isolated_manager_factory, tmp_path):
     games = [{"title": "Plain", "launch_path": "C:/p.exe", "library_id": ""}]
     isolated_manager_factory(games=games)
-    path = isolated_manager_factory.app_dir / "games.json"
+    path = isolated_manager_factory.games_file
     path.write_text(json.dumps(games, indent=7), encoding="utf-8")
     isolated_manager_factory()
     assert json.loads(path.read_text()) == games
@@ -197,7 +197,7 @@ def test_corrupt_games_json_is_copied_before_reconcile_writes(isolated_manager_f
     import library_manager
     isolated_manager_factory(config={"libraries": [{"id": "main", "path": str(tmp_path)}]})
     _seed_records(isolated_manager_factory, _record())
-    path = isolated_manager_factory.app_dir / "games.json"
+    path = isolated_manager_factory.games_file
     bad = path.with_name("games.json.bad")
     damaged = b'[{"title": "Hand added", '
     path.write_bytes(damaged)
@@ -245,7 +245,7 @@ def test_reconcile_skips_runtime_records(isolated_manager_factory, tmp_path):
     vb6.method = "run"
     for m in (_restart(isolated_manager_factory, tmp_path, dx8vb, vb6), isolated_manager_factory()):  # every start
         assert m.games == [] and m.catalog_game("dx8vb") is None and m.catalog_game("vb6-runtime") is None
-    assert not (isolated_manager_factory.app_dir / "games.json").exists()  # nothing changed, nothing written
+    assert not (isolated_manager_factory.games_file).exists()  # nothing changed, nothing written
     assert m.records.load("dx8vb") == dx8vb and m.records.load("vb6-runtime") == vb6
     assert set(m.records.game_records()) == set()
 
