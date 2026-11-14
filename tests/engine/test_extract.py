@@ -9,11 +9,13 @@ import pytest
 
 from engine import messages
 from engine.errors import Cancelled, ExtractError, UnsafePath
-from engine.extract import (Extractor, content_root, ditto_command, flatten_inno, innoextract_command,
-                            msi_admin_command, run_process, seven_zip_command)
+from engine.extract import (Extractor, _app_program, content_root, ditto_command, flatten_inno,
+                            innoextract_command, msi_admin_command, run_process, seven_zip_command)
 from tests.conftest import REPO_ROOT
 
 TOOLS_DIR = REPO_ROOT / "bin"
+# NTFS keeps no run bit: a file's mode reads 0o666 whatever chmod sets, so only the choice of program is checked there
+RUN_BIT = sys.platform != "win32"
 
 
 def test_seven_zip_command():
@@ -421,15 +423,19 @@ def test_mac_gives_each_apps_program_the_run_bit(tmp_path):
     dest = tmp_path / "o"
     _extractor(run, "darwin").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
     macos = dest / "Game.app" / "Contents" / "MacOS"
-    assert stat.S_IMODE((macos / "Game").stat().st_mode) == 0o755
-    assert stat.S_IMODE((macos / "helper").stat().st_mode) == 0o644
+    assert _app_program(dest / "Game.app") == macos / "Game"
+    if RUN_BIT:
+        assert stat.S_IMODE((macos / "Game").stat().st_mode) == 0o755
+        assert stat.S_IMODE((macos / "helper").stat().st_mode) == 0o644
 
 
 def test_mac_skips_a_plist_that_names_a_path_out_of_the_app(tmp_path):
-    run = FakeRun(side_effect=_app_unpacker(plist_program="../../Game.app/Contents/MacOS/helper"))
+    run = FakeRun(side_effect=_app_unpacker(plist_program="../../../Game.app/Contents/MacOS/helper"))
     dest = tmp_path / "o"
     _extractor(run, "darwin").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
-    assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "helper").stat().st_mode) == 0o644
+    assert _app_program(dest / "Game.app") is None
+    if RUN_BIT:
+        assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "helper").stat().st_mode) == 0o644
 
 
 def test_mac_skips_an_app_without_a_readable_plist(tmp_path):
@@ -439,18 +445,24 @@ def test_mac_skips_an_app_without_a_readable_plist(tmp_path):
         (dest / "Game.app" / "Contents" / "Info.plist").write_bytes(b"not a plist")
     dest = tmp_path / "o"
     _extractor(FakeRun(side_effect=unpack), "darwin").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
-    assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o644
+    assert _app_program(dest / "Game.app") is None
+    if RUN_BIT:
+        assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o644
 
 
-def test_windows_leaves_an_apps_program_alone(tmp_path):
+def test_windows_leaves_an_apps_program_alone(tmp_path, monkeypatch):
+    monkeypatch.setattr("engine.extract.mark_mac_programs", lambda dest: pytest.fail("marked on Windows"))
     run = FakeRun(side_effect=_app_unpacker())
     dest = tmp_path / "o"
     _extractor(run, "win32").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
-    assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o644
+    if RUN_BIT:
+        assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o644
 
 
 def test_mac_takes_a_program_named_from_contents_as_nvgt_writes_it(tmp_path):
     run = FakeRun(side_effect=_app_unpacker(plist_program="MacOS/Game"))
     dest = tmp_path / "o"
     _extractor(run, "darwin").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
-    assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o755
+    assert _app_program(dest / "Game.app") == dest / "Game.app" / "Contents" / "MacOS" / "Game"
+    if RUN_BIT:
+        assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o755

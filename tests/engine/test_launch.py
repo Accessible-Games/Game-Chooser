@@ -512,6 +512,6 @@ def test_a_mac_app_through_a_link_is_not_taken(tmp_path):
     (real / "Game.app").mkdir(parents=True)
     game = tmp_path / "game"
     game.mkdir()
-    (game / "linked").symlink_to(real)
+    link_to(real, game / "linked")
     rec = SimpleNamespace(launch_path="guess", launch_from_catalog=False)
     assert adopt_catalog_launch(rec, {"launch": {"macos": {"path": "linked/Game.app"}}}, "macos", game) is False
