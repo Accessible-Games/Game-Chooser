@@ -107,3 +107,22 @@ def test_ops_are_sorted_and_path_falls_back():
 ])
 def test_matches_persist(path, pats, expected):
     assert matches_persist(path, pats) is expected
+
+
+def test_unnormalized_keys_are_one_file():
+    plan = plan_update({"Data/Config.ini": rf("Data/Config.ini", "a")},
+                       {"data/config.ini": ("Data/Config.ini", "p")},
+                       {"Data/Config.ini": rf("Data/Config.ini", "b")})
+    assert [(o.key, o.op) for o in plan.ops] == [("data/config.ini", Op.BACKUP_AND_WRITE)]
+    assert list(plan.new_files) == ["data/config.ini"]
+
+
+@pytest.mark.parametrize("which", [0, 1, 2])
+def test_key_collision_within_one_dict_raises(which):
+    dicts = [{}, {}, {}]
+    if which == 1:
+        dicts[1] = {"a/b.txt": ("a/b.txt", "x"), "A/B.txt": ("A/B.txt", "y")}
+    else:
+        dicts[which] = {"a/b.txt": rf("a/b.txt", "x"), "A\\B.txt": rf("A/B.txt", "y")}
+    with pytest.raises(ValueError):
+        plan_update(*dicts)
