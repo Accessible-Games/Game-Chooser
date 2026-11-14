@@ -2,6 +2,7 @@
 import pytest
 
 from engine.errors import Cancelled, NoVerifiedSource
+from engine import messages
 from engine.messages import DEVELOPER_CHANGED_UNVERIFIED
 from engine.sources import fetch_exact, fetch_verified, hash_file
 from tests.engine.fakes import FakeFetcher, sha
@@ -154,6 +155,25 @@ def test_fetch_exact_says_when_nothing_downloaded(tmp_path):
                     lambda: False)
     assert ei.value.downloaded
     assert not NoVerifiedSource(["x"]).downloaded  # existing callers' shape still works
+
+
+def test_fetch_exact_says_gone_only_when_no_address_may_come_back(tmp_path):
+    def failure(fetcher, folder):
+        with pytest.raises(NoVerifiedSource) as ei:
+            fetch_exact([DEV, mirror()], "f" * 64, tmp_path / folder, fetcher, lambda p: None, lambda: False)
+        return ei.value
+
+    ff = FakeFetcher()
+    ff.gone = {DEV, mirror()}
+    e = failure(ff, "both gone")
+    assert e.gone and not e.downloaded and e.reasons == [messages.SOURCE_GONE] * 2
+    ff.gone = {mirror()}  # the developer's address can't be reached, maybe only for now
+    assert not failure(ff, "one unreachable").gone
+    ff = FakeFetcher({DEV: BAD})
+    ff.gone = {mirror()}
+    e = failure(ff, "one changed")
+    assert e.gone and e.downloaded
+    assert not NoVerifiedSource(["x"]).gone
 
 
 def test_fetch_exact_accepts_matching_hash(tmp_path):

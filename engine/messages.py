@@ -148,6 +148,7 @@ CATALOG_BAD_DOWNLOAD = "The catalog download was damaged. Showing the last saved
 CATALOG_BAD_DOWNLOAD_EMPTY = "The catalog download was damaged, and no saved copy is available."
 
 SOURCE_UNREACHABLE = "A download address couldn't be reached."
+SOURCE_GONE = "A download is no longer available at its address."
 SOURCE_CHECKSUM_MISMATCH = "A download didn't match the catalog's checksum."
 SOURCE_BLOCKED = "A download address is blocked."
 
