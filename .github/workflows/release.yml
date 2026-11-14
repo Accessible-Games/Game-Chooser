@@ -51,8 +51,10 @@ jobs:
           done
           [ -n "$(ls -A "$dist/bin/licenses")" ] || { echo "::error::$dist/bin/licenses is missing or empty"; exit 1; }
 
-      # A windowless build with a missing module exits without a word, so check it is still running after 15 seconds.
-      # It runs from a copy, so nothing it writes beside the exe (games.json) gets into the zip.
+      # A windowless build with a missing module exits without a word, and a missing DLL leaves a "System Error" box
+      # (titled after game-chooser.exe) open, so after 15 seconds the app must be running with its own main window,
+      # whose title is "Game Chooser (<games>)". It runs from a copy, so nothing it writes beside the exe (games.json)
+      # gets into the zip.
       - name: Smoke start
         shell: pwsh
         run: |
@@ -61,9 +63,14 @@ jobs:
           $env:APPDATA = Join-Path $env:RUNNER_TEMP 'smoke-appdata'
           New-Item -ItemType Directory $env:APPDATA | Out-Null
           $p = Start-Process (Join-Path $app 'game-chooser.exe') -PassThru
+          $null = $p.Handle
           Start-Sleep -Seconds 15
-          if ($p.HasExited) { throw "game-chooser.exe exited within 15 seconds (exit code $($p.ExitCode))" }
-          taskkill /PID $p.Id /T /F
+          $p.Refresh()
+          $exited = $p.HasExited
+          $title = $p.MainWindowTitle
+          if (-not $exited) { taskkill /PID $p.Id /T /F }
+          if ($exited) { throw "game-chooser.exe exited within 15 seconds (exit code $($p.ExitCode))" }
+          if ($title -cnotmatch '^Game Chooser \(') { throw "game-chooser.exe showed no Game Chooser window (main window title: '$title')" }
 
       - name: Package
         run: |
