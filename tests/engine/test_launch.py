@@ -477,3 +477,41 @@ def test_windows_folder_asks_again_with_a_bigger_buffer_when_told_it_was_too_sma
     call = _folder_call((len(deep) + 1, None), (len(deep), deep))
     assert launch._windows_folder(call) == deep
     assert len(call.sizes) == 2 and call.sizes[0] <= 260 < len(deep) < call.sizes[1]
+
+
+# ---- a Mac app (.app folder) ---------------------------------------------------------------------------------
+
+def test_start_program_opens_a_mac_app_with_open(tmp_path):
+    app = tmp_path / "Game.app"
+    (app / "Contents" / "MacOS").mkdir(parents=True)
+    calls = []
+    started = start_program(str(app), str(tmp_path), popen=lambda args, cwd: calls.append((args, cwd)) or _Process(7),
+                            shell_open=lambda *a: pytest.fail("no shell needed"))
+    assert calls == [(["/usr/bin/open", str(app)], str(tmp_path))]
+    assert started is None  # the process is open's, not the game's
+
+
+def test_a_file_named_like_an_app_is_run_as_a_program(tmp_path):
+    fake = tmp_path / "Game.app"
+    fake.write_bytes(b"x")
+    calls = []
+    start_program(str(fake), str(tmp_path), popen=lambda args, cwd: calls.append(args) or None)
+    assert calls == [[str(fake)]]
+
+
+def test_adopt_catalog_launch_takes_a_mac_app(tmp_path):
+    (tmp_path / "Game.app" / "Contents").mkdir(parents=True)
+    rec = SimpleNamespace(launch_path="guess", launch_from_catalog=False)
+    assert adopt_catalog_launch(rec, {"launch": {"macos": {"path": "Game.app"}}}, "macos", tmp_path) is True
+    assert rec.launch_path == "Game.app" and rec.launch_from_catalog is True
+    assert find_launch_exe(tmp_path, "Game.app", EXCL) == tmp_path / "Game.app"
+
+
+def test_a_mac_app_through_a_link_is_not_taken(tmp_path):
+    real = tmp_path / "real"
+    (real / "Game.app").mkdir(parents=True)
+    game = tmp_path / "game"
+    game.mkdir()
+    (game / "linked").symlink_to(real)
+    rec = SimpleNamespace(launch_path="guess", launch_from_catalog=False)
+    assert adopt_catalog_launch(rec, {"launch": {"macos": {"path": "linked/Game.app"}}}, "macos", game) is False

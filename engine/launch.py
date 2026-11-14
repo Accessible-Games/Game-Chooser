@@ -17,7 +17,7 @@ from urllib.parse import quote
 
 from . import messages
 from .paths import is_engine_dir
-from .safety import is_link, plain_file
+from .safety import is_link, plain_app, plain_file
 
 MAX_DEPTH = 10
 # What the temporary guess may pick. An .hta is never guessed: it starts only when the catalog's launch path names it.
@@ -28,6 +28,8 @@ _EXE_SUFFIXES = (".exe", ".bat")
 PAGE_SUFFIXES = (".html", ".htm")
 # An HTML Application: a program with the player's full rights, run by Windows' own host (`start_hta`).
 HTA_SUFFIX = ".hta"
+MAC_APP_SUFFIX = ".app"
+OPEN_COMMAND = "/usr/bin/open"  # macOS' own way to start an app
 HTA_HOST_NAME = "mshta.exe"
 # Which mshta.exe runs an .hta game: 32 (SysWOW64 on 64-bit Windows) or 64 (System32). 32, because:
 # - it is what Windows itself runs for an .hta: on 64-bit Windows 11 the `htafile` open command is
@@ -129,10 +131,15 @@ def start_program(path: str, cwd: str, popen: Callable | None = None,
     started directly: Windows answers ERROR_ELEVATION_REQUIRED. Such a program is started through the shell
     instead, which shows the administrator prompt as Explorer does. Raises LaunchCancelled if the player
     declines it, OSError if the program can't be started.
+
+    A Mac app (an .app folder) is started with macOS' `open`, and gives no process ID.
     """
     if popen is None:
         import subprocess
         popen = subprocess.Popen
+    if is_mac_app_name(path) and Path(path).is_dir():
+        popen([OPEN_COMMAND, path], cwd=cwd)  # its process is open's, which ends at once, not the game's
+        return None
     try:
         process = popen([path], cwd=cwd)
     except OSError as e:
@@ -151,6 +158,11 @@ class Started(NamedTuple):
 def launch_kind(path: str) -> str:
     """"page" for a launch file that is a web page (.html, .htm), otherwise "program" (an .hta is a program)."""
     return "page" if Path(path).suffix.lower() in PAGE_SUFFIXES else "program"
+
+
+def is_mac_app_name(path: str) -> bool:
+    """Does this launch path name a Mac app (an .app folder, which macOS starts with `open`)?"""
+    return Path(path).suffix.lower() == MAC_APP_SUFFIX
 
 
 def is_hta(path: str) -> bool:
@@ -282,6 +294,8 @@ def _recorded_launch_exe(game_dir: Path, launch_path: str | None) -> Path | None
     if not launch_path:
         return None
     try:
+        if is_mac_app_name(launch_path):
+            return plain_app(game_dir, launch_path)
         return plain_file(game_dir, launch_path)
     except (ValueError, OSError):
         return None

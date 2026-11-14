@@ -97,6 +97,11 @@ exists. **Nothing new may call it.** The guess only picks `.exe` and `.bat` file
 `start_hta` when the caller passes `hta_allowed`; anything else runs through `start_program`. The last two are
 kind "program" and return the started process's ID.
 
+- **Mac app (`.app` folder)**: `start_program` starts it with `/usr/bin/open` (`OPEN_COMMAND`) and returns no
+  process ID (the process is `open`'s). A catalog launch path that ends in `.app` is taken when it is a folder
+  inside the game, not through a link (`safety.plain_app`); every other launch path must be a plain file
+  (`plain_file`).
+
 - **`.hta` (HTML Application)**: a catalog game with no exe, started only when the catalog's launch path names the
   file (`_recorded_launch_exe` accepts any real file inside the game, so the install and Status need nothing
   special). `start_game` gives it the host only with `hta_allowed=True`, which

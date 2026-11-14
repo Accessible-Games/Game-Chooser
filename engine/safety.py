@@ -156,6 +156,14 @@ def plain_file(root: Path, rel: str, sha256: str | None = None) -> Path | None:
     return path
 
 
+def plain_app(root: Path, rel: str) -> Path | None:
+    """The Mac app (an .app folder) at `rel` under `root`, not through a link, else None. Raises UnsafePath."""
+    path, linked = _resolve_game_path(root, rel)
+    if linked or path.is_symlink() or not path.is_dir():
+        return None
+    return path
+
+
 def remove_unchanged(game_dir: Path, rel: str, sha: str) -> bool:
     """Delete the game's file at `rel` if it still has contents `sha`. True if it is gone; False if it
     isn't a plain file with those contents any more. Raises OSError if it couldn't be deleted."""
