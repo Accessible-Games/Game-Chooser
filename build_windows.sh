@@ -4,7 +4,8 @@
 #
 # The built app extracts downloads with the bundled tools in bin/ (7-Zip and innoextract, fetched by
 # scripts/fetch_tools.py; bin/ is not committed). engine/extract.py looks for them in the bin/ folder beside
-# the executable, so this script ships bin/ (with the tools' licenses) and THIRD_PARTY.md next to it.
+# the executable, so this script ships bin/ (with the tools' licenses), THIRD_PARTY.md and the app's own
+# LICENSE.txt (GPLv3) next to it.
 # Without them every zip, 7z, cab, Inno and NSIS install would fail.
 #
 # `bash build_windows.sh --tracing` builds the tracing variant into build/tracing/ instead: it adds the tracing/
@@ -42,7 +43,7 @@ fetch_tools_if_missing() {
     fi
 }
 
-# ship_tools DIST: copy bin/ (tools and licenses) and THIRD_PARTY.md into the built app's folder.
+# ship_tools DIST: copy bin/ (tools and licenses), THIRD_PARTY.md and LICENSE.txt into the built app's folder.
 ship_tools() {
     local dist="$1"
     if [ ! -d "$dist" ]; then
@@ -55,14 +56,14 @@ ship_tools() {
         cp "$tool" "$dist/bin/" || return 1
     done
     cp bin/licenses/* "$dist/bin/licenses/" || return 1
-    cp THIRD_PARTY.md "$dist/" || return 1
+    cp THIRD_PARTY.md LICENSE.txt "$dist/" || return 1
     for tool in "${TOOLS[@]}"; do
         if [ ! -f "$dist/$tool" ]; then
             echo "$dist/$tool was not shipped."
             return 1
         fi
     done
-    echo "Shipped bin/ ($(ls "$dist/bin" | grep -c -v '^licenses$') tools, $(ls "$dist/bin/licenses" | wc -l) license files) and THIRD_PARTY.md"
+    echo "Shipped bin/ ($(ls "$dist/bin" | grep -c -v '^licenses$') tools, $(ls "$dist/bin/licenses" | wc -l) license files), THIRD_PARTY.md and LICENSE.txt"
 }
 
 # `bash build_windows.sh --ship-only DIST` only copies the tools into an existing build folder (a dry run).
@@ -152,7 +153,7 @@ if [ $? -eq 0 ]; then
     if [ "$TRACING" -eq 1 ]; then
         echo "$TRACING_WARNING"
     else
-        echo "To distribute, copy the entire '$DIST' folder (it includes bin/ and THIRD_PARTY.md)"
+        echo "To distribute, copy the entire '$DIST' folder (it includes bin/, THIRD_PARTY.md and LICENSE.txt)"
     fi
 else
     echo ""
