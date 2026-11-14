@@ -352,7 +352,6 @@ def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Pat
 
 
 def _poll_for(watch: ProcessWatch, seconds: float, never: Callable[[], bool]) -> bool:
-    """Poll `watch` on this thread for up to `seconds` (stopping early if `never()` turns true)."""
     deadline = time.monotonic() + seconds
     while time.monotonic() < deadline and not never():
         if watch.poll(POLL_SECONDS):
@@ -433,8 +432,6 @@ def _run_live_file_steps(steps: list[dict], folder: Path, allowed: set[str], tit
 
 @dataclass
 class RunItem:
-    """One downloaded installer, as the engine hands it over."""
-
     catalog_id: str
     kind: str
     title: str

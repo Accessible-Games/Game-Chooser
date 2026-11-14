@@ -59,7 +59,6 @@ def _remove(path: Path) -> None:
 
 
 def _overlaps(a: Path, b: Path) -> bool:
-    """True if `a` and `b` are the same path or one is inside the other (compared case-insensitively)."""
     a, b = (PurePath(os.path.normcase(p.resolve())) for p in (a, b))
     return a == b or a in b.parents or b in a.parents
 

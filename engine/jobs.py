@@ -294,7 +294,6 @@ class InstallEngine:
         raise ValueError(f"Not a configured library: {req.library_id!r} {req.library_path!r}")
 
     def _installed(self, entry: dict, action: str) -> tuple[InstallRecord, Path]:
-        """The game's record and folder, for the actions that change an installed game."""
         title = title_of(entry)
         rec = self.ctx.records.load(entry["id"])
         if rec is None or rec.uninstalled:
@@ -655,7 +654,6 @@ class InstallEngine:
 
     def _place(self, entry: dict, staged: _StagedGame, target: Path, library_id: str, library_path: Path,
                staging: Path, notes: list[str]) -> JobResult:
-        """Move the staged tree into the library, run the system steps there, and save the record."""
         ctx = self.ctx
         game_id = entry["id"]
         files = _incoming(staged.tree, staged.owners, game_id)
@@ -1098,7 +1096,6 @@ def _method(source: dict) -> str | None:
 
 
 def _extra_steps(unpacked: list[tuple[dict, Fetched, Path]]) -> list[dict]:
-    """The steps of the extras about to be applied, in order."""
     return [s for _, fetched, _ in unpacked for s in _steps(fetched)]
 
 
@@ -1153,7 +1150,6 @@ def _take_back(target: Path, staging: Path) -> bool:
 
 
 def _incoming(tree: Path, owners: dict[str, str], game_id: str) -> dict[str, RecordedFile]:
-    """Every file in a staged tree, recorded with the extra that wrote it last (else the game)."""
     return {key: RecordedFile(display, sha, owners.get(key, game_id))
             for key, (display, sha) in hash_tree(tree).items()}
 
@@ -1263,7 +1259,6 @@ def _untouched_backups(game_dir: Path, backups: list[dict]) -> list[dict]:
 
 
 def _rewritten_by(files: dict[str, RecordedFile], backup: dict) -> dict:
-    """`backup`, compared against the file in `files` at its path, if there is one."""
     new = files.get(norm_key(backup["original"]))
     return {**backup, "installed_sha256": new.sha256} if new else backup
 
@@ -1275,7 +1270,6 @@ def _targets(plan: UpdatePlan, backup: dict) -> bool:
 
 
 def _holds(game_dir: Path, rel: str, files: dict[str, RecordedFile]) -> bool:
-    """True if the game's file at `rel` is exactly the one `files` lists there."""
     new = files.get(norm_key(rel))
     try:
         return new is not None and plain_file(game_dir, rel, new.sha256) is not None
@@ -1297,7 +1291,6 @@ def _repair_failure_text(e: NoVerifiedSource | _NoUnpackSpec, game_id: str, titl
 
 
 def _failure_text(e: Exception, title: str) -> str:
-    """The player's words for a failure while changing a game's files."""
     if isinstance(e, EngineError) and not isinstance(e, UnsafePath):
         return str(e)
     return messages.FILES_NOT_CHANGED.format(title=title)

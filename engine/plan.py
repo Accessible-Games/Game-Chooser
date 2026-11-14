@@ -123,7 +123,6 @@ def _choose_library(plan: InstallPlan, libraries: list[dict], last_library: str 
 
 
 def _warnings(entry: dict, action: str, interactive: bool) -> list[str]:
-    """The price (installs only), then a guided installer."""
     warnings = []
     price = install_warning(pricing_of(entry)) if action == "install" else None
     if price:

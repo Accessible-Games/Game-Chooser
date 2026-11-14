@@ -182,7 +182,6 @@ class _TreeWatch:
         return parents
 
     def _sweep(self) -> None:
-        """Start watching every new process whose parent is watched."""
         try:
             pairs = self._system.processes()
         except OSError:
