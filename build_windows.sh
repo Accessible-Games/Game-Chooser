@@ -115,8 +115,9 @@ fi
 # A report left from an earlier build must never be what the check reads.
 rm -f "$REPORT"
 
-# Run Nuitka to build the executable (nuitka isn't a project dependency; uv supplies it for this run)
-uv run --with nuitka python -m nuitka \
+# Run Nuitka to build the executable (nuitka isn't a project dependency; uv supplies it for this run, pinned so
+# a release build doesn't change with each new Nuitka)
+uv run --with nuitka==4.3.5 python -m nuitka \
     --standalone \
     --windows-console-mode=disable \
     --follow-imports \
