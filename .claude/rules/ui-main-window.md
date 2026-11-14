@@ -49,6 +49,10 @@ description. The Catalog tab has its status line and Retry above these.
   `.claude/rules/catalog-install.md`.
 - **Preferences** (`PreferencesDialog`): tabs Library Paths and Installing (`install_prefs.py`: catalog address,
   "register shared components"). An invalid address saves nothing; a changed address refetches the catalog on close.
+- **Enter in a dialog**: each dialog the app builds has a default button, so Enter in a field presses it: Add or
+  Save (`GameDialog`, which still runs every check and stays open on an error box), OK (Preferences), and the
+  action button of the install confirmation, Uninstall and Remove library. A focused button or an open drop-down
+  takes Enter itself; Escape is Cancel.
 - **First run** (config.json didn't exist): no dialog; `catalog_view.initial_tab(saved, is_first_run)` opens the
   Catalog tab, and an install with no library asks for a folder and makes it a library.
 

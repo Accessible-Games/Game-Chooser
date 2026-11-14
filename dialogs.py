@@ -91,6 +91,7 @@ class GameDialog(wx.Dialog):
         btn_sizer = wx.StdDialogButtonSizer()
         ok_label = "Add" if self.is_new else "Save"
         ok_btn = wx.Button(panel, wx.ID_OK, ok_label)
+        ok_btn.SetDefault()  # Enter in a field presses it (and runs the checks); Escape is Cancel
         cancel_btn = wx.Button(panel, wx.ID_CANCEL, "Cancel")
         btn_sizer.AddButton(ok_btn)
         btn_sizer.AddButton(cancel_btn)
@@ -266,6 +267,7 @@ class PreferencesDialog(wx.Dialog):
         btn_sizer.AddStretchSpacer()
         
         ok_btn = wx.Button(btn_panel, wx.ID_OK, "OK")
+        ok_btn.SetDefault()  # Enter in the address field saves and closes (a bad address keeps it open)
         cancel_btn = wx.Button(btn_panel, wx.ID_CANCEL, "Cancel")
         apply_btn = wx.Button(btn_panel, wx.ID_APPLY, "Apply")
         
