@@ -501,7 +501,7 @@ class GamesPanel(wx.Panel):
 
     def focus_list(self):
         """Put keyboard focus in the games list (screen reader pattern: select, focused item, SetFocus).
-        Not while the app is starting up (the first-run dialog may own focus) or a dialog is open."""
+        Not while the app is starting up or a dialog is open."""
         if not self or self.frame.initializing or self.frame.dialog_active:
             return
         index = self.list.get_selected_index()

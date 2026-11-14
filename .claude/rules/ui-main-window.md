@@ -16,7 +16,7 @@ paths:
 
 ## Files
 - **main_window.py** - `MainFrame`: notebook, menus, shortcuts, queue handlers, modal safety, state
-- **dialogs.py** - `FirstTimeSetupDialog`, `GameDialog` (add/edit by hand), `PreferencesDialog`
+- **dialogs.py** - `GameDialog` (add/edit by hand), `PreferencesDialog`
 - **install_dialogs.py** - `InstallConfirmDialog`, `UninstallDialog`, `RemoveLibraryDialog`
 - **description_field.py** - read-only multi-line description; Enter on a link line opens it
 - **progress_area.py** - gauge, status line, Done and Cancel for the running job
@@ -39,8 +39,7 @@ description. The Catalog tab has its status line and Retry above these.
   `MainFrame.selected_game()` is the selected row's `Game`.
   `MainFrame.games_changed()` is the one call after every change to a game, to `manager.games`, to a library or
   to what is installed (Add, Edit, Delete, Locate, a job that ended, an index take, Preferences, F5, a web game
-  added from the Catalog): it rebuilds both tabs' rows, the Libraries menu and the statuses. Add (also the
-  first-run dialog's), Edit, Delete and Locate write games.json through `_save_games`, and the Catalog's Add of a
+  added from the Catalog): it rebuilds both tabs' rows, the Libraries menu and the statuses. Add, Edit, Delete and Locate write games.json through `_save_games`, and the Catalog's Add of a
   web game through `save_or_keep` too: a save that fails says so (`messages.GAMES_NOT_SAVED`), and the change stays
   in memory and still shows.
   Status values (`engine/status.py`): `Ready`, `Update available`, `Executable not found`, `Library not found`.
@@ -50,8 +49,8 @@ description. The Catalog tab has its status line and Retry above these.
   `.claude/rules/catalog-install.md`.
 - **Preferences** (`PreferencesDialog`): tabs Library Paths and Installing (`install_prefs.py`: catalog address,
   "register shared components"). An invalid address saves nothing; a changed address refetches the catalog on close.
-- **FirstTimeSetupDialog**: shown when config.json didn't exist; the player can add a library or skip.
-  `catalog_view.initial_tab(saved, is_first_run)` picks the starting tab.
+- **First run** (config.json didn't exist): no dialog; `catalog_view.initial_tab(saved, is_first_run)` opens the
+  Catalog tab, and an install with no library asks for a folder and makes it a library.
 
 ## The games view (`GamesPanel`)
 Both tabs' search, list (with its sorting and type-ahead), filter tree, selection memory, action button,
@@ -188,10 +187,9 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - Screen reader announcement needs this sequence: select the row, make it the list's focused item, then
   `SetFocus()` (`GamesPanel.focus_list`, reached through `MainFrame.focus_active_list`).
 - Flags on `MainFrame`:
-  - **`initializing`**: `MainFrame` sets it true when it is created and false at the end of `check_libraries()`
-    (after the first-run dialog, just before the first `focus_active_list()`). `GamesPanel.focus_list()` (both
-    tabs) and `CatalogPanel.set_index_state()` take no focus while it is true (don't steal focus from the
-    first-run dialog)
+  - **`initializing`**: `MainFrame` sets it true when it is created and false once `load_saved_state()` is
+    done, just before the first `focus_active_list()`. `GamesPanel.focus_list()` (both tabs) and
+    `CatalogPanel.set_index_state()` take no focus while it is true (the window is still being built)
   - **`dialog_active`**: set by `modal_dialog()`; blocks selection events and defers work during modal dialogs
 - `GamesPanel.restoring_tree` is true while the view itself changes the tree (building it, restoring its
   selections, Escape): the tree's change events are then ignored.
@@ -199,8 +197,8 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
   in one case only: the list became empty while focus was on its action button. What never moves focus, and the three
   exceptions (this view's, `ProgressArea`'s Done button and `CatalogPanel`'s status line), is in CLAUDE.md
   (Focus).
-- After a dialog the code calls `focus_active_list()` only in these places. Startup: at the end of
-  `check_libraries`, which follows the first-run dialog when there is one. Library: after the message that a
+- After a dialog the code calls `focus_active_list()` only in these places. Startup: in `MainFrame.__init__`,
+  once `load_saved_state()` is done. Library: after the message that a
   catalog game can't be edited (Ctrl+E); in the forget flow when nothing was forgotten; after a catalog action
   from the context menu (Update, Extras, Undo, Repair, Uninstall); when Uninstall is refused, and after its
   dialog; after the damaged-file message at startup. Catalog: at every exit of Install (already queued, could not

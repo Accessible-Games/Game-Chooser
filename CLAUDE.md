@@ -140,8 +140,7 @@ Each file loads when a file it covers is read or edited.
 - `catalog-install.md` - the install service, queue and installer bridges, the Catalog tab, catalog schema v2,
   install confirmation, progress area, Library catalog actions and launching.
 - `ui-main-window.md` - the main window and Library tab, the games view both tabs are built from (`GamesPanel`),
-  the rest of modal safety, the quit sequence, keyboard shortcuts, accessibility and focus, the Preferences and
-  first-run dialogs.
+  the rest of modal safety, the quit sequence, keyboard shortcuts, accessibility and focus, the Preferences dialog.
 - `libraries-and-config.md` - libraries (install folders), `reconcile_catalog_records`, `config.json`, a damaged
   `games.json` or `config.json`, paths and executable detection.
 - `build.md` - `build_windows.sh`, the scripts, the dependencies that are not on PyPI, the license.

@@ -34,7 +34,7 @@ from engine.folders import library_label
 from engine.launch import LaunchCancelled, launch_kind
 from games_panel import GamesPanel
 from catalog_panel import CatalogPanel
-from dialogs import EXECUTABLE_WILDCARD, GameDialog, PreferencesDialog, FirstTimeSetupDialog
+from dialogs import EXECUTABLE_WILDCARD, GameDialog, PreferencesDialog
 from engine import messages
 from engine.entries import current_platform as catalog_platform, platform_label
 from engine.records import record_folder
@@ -98,8 +98,9 @@ class MainFrame(wx.Frame):
         self.init_ui()
         
         self.load_saved_state()
-        
-        self.check_libraries()
+
+        self.initializing = False
+        self.focus_active_list()
 
         # A games.json or config.json that couldn't be read: say so once, after the window is up
         if self.library_manager.load_problems:
@@ -434,17 +435,6 @@ class MainFrame(wx.Frame):
                 return g
         return None
 
-    def check_libraries(self):
-        if self.library_manager.is_first_run:
-            with self.modal_dialog(), FirstTimeSetupDialog(self, self.library_manager) as dlg:
-                dlg.ShowModal()
-
-            # Refresh UI in case they added stuff
-            self.games_changed()
-
-        self.initializing = False
-        self.focus_active_list()
-    
     def notify(self, text: str):
         """Tell the player something without a dialog (a Windows notification)"""
         try:
