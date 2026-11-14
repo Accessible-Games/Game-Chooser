@@ -140,6 +140,7 @@ def test_get_full_path_old_name_rows_resolve_to_launch_path(isolated_manager):
     assert isolated_manager.get_full_path(Game(title="Old", launch_path="Old/play.exe")) == "Old/play.exe"
 
 
+@pytest.mark.windows
 def test_libraries_on_other_drives_are_not_nested(isolated_manager_factory, tmp_path):
     from library_manager import _is_inside
 

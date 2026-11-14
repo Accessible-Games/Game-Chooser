@@ -25,6 +25,7 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
 import random
 
 import wx
+from wx import dataview
 
 from smart_list import VirtualSmartList
 
@@ -140,15 +141,27 @@ class GamesPanel(wx.Panel):
         sizer.Add(self.description, 0, wx.EXPAND | wx.ALL, 5)
         self.SetSizer(sizer)
 
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_selected)
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda event: self.on_action())
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_context)
+        # A ListCtrl's events, or what a DataViewCtrl (macOS) sends in their place: it never sends EVT_LIST_*.
+        # A DataView header click's GetColumn() is the column's model column, which is its place in the list here.
+        if self.list.control.use_dataview:
+            selected, activated, context, header_click = (
+                dataview.EVT_DATAVIEW_SELECTION_CHANGED, dataview.EVT_DATAVIEW_ITEM_ACTIVATED,
+                dataview.EVT_DATAVIEW_ITEM_CONTEXT_MENU, dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK)
+            on_selected, on_activated = self._on_dataview_selected, self._on_dataview_activated
+        else:
+            selected, activated, context, header_click = (
+                wx.EVT_LIST_ITEM_SELECTED, wx.EVT_LIST_ITEM_ACTIVATED, wx.EVT_LIST_ITEM_RIGHT_CLICK,
+                wx.EVT_LIST_COL_CLICK)
+            on_selected, on_activated = self.on_selected, lambda event: self.on_action()
+        self.list_ctrl.Bind(selected, on_selected)
+        self.list_ctrl.Bind(activated, on_activated)
+        self.list_ctrl.Bind(context, self.on_context)
         self.list_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_list_key)
         self.tree_ctrl.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_selection)
         self.tree_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_tree_key)
         self.search_combo.Bind(wx.EVT_TEXT, lambda event: self.apply_filters())
         self.search_combo.Bind(wx.EVT_COMBOBOX, lambda event: self.apply_filters())
-        self.list_ctrl.Bind(wx.EVT_LIST_COL_CLICK, lambda event: self.sort_by(event.GetColumn()))
+        self.list_ctrl.Bind(header_click, lambda event: self.sort_by(event.GetColumn()))
         self.list_ctrl.Bind(wx.EVT_CHAR, self.on_char)
         self._show_sort()
 
@@ -295,6 +308,10 @@ class GamesPanel(wx.Panel):
             item = None if focused is None else items.get(focused) or items.get(focused.split("/")[0])
             if item:
                 tree.SetFocusedItem(item)
+                # macOS' tree (wx's generic one) selects the item it focuses: a value the player had not
+                # selected would become a filter, the root or a category a selection of nothing
+                if tree.IsSelected(item) and self._tree_path(item) not in selected:
+                    tree.SelectItem(item, False)
         finally:
             self.restoring_tree = False
 
@@ -476,6 +493,22 @@ class GamesPanel(wx.Panel):
             self._saved()[self._key("last_selected")] = row.id
             self.save_config()
 
+    def _on_dataview_selected(self, event):
+        """A DataViewCtrl (macOS) sends its selection event for the view's own selects too, and when a refill
+        empties the list; a refill sets the label and description itself."""
+        if not self._populating:
+            self.on_selected(event)
+
+    def _on_dataview_activated(self, event):
+        """A DataViewCtrl (macOS) sends its activation for Return too, before the key-down, which follows only if
+        the activation is passed on. wx builds that one with no column (GetColumn() is -1) and a double-click's
+        with the clicked column. Return's goes on, to the accelerators (Cmd+Return is Open Folder) and to
+        on_list_key, which acts once while it is held; a double-click acts."""
+        if event.GetColumn() < 0:
+            event.Skip()
+        else:
+            self.on_action()
+
     def select_row(self, row):
         for index, shown in enumerate(self.displayed):
             if shown.id == row.id:
@@ -536,6 +569,10 @@ class GamesPanel(wx.Panel):
 
     def on_context(self, event):
         """The selected row's context menu (right-click, Shift+F10, Applications key)"""
+        if isinstance(event, dataview.DataViewEvent) and event.GetItem().IsOk():
+            # A right-click on the macOS DataViewCtrl selects nothing (a ListCtrl selects the row first): the row
+            # it is on becomes the selected one, as the player's own move
+            self._select(self.list.control.wx_model.GetRow(event.GetItem()))
         menu = self.context_menu(self.selected_row())
         if menu is None:
             return

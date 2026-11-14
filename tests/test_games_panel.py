@@ -33,6 +33,15 @@ ALPHA, BRAVO, CHARLIE, DELTA = entry("alpha"), entry("bravo", "Action"), entry("
 ANT, BEE, CAT = entry("ant", year=2003), entry("bee", "Action", year=2002), entry("cat", year=2001)
 SORT_KEYS = [lambda r: r.title.lower(), lambda r: r.year]
 
+# On macOS smart_list's list is a DataViewCtrl; what GamesPanel deliberately does only on a ListCtrl skips there
+DATAVIEW = wx.Platform == "__WXMAC__"
+TYPE_AHEAD = pytest.mark.skipif(DATAVIEW, reason="no type-ahead of the view's own on the macOS DataViewCtrl "
+                                                 "(GamesPanel.on_char leaves characters to the control)")
+SCROLLS = pytest.mark.skipif(DATAVIEW, reason="GamesPanel never scrolls the macOS DataViewCtrl itself "
+                                              "(_select, _in_view)")
+WIDTHS = pytest.mark.skipif(DATAVIEW, reason="the macOS DataViewCtrl keeps its own column widths: GamesPanel "
+                                             "neither restores nor saves them")
+
 
 class Saves:
     """In place of the manager's save_config: counts the saves, and can fail as a full disk does"""
@@ -99,10 +108,15 @@ def titles(view):
 
 
 def selected(view):
-    return view.list_ctrl.GetFirstSelected()
+    return view.list.get_selected_index()
 
 
 def focused(view):
+    """The list's focused row (smart_list has none of its own; on a DataViewCtrl the current item, which macOS
+    keeps on the selected row)"""
+    if view.list.control.use_dataview:
+        item = view.list_ctrl.GetCurrentItem()
+        return view.list.control.wx_model.GetRow(item) if item.IsOk() else -1
     return view.list_ctrl.GetFocusedItem()
 
 
@@ -115,9 +129,11 @@ def saves(view):
 
 
 def player_selects(view, index):
-    """What an arrow key or a click does"""
-    view.list_ctrl.Select(index)
-    view.list_ctrl.Focus(index)
+    """What an arrow key or a click does: the row is selected (and on a ListCtrl also focused; smart_list does that
+    only through SetSelectedIndex, which a DataViewCtrl can't take)"""
+    view.list.control.Select(index)
+    if not view.list.control.use_dataview:
+        view.list_ctrl.Focus(index)
 
 
 def tree_nodes(view):
@@ -132,6 +148,15 @@ def tree_nodes(view):
             child, child_cookie = tree.GetNextChild(category, child_cookie)
         category, cookie = tree.GetNextChild(tree.GetRootItem(), cookie)
     return nodes
+
+
+def focus_tree_item(tree, item):
+    """The player moves the tree's focus without changing what is selected. macOS' tree (wx's generic one) also
+    selects the item SetFocusedItem focuses, so that is taken back."""
+    was_selected = tree.IsSelected(item)
+    tree.SetFocusedItem(item)
+    if tree.IsSelected(item) and not was_selected:
+        tree.SelectItem(item, False)
 
 
 class KeyEvent(wx.KeyEvent):
@@ -186,14 +211,51 @@ def press_escape_in_tree(view):
     press(view.tree_ctrl, wx.WXK_ESCAPE)
 
 
+def dataview_event(view, kind, row=None, column=None):
+    """Send the list the event a DataViewCtrl (the list on macOS) sends on its own, for a row and column as the
+    list shows them; True when a handler took it (did not pass it on)"""
+    from wx import dataview
+    item = view.list.control.wx_model.GetItem(row) if row is not None else dataview.DataViewItem()
+    if column is None:
+        event = dataview.DataViewEvent(kind, view.list_ctrl, item)
+    else:
+        event = dataview.DataViewEvent(kind, view.list_ctrl, view.list_ctrl.GetColumn(column), item)
+    return view.list_ctrl.GetEventHandler().ProcessEvent(event)
+
+
+def return_on_dataview(view, row, repeat=False, **modifiers):
+    """What the macOS DataViewCtrl does with Return (wxWidgets' dataview.mm, seen in a real run): an activation
+    with no column first, and the key-down only when that was passed on. True when the key-down was taken."""
+    if dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, row):
+        return True
+    return press(view.list_ctrl, wx.WXK_RETURN, repeat=repeat, **modifiers)
+
+
 def click_header(view, column):
+    """smart_list has no header click of its own: each control's event"""
+    if view.list.control.use_dataview:
+        dataview_event(view, wx.dataview.wxEVT_DATAVIEW_COLUMN_HEADER_CLICK, column=column)
+        return
     event = wx.ListEvent(wx.wxEVT_LIST_COL_CLICK, view.list_ctrl.GetId())
     event.SetColumn(column)
     view.list_ctrl.GetEventHandler().ProcessEvent(event)
 
 
 def headers(view):
-    return [view.list_ctrl.GetColumn(i).GetText() for i in range(view.list_ctrl.GetColumnCount())]
+    """The column headers as shown (smart_list has no header text of its own)"""
+    columns = [view.list_ctrl.GetColumn(i) for i in range(view.list_ctrl.GetColumnCount())]
+    if view.list.control.use_dataview:
+        return [column.GetTitle() for column in columns]
+    return [column.GetText() for column in columns]
+
+
+def as_shown(view, names):
+    """Headers as `view` shows them: a DataViewCtrl (macOS) has no sort arrow (GamesPanel._show_sort)"""
+    if isinstance(names, str):
+        return as_shown(view, [names])[0]
+    if view.list.control.use_dataview:
+        return [name.rstrip(" \u25b2\u25bc") for name in names]
+    return names
 
 
 def test_label_and_description_follow_the_row_when_its_number_stays_but_the_game_changes(make_view):
@@ -342,22 +404,22 @@ def test_saved_search_and_sort_are_read_when_the_view_is_built(make_view):
                      sort_keys=SORT_KEYS)
     view.set_rows(rows(ANT, BEE, CAT))
     assert view.search_combo.GetValue() == "a" and titles(view) == ["Ant", "Cat"]  # newest first; no "a" in Bee
-    assert headers(view) == ["Title", "Year ▼"]
+    assert headers(view) == as_shown(view, ["Title", "Year ▼"])
 
 
 def test_sorting_keeps_the_game_selected_and_its_label_right(make_view):
     view = make_view(sort_keys=SORT_KEYS)
     view.set_rows(rows(ANT, BEE, CAT))
-    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title ▲", "Year"]
+    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == as_shown(view, ["Title ▲", "Year"])
     click_header(view, 1)  # by year, oldest first: Ant moves from row 0 to row 2
-    assert titles(view) == ["Cat", "Bee", "Ant"] and headers(view) == ["Title", "Year ▲"]
+    assert titles(view) == ["Cat", "Bee", "Ant"] and headers(view) == as_shown(view, ["Title", "Year ▲"])
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (2, 2, "Install Ant")
     click_header(view, 1)  # the same column again: the other way round
-    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title", "Year ▼"]
+    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == as_shown(view, ["Title", "Year ▼"])
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (0, 0, "Install Ant")
     assert (saved(view)["sort_column"], saved(view)["sort_ascending"]) == (1, False)
     press(view.list_ctrl, ord("1"), wx.wxEVT_CHAR)  # a digit key sorts by that column
-    assert headers(view) == ["Title ▲", "Year"] and saved(view)["sort_column"] == 0
+    assert headers(view) == as_shown(view, ["Title ▲", "Year"]) and saved(view)["sort_column"] == 0
 
 
 def test_rows_that_tie_in_the_sorted_column_are_in_title_order(make_view):
@@ -424,6 +486,7 @@ def test_library_rows_launch_describe_and_are_remembered_by_id(make_view):
     assert (view.action_btn.GetLabel(), view.action_btn.IsEnabled()) == ("Launch", False)
 
 
+@WIDTHS
 def test_column_widths_are_restored_and_saved(make_view):
     view = make_view({"column_widths": [123, 45]})
     assert [view.list_ctrl.GetColumnWidth(i) for i in range(2)] == [123, 45]
@@ -534,6 +597,7 @@ def test_a_selected_catalog_game_whose_object_was_replaced_stays_selected(make_v
     assert saved(view)["last_selected"] == "alpha"
 
 
+@SCROLLS
 def test_a_background_refill_scrolls_only_to_a_selected_row_that_was_in_view(make_view):
     """A finished job or a Status result must not scroll the list away from where the player scrolled it. The
     list is never shown here, so what it has in view is given by hand."""
@@ -558,6 +622,7 @@ def test_a_background_refill_scrolls_only_to_a_selected_row_that_was_in_view(mak
     assert scrolled == [52, 50, 70, 70]
 
 
+@SCROLLS
 def test_the_first_fill_brings_the_remembered_row_into_view(make_view):
     view = make_view({"last_selected": "game090"})
     scrolled = []
@@ -571,7 +636,7 @@ def test_a_tree_rebuild_keeps_the_open_categories_and_the_focused_item(make_view
     view.set_rows(rows(ALPHA, BRAVO))
     tree, nodes = view.tree_ctrl, tree_nodes(view)
     tree.Expand(tree.GetItemParent(nodes["Developer"]["Dev"]))  # open, with nothing selected under it
-    tree.SetFocusedItem(nodes["Developer"]["Dev"])  # the player moved there without selecting it
+    focus_tree_item(tree, nodes["Developer"]["Dev"])  # the player moved there without selecting it
     before = saves(view).count
     view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))  # a refresh that adds a tree value
     nodes = tree_nodes(view)
@@ -581,7 +646,7 @@ def test_a_tree_rebuild_keeps_the_open_categories_and_the_focused_item(make_view
     assert view._selected_paths() == [] and titles(view) == ["Alpha", "Bravo", "Echo"]
     assert saves(view).count == before  # moving the tree's focus is not a change of filter
     tree.SelectItem(nodes["Genre"]["Puzzle"], True)
-    tree.SetFocusedItem(nodes["Genre"]["Action"])
+    focus_tree_item(tree, nodes["Genre"]["Action"])
     view.set_rows(rows(ALPHA, BRAVO))  # Strategy went: rebuilt again, with a selection this time
     assert tree.GetItemText(tree.GetFocusedItem()) == "Action"
     assert view._selected_paths() == ["Genre/Puzzle"] and titles(view) == ["Alpha"]
@@ -596,7 +661,7 @@ def test_a_tree_rebuild_keeps_the_focus_on_the_root(make_view):
     view.set_rows(rows(ALPHA, BRAVO))
     tree = view.tree_ctrl
     tree.SelectItem(tree_nodes(view)["Genre"]["Puzzle"], True)
-    tree.SetFocusedItem(tree.GetRootItem())
+    focus_tree_item(tree, tree.GetRootItem())
     assert view._selected_paths() == ["Genre/Puzzle"]
     before = saves(view).count
     view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))  # a refresh that adds a tree value
@@ -604,6 +669,30 @@ def test_a_tree_rebuild_keeps_the_focus_on_the_root(make_view):
     assert tree.GetFocusedItem() == root and tree.GetItemText(root) == "Filters"
     assert not tree.IsSelected(root) and view._selected_paths() == ["Genre/Puzzle"]
     assert titles(view) == ["Alpha"] and saves(view).count == before
+
+
+def test_a_tree_rebuild_never_selects_the_focused_value(make_view, monkeypatch):
+    """Escape clears the filters and leaves the tree's focus on the value; a background refresh then rebuilds the
+    tree and puts the focus back. On macOS the tree's SetFocusedItem also selects, which filtered the list again
+    without the player choosing it. That tree is stood in here, so this holds on every system."""
+    focus = wx.TreeCtrl.SetFocusedItem
+
+    def focus_and_select(tree, item):  # what wx's generic tree (macOS) does
+        focus(tree, item)
+        tree.SelectItem(item, True)
+    monkeypatch.setattr(wx.TreeCtrl, "SetFocusedItem", focus_and_select)
+    view = make_view()
+    view.set_rows(rows(ALPHA, BRAVO))
+    tree = view.tree_ctrl
+    puzzle = tree_nodes(view)["Genre"]["Puzzle"]
+    tree.Expand(tree.GetItemParent(puzzle))
+    tree.SelectItem(puzzle, True)
+    assert titles(view) == ["Alpha"]
+    press_escape_in_tree(view)
+    assert view._selected_paths() == [] and titles(view) == ["Alpha", "Bravo"]
+    view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))  # a background refresh
+    assert tree.GetItemText(tree.GetFocusedItem()) == "Puzzle"
+    assert view._selected_paths() == [] and titles(view) == ["Alpha", "Bravo", "Echo"]
 
 
 def test_only_values_are_selected_from_the_saved_tree_selections(make_view):
@@ -678,7 +767,8 @@ def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, pre
     assert set(state) == defaults
     assert (state[prefix + "last_selected"], state[prefix + "last_search"], state[prefix + "tree_selections"]) == \
         ("alpha", "a", ["Genre/Puzzle"])
-    assert len(state[prefix + "column_widths"]) == 2 and state[prefix + "splitter_position"] > 0
+    widths = state[prefix + "column_widths"]  # none kept for the macOS DataViewCtrl, which keeps its own
+    assert (widths is None if DATAVIEW else len(widths) == 2) and state[prefix + "splitter_position"] > 0
     assert (state[prefix + "sort_column"], state[prefix + "sort_ascending"]) == (1, True)
     assert (state[other + "sort_column"], state[other + "sort_ascending"]) == (0, True)
     assert (state[other + "last_selected"], state[other + "last_search"], state[other + "tree_selections"],
@@ -733,6 +823,8 @@ def test_the_filter_is_applied_before_the_config_is_saved(make_view):
     assert seen[-1] == ["Bravo", "Alpha"]
 
 
+@pytest.mark.skipif(DATAVIEW, reason="on macOS a window that is never shown holds no keyboard focus "
+                                     "(only a key window does); the next test stands in for it")
 def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(make_view):
     """Real keyboard focus, which a frame that is never shown does hold within its own thread"""
     view = make_view()
@@ -745,6 +837,27 @@ def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(m
     view.set_busy(False)
     assert view.list_ctrl.HasFocus() and not view.progress_area.IsShown()
     assert view.action_btn.IsShown() and view.action_btn.IsEnabled()  # the button stays after the job
+
+
+def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside_stood_in(make_view):
+    """The rule of the test above with the focus stood in, so it also runs where a hidden window holds none"""
+    view = make_view()
+    view.set_rows(rows(ALPHA))
+    focus = []
+    view.list.control.SetFocus = lambda: focus.append(True)
+    view.set_busy(True)
+    view.progress_area.has_focus_inside = lambda: True  # the player is on Cancel when the job ends
+    view.frame.dialog_active = True
+    view.set_busy(False)
+    assert focus == [] and not view.progress_area.IsShown()  # never while a dialog is open
+    view.frame.dialog_active = False
+    view.set_busy(True)
+    view.set_busy(False)
+    assert focus == [True] and not view.progress_area.IsShown()
+    view.progress_area.has_focus_inside = lambda: False
+    view.set_busy(True)
+    view.set_busy(False)
+    assert focus == [True]  # focus was elsewhere: it stays there
 
 
 def test_the_progress_area_grows_for_done_in_a_window_wide_enough(make_view):
@@ -780,11 +893,12 @@ def test_a_saved_sort_column_the_list_does_not_have_is_ignored(make_view, column
     """A hand-edited config.json must not stop every fill with an IndexError"""
     view = make_view({"sort_column": column, "sort_ascending": False}, sort_keys=SORT_KEYS)
     view.set_rows(rows(CAT, ANT, BEE))
-    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title ▲", "Year"]
+    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == as_shown(view, ["Title ▲", "Year"])
 
 
 # ---- type-ahead: typing in the list jumps to the title that starts with what was typed --------------------------
 
+@TYPE_AHEAD
 def test_typing_jumps_to_the_title_as_the_players_own_move(make_view):
     """As an arrow key: the label, the description, the focused item, the scroll and the remembered game follow"""
     view, _ = typing_view(make_view)
@@ -800,6 +914,7 @@ def test_typing_jumps_to_the_title_as_the_players_own_move(make_view):
     assert restarted.selected_row().title == "Temple Of Doom"
 
 
+@TYPE_AHEAD
 def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_view):
     acted = []
     view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
@@ -829,6 +944,21 @@ def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_vi
     assert acted[-1] == "Temple Run" and len(acted) == 4
 
 
+@pytest.mark.parametrize("held", [{}, {"shift": True}, {"ctrl": True}, {"ctrl": True, "shift": True},
+                                  {"ctrl": True, "alt": True}, {"alt": True, "shift": True}])
+def test_with_nothing_typed_any_space_but_alt_alone_acts_once(make_view, held):
+    """The part of the next test that holds where the view types nothing (the macOS DataViewCtrl): any Space but
+    Alt alone acts on the selected game, once while it is held, and Alt+Space is passed on (the window menu)"""
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    player_selects(view, 1)
+    assert press(view.list_ctrl, wx.WXK_SPACE, **held) and acted == ["Bravo"]
+    assert press(view.list_ctrl, wx.WXK_SPACE, repeat=True, **held) and acted == ["Bravo"]
+    assert not press(view.list_ctrl, wx.WXK_SPACE, alt=True) and acted == ["Bravo"]
+
+
+@TYPE_AHEAD
 @pytest.mark.parametrize("held", [{"shift": True}, {"ctrl": True}, {"ctrl": True, "shift": True},
                                   {"ctrl": True, "alt": True}, {"alt": True, "shift": True}])
 def test_a_space_with_any_modifier_but_alt_alone_is_a_plain_space(make_view, held):
@@ -846,16 +976,17 @@ def test_a_space_with_any_modifier_but_alt_alone_is_a_plain_space(make_view, hel
     assert not press(view.list_ctrl, wx.WXK_SPACE, alt=True) and acted == ["Temple Run"]
 
 
+@TYPE_AHEAD
 def test_a_digit_belongs_to_the_text_while_typing_and_sorts_otherwise(make_view):
     view, now = typing_view(make_view)
     type_text(view, "area 51")
-    assert selected(view) == 1 and headers(view) == ["Title ▲", "Year"]  # "5" and "1" did not sort
+    assert selected(view) == 1 and headers(view) == as_shown(view, ["Title ▲", "Year"])  # "5" and "1" did not sort
     now[0] += 2
     type_text(view, "2")  # nothing is being typed: the digit sorts by its column
-    assert headers(view) == ["Title", "Year ▲"] and view.selected_row().title == "Area 51"
+    assert headers(view) == as_shown(view, ["Title", "Year ▲"]) and view.selected_row().title == "Area 51"
     now[0] += 2
     type_text(view, "9")  # no such column, and a digit never starts a text
-    assert headers(view) == ["Title", "Year ▲"] and view.selected_row().title == "Area 51"
+    assert headers(view) == as_shown(view, ["Title", "Year ▲"]) and view.selected_row().title == "Area 51"
     assert not view.type_ahead.typing()
 
 
@@ -872,6 +1003,7 @@ def test_typing_that_matches_no_title_and_keys_with_ctrl_alone_or_alt_alone_chan
     assert selected(view) == 2 and saves(view).count == before and not view.type_ahead.typing()
 
 
+@TYPE_AHEAD
 def test_typing_looks_at_titles_only_in_the_order_the_list_shows(make_view):
     view, now = typing_view(make_view, {"sort_column": 0, "sort_ascending": False})
     assert titles(view)[0] == "Temple Run" and selected(view) == 0
@@ -882,6 +1014,7 @@ def test_typing_looks_at_titles_only_in_the_order_the_list_shows(make_view):
     assert view.selected_row().title == "Temple Of Doom"
 
 
+@TYPE_AHEAD
 def test_space_in_a_text_never_moves_the_selection(make_view):
     """The player types `a`, lands on Alpha and presses Space: the text is then "a ", which only "A Hero's Call"
     starts with, and the selection must not go there"""
@@ -905,6 +1038,7 @@ def test_space_in_a_text_never_moves_the_selection(make_view):
 @pytest.mark.parametrize("key", [
     "ESCAPE", "BACK", "UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN",
     "NUMPAD_UP", "NUMPAD_DOWN", "NUMPAD_HOME", "NUMPAD_END", "NUMPAD_PAGEUP", "NUMPAD_PAGEDOWN"])  # Num Lock off
+@TYPE_AHEAD
 def test_a_typed_text_ends_on_a_key_that_ends_a_thought(make_view, key):
     """Escape, Backspace and the keys that move through the list: what is typed next is a new text, and Space
     acts at once on the row the player moved to"""
@@ -922,6 +1056,7 @@ def test_a_typed_text_ends_on_a_key_that_ends_a_thought(make_view, key):
     assert acted == ["Bravo"]
 
 
+@TYPE_AHEAD
 def test_a_character_typed_with_altgr_is_text(make_view):
     """Ctrl and Alt both down is what AltGr is to Windows. wx hands over a letter outside the system code page
     that way (\u0119 and \u017c on a Polish layout, under code page 1252), and with no key code"""
@@ -935,6 +1070,105 @@ def test_a_digit_sorts_only_with_neither_ctrl_nor_alt_held(make_view):
     view, _ = typing_view(make_view)
     for modifiers in ({"alt": True}, {"ctrl": True}, {"ctrl": True, "alt": True}):
         press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR, **modifiers)
-        assert headers(view) == ["Title \u25b2", "Year"] and not view.type_ahead.typing()
+        assert headers(view) == as_shown(view, ["Title \u25b2", "Year"]) and not view.type_ahead.typing()
     press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR, shift=True)  # some layouts (French) give digits only with Shift
-    assert headers(view) == ["Title", "Year \u25b2"]
+    assert headers(view) == as_shown(view, ["Title", "Year \u25b2"])
+
+
+# ---- the macOS list control (a DataViewCtrl) sends its own events -------------------------------------------------
+
+needs_dataview = pytest.mark.skipif(not wx.Platform == "__WXMAC__",
+                                    reason="a DataViewCtrl is the list only on macOS (a ListCtrl's events are above)")
+
+
+@needs_dataview
+def test_moving_through_the_dataview_list_updates_the_button_and_description(make_view):
+    view = make_view()
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)  # the player moves to Bravo
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_SELECTION_CHANGED, 1)
+    assert view.action_btn.GetLabel() == "Install Bravo" and view.description.GetValue().startswith("About Bravo.")
+    assert saved(view)["last_selected"] == "bravo"
+
+
+@needs_dataview
+def test_a_double_click_on_a_dataview_row_acts_on_it(make_view):
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1, column=0)  # a double-click has a column
+    wx.GetApp().ProcessPendingEvents()
+    assert acted == ["Bravo"]
+
+
+@needs_dataview
+def test_return_on_a_dataview_row_acts_once_and_once_while_held(make_view):
+    """The macOS DataViewCtrl sends its activation for Return before the key-down (seen in a real run): Return
+    acts once, through on_list_key, and a held Return's repeats act on nothing"""
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    for repeat in (False, True, True):
+        assert return_on_dataview(view, 1, repeat=repeat)
+        wx.GetApp().ProcessPendingEvents()
+    assert acted == ["Bravo"]
+
+
+@needs_dataview
+def test_an_activation_whose_return_an_accelerator_took_does_nothing(make_view):
+    """Cmd+Return is Open Folder (an accelerator, Ctrl in wx): it takes the key before any key-down, so the
+    keyboard activation that came first must not act on its own"""
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1)  # no column, and no key-down follows
+    wx.GetApp().ProcessPendingEvents()
+    assert acted == []
+
+
+@needs_dataview
+def test_return_whose_action_takes_long_acts_once(make_view):
+    """An action that holds the UI thread (a dialog, a slow start) must not let Return act a second time"""
+    import time
+    acted = []
+    view = make_view(on_action=lambda: (acted.append(view.selected_row().title), time.sleep(0.7)))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    return_on_dataview(view, 1)
+    wx.GetApp().ProcessPendingEvents()
+    assert acted == ["Bravo"]
+
+
+@needs_dataview
+def test_a_right_click_on_a_dataview_row_selects_it_and_shows_its_menu(make_view):
+    """A ListCtrl selects the row a right-click is on; nothing on macOS does, and the menu (Uninstall, Delete) was
+    the other, selected game's"""
+    asked = []
+    view = make_view(context_menu=lambda row: asked.append(row.title))  # None: no menu to show
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(0)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_CONTEXT_MENU, 1)
+    assert asked == ["Bravo"] and selected(view) == 1 and view.action_btn.GetLabel() == "Install Bravo"
+    assert saved(view)["last_selected"] == "bravo"
+
+
+@needs_dataview
+def test_a_dataview_context_menu_without_a_row_is_the_selected_rows(make_view):
+    """Where the event names no row (as a key's), the selected row's menu"""
+    asked = []
+    view = make_view(context_menu=lambda row: asked.append(row.title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_CONTEXT_MENU)
+    assert asked == ["Bravo"] and selected(view) == 1
+
+
+@needs_dataview
+def test_a_dataview_header_click_sorts_by_that_column(make_view):
+    view = make_view()
+    view.set_rows(rows(ANT, BEE, CAT))
+    click_header(view, 1)
+    assert titles(view) == ["Cat", "Bee", "Ant"] and saved(view)["sort_column"] == 1

@@ -9,7 +9,7 @@ from urllib.parse import urlsplit
 
 import pytest
 
-from engine.entries import current_platform, is_readable, visible_games
+from engine.entries import is_readable, visible_games
 from engine.errors import DownloadError
 from engine.extract import Extractor
 from engine.index import SUPPORTED_SCHEMA_VERSION, CatalogIndex
@@ -52,7 +52,8 @@ def test_index_loads_and_every_entry_is_readable(tmp_path):
     assert {"test-game", "test-game-no-path", "test-game-extras", "test-extra", "test-shared-extra",
             "test-game-tar", "test-game-page", "test-game-hta"} <= set(state.entries)
     assert all(is_readable(e) for e in state.entries.values())
-    visible = {e["id"] for e in visible_games(state.entries, current_platform())}
+    # The test catalog's games are Windows games (every source says so), whatever system runs this
+    visible = {e["id"] for e in visible_games(state.entries, "windows")}
     assert {"test-game", "test-game-no-path", "test-game-extras", "trace-test"} <= visible
     assert {"test-game-tar", "test-game-page", "test-game-hta"} <= visible
     assert not {"test-extra", "test-shared-extra"} & visible  # an extra is not a game

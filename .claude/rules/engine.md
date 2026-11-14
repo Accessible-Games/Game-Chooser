@@ -51,6 +51,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   name wins; hash-checked from a trusted folder or the private staging copy; recorded with owner `runtime:<id>`,
   ids in the record's `runtime_copies`), so a game that loads a runtime DLL by name finds it; **steps.py**,
   **registry.py**, **elevation.py** - catalog steps and the one program that runs elevated.
+  A copy or move step whose source and target are one path, or one inside the other, is refused before
+  anything changes (`steps._overlaps`), case ignored on every system: on a Mac's usual disk, as on Windows,
+  "A" and "a" are one file.
 - **Extras**: an extra's `extends` is a list of one or more game ids (there is no `install_into`), and the index
   lists it in the `extras` ({id, required}) of each of those games, so one extra id can be in several games'
   `extras`. The app never reads `extends`: `entries.extras_of` and the install plan go by the game's own `extras`.

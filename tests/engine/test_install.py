@@ -423,7 +423,8 @@ def test_disk_full_during_download_says_so_and_tries_no_other_source(tmp_path):
                      "C:/Games/Entombed/a.wav", 32), messages.FILE_LOCKED),
     (FileNotFoundError(2, "The system cannot find the file specified", "C:/Games/Entombed/a.wav"), messages.FILE_VANISHED),
     (OSError(errno.ENOSPC, "No space left on device"), messages.DISK_FULL),
-    (OSError(0, "The disk is full", "C:/x", 112), messages.DISK_FULL),
+    # Windows' own number (OSError takes it only on Windows; elsewhere a full disk is ENOSPC, above)
+    pytest.param(OSError(0, "The disk is full", "C:/x", 112), messages.DISK_FULL, marks=pytest.mark.windows),
 ])
 def test_file_errors_escaping_a_job_get_plain_words(tmp_path, monkeypatch, error, text):
     routes = {}

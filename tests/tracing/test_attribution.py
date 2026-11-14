@@ -1,3 +1,5 @@
+import pytest
+
 from tracing.attribution import ROOT_SLACK, find_root, parent_of, session_tree
 from tracing.clock import TICKS_PER_SECOND
 from tracing.model import ProcInfo, SessionInfo
@@ -70,6 +72,7 @@ def test_find_root_none_when_absent():
 
 # ---- a launch that gave no process ID: the root is found by exe ------------------------------------------
 
+@pytest.mark.windows
 def test_find_root_by_exe_when_the_pid_is_unknown():
     exe = r"C:\Games\X\Game.exe"
     root = p(500, 1, 10 * S + S // 2, image=r"c:/games/x/GAME.EXE")

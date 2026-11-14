@@ -59,7 +59,9 @@ def _remove(path: Path) -> None:
 
 
 def _overlaps(a: Path, b: Path) -> bool:
-    a, b = (PurePath(os.path.normcase(p.resolve())) for p in (a, b))
+    """Case ignored everywhere: on a Mac's usual disk, as on Windows, "A" and "a" are one file, and normcase
+    lowers case only on Windows. On a disk that tells them apart this refuses a step it could have run."""
+    a, b = (PurePath(os.path.normcase(p.resolve()).lower()) for p in (a, b))
     return a == b or a in b.parents or b in a.parents
 
 

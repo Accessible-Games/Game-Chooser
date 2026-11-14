@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from engine.errors import ElevationDeclined
 from tracing import messages
 from tracing.client import TraceClient
@@ -151,6 +153,7 @@ def test_recorder_leaving_capturing_is_off(tmp_path):
         assert state.phase == "off" and state.reason == messages.RECORDER_GONE
 
 
+@pytest.mark.windows
 def test_launch_without_a_pid_is_recorded_with_root_pid_0(tmp_path):
     asked = []
     procs = [LiveProc(30, 4, 5, r"C:\g\a.exe")]
