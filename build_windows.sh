@@ -51,6 +51,10 @@ ship_tools() {
         echo "Build folder $dist not found."
         return 1
     fi
+    if [ ! -f "$dist/game-chooser.exe" ]; then
+        echo "$dist/game-chooser.exe not found."
+        return 1
+    fi
     rm -rf "$dist/bin"
     mkdir -p "$dist/bin/licenses"
     for tool in "${TOOLS[@]}"; do

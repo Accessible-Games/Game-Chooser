@@ -40,16 +40,9 @@ jobs:
       - name: Test
         run: uv run pytest -q
 
+      # Fails when the exe, a bundled tool, a license text, THIRD_PARTY.md or LICENSE.txt is missing from the build.
       - name: Build
         run: bash build_windows.sh
-
-      - name: Check the built folder
-        run: |
-          dist=build/game-chooser.dist
-          for f in game-chooser.exe bin/7z.exe bin/7z.dll bin/innoextract.exe THIRD_PARTY.md LICENSE.txt; do
-            [ -f "$dist/$f" ] || { echo "::error::$dist/$f is missing"; exit 1; }
-          done
-          [ -n "$(ls -A "$dist/bin/licenses")" ] || { echo "::error::$dist/bin/licenses is missing or empty"; exit 1; }
 
       # A windowless build with a missing module exits without a word, and a missing DLL leaves a "System Error" box
       # (titled after game-chooser.exe) open, so after 15 seconds the app must be running with its own main window,
