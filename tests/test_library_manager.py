@@ -164,13 +164,14 @@ def test_truncated_config_json_is_copied_and_the_app_keeps_working(isolated_mana
     assert isolated_manager_factory().config["libraries"] == [lib]
 
 
-def test_wrong_shape_config_is_treated_as_damaged(isolated_manager_factory):
+@pytest.mark.parametrize("text", ['{"libraries": ["D:/Games"]}', '{"libraries": [{"path": "D:/Games"}]}'])
+def test_wrong_shape_config_is_treated_as_damaged(isolated_manager_factory, text):
     config = isolated_manager_factory.config_dir / "config.json"
     config.parent.mkdir(parents=True, exist_ok=True)
-    config.write_text('{"libraries": ["D:/Games"]}', encoding="utf-8")  # valid JSON, a library that isn't an object
+    config.write_text(text, encoding="utf-8")  # valid JSON, a library that isn't an object or has no id
     m = isolated_manager_factory()
     assert m.config["libraries"] == []
-    assert config.with_name("config.json.bad").read_text(encoding="utf-8") == '{"libraries": ["D:/Games"]}'
+    assert config.with_name("config.json.bad").read_text(encoding="utf-8") == text
 
 
 @pytest.mark.parametrize("text", ['[["Hand added"]]', '["Hand added"]'])  # valid JSON, a row that isn't an object
