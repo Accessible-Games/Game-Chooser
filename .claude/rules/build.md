@@ -11,10 +11,16 @@ paths:
 ```bash
 ./build_windows.sh
 ```
-Needs Nuitka (pinned, run as `python -m nuitka` through `uv`) and a C compiler. It fetches the extraction tools into
-`bin/` when missing, builds a standalone folder `build/game-chooser.dist/` (`--include-package=engine`), then ships
-`bin/` (with `bin/licenses/`), `THIRD_PARTY.md` and `LICENSE.txt` next to the exe. `./build_windows.sh --ship-only DIST` only ships the
-tools into an existing build folder. Distribute the whole `game-chooser.dist` folder.
+Needs Nuitka (pinned, run as `python -m nuitka` through `uv`), a C compiler and uv's own Python. It fetches the
+extraction tools into `bin/` when missing, builds a standalone folder `build/game-chooser.dist/`
+(`--include-package=engine`), then ships `bin/` (with `bin/licenses/`), `THIRD_PARTY.md` and `LICENSE.txt` next to
+the exe, and `licenses/` (`scripts/collect_licenses.py`: the license texts of what is built into the app, from
+Python's `LICENSE.txt`, the installed packages' dist-info and pywin32's `win32/License.txt`; the texts for OpenSSL,
+libffi, expat, mpdecimal and liblzma come from the python-build-standalone release named in uv's Python's `BUILD`
+file, since that Python carries none). It fails when the exe, a tool, a license text, `THIRD_PARTY.md` or
+`LICENSE.txt` is missing. `THIRD_PARTY.md` lists each bundled component and where its text is in the shipped folder;
+a new component needs an entry there and in `collect_licenses.py`. `./build_windows.sh --ship-only DIST` only ships
+the tools and license texts into an existing build folder. Distribute the whole `game-chooser.dist` folder.
 
 The normal build leaves out `tracing/` and `procmon_parser` (`--nofollow-import-to`), and afterwards runs
 `scripts/check_no_tracing.py build/compilation-report.xml build/game-chooser.dist`, which fails the build if any
@@ -27,17 +33,18 @@ distributed.
 ## Release workflow
 `.github/workflows/release.yml` (Windows x64 only, on `windows-latest`) runs when a tag starting with `v` is pushed:
 `uv sync --locked`, `scripts/fetch_tools.py` (before the tests, or the `tools` tests skip), `pytest`, the normal
-build, a check that the exe, the tools, `bin/licenses/`, `THIRD_PARTY.md` and `LICENSE.txt` are in the built folder,
-and a smoke start (a copy of the build, with `APPDATA` pointed at an empty folder, must still be running after 15
-seconds). It then zips the folder as `GameChooser-<tag>-windows-x64.zip` (one top-level `GameChooser` folder) with a
-`SHA256SUMS.txt`, and publishes both as a GitHub release with generated notes. Running it by hand
-(`workflow_dispatch`) is a dry run: no release, the zip (named with the short commit hash) is kept as a workflow
-artifact.
+build (which checks the shipped files itself), and a smoke start: a copy of the build, with `APPDATA` pointed at an
+empty folder, must still be running after 15 seconds with a main window titled `Game Chooser (`... (a missing DLL
+leaves Windows' error box, titled after `game-chooser.exe`, which keeps the process alive). It then zips the folder
+as `GameChooser-<tag>-windows-x64.zip` (one top-level `GameChooser` folder) with a `SHA256SUMS.txt`, and publishes
+both as a GitHub release with generated notes. Running it by hand (`workflow_dispatch`) is a dry run: no release, the
+zip (named with the short commit hash) is kept as a workflow artifact.
 
 ## Scripts, tools and dependencies
-- **scripts/** - `check_no_tracing.py`, `fetch_procmon.py`, `fetch_tools.py`, `serve_test_catalog.py`;
-  **bin/** - bundled tools (git-ignored). `smart_list` (pinned in `[tool.uv.sources]`)
-  and its dependency `resource_finder` are uv git dependencies, not on PyPI
+- **scripts/** - `check_no_tracing.py`, `collect_licenses.py`, `fetch_procmon.py`, `fetch_tools.py`,
+  `serve_test_catalog.py`; **bin/** - bundled tools (git-ignored; `fetch_tools.py` takes each from an address with
+  its version in it, since a fixed SHA256 breaks when an unversioned file is replaced). `smart_list` (pinned in
+  `[tool.uv.sources]`) and its dependency `resource_finder` are uv git dependencies, not on PyPI
 
 ## License
 GNU GPLv3 - see LICENSE.txt
