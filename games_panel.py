@@ -23,7 +23,6 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
 """
 
 import random
-import time
 
 import wx
 from wx import dataview
@@ -41,8 +40,6 @@ from progress_area import ProgressArea
 ENDS_TYPED_TEXT = frozenset(getattr(wx, f"WXK_{prefix}{name}") for prefix in ("", "NUMPAD_")
                             for name in ("UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN")
                             ) | {wx.WXK_ESCAPE, wx.WXK_BACK, wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER}
-# On macOS a DataViewCtrl activation this soon after a Return key-down is that Return's (_act_unless_return)
-RETURN_ACTIVATION_SECONDS = 0.5
 
 
 class GamesPanel(wx.Panel):
@@ -83,7 +80,6 @@ class GamesPanel(wx.Panel):
         self.displayed = []  # the rows in the list now (filtered and sorted)
         self._tree_nodes = None  # what the tree shows: (key, label, values) per category; None until first built
         self._populating = False
-        self._return_pressed = float("-inf")  # time.monotonic() of the last Return key-down
         self.restoring_tree = False
         self.type_ahead = TypeAhead()  # the text being typed into the list to jump to a title
         # Read here, not by the main window later: the list is filled before the rest of the saved state loads
@@ -505,14 +501,12 @@ class GamesPanel(wx.Panel):
 
     def _on_dataview_activated(self, event):
         """A DataViewCtrl (macOS) sends its activation for Return too, before the key-down, which follows only if
-        the activation is passed on; acting here, a held Return acted on every repeat. So it is passed on, Return
-        acts in on_list_key (once while held), and the activation acts, once both are in, only when no Return
-        came with it: a double-click."""
-        event.Skip()
-        wx.CallAfter(self._act_unless_return)
-
-    def _act_unless_return(self):
-        if self and time.monotonic() - self._return_pressed > RETURN_ACTIVATION_SECONDS:
+        the activation is passed on. wx builds that one with no column (GetColumn() is -1) and a double-click's
+        with the clicked column. Return's goes on, to the accelerators (Cmd+Return is Open Folder) and to
+        on_list_key, which acts once while it is held; a double-click acts."""
+        if event.GetColumn() < 0:
+            event.Skip()
+        else:
             self.on_action()
 
     def select_row(self, row):
@@ -552,8 +546,6 @@ class GamesPanel(wx.Panel):
 
     def on_list_key(self, event):
         key = event.GetKeyCode()
-        if key in (wx.WXK_RETURN, wx.WXK_NUMPAD_ENTER):
-            self._return_pressed = time.monotonic()  # for _act_unless_return
         plain = not event.HasAnyModifiers()
         # Any Space but Alt+Space (the window menu) is a plain one: Ctrl+Space reaching the list control clears
         # the selection, and the button still names the game

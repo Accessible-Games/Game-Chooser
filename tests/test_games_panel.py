@@ -213,14 +213,22 @@ def press_escape_in_tree(view):
 
 def dataview_event(view, kind, row=None, column=None):
     """Send the list the event a DataViewCtrl (the list on macOS) sends on its own, for a row and column as the
-    list shows them"""
+    list shows them; True when a handler took it (did not pass it on)"""
     from wx import dataview
     item = view.list.control.wx_model.GetItem(row) if row is not None else dataview.DataViewItem()
     if column is None:
         event = dataview.DataViewEvent(kind, view.list_ctrl, item)
     else:
         event = dataview.DataViewEvent(kind, view.list_ctrl, view.list_ctrl.GetColumn(column), item)
-    view.list_ctrl.GetEventHandler().ProcessEvent(event)
+    return view.list_ctrl.GetEventHandler().ProcessEvent(event)
+
+
+def return_on_dataview(view, row, repeat=False, **modifiers):
+    """What the macOS DataViewCtrl does with Return (wxWidgets' dataview.mm, seen in a real run): an activation
+    with no column first, and the key-down only when that was passed on. True when the key-down was taken."""
+    if dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, row):
+        return True
+    return press(view.list_ctrl, wx.WXK_RETURN, repeat=repeat, **modifiers)
 
 
 def click_header(view, column):
@@ -1083,7 +1091,7 @@ def test_a_double_click_on_a_dataview_row_acts_on_it(make_view):
     view = make_view(on_action=lambda: acted.append(view.selected_row().title))
     view.set_rows(rows(ALPHA, BRAVO))
     view.list.control.Select(1)
-    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1)  # a double-click: no key with it
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1, column=0)  # a double-click has a column
     wx.GetApp().ProcessPendingEvents()
     assert acted == ["Bravo"]
 
@@ -1097,9 +1105,34 @@ def test_return_on_a_dataview_row_acts_once_and_once_while_held(make_view):
     view.set_rows(rows(ALPHA, BRAVO))
     view.list.control.Select(1)
     for repeat in (False, True, True):
-        dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1)
-        press(view.list_ctrl, wx.WXK_RETURN, repeat=repeat)
+        assert return_on_dataview(view, 1, repeat=repeat)
         wx.GetApp().ProcessPendingEvents()
+    assert acted == ["Bravo"]
+
+
+@needs_dataview
+def test_an_activation_whose_return_an_accelerator_took_does_nothing(make_view):
+    """Cmd+Return is Open Folder (an accelerator, Ctrl in wx): it takes the key before any key-down, so the
+    keyboard activation that came first must not act on its own"""
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1)  # no column, and no key-down follows
+    wx.GetApp().ProcessPendingEvents()
+    assert acted == []
+
+
+@needs_dataview
+def test_return_whose_action_takes_long_acts_once(make_view):
+    """An action that holds the UI thread (a dialog, a slow start) must not let Return act a second time"""
+    import time
+    acted = []
+    view = make_view(on_action=lambda: (acted.append(view.selected_row().title), time.sleep(0.7)))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    return_on_dataview(view, 1)
+    wx.GetApp().ProcessPendingEvents()
     assert acted == ["Bravo"]
 
 
