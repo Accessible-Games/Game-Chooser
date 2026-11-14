@@ -19,30 +19,7 @@
 button with the install progress, and the description.
 
 UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: `build_rows` on the Catalog tab,
-`library_rows` on the Library tab). Its rules, which hold for both tabs:
-- After every refill or sort the action label and the description are set directly, never left to a selection
-  event: wx fires none when the selected row number stays the same and another game moves into it.
-- Every programmatic select also sets the list's focused item, so the arrow keys start from the selected game.
-- The selected game stays selected through every refill. A Library row is found again by its Game object (its
-  id, the launch path, can change or pass to another game), a Catalog row by its id (`catalog_view.pick_index`).
-- Every change to the games comes in through `set_rows`, which also brings the tree up to date: it is rebuilt
-  only when what it shows changed, and a rebuild keeps the player's tree selections, the open categories and
-  the tree's focused item.
-- `set_rows` and `refill` are background refreshes: they never scroll the list away from where the player
-  scrolled it, and when the selected game is no longer listed the selection keeps its row number. A filter the
-  player changes (`apply_filters`) brings the selected row into view and falls back to the first row instead.
-- A filter is applied first and saved second, and a save that fails is logged, never raised.
-- Typing in the list jumps to the next title that starts with what was typed (type-ahead), as the player's own
-  move. While a text is being typed, Space and the digit keys belong to it (Space for 3 seconds after the last
-  character, a digit for 1 second after the last key); otherwise Space is the action and a digit sorts. A
-  Space never moves the selection; with any modifier but Alt alone it is a plain Space, and only Alt+Space (the
-  window menu) goes on to the list control. A held Space or Enter acts once on the list; a dialog its first press
-  opens can still get the repeats. Escape, Backspace, Enter, a sort and the navigation keys end the text. Enter always acts.
-- The view moves focus on its own in one case only, to its list: the control that has focus is about to become
-  unusable (the action button as the list empties; the progress area as it hides). Never while a dialog is
-  open or the app is starting.
-What differs between the tabs is a setting of `GamesPanel` or lives in the tab's own code (what a row's action
-does, its context menu, the Catalog's status line).
+`library_rows` on the Library tab). Its rules are in .claude/rules/ui-main-window.md.
 """
 
 import random
