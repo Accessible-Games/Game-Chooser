@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Game Chooser - A desktop game library manager
 # Copyright (C) 2025 Alec Olson
 #
@@ -15,10 +14,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""
-Data models for Game Chooser application
-"""
-
 from dataclasses import dataclass, fields
 
 
@@ -28,7 +23,6 @@ def is_web_path(path: str) -> bool:
 
 @dataclass(eq=False)  # eq=False: a game equals only itself (rows find their game with `is`, lists remove by identity)
 class Game:
-    """Represents a game in the library"""
     title: str = ""
     genre: str = ""
     developer: str = ""

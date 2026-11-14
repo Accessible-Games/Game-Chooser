@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Game Chooser - A desktop game library manager
 # Copyright (C) 2025 Alec Olson
 #
@@ -14,10 +13,6 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-"""
-Game library management for Game Chooser application
-"""
 
 import json
 import logging
@@ -96,7 +91,6 @@ def _is_inside(path, parent):
 
 
 class GameLibraryManager:
-    """Handles all game library operations and data management"""
     
     def __init__(self):
         self.games = []
@@ -116,7 +110,6 @@ class GameLibraryManager:
         self.reconcile_catalog_records()
     
     def get_config_path(self):
-        """Get platform-specific config path"""
         system = platform.system()
         if system == "Windows":
             app_data = Path(os.environ.get('APPDATA', ''))
@@ -128,7 +121,6 @@ class GameLibraryManager:
         return config_dir / "config.json"
     
     def load_config(self):
-        """Load configuration from JSON file"""
         view = {"splitter_position": None, "sort_column": 0, "sort_ascending": True, "last_selected": None,
                 "last_search": "", "column_widths": None, "tree_selections": []}  # each tab's games view
         default_config = {
@@ -153,7 +145,6 @@ class GameLibraryManager:
             try:
                 with open(self.config_file, 'r', encoding="utf-8") as f:
                     loaded = json.load(f)
-                    # Merge with defaults to ensure all keys exist
                     for key, value in default_config.items():
                         loaded.setdefault(key, value)
                     for section in ("SavedState", "install"):
@@ -203,7 +194,6 @@ class GameLibraryManager:
         return value if item is None else [v for v in value if isinstance(v, item)]
 
     def load_games(self):
-        """Load games from JSON file"""
         self.games_load_failed = False
         if self.games_file.exists():
             try:
@@ -243,7 +233,6 @@ class GameLibraryManager:
         self._uncopied_damage.discard(path)
 
     def catalog_game(self, catalog_id):
-        """The game installed from this catalog entry, or None"""
         return next((game for game in self.games if game.catalog_id == catalog_id), None)
 
     def add_catalog_game(self, fields):
@@ -324,7 +313,6 @@ class GameLibraryManager:
         return CatalogIndex(self.config_dir / "catalog", url, fetcher=None).load_cached().entries
 
     def library_by_id(self, library_id):
-        """The library with this id, or None"""
         return next((lib for lib in self.config["libraries"] if lib["id"] == library_id), None)
 
     def library_reachable(self, library_id):

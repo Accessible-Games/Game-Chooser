@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 # Game Chooser - A desktop game library manager
 # Copyright (C) 2025 Alec Olson
 #
