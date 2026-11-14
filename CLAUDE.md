@@ -21,7 +21,7 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 
 ### Testing Strategy
 - Logic lives in wx-free modules so it is unit-tested: `catalog_view.py`, `install_choices.py`, `install_prefs.py`,
-  `library_actions.py`, `install_service.py`, `library_manager.py`, `language_names.py`, `engine/`.
+  `library_actions.py`, `install_service.py`, `library_manager.py`, `engine/`.
   `wx_bridge.py` takes injectable `post` functions so its threading is tested without a running wx app (the test
   skips when wxPython is not installed).
 - Of the UI files, `dialogs.py`, `install_dialogs.py`, `progress_area.py` and `description_field.py` are not
@@ -35,8 +35,8 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
 - Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, catalog
-  panel, games panel, main window, install choices, install prefs, install service, language names, library
-  actions, library integration, library manager, validation service, wx bridge, catalog fixtures).
+  panel, games panel, main window, install choices, install prefs, install service, library actions,
+  library integration, library manager, validation service, wx bridge, catalog fixtures).
 - `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
   except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
   build check) cover the tracing build.
@@ -52,7 +52,7 @@ duplicate check, the install queue's worker and notifier.
 **`InstallService` threading rule.** Three members change no games, records or libraries, and the code runs them
 on worker threads: `fetch_index()` (it also saves the fetched index in the cache folder), `statuses()` and
 `player_files()` (both only read). Everything that mutates games, records or libraries runs on the **UI thread
-only**: `take_index`, `load_cached_index`, `refresh_index`, `adopt_launch_paths`, `apply_result`, `job_failed`,
+only**: `take_index`, `load_cached_index`, `adopt_launch_paths`, `apply_result`, `job_failed`,
 `submit`, `forget`, `remove_library`, and so on. Pattern: fetch on a worker, then `take_index` on the UI thread.
 What starts each worker: `MainFrame.start_index_fetch` and `MainFrame.refresh_statuses` each start their own
 daemon thread, and the player-file counts and `GameDialog`'s duplicate check go through
