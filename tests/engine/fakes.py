@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from engine.errors import Cancelled, DownloadError, InstallFailed
+from engine.errors import Cancelled, DownloadError, DownloadGone, InstallFailed
 from engine.extract import content_root, extract_tar
 from engine.http import check_url_allowed
 
@@ -52,25 +52,31 @@ def fails(call, *args, **kwargs) -> InstallFailed:
 
 
 class FakeFetcher:
-    """Serves canned bytes by URL; counts calls per URL."""
+    """Serves canned bytes by URL; counts calls per URL. A URL with no route is unreachable (maybe only for now);
+    one in `gone` answers that the file doesn't exist (HTTP 404 or 410)."""
 
     def __init__(self, routes: dict[str, bytes] | None = None):
         self.routes: dict[str, bytes] = dict(routes or {})
+        self.gone: set[str] = set()
         self.calls: dict[str, int] = {}
         self.requests: list[str] = []
 
+    def _check(self, url: str) -> None:
+        if url in self.gone:
+            raise DownloadGone(f"404 Not Found: {url}")
+        if url not in self.routes:
+            raise DownloadError(f"Unreachable: {url}")
+
     def get_bytes(self, url: str, max_bytes: int = 64 * 2**20) -> bytes:
         self.calls[url] = self.calls.get(url, 0) + 1
-        if url not in self.routes:
-            raise DownloadError(f"404 Not Found: {url}")
+        self._check(url)
         return self.routes[url]
 
     def download(self, url: str, dest: Path, progress=None, cancel=None) -> None:
         """Like Fetcher.download: blocked hosts refused, bytes written, progress called, cancel honored."""
         check_url_allowed(url)
         self.requests.append(url)
-        if url not in self.routes:
-            raise DownloadError(f"404 Not Found: {url}")
+        self._check(url)
         data = self.routes[url]
         half = len(data) // 2
         dest.write_bytes(data[:half])

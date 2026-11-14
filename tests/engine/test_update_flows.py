@@ -10,11 +10,14 @@ import shutil
 from dataclasses import asdict
 from pathlib import Path
 
+import pytest
+
 import engine.safety
 from engine import messages
 from engine.entries import mirror_url_for
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord, RecordedFile
+from library_actions import undo_item
 from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, fails, make_engine, never, put, quiet, reg_step,
                                 served_source, sha, snapshot, zip_bytes)
 
@@ -665,6 +668,70 @@ def test_repair_when_the_games_download_changed_and_the_mirror_is_unreachable(tm
     eng.ctx.fetcher.routes[DEV_URL] = zip_bytes(V2)       # changed; the mirror never had it
     (game / "pawprints.exe").unlink()
     assert fails(run, eng, "repair").message == messages.REPAIR_FILE_CHANGED.format(title="Pawprints")
+
+
+def test_repair_whose_download_is_gone_says_so(tmp_path):
+    eng, game = install_v1(tmp_path)
+    eng.ctx.fetcher.gone.add(record(eng).source.url)      # HTTP 404: the mirror no longer has it
+    (game / "pawprints.exe").unlink()
+    before = snapshot(game)
+    assert fails(run, eng, "repair").message == messages.REPAIR_FILE_GONE.format(title="Pawprints")
+    assert snapshot(game) == before
+
+
+def test_update_whose_download_is_gone_says_so(tmp_path):
+    eng, game = install_v1(tmp_path)
+    eng.ctx.fetcher.gone.add(publish(eng, V2)["sources"][0]["url"])
+    before = snapshot(game)
+    error = fails(run, eng, "update")
+    assert error.message == messages.NO_SOURCE.format(title="Pawprints", reasons=messages.SOURCE_GONE)
+    assert snapshot(game) == before
+
+
+def test_undo_stays_offered_while_one_address_may_come_back(tmp_path):
+    eng, game = install_v1(tmp_path, url=DEV_URL)
+    v1_mirror = mirror_url_for(record(eng).source.sha256, "pawprints.zip")
+    publish(eng, V2)
+    run(eng, "update")
+    eng.ctx.fetcher.gone.add(DEV_URL)                     # the developer took v1 down; the mirror can't be reached
+    assert fails(run, eng, "undo").message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
+    assert undo_item(record(eng)).enabled
+    eng.ctx.fetcher.gone.add(v1_mirror)                   # and the mirror doesn't have it either
+    assert fails(run, eng, "undo").message.startswith(
+        "The previous version of Pawprints is no longer available to download, so the update can't be undone.")
+    assert not undo_item(record(eng)).enabled
+
+
+def test_undo_without_the_previous_versions_unpack_details_says_so(tmp_path):
+    eng, game = install_v1(tmp_path)
+    publish(eng, V2)
+    run(eng, "update")
+    rec = record(eng)
+    rec.previous = {**rec.previous, "source": {**rec.previous["source"], "install": None}}  # as before specs were kept
+    eng.ctx.records.save(rec)
+    before = snapshot(game)
+    assert fails(run, eng, "undo").message == (
+        "Game Chooser doesn't have the details it needs to rebuild the previous version of Pawprints, so the update "
+        "can't be undone. Pawprints is still installed, unchanged, on the current version. Your copies of the files "
+        f"the update replaced are still in {BK}, in Pawprints's folder.")
+    item = undo_item(record(eng))
+    assert not item.enabled and item.label == ("Undo last update (not available: Game Chooser doesn't have the details "
+                                               "it needs to rebuild the previous version of Pawprints)")
+    assert snapshot(game) == before
+
+
+@pytest.mark.parametrize("served, why", [("gone", "is no longer available to download"),
+                                         (b"a different file", "has changed since then")], ids=["gone", "changed"])
+def test_adding_extras_when_an_installed_download_is_gone_or_changed_says_so(tmp_path, served, why):
+    eng, game = install_v1(tmp_path, optional=())  # 1.0 is the catalog's version: no update is offered
+    url = record(eng).source.url
+    if served == "gone":
+        eng.ctx.fetcher.gone.add(url)
+    else:
+        eng.ctx.fetcher.routes[url] = served
+    error = fails(run, eng, "extras", extras=("pawprints-voices",))
+    assert error.message == (f"A file Pawprints was installed from {why}, so extras can't be added to it now. "
+                             "If an update is offered, update Pawprints first.")
 
 
 def test_adding_extras_offline_says_try_again_later(tmp_path):

@@ -22,17 +22,23 @@ class DownloadError(EngineError):
     pass
 
 
+class DownloadGone(DownloadError):
+    """The server answered that the file doesn't exist (HTTP 404 or 410): trying again won't help."""
+
+
 class NoVerifiedSource(EngineError):
     """No source gave a file that verified.
 
     `downloaded` is True when at least one file did download but didn't match; False means every
-    attempt failed to download at all (unreachable or blocked), which may only be for now.
+    attempt failed to download at all (unreachable, blocked or gone). `gone` is True when at least one
+    address answered that the file doesn't exist and none failed in a way that may only be for now.
     """
 
-    def __init__(self, reasons: list[str], downloaded: bool = False):
+    def __init__(self, reasons: list[str], downloaded: bool = False, gone: bool = False):
         super().__init__("; ".join(reasons))
         self.reasons = reasons
         self.downloaded = downloaded
+        self.gone = gone
 
 
 class ExtractError(EngineError):

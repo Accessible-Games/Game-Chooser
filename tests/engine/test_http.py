@@ -1,6 +1,6 @@
 import pytest
 
-from engine.errors import BlockedHost, Cancelled, DownloadError
+from engine.errors import BlockedHost, Cancelled, DownloadError, DownloadGone
 from engine.http import Fetcher, check_url_allowed
 
 
@@ -77,6 +77,15 @@ def test_http_error_is_download_error(http_server, tmp_path):
     with pytest.raises(DownloadError):
         Fetcher().download(http_server.url("/404"), tmp_path / "a")
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("status, gone", [(404, True), (410, True), (503, False)])
+def test_only_a_missing_file_is_gone(http_server, tmp_path, status, gone):
+    """404 and 410 say the file doesn't exist; a server error may pass."""
+    http_server.routes["/x"] = (status, {}, b"")
+    with pytest.raises(DownloadError) as ei:
+        Fetcher().download(http_server.url("/x"), tmp_path / "a")
+    assert isinstance(ei.value, DownloadGone) is gone
 
 
 def test_unreachable_is_download_error(tmp_path):

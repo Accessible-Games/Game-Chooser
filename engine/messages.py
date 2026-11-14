@@ -14,6 +14,10 @@ REPAIR_EXTRA_CHANGED = ("The download for {extra} has changed since it was added
                         "restore it. Use Update instead.")
 DOWNLOAD_UNREACHABLE = "{title}'s download couldn't be reached right now. Check your connection and try again later."
 UNDO_UNAVAILABLE = "The previous version of {title} is no longer available to download."
+UNDO_NO_DETAILS = "Game Chooser doesn't have the details it needs to rebuild the previous version of {title}."
+UNDO_NOT_POSSIBLE = "{reason}, so the update can't be undone. {title} is still installed, unchanged, on the current version."
+UNDO_BACKUPS_WHERE = "Your copies of the files the update replaced are still in {folders}, in {title}'s folder."
+REPAIR_FILE_GONE = "A file {title} was installed from is no longer available to download, so Repair can't restore it."
 ELEVATION_DECLINED = "Administrator permission was declined, so {what} wasn't installed."
 NO_SOURCE = "{title} couldn't be downloaded. {reasons}"
 INSTALLED = "{title} is installed"
@@ -148,6 +152,7 @@ CATALOG_BAD_DOWNLOAD = "The catalog download was damaged. Showing the last saved
 CATALOG_BAD_DOWNLOAD_EMPTY = "The catalog download was damaged, and no saved copy is available."
 
 SOURCE_UNREACHABLE = "A download address couldn't be reached."
+SOURCE_GONE = "A download is no longer available at its address."
 SOURCE_CHECKSUM_MISMATCH = "A download didn't match the catalog's checksum."
 SOURCE_BLOCKED = "A download address is blocked."
 
@@ -181,6 +186,10 @@ INSTALL_NOT_CHANGEABLE = "Game Chooser can't change {title}, because of how it w
 GAME_FOLDER_MISSING = "{title}'s folder {path} wasn't found. If it was moved or deleted, install the game again."
 NOTHING_TO_UNDO = "{title} hasn't been updated, so there's nothing to undo."
 EXTRAS_NOT_AVAILABLE = "The extras you chose for {title} aren't in the catalog anymore."
+EXTRAS_FILE_GONE = ("A file {title} was installed from is no longer available to download, so extras can't be added "
+                    "to it now. If an update is offered, update {title} first.")
+EXTRAS_FILE_CHANGED = ("A file {title} was installed from has changed since then, so extras can't be added to it now. "
+                       "If an update is offered, update {title} first.")
 EXTRAS_NEED_UPDATE = "Game Chooser can't add extras to this copy of {title}. Update {title} first, then add them."
 REPAIR_NOT_POSSIBLE = ("Game Chooser no longer has the details it needs to rebuild {title}, so Repair can't "
                        "restore it. Use Update instead.")
