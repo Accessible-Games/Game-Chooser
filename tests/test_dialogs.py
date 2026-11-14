@@ -45,3 +45,9 @@ def test_choosing_web_game_keeps_a_typed_path(make_dialog):
     dlg.platform_ctrl.SetValue("Web Game")
     dlg._update_path_ui()
     assert dlg.path_ctrl.GetValue() == r"C:\Games\x.exe"
+
+
+@pytest.mark.parametrize("year, shown", [(1995, "1995"), (None, "")])
+def test_edit_game_opens_on_a_year_stored_as_a_number_or_null(make_dialog, year, shown):
+    """A hand-edited games.json may hold either"""
+    assert make_dialog(Game(title="Alpha", year=year)).year_ctrl.GetValue() == shown
