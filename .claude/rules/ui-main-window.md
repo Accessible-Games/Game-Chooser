@@ -72,6 +72,14 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   full layout gave it, which cut a longer label short.
 - Every programmatic select also sets the list's focused item (not on the macOS DataView control), so the arrow
   keys start from the selected game.
+- On macOS smart_list's list is a DataViewCtrl, which never sends `EVT_LIST_*`: the view binds
+  `EVT_DATAVIEW_SELECTION_CHANGED`, `ITEM_ACTIVATED`, `ITEM_CONTEXT_MENU` and `COLUMN_HEADER_CLICK` in their
+  place (one table where the list's events are bound). It sends its selection event for the view's own selects
+  too, and when a refill empties the list, so that one is ignored while the view refills
+  (`_on_dataview_selected`). smart_list's own `Bind` and `set_selected_index` are not used on it (`Bind` maps
+  activation to `EVT_MENU_OPEN`; `set_selected_index` calls `SelectRow`, which only a `DataViewListCtrl` has).
+  There the view shows no sort arrow, scrolls nothing into view and keeps no column widths
+  (`tests/test_games_panel.py` skips those tests on macOS, with the reason).
 - A list is refilled in three ways only: `set_rows` (the games changed), `refill()` (what the rows show changed:
   the Status column) and `apply_filters()` (the player changed the search, the tree, View > Libraries, View >
   Filter Tree or the sort order).
@@ -92,6 +100,9 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
 - `set_rows` also syncs the tree. It is rebuilt only when what it shows changed, and a rebuild keeps the
   player's tree selections, the open categories and the tree's focused item: the root, a category or a value
   (when the value is gone, its category).
+  On macOS wx's tree is the generic one, whose `SetFocusedItem` also selects: `_restore_tree` takes back a
+  selection that focusing added, so a background refresh never filters by the value that has the focus (after
+  Escape cleared the filters).
 - The remembered game (`last_selected`, a row id: what the next start selects) changes only when the player
   moves the selection, or when a background refresh leaves the selected row with another id: the game got a new
   launch path, or it left the list and another game is in its row.
