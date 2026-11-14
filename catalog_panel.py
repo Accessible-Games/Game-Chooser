@@ -116,12 +116,8 @@ class CatalogPanel(wx.Panel):
         self._checking = checking
         self._update_status()
 
-    def check_for_updates(self):
-        """F5 and Retry: fetch the index again (MainFrame runs the fetch on a worker thread)"""
-        self.frame.start_index_fetch()
-
     def on_retry(self, event):
-        self.check_for_updates()
+        self.frame.start_index_fetch()  # on a worker thread
         if self.status.IsShown():  # the Retry button is about to hide; a screen reader follows to the status
             self.status.SetFocus()
 

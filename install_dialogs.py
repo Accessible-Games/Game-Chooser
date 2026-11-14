@@ -33,7 +33,7 @@ class InstallConfirmDialog(wx.Dialog):
     """Confirm an install (or update, or adding extras), driven by the plan.
 
     The intro StaticText is the first child, so it comes first in the reading order; its size and "Includes"
-    text are read when the dialog opens. After ShowModal() == wx.ID_OK, get_choice() says what was chosen.
+    text are read when the dialog opens. After ShowModal() == wx.ID_OK, `choice` says what was chosen.
 
     `fixed_library` (Update and Extras) is the game's own library: it is shown, not offered as a choice. Why the
     game can't be installed where chosen is shown in a read-only "Install problem" field right after the choice,
@@ -45,7 +45,7 @@ class InstallConfirmDialog(wx.Dialog):
         self.plan = plan
         self.service = service
         self.fixed_library = fixed_library
-        self._choice = None
+        self.choice: InstallChoice | None = None
         self._entry_titles = {i: e.get("title", "") for i, e in service.entries.items()}
         self._extra_boxes = {}
         self._radio = None
@@ -216,11 +216,8 @@ class InstallConfirmDialog(wx.Dialog):
                 wx.MessageBox(str(e), messages.CONFIRM_LIBRARY_ERROR_TITLE, wx.OK | wx.ICON_WARNING, self)
                 self._folder.SetFocus()
                 return
-        self._choice = build_choice(self.plan, library, self._checked())
+        self.choice = build_choice(self.plan, library, self._checked())
         self.EndModal(wx.ID_OK)
-
-    def get_choice(self) -> InstallChoice | None:
-        return self._choice
 
 
 class _UninstallConfirm(wx.Dialog):

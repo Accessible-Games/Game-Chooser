@@ -176,7 +176,7 @@ class MainFrame(wx.Frame):
         system = platform.system()
         exit_shortcut = "Ctrl+Q" if system == "Darwin" else "Alt+F4"
         exit_item = file_menu.Append(wx.ID_EXIT, f"E&xit\t{exit_shortcut}")
-        self.Bind(wx.EVT_MENU, self.on_exit, exit_item)
+        self.Bind(wx.EVT_MENU, lambda event: self.Close(), exit_item)
         menu_bar.Append(file_menu, "&File")
 
         edit_menu = wx.Menu()
@@ -463,18 +463,16 @@ class MainFrame(wx.Frame):
         same job, whatever is selected."""
         return [view.progress_area for view in self.views.values()]
 
+    # The on_* handlers run through wx_bridge._call_if_alive, which drops them once the window is gone
+
     def on_job_started(self, job):
-        if self:
-            self._sync_progress()
+        self._sync_progress()
 
     def on_queue_changed(self, waiting):
-        if self:
-            self._sync_progress()
+        self._sync_progress()
 
     def on_job_progress(self, job, progress):
         """Progress only changes the areas' gauge and status, never focus or games, so it applies at once"""
-        if not self:
-            return
         self._sync_progress()
         if self.service.queue.current() is not job or job.id == self._cancelling_job_id:
             return  # a late report from a job that has ended, or one being cancelled (it says so)
@@ -492,8 +490,6 @@ class MainFrame(wx.Frame):
         self._job_ended("cancelled", job)
 
     def _job_ended(self, kind, job, detail=None):
-        if not self:
-            return
         if self._cancelling_job_id == job.id:
             self._cancelling_job_id = None
         self._sync_progress()
@@ -783,10 +779,8 @@ class MainFrame(wx.Frame):
 
     def on_launch(self, event):
         game = self.selected_game()
-        if not game:
-            return
-
-        self.launch_game(game)
+        if game:
+            self.launch_game(game)
 
     def on_random_game(self, event):
         """Ctrl+R: a random game from the active tab's list as shown (GamesPanel.random_game asks, selects its row
@@ -949,7 +943,7 @@ class MainFrame(wx.Frame):
         """The confirmation dialog for a plan (install, update or extras): the player's InstallChoice, or None
         when they cancelled"""
         with self.modal_dialog(), InstallConfirmDialog(self, plan, self.service, fixed_library=fixed_library) as dlg:
-            return dlg.get_choice() if dlg.ShowModal() == wx.ID_OK else None
+            return dlg.choice if dlg.ShowModal() == wx.ID_OK else None
 
     def _confirm_change(self, game, action):
         """Update or Extras: the confirmation dialog for that plan, with the game's library fixed"""
@@ -1090,14 +1084,10 @@ class MainFrame(wx.Frame):
         """F5: on the Catalog tab check for catalog updates; on Library rebuild the game list and tree and
         recheck each game's Status"""
         if self.active_tab() == "catalog":
-            self.catalog_panel.check_for_updates()
+            self.start_index_fetch()
             return
         self.games_changed()
 
-    def on_exit(self, event):
-        """Exit application"""
-        self.Close()
-    
     def update_title(self):
         count = len(self.library_manager.games)
         self.SetTitle(f"Game Chooser{self.title_note} ({count})")
@@ -1145,7 +1135,10 @@ class MainFrame(wx.Frame):
         """Handle window close. While a job runs, ask first; quitting cancels it and waits for it to stop."""
         queue = self.service.queue
         job = queue.current()
-        if job is not None and event.CanVeto() and not self.confirm_quit_while_busy(job.title, job.request.action):
+        # "<title> is still installing. Cancel it and quit?" (worded by the job's action), No by default
+        if job is not None and event.CanVeto() and not self._ask(
+                messages.quit_while_busy_text(job.request.action, job.title), messages.QUIT_WHILE_BUSY_TITLE,
+                wx.NO_DEFAULT | wx.ICON_QUESTION):
             event.Veto()
             return
         self._quitting = True
@@ -1175,9 +1168,4 @@ class MainFrame(wx.Frame):
         try:
             fn()
         except Exception:
-            log.exception("Couldn't %s while quitting", what)
-
-    def confirm_quit_while_busy(self, title, action="install"):
-        """"<title> is still installing. Cancel it and quit?" (worded by the job's action). True for Yes."""
-        return self._ask(messages.quit_while_busy_text(action, title), messages.QUIT_WHILE_BUSY_TITLE,
-                         wx.NO_DEFAULT | wx.ICON_QUESTION)
+            log.exception("Couldn't %s while quitting", what)

@@ -73,7 +73,7 @@ class ProgressArea(wx.Panel):
         sizer.Add(self.cancel_btn, 0, wx.ALIGN_CENTER_VERTICAL)
         self.SetSizer(sizer)
 
-        self.done_btn.Bind(wx.EVT_BUTTON, self._done_pressed)
+        self.done_btn.Bind(wx.EVT_BUTTON, lambda event: self._on_done and self._on_done())
         self.cancel_btn.Bind(wx.EVT_BUTTON, lambda event: self.on_cancel())
 
     # ---- the job ---------------------------------------------------------------------------------------------
@@ -125,11 +125,6 @@ class ProgressArea(wx.Panel):
             self.Layout()
             if moved:  # focus was already here; keep it in the area rather than lose it
                 self.cancel_btn.SetFocus()
-
-    def _done_pressed(self, event):
-        on_done = self._on_done
-        if on_done is not None:
-            on_done()
 
     def has_focus_inside(self) -> bool:
         focus = wx.Window.FindFocus()
