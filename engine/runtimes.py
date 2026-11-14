@@ -1208,7 +1208,8 @@ def copies_in_tree(ctx, entry: dict, tree: Path, exe: Path, copies: list[Private
 
     `installed` (the record and folder of the version being replaced) keeps, for a runtime there is nothing to
     copy from this time (no shared folder, or one that can't be trusted), the copies that version recorded,
-    where they are unchanged: a Repair or Update never removes a working copy because its source is gone.
+    where they are unchanged: a Repair or Update never removes a working copy because its source is gone. One
+    that can't be kept (the drive is full) gets the runtime's "not copied" note, even if others were kept.
 
     Returns the owners to record (norm_key in `tree` -> runtime_owner(id)), the notes, and the runtime ids (for
     the record's `runtime_copies`)."""
@@ -1220,7 +1221,11 @@ def copies_in_tree(ctx, entry: dict, tree: Path, exe: Path, copies: list[Private
         for source in sources:
             runtime_id = source.runtime["id"]
             if source.folder is None or runtime_id in notes:
-                if _keep_recorded(rec, game_dir, tree, runtime_id, placed) and source.folder is None:
+                kept, lost = _keep_recorded(rec, game_dir, tree, runtime_id, placed)
+                if lost:
+                    notes[runtime_id] = messages.RUNTIME_FILES_NOT_COPIED.format(
+                        title=title, component=title_of(source.runtime))
+                elif kept and source.folder is None:
                     notes.pop(runtime_id, None)
     owners = {norm_key(dest.relative_to(tree).as_posix()): runtime_owner(runtime_id)
               for dest, (runtime_id, _) in placed.items()}
@@ -1228,10 +1233,10 @@ def copies_in_tree(ctx, entry: dict, tree: Path, exe: Path, copies: list[Private
 
 
 def _keep_recorded(rec: InstallRecord, game_dir: Path, tree: Path, runtime_id: str,
-                   placed: dict[Path, tuple[str, str]]) -> bool:
+                   placed: dict[Path, tuple[str, str]]) -> tuple[bool, bool]:
     """Copy into `tree` the runtime's recorded copies that `game_dir` still holds unchanged, where `tree` has
-    nothing at that name. True if any was kept."""
-    kept = False
+    nothing at that name. Returns (any was kept, any couldn't be)."""
+    kept = lost = False
     for recorded in rec.files.values():
         if recorded.owner != runtime_owner(runtime_id):
             continue
@@ -1244,12 +1249,14 @@ def _keep_recorded(rec: InstallRecord, game_dir: Path, tree: Path, runtime_id: s
             _copy_new(path, dest)
             if hash_file(dest) != recorded.sha256:
                 _unlink_quietly(dest)
+                lost = True
                 continue
         except (UnsafePath, TypeError, ValueError, OSError):
+            lost = True
             continue
         placed[dest] = (runtime_id, recorded.sha256)
         kept = True
-    return kept
+    return kept, lost
 
 
 def copies_after_installer(ctx, entry: dict, rec: InstallRecord, game_dir: Path, copies: list[PrivateCopy],
