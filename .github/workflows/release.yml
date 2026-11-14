@@ -1,0 +1,90 @@
+# Builds, checks and publishes the Windows x64 release (the only platform with a build path, build_windows.sh).
+# A pushed tag starting with v publishes a GitHub release; a manual run is a dry run that stops before publishing
+# and leaves the zip as a workflow artifact.
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    env:
+      # uv's own Python, never one found on the machine: scripts/collect_licenses.py needs its BUILD file.
+      UV_PYTHON_PREFERENCE: only-managed
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          enable-cache: false
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      # Before the tests, or the tests marked tools skip.
+      - name: Fetch the extraction tools
+        run: uv run python scripts/fetch_tools.py
+
+      - name: Test
+        run: uv run pytest -q
+
+      # Fails when the exe, a bundled tool, a license text, THIRD_PARTY.md or LICENSE.txt is missing from the build.
+      - name: Build
+        run: bash build_windows.sh
+
+      # A windowless build with a missing module exits without a word, and a missing DLL leaves a "System Error" box
+      # (titled after game-chooser.exe) open, so after 15 seconds the app must be running with its own main window,
+      # whose title is "Game Chooser (<games>)". It runs from a copy, so nothing it writes beside the exe (games.json)
+      # gets into the zip.
+      - name: Smoke start
+        shell: pwsh
+        run: |
+          $app = Join-Path $env:RUNNER_TEMP 'GameChooser'
+          Copy-Item build\game-chooser.dist $app -Recurse
+          $env:APPDATA = Join-Path $env:RUNNER_TEMP 'smoke-appdata'
+          New-Item -ItemType Directory $env:APPDATA | Out-Null
+          $p = Start-Process (Join-Path $app 'game-chooser.exe') -PassThru
+          $null = $p.Handle
+          Start-Sleep -Seconds 15
+          $p.Refresh()
+          $exited = $p.HasExited
+          $title = $p.MainWindowTitle
+          if (-not $exited) { taskkill /PID $p.Id /T /F }
+          if ($exited) { throw "game-chooser.exe exited within 15 seconds (exit code $($p.ExitCode))" }
+          if ($title -cnotmatch '^Game Chooser \(') { throw "game-chooser.exe showed no Game Chooser window (main window title: '$title')" }
+
+      - name: Package
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then version="$GITHUB_REF_NAME"; else version="${GITHUB_SHA::7}"; fi
+          zip="GameChooser-$version-windows-x64.zip"
+          mkdir package
+          cp -r build/game-chooser.dist package/GameChooser
+          (cd package && ../bin/7z.exe a -tzip "../$zip" GameChooser)
+          sha256sum "$zip" > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          echo "ZIP=$zip" >> "$GITHUB_ENV"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ env.ZIP }}
+          archive: false
+          if-no-files-found: error
+          overwrite: true
+
+      - name: Publish the release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "$ZIP" SHA256SUMS.txt --verify-tag --generate-notes

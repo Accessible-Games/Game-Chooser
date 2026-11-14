@@ -16,10 +16,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BIN = ROOT / "bin"
 
-SEVEN_ZR_URL = "https://www.7-zip.org/a/7zr.exe"
-SEVEN_ZR_SHA256 = "256feca8e274e5da655e2a284fabafd9f554365eb164862089dacd4e8276d282"
-SEVEN_ZIP_URL = "https://www.7-zip.org/a/7z2409-x64.exe"
-SEVEN_ZIP_SHA256 = "bdd1a33de78618d16ee4ce148b849932c05d0015491c34887846d431d29f308e"
+SEVEN_ZR_URL = "https://github.com/ip7z/7zip/releases/download/26.06/7zr.exe"
+SEVEN_ZR_SHA256 = "e80db2dad715a6c5adabe292d31ed54e11f4e9b99ca349827b50573b175891bc"
+SEVEN_ZIP_URL = "https://github.com/ip7z/7zip/releases/download/26.06/7z2606-x64.exe"
+SEVEN_ZIP_SHA256 = "9b697f65ecc2d9b0152f5ee96d72dde522a7827690349d9307935dacf40f42ec"
 INNOEXTRACT_URL = "https://constexpr.org/innoextract/files/innoextract-1.9-windows.zip"
 INNOEXTRACT_SHA256 = "6989342c9b026a00a72a38f23b62a8e6a22cc5de69805cf47d68ac2fec993065"
 
