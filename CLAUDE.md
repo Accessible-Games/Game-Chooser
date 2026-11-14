@@ -40,7 +40,7 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   library integration, library manager, validation service, wx bridge, catalog fixtures).
 - `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
   except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
-  build check) cover the tracing build.
+  build check) cover the tracing build. `tests/test_collect_licenses.py` covers `scripts/collect_licenses.py`.
 - Mock minimal structures, test edge cases (empty/None, mixed states), keep logic out of the UI layer.
 
 ## Rules that hold everywhere
