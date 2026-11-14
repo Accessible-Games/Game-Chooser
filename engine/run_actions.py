@@ -26,70 +26,56 @@ from .sources import Fetched, hash_file
 def repair(engine, entry: dict, rec: InstallRecord, game_dir: Path, progress, cancel) -> "jobs.JobResult":
     """Run the recorded installer again over the game's folder, then put its recorded extras back.
     The record keeps its source and extras, and its undo point stays as it was: Repair isn't one."""
-    game_id, title = entry["id"], title_of(entry)
-    extra_sources = dict(rec.extras)
-    if extra_sources:  # applied by Game Chooser after the installer, so checked before it runs
-        engine._require_writable(rec, game_dir, title)
-    private = runtimes.private_runtimes(rec, entry, engine.ctx)
-    prior = jobs._snapshot(rec)
-    with engine._workspace(engine._staging_root(rec, game_dir), game_id) as (staging, work):
-        try:
-            fetched, unpacked, copies = _fetch_recorded(engine, entry, rec.source, extra_sources, private, staging,
-                                                        work, progress, cancel)
-        except (NoVerifiedSource, jobs._NoUnpackSpec) as e:
-            raise InstallFailed(jobs._repair_failure_text(e, game_id, title)) from e
-        record, notes = run_installer.update(engine.ctx, _run_item(engine, entry, fetched, rec.source), rec,
-                                             game_dir, progress, cancel, previous=KEEP_UNDO_POINT,
-                                             spare_steps=jobs._extra_steps(unpacked))
-        extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, prior, cancel,
-                                                              recorded=extra_sources)
-        private_notes = engine._private_after_installer(entry, record, copies)
-        copy_notes = engine._copies_after_installer(entry, record, copies, record.runtime_copies)
-    return jobs.JobResult("repair", game_id, title, jobs.game_fields_for(entry, record, engine.ctx.platform),
-                          [*notes, *extra_notes, *private_notes, *copy_notes],
-                          backups=backups)
+    return undo(engine, entry, rec, game_dir, rec.source, None, progress, cancel)
 
 
-def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: InstalledSource,
+def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: InstalledSource, previous: dict | None,
          progress, cancel) -> "jobs.JobResult":
     """Run the previous version's installer (`source`, from `rec.previous`) over the game's folder and
     put its extras back, then put back the player's copies the update moved aside, where the update's
-    file is untouched."""
+    file is untouched. With `previous` None this is Repair (see repair)."""
     ctx = engine.ctx
     game_id, title = entry["id"], title_of(entry)
-    previous = rec.previous
-    extra_sources = {k: jobs._source_from(v) for k, v in (previous.get("extras") or {}).items()}
+    if previous is None:
+        extra_sources, prior = dict(rec.extras), jobs._snapshot(rec)
+    else:
+        extra_sources = {k: jobs._source_from(v) for k, v in (previous.get("extras") or {}).items()}
+        prior = previous
     if extra_sources or rec.extras:  # changed by Game Chooser after the installer, so checked before it runs
         engine._require_writable(rec, game_dir, title)
-    private = runtimes.private_runtimes(rec, entry, ctx, previous.get("private_runtimes"))
+    private = runtimes.private_runtimes(rec, entry, ctx, (previous or {}).get("private_runtimes"))
     with engine._workspace(engine._staging_root(rec, game_dir), game_id) as (staging, work):
         try:
             fetched, unpacked, copies = _fetch_recorded(engine, entry, source, extra_sources, private, staging,
                                                         work, progress, cancel)
         except (NoVerifiedSource, jobs._NoUnpackSpec) as e:
+            if previous is None:
+                raise InstallFailed(jobs._repair_failure_text(e, game_id, title)) from e
             raise engine._undo_failed(e, rec, title) from e
         # Decided before anything changes: a backup goes back only over the file the update wrote.
-        untouched = jobs._untouched_backups(game_dir, previous.get("backups") or [])
+        untouched = jobs._untouched_backups(game_dir, (previous or {}).get("backups") or [])
         try:
             # The undo point stays until the backups are back, so a failed Undo can be tried again.
             record, notes = run_installer.update(ctx, _run_item(engine, entry, fetched, source), rec, game_dir,
                                                  progress, cancel, previous=KEEP_UNDO_POINT,
                                                  spare_steps=jobs._extra_steps(unpacked), undo_of=previous)
-            extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, previous,
+            extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, prior,
                                                                   cancel, recorded=extra_sources)
             extra_notes += engine._private_after_installer(entry, record, copies)
-            extra_notes += engine._copies_after_installer(entry, record, copies, jobs._previous_copies(previous, rec))
+            extra_notes += engine._copies_after_installer(entry, record, copies, record.runtime_copies
+                                                          if previous is None else jobs._previous_copies(previous, rec))
         except BaseException:
             _retarget_rewritten(ctx, rec, game_dir, untouched)
             raise
-    # The installer and extras have just rewritten those files, so each is compared with what they wrote.
-    restored = restore_backups(game_dir, [jobs._rewritten_by(record.files, b) for b in untouched])
-    notes += jobs._backups_kept_note(game_dir, previous.get("backups") or [], restored, title)
-    record.previous = None
-    record.previous_unavailable = None
-    ctx.records.save(record)
-    return jobs.JobResult("undo", game_id, title, jobs.game_fields_for(entry, record, ctx.platform), [*notes, *extra_notes],
-                          backups=backups)
+    if previous is not None:
+        # The installer and extras have just rewritten those files, so each is compared with what they wrote.
+        restored = restore_backups(game_dir, [jobs._rewritten_by(record.files, b) for b in untouched])
+        notes += jobs._backups_kept_note(game_dir, previous.get("backups") or [], restored, title)
+        record.previous = None
+        record.previous_unavailable = None
+        ctx.records.save(record)
+    return jobs.JobResult("repair" if previous is None else "undo", game_id, title,
+                          jobs.game_fields_for(entry, record, ctx.platform), [*notes, *extra_notes], backups=backups)
 
 
 def copy_installed_files(rec: InstallRecord, game_dir: Path, tree: Path, title: str) -> Path:

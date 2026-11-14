@@ -881,7 +881,7 @@ class InstallEngine:
             raise InstallFailed(messages.NOTHING_TO_UNDO.format(title=title))
         source = _source_from(previous["source"])
         if _recorded_runs_installer(source):
-            return run_actions.undo(self, entry, rec, game_dir, source, progress, cancel)
+            return run_actions.undo(self, entry, rec, game_dir, source, previous, progress, cancel)
         self._require_writable(rec, game_dir, title)
         extra_sources = {k: _source_from(v) for k, v in (previous.get("extras") or {}).items()}
         # The previous version's private copies; an undo point from before they were kept: the current ones.
