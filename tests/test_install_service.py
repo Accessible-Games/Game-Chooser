@@ -20,11 +20,18 @@ from tests.engine.fakes import (FakeElevator, FakeFetcher, FakeInstallerUI, Fake
                                 served_source, zip_bytes)
 
 MIRROR = "https://files.accessiblegames.net/files/"
+# The service picks sources and launch paths for the system it runs on: the entries here offer theirs for it
+PLATFORM = current_platform()
+
+
+def local_source(routes, url, data, **kwargs):
+    """served_source (a Windows source), offered for this system instead"""
+    return {**served_source(routes, url, data, **kwargs), "platform": PLATFORM}
 
 
 def game_entry(routes, id="entombed", title="Entombed", files=None, **fields):
     files = files if files is not None else {f"{id}.exe": b"exe", "sounds/a.wav": b"wav"}
-    source = served_source(routes, f"{MIRROR}{id}/{id}.zip", zip_bytes(files))
+    source = local_source(routes, f"{MIRROR}{id}/{id}.zip", zip_bytes(files))
     return {"id": id, "kind": "game", "title": title, "developer": ["Ghorse"], "genres": ["Arcade"],
             "year": 2008, "version": "1.0", "sources": [source], **fields}
 
@@ -222,7 +229,7 @@ def test_adopt_launch_paths_after_index_load(rig):
     counts = []  # what each adoption did
     adopt = rig.service._adopt
     rig.service._adopt = lambda catalog_id: counts.append(adopt(catalog_id)) or counts[-1]
-    rig.publish({**entry, "launch": {"windows": {"path": "sub/other.exe"}}})
+    rig.publish({**entry, "launch": {PLATFORM: {"path": "sub/other.exe"}}})
     assert counts == [True]
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/sub/other.exe"
     assert [g["launch_path"] for g in _games_json(rig.manager)] == ["Entombed/sub/other.exe"]
@@ -239,7 +246,7 @@ def test_adopt_skips_unreachable_library(rig):
     rig.publish(entry)
     rig.run("install", "entombed", library_id=lib["id"])
     shutil.rmtree(rig.tmp_path / "Games")
-    rig.publish({**entry, "launch": {"windows": {"path": "sub/other.exe"}}})
+    rig.publish({**entry, "launch": {PLATFORM: {"path": "sub/other.exe"}}})
     rig.service.adopt_launch_paths()
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
 
@@ -375,7 +382,7 @@ def _guessed_install(rig, *ids):
 def test_fetch_index_changes_nothing_until_taken(rig):
     _, (entry,) = _guessed_install(rig, "entombed")
     before_entries, before_json = rig.service.entries, _games_json(rig.manager)
-    publish(rig.fetcher, DEFAULT_CATALOG_URL, [{**entry, "launch": {"windows": {"path": "sub/other.exe"}}}])
+    publish(rig.fetcher, DEFAULT_CATALOG_URL, [{**entry, "launch": {PLATFORM: {"path": "sub/other.exe"}}}])
     state = rig.service.fetch_index()
     assert state.entries["entombed"]["launch"] and state.error is None
     assert rig.service.entries is before_entries and "launch" not in rig.service.entries["entombed"]
@@ -392,7 +399,7 @@ def test_adopt_skips_a_game_with_a_job(rig):
     _, (entry,) = _guessed_install(rig, "entombed")
     rig.service.queue.hold.add("entombed")
     rig.service.submit("repair", "entombed")
-    rig.publish({**entry, "launch": {"windows": {"path": "sub/other.exe"}}})
+    rig.publish({**entry, "launch": {PLATFORM: {"path": "sub/other.exe"}}})
     rig.service.adopt_launch_paths()
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
     assert not rig.manager.records.load("entombed").launch_from_catalog
@@ -400,8 +407,8 @@ def test_adopt_skips_a_game_with_a_job(rig):
 
 def test_malformed_entry_does_not_stop_adoption(rig):
     _, (first, second) = _guessed_install(rig, "entombed", "pawprints")
-    rig.publish({**first, "launch": {"windows": "sub/other.exe"}},  # not an object: adopting it raises
-                {**second, "launch": {"windows": {"path": "sub/other.exe"}}})
+    rig.publish({**first, "launch": {PLATFORM: "sub/other.exe"}},  # not an object: adopting it raises
+                {**second, "launch": {PLATFORM: {"path": "sub/other.exe"}}})
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
     assert rig.manager.catalog_game("pawprints").launch_path == "Pawprints/sub/other.exe"
 
@@ -698,8 +705,8 @@ def test_an_extra_shared_by_two_games_through_the_catalog_and_library(rig):
     lib = rig.library()
     shared = {"id": "series-patch", "kind": "extra", "title": "Series Patch", "extends": ["alpha", "bravo"],
               "version": "1",
-              "sources": [served_source(rig.routes, f"{MIRROR}series-patch/series-patch.zip",
-                                        zip_bytes({"data/bonus.dat": b"bonus"}))]}
+              "sources": [local_source(rig.routes, f"{MIRROR}series-patch/series-patch.zip",
+                                       zip_bytes({"data/bonus.dat": b"bonus"}))]}
     alpha, bravo = (game_entry(rig.routes, id=i, title=i.title(), extras=[{"id": "series-patch", "required": False}])
                     for i in ("alpha", "bravo"))
     rig.publish(alpha, bravo, shared)
