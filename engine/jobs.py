@@ -960,7 +960,8 @@ class InstallEngine:
                     tree = self._stage_recorded(entry, rec.source, base_extras, game_dir.name, staging, work,
                                                 progress, cancel, copies=False).tree
                 except NoVerifiedSource as e:
-                    text = (messages.EXTRAS_NEED_UPDATE if e.downloaded or e.gone else messages.DOWNLOAD_UNREACHABLE)
+                    text = (messages.EXTRAS_FILE_CHANGED if e.downloaded else messages.EXTRAS_FILE_GONE if e.gone
+                            else messages.DOWNLOAD_UNREACHABLE)
                     raise InstallFailed(text.format(title=title)) from e
                 except _NoUnpackSpec as e:
                     raise InstallFailed(messages.EXTRAS_NEED_UPDATE.format(title=title)) from e

@@ -185,6 +185,10 @@ INSTALL_NOT_CHANGEABLE = "Game Chooser can't change {title}, because of how it w
 GAME_FOLDER_MISSING = "{title}'s folder {path} wasn't found. If it was moved or deleted, install the game again."
 NOTHING_TO_UNDO = "{title} hasn't been updated, so there's nothing to undo."
 EXTRAS_NOT_AVAILABLE = "The extras you chose for {title} aren't in the catalog anymore."
+EXTRAS_FILE_GONE = ("A file {title} was installed from is no longer available to download, so extras can't be added "
+                    "to it now. If an update is offered, update {title} first.")
+EXTRAS_FILE_CHANGED = ("A file {title} was installed from has changed since then, so extras can't be added to it now. "
+                       "If an update is offered, update {title} first.")
 EXTRAS_NEED_UPDATE = "Game Chooser can't add extras to this copy of {title}. Update {title} first, then add them."
 REPAIR_NOT_POSSIBLE = ("Game Chooser no longer has the details it needs to rebuild {title}, so Repair can't "
                        "restore it. Use Update instead.")

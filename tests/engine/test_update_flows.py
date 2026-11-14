@@ -10,6 +10,8 @@ import shutil
 from dataclasses import asdict
 from pathlib import Path
 
+import pytest
+
 import engine.safety
 from engine import messages
 from engine.entries import mirror_url_for
@@ -695,15 +697,23 @@ def test_undo_stays_offered_while_one_address_may_come_back(tmp_path):
     assert fails(run, eng, "undo").message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
     assert undo_item(record(eng)).enabled
     eng.ctx.fetcher.gone.add(v1_mirror)                   # and the mirror doesn't have it either
-    assert fails(run, eng, "undo").message == messages.UNDO_NOT_POSSIBLE.format(title="Pawprints")
+    assert fails(run, eng, "undo").message.startswith(
+        "The previous version of Pawprints is no longer available to download, so the update can't be undone.")
     assert not undo_item(record(eng)).enabled
 
 
-def test_adding_extras_when_the_installed_download_is_gone_says_update_first(tmp_path):
-    eng, game = install_v1(tmp_path, optional=())
-    eng.ctx.fetcher.gone.add(record(eng).source.url)
+@pytest.mark.parametrize("served, why", [("gone", "is no longer available to download"),
+                                         (b"a different file", "has changed since then")], ids=["gone", "changed"])
+def test_adding_extras_when_an_installed_download_is_gone_or_changed_says_so(tmp_path, served, why):
+    eng, game = install_v1(tmp_path, optional=())  # 1.0 is the catalog's version: no update is offered
+    url = record(eng).source.url
+    if served == "gone":
+        eng.ctx.fetcher.gone.add(url)
+    else:
+        eng.ctx.fetcher.routes[url] = served
     error = fails(run, eng, "extras", extras=("pawprints-voices",))
-    assert error.message == messages.EXTRAS_NEED_UPDATE.format(title="Pawprints")
+    assert error.message == (f"A file Pawprints was installed from {why}, so extras can't be added to it now. "
+                             "If an update is offered, update Pawprints first.")
 
 
 def test_adding_extras_offline_says_try_again_later(tmp_path):
