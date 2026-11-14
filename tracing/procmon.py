@@ -61,7 +61,6 @@ def _detail_excludes() -> list[tuple[str, str]]:
 
 
 def describe_filter(operations: Sequence[str] = CAPTURE_OPERATIONS) -> list[str]:
-    """The active filter in readable form, one line per category, for the recorder log."""
     return [
         "capture filter, included operations: " + ", ".join(operations),
         "capture filter, excluded processes: " + ", ".join(EXCLUDED_PROCESSES),

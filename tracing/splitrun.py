@@ -26,7 +26,6 @@ class SplitResult:
 
 
 def report_split(folders, problems, out) -> bool:
-    """Say what a split wrote and its problems; True when it had a problem."""
     for folder in folders:
         out(f"Wrote {folder}")
     for problem in problems:

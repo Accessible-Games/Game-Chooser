@@ -1,4 +1,4 @@
-"""WindowsCloser on real child processes of the test (plain Python programs; no admin rights, no game).
+"""Closer over WindowsProcesses on real child processes of the test (plain Python programs; no admin rights, no game).
 
 The children's windows are never seen: one is hidden, the other is a zero-size, off-screen tool window that can't
 be activated, so no test moves focus or shows anything.
@@ -10,7 +10,7 @@ import sys
 import pytest
 
 from tracing import closing
-from tracing.closing import Identity, Refused, WindowsCloser, process_identity
+from tracing.closing import Closer, Identity, Refused, WindowsProcesses, process_identity
 from tracing.live import process_start_time
 
 pytestmark = [pytest.mark.windows, pytest.mark.skipif(sys.platform != "win32", reason="Windows only")]
@@ -45,7 +45,7 @@ sys.exit(7 if not user32.IsWindow(hwnd) else 4)
 
 def closer():
     """The closer as the recorder builds it, with this test standing in for Game Chooser."""
-    return WindowsCloser(process_identity(os.getpid()))
+    return Closer(process_identity(os.getpid()), WindowsProcesses())
 
 
 @pytest.fixture
@@ -132,7 +132,7 @@ def test_process_identity_reads_the_user_and_the_rights_of_a_process(child):
 ])
 def test_a_process_outside_the_limit_is_neither_asked_nor_ended(child, limit, reason):
     proc, start = child(WINDOW, "visible")
-    refusing = WindowsCloser(limit(process_identity(os.getpid())))
+    refusing = Closer(limit(process_identity(os.getpid())), WindowsProcesses())
     for action in (refusing.ask_close, refusing.end):
         with pytest.raises(Refused) as refused:
             action(proc.pid, start)

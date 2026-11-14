@@ -22,10 +22,8 @@ MAX_INDEX_BYTES = 64 * 2**20
 @dataclass
 class IndexState:
     entries: dict[str, dict] = field(default_factory=dict)
-    generated_at: str | None = None
     newer_app_needed: bool = False
     error: str | None = None
-    from_cache: bool = False
 
 
 def normalize_catalog_url(url: str) -> str | None:
@@ -72,14 +70,7 @@ class CatalogIndex:
         self.cache_dir = Path(cache_dir)
         self.base_url = base_url
         self.fetcher = fetcher
-
-    @property
-    def _gz_path(self) -> Path:
-        return self.cache_dir / GZ_NAME
-
-    @property
-    def _meta_path(self) -> Path:
-        return self.cache_dir / META_NAME
+        self._gz_path, self._meta_path = self.cache_dir / GZ_NAME, self.cache_dir / META_NAME
 
     def _read_cache(self) -> tuple[IndexState, str | None] | None:
         """The cached index and its gz sha256, or None when absent or unusable."""
@@ -90,12 +81,12 @@ class CatalogIndex:
             return None
         if _schema_of(doc) > SUPPORTED_SCHEMA_VERSION:
             return None
-        state = IndexState(_entries_by_id(doc), doc.get("generated_at"), False, None, True)
+        state = IndexState(_entries_by_id(doc))
         return state, hashlib.sha256(gz).hexdigest()
 
     def load_cached(self) -> IndexState:
         cached = self._read_cache()
-        return cached[0] if cached else IndexState(from_cache=True)
+        return cached[0] if cached else IndexState()
 
     def _cached_meta_sha(self) -> str | None:
         try:
@@ -108,9 +99,7 @@ class CatalogIndex:
     def _fallback(self, error: str, empty_error: str, newer: bool = False) -> IndexState:
         state = self.load_cached()
         state.newer_app_needed = newer
-        state.error = error if state.entries else empty_error
-        if newer:
-            state.error = None if state.entries else empty_error
+        state.error = (None if newer else error) if state.entries else empty_error
         return state
 
     def refresh(self) -> IndexState:
@@ -145,7 +134,7 @@ class CatalogIndex:
         if _schema_of(doc) > SUPPORTED_SCHEMA_VERSION:
             return self._fallback(messages.CATALOG_NEWER_APP, messages.CATALOG_NEWER_APP, newer=True)
 
-        state = IndexState(_entries_by_id(doc), doc.get("generated_at"), False, None, False)
+        state = IndexState(_entries_by_id(doc))
         try:
             self._write_cache(gz, json.dumps(meta).encode("utf-8"))
         except OSError:

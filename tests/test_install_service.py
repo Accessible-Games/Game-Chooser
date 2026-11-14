@@ -145,7 +145,7 @@ def test_load_cached_index_reads_what_refresh_saved(rig):
     rig.fetcher.routes.clear()
     rig.service.load_cached_index()
     state = rig.service.index_state
-    assert state.from_cache and set(state.entries) == {"entombed"}
+    assert set(state.entries) == {"entombed"}
     assert [e["id"] for e in visible_games(rig.service.entries, current_platform())] == ["entombed"]
 
 

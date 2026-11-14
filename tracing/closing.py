@@ -122,11 +122,6 @@ class Closer:
             self._processes.close(handle)
 
 
-class WindowsCloser(Closer):
-    def __init__(self, limit: Identity | None):
-        super().__init__(limit, WindowsProcesses())
-
-
 def process_identity(pid: int) -> Identity | None:
     """Who the running process `pid` runs as; None when it has gone or can't be read."""
     processes = WindowsProcesses()
@@ -248,13 +243,11 @@ def _token_sid(token, info_class: int):
 
 
 def _sid_pointer(buffer):
-    """The SID pointer at the start of a TOKEN_USER or TOKEN_MANDATORY_LABEL buffer."""
     import ctypes
     return ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p)).contents.value
 
 
 def _visible_windows(pid: int) -> list[int]:
-    """The visible top-level windows that belong to process `pid`."""
     import ctypes
     from ctypes import wintypes
     user32 = ctypes.windll.user32

@@ -6,10 +6,7 @@ renames and SetDispositionInformationEx. Then it tries Process Monitor's own CSV
 Everything goes into OUT_DIR/probe.json; capture.pml is never deleted.
 
 Needs administrator rights: unelevated, it starts itself again elevated (a UAC prompt) and waits.
-
-    python -m tracing.probe OUT_DIR WORKLOAD_BAT [--procmon PROCMON64_EXE]
 """
-import argparse
 import json
 import subprocess
 import sys
@@ -37,12 +34,6 @@ STOP_TIMEOUT = 300
 EXPORT_TIMEOUT = 300
 
 Relaunch = tuple[str, list[str], Path | None]  # exe, args, working folder
-
-
-def module_relaunch(out_dir: Path, workload: Path, procmon: Path) -> Relaunch:
-    """This module run from source: python -m tracing.probe, from the repo root."""
-    return (sys.executable, ["-m", "tracing.probe", str(out_dir), str(workload), "--procmon", str(procmon)],
-            paths.REPO_DIR)
 
 
 def cli_relaunch(compiled: bool, out_dir: Path, workload: Path) -> Relaunch:
@@ -78,8 +69,8 @@ def _proc_json(proc: ProcInfo) -> dict:
             "is_64bit": proc.is_64bit}
 
 
-def run_probe(out_dir: Path, procmon: Path, workload: Path, relaunch: Relaunch | None = None) -> int:
-    """Run the probe; unelevated, start `relaunch` elevated instead (default: --trace-probe) and wait for it."""
+def run_probe(out_dir: Path, procmon: Path, workload: Path) -> int:
+    """Run the probe; unelevated, start --trace-probe elevated instead and wait for it."""
     out_dir = Path(out_dir).resolve()
     workload = Path(workload).resolve()
     for needed in (Path(procmon), workload):
@@ -88,9 +79,8 @@ def run_probe(out_dir: Path, procmon: Path, workload: Path, relaunch: Relaunch |
             return 1
     if _is_admin():
         return _probe_elevated(out_dir, Path(procmon).resolve(), workload)
-    if relaunch is None:
-        relaunch = cli_relaunch(paths.is_compiled(vars(sys.modules["__main__"])), out_dir, workload)
-    return _relaunch_elevated(relaunch, out_dir)
+    return _relaunch_elevated(cli_relaunch(paths.is_compiled(vars(sys.modules["__main__"])), out_dir, workload),
+                              out_dir)
 
 
 def _is_admin() -> bool:
@@ -192,17 +182,3 @@ def _file_version(exe: Path) -> str:
     info = win32api.GetFileVersionInfo(str(exe), "\\")
     ms, ls = info["FileVersionMS"], info["FileVersionLS"]
     return f"{ms >> 16}.{ms & 0xFFFF}.{ls >> 16}.{ls & 0xFFFF}"
-
-
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(prog="python -m tracing.probe", description=__doc__.splitlines()[0])
-    parser.add_argument("out_dir", type=Path)
-    parser.add_argument("workload", type=Path)
-    parser.add_argument("--procmon", type=Path, default=paths.procmon_exe(False))
-    args = parser.parse_args(argv)
-    out_dir, workload, procmon = args.out_dir.resolve(), args.workload.resolve(), args.procmon.resolve()
-    return run_probe(out_dir, procmon, workload, module_relaunch(out_dir, workload, procmon))
-
-
-if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
