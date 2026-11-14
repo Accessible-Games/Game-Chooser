@@ -123,6 +123,46 @@ def test_reconcile_unlinks_game_whose_record_is_gone(isolated_manager_factory, t
     assert "catalog_id" not in saved and saved["library_id"] == ""
 
 
+@pytest.mark.parametrize("library_known", [True, False])  # False: a whole other %APPDATA%, as on the VM
+def test_a_start_without_the_install_records_never_duplicates_games(isolated_manager_factory, tmp_path,
+                                                                    library_known):
+    """One start without the install records turns the catalog games into games added by hand; once the records
+    are back, those same games are linked to them again, not added a second time."""
+    config = {"libraries": [{"id": "main", "path": str(tmp_path)}]}
+    first = isolated_manager_factory(games=_catalog_row(), config=config if library_known else {"libraries": []})
+    assert [g.catalog_id for g in first.games] == [""]
+    _seed_records(isolated_manager_factory, _record())
+    m = isolated_manager_factory(config=config)
+    assert [(g.title, g.catalog_id, g.library_id, g.launch_path) for g in m.games] == [
+        ("Entombed", "entombed", "main", "Entombed/e.exe")]
+    assert m.games[0].installed_source == {"url": "https://x/e.zip", "sha256": "a" * 64, "size": 50}
+    assert m.games[0].installed_extras == ["patch"]
+    assert [g["catalog_id"] for g in _games_json(m)] == ["entombed"]
+
+
+def test_only_a_game_added_by_hand_with_the_records_launch_file_is_linked_to_it(isolated_manager_factory, tmp_path):
+    """The same exe (any case or slashes) is the same game on disk; another exe in its folder, the same path in
+    another library, or a web game stays a separate game added by hand."""
+    main, other = tmp_path / "main", tmp_path / "other"
+    config = {"libraries": [{"id": "main", "path": str(main)}, {"id": "other", "path": str(other)}]}
+    games = [{"title": "Editor", "launch_path": str(main / "Entombed" / "editor.exe"), "library_id": ""},
+             {"title": "Elsewhere", "launch_path": "Entombed/e.exe", "library_id": "other"},
+             {"title": "Web", "launch_path": "https://example.com/", "library_id": ""},
+             {"title": "Mine", "launch_path": (main / "ENTOMBED" / "E.EXE").as_posix(), "library_id": ""}]
+    isolated_manager_factory(games=games, config=config)
+    _seed_records(isolated_manager_factory, _record())
+    m = isolated_manager_factory()
+    assert [(g.title, g.catalog_id, g.library_id, g.launch_path) for g in m.games] == [
+        ("Editor", "", "", str(main / "Entombed" / "editor.exe")), ("Elsewhere", "", "other", "Entombed/e.exe"),
+        ("Web", "", "", "https://example.com/"), ("Mine", "entombed", "main", "Entombed/e.exe")]
+
+
+def test_an_uninstalled_record_never_takes_a_game_added_by_hand(isolated_manager_factory, tmp_path):
+    hand = [{"title": "Hand", "launch_path": str(tmp_path / "Entombed" / "e.exe"), "library_id": ""}]
+    m = _restart(isolated_manager_factory, tmp_path, _record(uninstalled=True, files={}), games=hand)
+    assert [(g.title, g.catalog_id, g.library_id) for g in m.games] == [("Hand", "", "")]
+
+
 def test_reconcile_saves_only_when_it_changed_something(isolated_manager_factory, tmp_path):
     games = [{"title": "Plain", "launch_path": "C:/p.exe", "library_id": ""}]
     isolated_manager_factory(games=games)

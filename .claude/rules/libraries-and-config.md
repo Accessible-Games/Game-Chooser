@@ -30,6 +30,12 @@ paths:
   a record with no game gets one; a game whose record is gone (or unsafe id) becomes a game added by hand; a game
   whose uninstall stopped partway stays linked; one whose uninstall finished but never reached games.json leaves
   the list (the record stays).
+  - A record with no game first looks for a game added by hand (not a web game) that launches the same file: the
+    full path, ignoring case and slashes, or the same library id and relative path while that library is unknown.
+    That game is linked again (catalog id, library, relative path, installed source and extras from the record;
+    its title and details stay) instead of a second game being added. This undoes one start without the records
+    (another `%APPDATA%`, a missing `installs\`), which unlinks every catalog game. Another exe in the same folder,
+    the same relative path in another library, or an uninstalled record never links a game.
 
 ## Configuration (`config.json`)
 - `libraries`: `[{"id", "path"}]`

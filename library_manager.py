@@ -27,7 +27,7 @@ from engine import messages
 from engine.folders import library_label
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex
 from engine.jobs import game_fields_for
-from engine.paths import folder_key, write_atomic
+from engine.paths import folder_key, norm_key, write_atomic
 from engine.records import RecordStore
 from install_prefs import current_catalog_url
 from library_actions import is_uninstall_unfinished
@@ -253,7 +253,9 @@ class GameLibraryManager:
         """Make games.json agree with the install records (they are the truth about what is installed).
 
         A record with no game gets one, using the cached catalog index only (never the network); a game
-        whose record is gone becomes a game added by hand and is kept. Only games' records count: a shared
+        whose record is gone becomes a game added by hand and is kept. A record with no game whose launch file is a
+        game added by hand's (a start without the records unlinked it) links that game again instead of adding a
+        second one; it keeps its title and details. Only games' records count: a shared
         runtime's record (kind "runtime") is never a game.
 
         An uninstalled record: if the uninstall stopped partway (installed files left, or the game's own
@@ -281,12 +283,25 @@ class GameLibraryManager:
         missing = [r for r in records.values() if not r.uninstalled and self.catalog_game(r.catalog_id) is None]
         if missing:
             entries = self._cached_entries()
+            by_hand = {self._launch_key(g): g for g in self.games if not g.catalog_id and not g.is_web}
             for rec in missing:
                 entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id}  # titled by its id
-                self.games.append(Game.from_dict(game_fields_for(entry, rec)))
+                fields = game_fields_for(entry, rec)
+                same = by_hand.pop(self._launch_key(Game.from_dict(fields)), None)
+                if same is None:
+                    self.games.append(Game.from_dict(fields))
+                else:  # the same file on disk (a start without the records unlinked it): link it again, keep its details
+                    for key in ("launch_path", "library_id", "catalog_id", "installed_source", "installed_extras"):
+                        setattr(same, key, fields[key])
             changed = True
         if changed:  # a damaged games.json is copied first, or not written over (save_games)
             self.save_or_keep(self.save_games, "games.json")
+
+    def _launch_key(self, game):
+        """Which file a game launches, to compare games: its full path, or its library and relative path while
+        that library is not known"""
+        path = self.get_full_path(game)
+        return folder_key(path) if path else (game.library_id, norm_key(game.launch_path))
 
     def _record_unreadable(self, catalog_id):
         """True when a record file is there for this id but can't be read, so it may still be the game's. A
