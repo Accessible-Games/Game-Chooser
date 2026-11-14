@@ -24,6 +24,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   **pricing.py** - how `pricing` reads, the Price filter values and the install confirmation's price warning.
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
+  Uninstall (`apply_uninstall`) removes every empty folder in the game's folder, box ticked or not (one the archive
+  shipped empty, like `saves`, has no recorded file under it); a folder holding a player's file stays, with its
+  parents; links are never entered. A game folder left with nothing in it goes, and so does its record.
 - **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
   refused); **run_installer.py** / **run_actions.py** / **installer_watch.py** - installers that run.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain

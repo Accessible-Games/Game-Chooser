@@ -49,6 +49,16 @@ def test_empty_player_list_skips_recycle(tmp_path):
     assert fake.calls == [] and not game.exists()
 
 
+@pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
+def test_a_game_folder_already_gone_is_no_error(tmp_path, delete_player_data):
+    game = tmp_path / "game"
+    put(game, "game.exe", b"exe")
+    p = plan_uninstall(FakeRecord({"game.exe": b"exe"}), game)
+    (game / "game.exe").unlink()
+    game.rmdir()  # as a vendor uninstaller may leave it
+    assert apply_uninstall(p, game, delete_player_data, recycle=FakeRecycle()) == 0
+
+
 def test_changed_file_is_kept_and_counted_at_apply_time(tmp_path):
     game, rec = setup(tmp_path)
     p = plan_uninstall(rec, game)
