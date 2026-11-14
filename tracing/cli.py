@@ -104,7 +104,8 @@ def run_command(argv: list[str], compiled: bool) -> int | None:
     if args.trace_split is not None:
         return _split(args, compiled)
     if args.trace_stop is not None:
-        return _stop(args, compiled)
+        return _run_stop(paths.traces_dir(compiled, args.traces_dir),
+                         Path(args.trace_stop) if args.trace_stop else None, args.close_games)
     if args.trace_check is not None:
         return _trace_check(Path(args.trace_check))
     return _run_probe(Path(args.trace_probe), paths.procmon_exe(compiled),
@@ -161,11 +162,6 @@ def _split(args, compiled: bool) -> int:
             continue
         failed = report_split(result.folders, result.problems, print) or failed
     return 1 if failed else 0
-
-
-def _stop(args, compiled: bool) -> int:
-    return _run_stop(paths.traces_dir(compiled, args.traces_dir),
-                     Path(args.trace_stop) if args.trace_stop else None, args.close_games)
 
 
 def _run_stop(traces_dir: Path, run_path: Path | None, close_games: bool) -> int:
