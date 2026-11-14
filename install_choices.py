@@ -34,10 +34,7 @@ def library_choice_labels(libraries: list[dict]) -> list[str]:
 
 
 def default_library_index(plan) -> int:
-    for index, lib in enumerate(plan.libraries):
-        if lib["id"] == plan.default_library:
-            return index
-    return 0
+    return next((index for index, lib in enumerate(plan.libraries) if lib["id"] == plan.default_library), 0)
 
 
 def included_titles(plan, entry_titles: dict[str, str]) -> list[str]:

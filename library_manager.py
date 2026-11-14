@@ -154,14 +154,12 @@ class GameLibraryManager:
                 with open(self.config_file, 'r', encoding="utf-8") as f:
                     loaded = json.load(f)
                     # Merge with defaults to ensure all keys exist
-                    for key in default_config:
-                        if key not in loaded:
-                            loaded[key] = default_config[key]
+                    for key, value in default_config.items():
+                        loaded.setdefault(key, value)
                     for section in ("SavedState", "install"):
                         if isinstance(loaded.get(section), dict):
                             for state_key, value in default_config[section].items():
-                                if state_key not in loaded[section]:
-                                    loaded[section][state_key] = value
+                                loaded[section].setdefault(state_key, value)
                     # The only old-file handling: ids are assigned once and then saved, so they stay stable
                     upgraded = loaded.pop("exceptions", None) is not None
                     for lib in loaded["libraries"]:
@@ -249,10 +247,7 @@ class GameLibraryManager:
 
     def catalog_game(self, catalog_id):
         """The game installed from this catalog entry, or None"""
-        for game in self.games:
-            if game.catalog_id == catalog_id:
-                return game
-        return None
+        return next((game for game in self.games if game.catalog_id == catalog_id), None)
 
     def add_catalog_game(self, fields):
         """Add the game for an installed catalog entry (replacing its old one) and save"""
@@ -333,10 +328,7 @@ class GameLibraryManager:
 
     def library_by_id(self, library_id):
         """The library with this id, or None"""
-        for lib in self.config["libraries"]:
-            if lib["id"] == library_id:
-                return lib
-        return None
+        return next((lib for lib in self.config["libraries"] if lib["id"] == library_id), None)
 
     def library_reachable(self, library_id):
         """True if the library's folder is there right now (a drive can be unplugged)"""
