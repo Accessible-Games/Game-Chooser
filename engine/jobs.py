@@ -1033,13 +1033,18 @@ class InstallEngine:
             return JobResult("uninstall", rec.catalog_id, title, None,
                              [messages.GAME_FOLDER_IS_LIBRARY_FORGOTTEN.format(title=title, path=game_dir)])
         if is_link(game_dir):  # the game moved elsewhere and left a link: nothing behind the link is touched
+            if rec.vendor_uninstaller:  # Windows' entry runs it through the link, so the link must stay
+                raise InstallFailed(messages.GAME_FOLDER_LINK_VENDOR.format(title=title, path=game_dir))
             target = Path(os.path.realpath(game_dir))
             notes = undo_steps(rec.steps, StepContext(game_dir.absolute(), ctx.elevator, ctx.registry))
+            rec.steps = []
+            ctx.records.save(rec)  # so a retry after a failed removal doesn't undo them again
             os.rmdir(game_dir)  # removes the link only
             ctx.records.delete(rec.catalog_id)
             return JobResult("uninstall", rec.catalog_id, title, None,
-                             [*notes, messages.GAME_FOLDER_LINK_REMOVED.format(title=title, path=game_dir,
-                                                                              target=target)])
+                             [*notes, (messages.GAME_FOLDER_LINK_REMOVED if target.is_dir() else
+                                       messages.GAME_FOLDER_LINK_BROKEN).format(title=title, path=game_dir,
+                                                                                target=target)])
         vendor = rec.vendor_uninstaller
         if vendor:
             run_installer.require_no_setaside(ctx, rec.catalog_id, title)

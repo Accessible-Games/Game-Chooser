@@ -186,6 +186,11 @@ GAME_FOLDER_IS_LIBRARY_FORGOTTEN = ("Game Chooser's record of {title} named the 
                                     "folder, so {title} was taken off the list and nothing there was touched.")
 GAME_FOLDER_LINK_REMOVED = ("{title}'s folder {path} was a link to {target}. Game Chooser removed the link and left "
                             "everything in {target} as it is, so you can delete it yourself.")
+GAME_FOLDER_LINK_BROKEN = ("{title}'s folder {path} was a link to {target}, which no longer exists. Game Chooser "
+                           "removed the link.")
+GAME_FOLDER_LINK_VENDOR = ("{title}'s folder {path} is a link to another place, and {title}'s own uninstaller is "
+                           "reached through it, so Game Chooser left everything as it is. Uninstall {title} from "
+                           "Installed apps in Windows Settings, or put its folder back where it was and try again.")
 NOTHING_TO_UNDO = "{title} hasn't been updated, so there's nothing to undo."
 EXTRAS_NOT_AVAILABLE = "The extras you chose for {title} aren't in the catalog anymore."
 EXTRAS_NEED_UPDATE = "Game Chooser can't add extras to this copy of {title}. Update {title} first, then add them."
