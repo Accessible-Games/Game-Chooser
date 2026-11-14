@@ -308,6 +308,10 @@ class GamesPanel(wx.Panel):
             item = None if focused is None else items.get(focused) or items.get(focused.split("/")[0])
             if item:
                 tree.SetFocusedItem(item)
+                # macOS' tree (wx's generic one) selects the item it focuses: a value the player had not
+                # selected would become a filter, the root or a category a selection of nothing
+                if tree.IsSelected(item) and self._tree_path(item) not in selected:
+                    tree.SelectItem(item, False)
         finally:
             self.restoring_tree = False
 

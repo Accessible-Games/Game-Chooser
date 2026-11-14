@@ -150,6 +150,15 @@ def tree_nodes(view):
     return nodes
 
 
+def focus_tree_item(tree, item):
+    """The player moves the tree's focus without changing what is selected. macOS' tree (wx's generic one) also
+    selects the item SetFocusedItem focuses, so that is taken back."""
+    was_selected = tree.IsSelected(item)
+    tree.SetFocusedItem(item)
+    if tree.IsSelected(item) and not was_selected:
+        tree.SelectItem(item, False)
+
+
 class KeyEvent(wx.KeyEvent):
     """wx leaves a made-up key event's auto-repeat flag unset (it reads as anything): here it is `repeat`"""
 
@@ -619,7 +628,7 @@ def test_a_tree_rebuild_keeps_the_open_categories_and_the_focused_item(make_view
     view.set_rows(rows(ALPHA, BRAVO))
     tree, nodes = view.tree_ctrl, tree_nodes(view)
     tree.Expand(tree.GetItemParent(nodes["Developer"]["Dev"]))  # open, with nothing selected under it
-    tree.SetFocusedItem(nodes["Developer"]["Dev"])  # the player moved there without selecting it
+    focus_tree_item(tree, nodes["Developer"]["Dev"])  # the player moved there without selecting it
     before = saves(view).count
     view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))  # a refresh that adds a tree value
     nodes = tree_nodes(view)
@@ -629,7 +638,7 @@ def test_a_tree_rebuild_keeps_the_open_categories_and_the_focused_item(make_view
     assert view._selected_paths() == [] and titles(view) == ["Alpha", "Bravo", "Echo"]
     assert saves(view).count == before  # moving the tree's focus is not a change of filter
     tree.SelectItem(nodes["Genre"]["Puzzle"], True)
-    tree.SetFocusedItem(nodes["Genre"]["Action"])
+    focus_tree_item(tree, nodes["Genre"]["Action"])
     view.set_rows(rows(ALPHA, BRAVO))  # Strategy went: rebuilt again, with a selection this time
     assert tree.GetItemText(tree.GetFocusedItem()) == "Action"
     assert view._selected_paths() == ["Genre/Puzzle"] and titles(view) == ["Alpha"]
@@ -644,7 +653,7 @@ def test_a_tree_rebuild_keeps_the_focus_on_the_root(make_view):
     view.set_rows(rows(ALPHA, BRAVO))
     tree = view.tree_ctrl
     tree.SelectItem(tree_nodes(view)["Genre"]["Puzzle"], True)
-    tree.SetFocusedItem(tree.GetRootItem())
+    focus_tree_item(tree, tree.GetRootItem())
     assert view._selected_paths() == ["Genre/Puzzle"]
     before = saves(view).count
     view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))  # a refresh that adds a tree value
@@ -652,6 +661,24 @@ def test_a_tree_rebuild_keeps_the_focus_on_the_root(make_view):
     assert tree.GetFocusedItem() == root and tree.GetItemText(root) == "Filters"
     assert not tree.IsSelected(root) and view._selected_paths() == ["Genre/Puzzle"]
     assert titles(view) == ["Alpha"] and saves(view).count == before
+
+
+def test_a_tree_rebuild_never_selects_the_focused_value(make_view):
+    """Escape clears the filters and leaves the tree's focus on the value; a background refresh then rebuilds the
+    tree and puts the focus back. On macOS the tree's SetFocusedItem also selects, which filtered the list again
+    without the player choosing it."""
+    view = make_view()
+    view.set_rows(rows(ALPHA, BRAVO))
+    tree = view.tree_ctrl
+    puzzle = tree_nodes(view)["Genre"]["Puzzle"]
+    tree.Expand(tree.GetItemParent(puzzle))
+    tree.SelectItem(puzzle, True)
+    assert titles(view) == ["Alpha"]
+    press_escape_in_tree(view)
+    assert view._selected_paths() == [] and titles(view) == ["Alpha", "Bravo"]
+    view.set_rows(rows(ALPHA, BRAVO, entry("echo", "Strategy")))  # a background refresh
+    assert tree.GetItemText(tree.GetFocusedItem()) == "Puzzle"
+    assert view._selected_paths() == [] and titles(view) == ["Alpha", "Bravo", "Echo"]
 
 
 def test_only_values_are_selected_from_the_saved_tree_selections(make_view):
