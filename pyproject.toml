@@ -5,12 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "frozendict>=2.4.6",
-    "platform-utils>=1.6.0",
-    "pywin32>=311 ; sys_platform == 'win32'",
+    "frozendict>=2.5.1",
+    "platform-utils>=1.6.3",
+    "pywin32>=312 ; sys_platform == 'win32'",
     "six>=1.17.0",
     "smart-list",
-    "wxpython==4.2.3",
+    "wxpython==4.3.2",
 ]
 
 [dependency-groups]
@@ -32,4 +32,4 @@ markers = [
 ]
 
 [tool.uv.sources]
-smart-list = { git = "https://github.com/accessibleapps/smart_list", rev = "2a110818a311a248295c3bfdc91a95ed1caac4c0" }
+smart-list = { git = "https://github.com/accessibleapps/smart_list", rev = "e1fe4b0ad2f4f5ff758588146c27f5dbaf5d41c1" }
