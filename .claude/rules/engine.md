@@ -27,6 +27,13 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   Uninstall (`apply_uninstall`) removes every empty folder in the game's folder, box ticked or not (one the archive
   shipped empty, like `saves`, has no recorded file under it); a folder holding a player's file stays, with its
   parents; links are never entered. A game folder left with nothing in it goes, and so does its record.
+  Before that, `jobs._uninstall` guards the game folder itself. A record naming a library folder, or one holding a
+  library (`_holds_a_library`; damaged, since the app never writes one), is only deleted, nothing on disk touched
+  (`GAME_FOLDER_IS_LIBRARY_FORGOTTEN`); Update, Repair, Undo and Extras refuse it (`_installed`,
+  `GAME_FOLDER_IS_LIBRARY`). A game folder that is itself a link (a game moved to another drive) has its system
+  steps undone, then only the link and the record go: nothing behind the link is touched and no vendor uninstaller
+  runs (`GAME_FOLDER_LINK_REMOVED` says where the files are). Update, Repair and Undo still work through such a
+  link, changing only the game's own files.
 - **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
   refused); **run_installer.py** / **run_actions.py** / **installer_watch.py** - installers that run.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain

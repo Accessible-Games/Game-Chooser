@@ -179,6 +179,13 @@ NOT_IN_CATALOG = "This game is no longer in the catalog."
 NOT_INSTALLED = "{title} isn't installed by Game Chooser."
 INSTALL_NOT_CHANGEABLE = "Game Chooser can't change {title}, because of how it was installed."
 GAME_FOLDER_MISSING = "{title}'s folder {path} wasn't found. If it was moved or deleted, install the game again."
+GAME_FOLDER_IS_LIBRARY = ("Game Chooser's record of {title} names the library folder {path} as the game's folder, "
+                          "so Game Chooser won't change anything there. Uninstall {title} to take it off the list; "
+                          "no files are touched.")
+GAME_FOLDER_IS_LIBRARY_FORGOTTEN = ("Game Chooser's record of {title} named the library folder {path} as the game's "
+                                    "folder, so {title} was taken off the list and nothing there was touched.")
+GAME_FOLDER_LINK_REMOVED = ("{title}'s folder {path} was a link to {target}. Game Chooser removed the link and left "
+                            "everything in {target} as it is, so you can delete it yourself.")
 NOTHING_TO_UNDO = "{title} hasn't been updated, so there's nothing to undo."
 EXTRAS_NOT_AVAILABLE = "The extras you chose for {title} aren't in the catalog anymore."
 EXTRAS_NEED_UPDATE = "Game Chooser can't add extras to this copy of {title}. Update {title} first, then add them."

@@ -52,13 +52,13 @@ from .errors import EngineError, InstallFailed, NoVerifiedSource, StepError, Uns
 from .folders import library_label, target_folder
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import STAGING_DIR_NAME, is_engine_dir, norm_key, safe_join, same_folder, walk_files
+from .paths import STAGING_DIR_NAME, is_engine_dir, is_link, norm_key, safe_join, same_folder, walk_files
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
 from .recycle import send_to_recycle_bin
 from .installer_watch import ProcessWatch, watch_process
 from .run_installer import InstallerUI, RunItem
 from .runtimes import _clear, _clear_or_fail
-from .uninstall_keys import UninstallReader, _winreg_reader
+from .uninstall_keys import UninstallReader, _winreg_reader, inside
 from .safety import (UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall,
                      plain_file, plan_uninstall, plan_update, preflight, restore_backups)
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
@@ -298,6 +298,8 @@ class InstallEngine:
         game_dir = record_folder(rec, self.ctx.libraries)
         if game_dir is None or not game_dir.is_dir():
             raise InstallFailed(messages.GAME_FOLDER_MISSING.format(title=title, path=game_dir or rec.folder))
+        if _holds_a_library(game_dir, self.ctx.libraries):
+            raise InstallFailed(messages.GAME_FOLDER_IS_LIBRARY.format(title=title, path=game_dir))
         return rec, game_dir
 
     @contextmanager
@@ -1026,6 +1028,18 @@ class InstallEngine:
         game_dir = record_folder(rec, ctx.libraries)
         if game_dir is None:
             raise InstallFailed(messages.GAME_FOLDER_MISSING.format(title=title, path=rec.folder))
+        if _holds_a_library(game_dir, ctx.libraries):  # a damaged record: nothing there is the game's alone
+            ctx.records.delete(rec.catalog_id)
+            return JobResult("uninstall", rec.catalog_id, title, None,
+                             [messages.GAME_FOLDER_IS_LIBRARY_FORGOTTEN.format(title=title, path=game_dir)])
+        if is_link(game_dir):  # the game moved elsewhere and left a link: nothing behind the link is touched
+            target = Path(os.path.realpath(game_dir))
+            notes = undo_steps(rec.steps, StepContext(game_dir.absolute(), ctx.elevator, ctx.registry))
+            os.rmdir(game_dir)  # removes the link only
+            ctx.records.delete(rec.catalog_id)
+            return JobResult("uninstall", rec.catalog_id, title, None,
+                             [*notes, messages.GAME_FOLDER_LINK_REMOVED.format(title=title, path=game_dir,
+                                                                              target=target)])
         vendor = rec.vendor_uninstaller
         if vendor:
             run_installer.require_no_setaside(ctx, rec.catalog_id, title)
@@ -1103,6 +1117,11 @@ def _prefetched(fetch: Fetch, item_id: str, fetched: Fetched) -> Fetch:
             return pending.pop()
         return fetch(item, work_dir)
     return get
+
+
+def _holds_a_library(game_dir: Path, libraries: list[dict]) -> bool:
+    """True if `game_dir` is a library folder or holds one: never one game's own folder."""
+    return any(lib.get("path") and inside(Path(lib["path"]), game_dir) for lib in libraries)
 
 
 def _require_changeable(rec: InstallRecord, title: str, action: str) -> None:
