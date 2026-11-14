@@ -1,3 +1,4 @@
+import stat
 import subprocess
 import sys
 import time
@@ -238,6 +239,32 @@ def test_dotdot_entries_do_not_escape_dest(tmp_path):
         pass  # refusing the archive is also fine; writing outside dest is not
     assert not (tmp_path / "work" / "escaped.txt").exists()
     assert not (tmp_path / "escaped.txt").exists()
+
+
+@pytest.mark.tools
+@pytest.mark.parametrize("form", ["drive", "rooted", "backslash", "dotdot"])
+def test_link_entries_do_not_write_outside_dest(tmp_path, form):
+    # 7-Zip 26.06 tries to create absolute-target links 24.09 refused up front; only a machine with the
+    # symlink privilege (the elevated release runner) gets as far as creating one, elsewhere this still holds
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    rooted = outside.as_posix()[len(outside.drive):]
+    target = {"drive": outside.as_posix(), "rooted": rooted, "backslash": rooted.replace("/", "\\"),
+              "dotdot": "../outside"}[form]
+    evil = tmp_path / "evil.zip"
+    with zipfile.ZipFile(evil, "w") as zf:
+        link = zipfile.ZipInfo("lnk")
+        link.create_system, link.external_attr = 3, (stat.S_IFLNK | 0o777) << 16  # a unix symlink entry
+        zf.writestr(link, target)
+        zf.writestr("lnk/pwned.txt", b"bad")
+    dest = tmp_path / "out"
+    try:
+        Extractor(TOOLS_DIR).extract(evil, dest, {"method": "zip"}, lambda: False)
+    except ExtractError:
+        pass  # refusing the archive is fine; writing through the link is not
+    else:
+        assert not [p for p in dest.rglob("*") if p.is_symlink() or p.is_junction()]
+    assert list(outside.iterdir()) == []
 
 
 def _tar(path: Path, mode: str, members: dict[str, bytes], links: dict[str, tuple[bytes, str]] | None = None) -> Path:
