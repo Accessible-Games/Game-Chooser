@@ -30,6 +30,14 @@ is deleted before Nuitka runs; a build that fails the check has its dist folder 
 `procmon/` and a `TRACING-BUILD.txt` warning); it is for the catalog admin's test machines only and is never
 distributed.
 
+## macOS build
+`./build_macos.sh` (on a Mac only) builds `build/Game Chooser.app` for the Mac's own processor with the same pinned
+Nuitka (`--mode=app`), leaves tracing out and runs `check_no_tracing.py` on the bundle. It ships no `bin/` (the
+tools are Windows programs) and has no tracing variant. It copies `LICENSE.txt`, `THIRD_PARTY-macos.md` (as
+`THIRD_PARTY.md`) and `licenses/` into `Contents/Resources/`, then signs the bundle again ad hoc, since adding files
+breaks Nuitka's signature. `collect_licenses.py` takes Python's license from `lib/python3.X/` off Windows and skips
+pywin32 there. A new component built into the Mac app needs an entry in `THIRD_PARTY-macos.md`.
+
 ## Release workflow
 `.github/workflows/release.yml` (Windows x64 only, on `windows-latest`) runs when a tag starting with `v` is pushed:
 `uv sync --locked`, `scripts/fetch_tools.py` (before the tests, or the `tools` tests skip), `pytest`, the normal
@@ -41,7 +49,7 @@ both as a GitHub pre-release with generated notes. Running it by hand (`workflow
 the zip (named with the short commit hash) is kept as a workflow artifact.
 
 ## Scripts, tools and dependencies
-- **scripts/** - `check_no_tracing.py`, `collect_licenses.py`, `fetch_procmon.py`, `fetch_tools.py`,
+- **build_macos.sh** - the macOS build (above). **scripts/** - `check_no_tracing.py`, `collect_licenses.py`, `fetch_procmon.py`, `fetch_tools.py`,
   `serve_test_catalog.py`; **bin/** - bundled tools (git-ignored; `fetch_tools.py` takes each from an address with
   its version in it, since a fixed SHA256 breaks when an unversioned file is replaced). `smart_list` (pinned in
   `[tool.uv.sources]`) and its dependency `resource_finder` are uv git dependencies, not on PyPI

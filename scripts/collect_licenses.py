@@ -1,4 +1,5 @@
-"""Copy the license texts of what Nuitka builds into the app into DIST/licenses/ (run by build_windows.sh).
+"""Copy the license texts of what Nuitka builds into the app into DIST/licenses/ (run by build_windows.sh and
+build_macos.sh).
 
 Run: uv run python scripts/collect_licenses.py DIST
 Texts come from the installed packages and the Python uv uses. That Python (python-build-standalone) has no texts
@@ -51,15 +52,24 @@ def package_texts(name: str) -> list[tuple[str, bytes]]:
     return found
 
 
+def python_license(base: Path, platform: str) -> Path:
+    """Where python-build-standalone keeps Python's license: beside python.exe on Windows, with the standard
+    library elsewhere."""
+    if platform == "win32":
+        return base / "LICENSE.txt"
+    return base / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "LICENSE.txt"
+
+
 def main() -> None:
     out = Path(sys.argv[1]) / "licenses"
     base = Path(sys.base_prefix)
-    texts = [("Python.txt", file_text(base / "LICENSE.txt", "Python's license"))]
+    texts = [("Python.txt", file_text(python_license(base, sys.platform), "Python's license"))]
     for name in PACKAGES:
         texts += package_texts(name)
-    # pywin32's texts sit in its package folders (311 has none in its dist-info).
-    texts.append(("pywin32.txt", file_text(Path(installed("pywin32").locate_file("win32/License.txt")),
-                                           "pywin32's license")))
+    if sys.platform == "win32":
+        # pywin32's texts sit in its package folders (311 has none in its dist-info).
+        texts.append(("pywin32.txt", file_text(Path(installed("pywin32").locate_file("win32/License.txt")),
+                                               "pywin32's license")))
     tag = file_text(base / "BUILD", "the python-build-standalone release of uv's Python").decode().strip()
     for name in PYTHON_LIBRARIES:
         url = PBS_URL.format(tag=tag, name=name)

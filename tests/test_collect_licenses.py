@@ -19,3 +19,10 @@ def test_a_license_that_is_not_utf8_ships_byte_for_byte(tmp_path, monkeypatch):
     (info / "RECORD").write_text("pkg-1.dist-info/METADATA,,\npkg-1.dist-info/licenses/LICENSE.txt,,\n")
     monkeypatch.setattr(collect_licenses, "distribution", lambda name: PathDistribution(info))
     assert collect_licenses.package_texts("pkg") == [("pkg-LICENSE.txt", text)]
+
+
+def test_python_license_is_beside_python_on_windows_and_with_the_standard_library_elsewhere():
+    base = Path("/py")
+    version = f"python{collect_licenses.sys.version_info.major}.{collect_licenses.sys.version_info.minor}"
+    assert collect_licenses.python_license(base, "win32") == base / "LICENSE.txt"
+    assert collect_licenses.python_license(base, "darwin") == base / "lib" / version / "LICENSE.txt"
