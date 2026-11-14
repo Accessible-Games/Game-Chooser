@@ -2,14 +2,7 @@
 # Build script for the Game Chooser macOS app bundle using Nuitka
 # Run this on a Mac with: bash build_macos.sh
 #
-# Builds build/Game Chooser.app for the Mac's own processor (arm64 or x86_64). The bundle carries LICENSE.txt
-# (GPLv3), THIRD_PARTY.md (from THIRD_PARTY-macos.md) and licenses/ (scripts/collect_licenses.py) in
-# Contents/Resources/. Adding them breaks the signature Nuitka made, so the bundle is signed again afterwards
-# (ad hoc, which is enough to run on the Mac that built it; another Mac needs a Developer ID signature and
-# notarization, or the player has to allow it in System Settings).
-#
-# The bundled extraction tools in bin/ are Windows programs, so no bin/ is shipped. There is no tracing build on
-# macOS (it needs Process Monitor); the build leaves tracing out and then runs scripts/check_no_tracing.py.
+# Builds build/Game Chooser.app for the Mac's current processor (arm64 or x86_64).
 
 set -u
 
@@ -28,8 +21,6 @@ echo "Building Game Chooser for macOS ($(uname -m))..."
 
 # Clean the previous build (only Nuitka's own folders and the app: build/ may hold other things)
 rm -rf "$BUILT_APP" "$APP" "$OUT/game-chooser.build" "$OUT/game-chooser.dist"
-
-# A report left from an earlier build must never be what the check reads.
 rm -f "$REPORT"
 
 # nuitka isn't a project dependency; uv supplies it for this run, pinned like the Windows build's
