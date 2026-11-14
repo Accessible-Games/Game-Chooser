@@ -97,7 +97,7 @@ class FirstTimeSetupDialog(wx.Dialog):
                 self.parent_frame._save_games()
 
     def on_preferences(self, event):
-        with PreferencesDialog(self, self.library_manager, getattr(self.parent_frame, "service", None)) as dlg:
+        with PreferencesDialog(self, self.library_manager, self.parent_frame.service) as dlg:
             dlg.ShowModal()
 
     def on_close(self, event):
@@ -315,13 +315,12 @@ class PreferencesDialog(wx.Dialog):
     It holds library ids only, never a Game, so the main window applies finished installs while it is open
     (`holds_no_games`) and calls on_job_done after each, which redraws the library list from the config. The
     prompts it opens itself still wait for job results (the parent's modal_dialog()). `service` (the
-    InstallService) uninstalls a library's catalog games before Remove takes it away; without one, Remove only
-    forgets the library.
+    InstallService) uninstalls a library's catalog games before Remove takes it away.
     """
 
     holds_no_games = True
 
-    def __init__(self, parent, library_manager, service=None):
+    def __init__(self, parent, library_manager, service):
         super().__init__(parent, title="Preferences", size=(700, 500))
 
         self.library_manager = library_manager
@@ -451,7 +450,7 @@ class PreferencesDialog(wx.Dialog):
         for its games' uninstalls says so. The selected library stays selected (or the row where it was)."""
         selected = self._selected_library()
         index = self.lib_list.get_selected_index()
-        removing = self.service.pending_removal if self.service is not None else set()
+        removing = self.service.pending_removal
         rows = [{"id": lib["id"], "name": library_row_name(library_label(lib), lib["id"] in removing),
                  "path": lib["path"]}
                 for lib in self.library_manager.config["libraries"]]
@@ -499,7 +498,7 @@ class PreferencesDialog(wx.Dialog):
         selected = self._selected_library()
         if not selected:
             return
-        if self.service is not None and selected["id"] in self.service.pending_removal:
+        if selected["id"] in self.service.pending_removal:
             # its queued uninstalls find the game folders through the library when they run
             self._tell(messages.LIBRARY_BEING_REMOVED)
             return
@@ -529,9 +528,6 @@ class PreferencesDialog(wx.Dialog):
         if lib is None:  # gone meanwhile (its last uninstall just finished): say so, as Change folder does
             self._tell(messages.LIBRARY_FOLDER_MISSING)
             self._fill_library_list()
-            return None
-        if self.service is None:
-            self._change_libraries(manager.remove_library, library_id)
             return None
         if library_id in self.service.pending_removal:
             self._tell(messages.LIBRARY_BEING_REMOVED)
