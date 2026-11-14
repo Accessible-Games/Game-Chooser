@@ -84,7 +84,7 @@ class Recorder:
         # neither may crash the recorder.
         if self._accept_sessions:
             try:
-                for info in self.run_dir.read_sessions():
+                for info in self.run_dir.read_sessions_and_problems()[0]:
                     if info.session_id not in self._added:
                         self._added.add(info.session_id)
                         self.tree.add_session(info.session_id, info.root_pid, info.root_start,

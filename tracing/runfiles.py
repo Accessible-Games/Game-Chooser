@@ -163,9 +163,6 @@ class RunDir:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write(self.sessions_dir / f"{info.session_id}.json", json.dumps(info.to_json()))
 
-    def read_sessions(self) -> list[SessionInfo]:
-        return self.read_sessions_and_problems()[0]
-
     def read_sessions_and_problems(self) -> tuple[list[SessionInfo], list[str]]:
         """The readable sessions in launch order, and one problem per session file that couldn't be read."""
         sessions, problems = [], []

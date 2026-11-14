@@ -39,7 +39,6 @@ def test_sessions_round_trip_sorted(tmp_path, run):
     run.write_session(session("b", 200))
     run.write_session(session("a", 100))
     (run.sessions_dir / "bad.json").write_text("{oops", encoding="utf-8")
-    assert [s.session_id for s in run.read_sessions()] == ["a", "b"]
     sessions, problems = run.read_sessions_and_problems()
     assert [s.session_id for s in sessions] == ["a", "b"]
     assert len(problems) == 1 and "bad.json" in problems[0]
