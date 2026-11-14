@@ -1028,7 +1028,7 @@ class InstallEngine:
         game_dir = record_folder(rec, ctx.libraries)
         if game_dir is None:
             raise InstallFailed(messages.GAME_FOLDER_MISSING.format(title=title, path=rec.folder))
-        if _holds_a_library(game_dir, ctx.libraries):  # a damaged record: nothing there is the game's alone
+        if _holds_a_library(game_dir, ctx.libraries):  # nothing there is the game's alone
             ctx.records.delete(rec.catalog_id)
             return JobResult("uninstall", rec.catalog_id, title, None,
                              [messages.GAME_FOLDER_IS_LIBRARY_FORGOTTEN.format(title=title, path=game_dir)])

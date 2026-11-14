@@ -78,15 +78,16 @@ def test_a_library_is_never_an_installed_games_folder_or_inside_one(isolated_man
             catalog_id=cid, kind="game", library_id=library_id, folder=folder, launch_path="g.exe", source=source,
             extras={}, files={}, steps=[], method="run"))
     other = isolated_manager.add_library(_folder(tmp_path, "Other"))
-    for path, game_folder in ((outside, outside), (_folder(tmp_path, "Program Files", "Foo", "Sub"), outside),
-                              (str(tmp_path / "Games" / "Bar" / "Saves"), str(tmp_path / "Games" / "Bar"))):
+    for path in (outside, _folder(tmp_path, "Program Files", "Foo", "Sub")):
         with pytest.raises(LibraryError) as e:
             isolated_manager.add_library(path)
-        assert str(e.value) == messages.LIBRARY_IN_GAME_FOLDER.format(path=game_folder)
+        assert str(e.value) == messages.LIBRARY_IN_GAME_FOLDER.format(path=outside)
         with pytest.raises(LibraryError) as e:
             isolated_manager.change_library_folder(other["id"], path)
-        assert str(e.value) == messages.LIBRARY_IN_GAME_FOLDER.format(path=game_folder)
+        assert str(e.value) == messages.LIBRARY_IN_GAME_FOLDER.format(path=outside)
     assert [x["path"] for x in isolated_manager.config["libraries"]] == [lib["path"], other["path"]]
+    # A library's own games move with it, so they never stop it moving (as onto a part of itself).
+    isolated_manager.change_library_folder(lib["id"], str(tmp_path / "Games" / "Bar" / "Saves"))
 
 
 def test_change_folder_keeps_games(isolated_manager, tmp_path):

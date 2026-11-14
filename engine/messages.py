@@ -179,11 +179,10 @@ NOT_IN_CATALOG = "This game is no longer in the catalog."
 NOT_INSTALLED = "{title} isn't installed by Game Chooser."
 INSTALL_NOT_CHANGEABLE = "Game Chooser can't change {title}, because of how it was installed."
 GAME_FOLDER_MISSING = "{title}'s folder {path} wasn't found. If it was moved or deleted, install the game again."
-GAME_FOLDER_IS_LIBRARY = ("Game Chooser's record of {title} names the library folder {path} as the game's folder, "
-                          "so Game Chooser won't change anything there. Uninstall {title} to take it off the list; "
-                          "no files are touched.")
-GAME_FOLDER_IS_LIBRARY_FORGOTTEN = ("Game Chooser's record of {title} named the library folder {path} as the game's "
-                                    "folder, so {title} was taken off the list and nothing there was touched.")
+GAME_FOLDER_IS_LIBRARY = ("{title}'s folder {path} is, or holds, a library folder, so Game Chooser won't change "
+                          "anything there. Uninstall {title} to take it off the list; no files are touched.")
+GAME_FOLDER_IS_LIBRARY_FORGOTTEN = ("{title}'s folder {path} is, or holds, a library folder, so {title} was taken off "
+                                    "the list and nothing there was touched.")
 GAME_FOLDER_LINK_REMOVED = ("{title}'s folder {path} was a link to {target}. Game Chooser removed the link and left "
                             "everything in {target} as it is, so you can delete it yourself.")
 GAME_FOLDER_LINK_BROKEN = ("{title}'s folder {path} was a link to {target}, which no longer exists. Game Chooser "
@@ -280,6 +279,7 @@ def names(items: list[str]) -> str:
 LIBRARY_ALREADY_ADDED = "That folder is already a library."
 LIBRARY_INSIDE = "That folder is inside the library {label}."
 LIBRARY_CONTAINS = "That folder contains the library {label}."
+LIBRARY_IN_GAME_FOLDER = "That folder is, or is inside, {path}, the folder of an installed game."
 LIBRARY_FOLDER_MISSING = "That folder doesn't exist."
 LIBRARY_UNREACHABLE = ("The library folder {path} can't be reached. If it's on a drive that isn't connected, "
                        "connect it and try again. If it moved, use Change folder in Preferences.")
