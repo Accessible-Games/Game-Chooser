@@ -128,7 +128,6 @@ class GameDialog(wx.Dialog):
 
         self.game = game or Game()
         self.library_manager = library_manager
-        self.original_path = game.launch_path if game else ""
 
         genres = sorted(set(g.genre for g in library_manager.games if g.genre))
         developers = sorted(set(g.developer for g in library_manager.games if g.developer))
