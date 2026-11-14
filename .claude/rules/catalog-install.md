@@ -6,14 +6,12 @@ paths:
   - "/library_*.py"
   - "/wx_bridge.py"
   - "/main_window.py"
-  - "/language_names.py"
   - "/progress_area.py"
   - "/description_field.py"
   - "/tests/test_install_*.py"
   - "/tests/test_catalog_view.py"
   - "/tests/test_library_*.py"
   - "/tests/test_wx_bridge.py"
-  - "/tests/test_language_names.py"
 ---
 
 # Catalog, installing and launching
@@ -26,8 +24,8 @@ paths:
 - **catalog_panel.py** - the Catalog tab: its status line, Retry and what a row's action does, around a
   `GamesPanel` (`games_panel.py`, the games view both tabs share; see `.claude/rules/ui-main-window.md`);
   **catalog_view.py** - wx-free rows for both tabs (`build_rows` for catalog entries, `library_rows` for the
-  player's games), filters, `pick_index`, the type-ahead matching, description text, links;
-  **language_names.py** - ISO 639-1 codes to English names (unknown codes shown as written)
+  player's games), filters, `pick_index`, the type-ahead matching, description text, links, and the English
+  names of ISO 639-1 language codes (unknown codes shown as written)
 - **wx_bridge.py** - queue listener and installer-UI bridges to the UI thread, `run_in_background`
 
 ## Install service (`install_service.py`)

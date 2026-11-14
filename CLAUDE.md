@@ -21,7 +21,7 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 
 ### Testing Strategy
 - Logic lives in wx-free modules so it is unit-tested: `catalog_view.py`, `install_choices.py`, `install_prefs.py`,
-  `library_actions.py`, `install_service.py`, `library_manager.py`, `language_names.py`, `engine/`.
+  `library_actions.py`, `install_service.py`, `library_manager.py`, `engine/`.
   `wx_bridge.py` takes injectable `post` functions so its threading is tested without a running wx app (the test
   skips when wxPython is not installed).
 - Of the UI files, `dialogs.py`, `install_dialogs.py`, `progress_area.py` and `description_field.py` are not
@@ -35,8 +35,8 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
 - Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, catalog
-  panel, games panel, main window, install choices, install prefs, install service, language names, library
-  actions, library integration, library manager, validation service, wx bridge, catalog fixtures).
+  panel, games panel, main window, install choices, install prefs, install service, library actions,
+  library integration, library manager, validation service, wx bridge, catalog fixtures).
 - `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
   except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
   build check) cover the tracing build.
