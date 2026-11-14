@@ -1120,8 +1120,19 @@ def _prefetched(fetch: Fetch, item_id: str, fetched: Fetched) -> Fetch:
 
 
 def _holds_a_library(game_dir: Path, libraries: list[dict]) -> bool:
-    """True if `game_dir` is a library folder or holds one: never one game's own folder."""
-    return any(lib.get("path") and inside(Path(lib["path"]), game_dir) for lib in libraries)
+    """True if `game_dir` is a library folder or holds one: never one game's own folder. Compared as text and on
+    disk, so another spelling (`\\\\?\\`, a share, a short name) or a link to the library is caught too."""
+    for lib in libraries:
+        if not lib.get("path"):
+            continue
+        folder = Path(os.path.abspath(lib["path"]))
+        if inside(folder, game_dir):
+            return True
+        for f in (folder, *folder.parents):
+            with suppress(OSError):  # a folder that isn't there can't be the game's
+                if os.path.samefile(game_dir, f):
+                    return True
+    return False
 
 
 def _require_changeable(rec: InstallRecord, title: str, action: str) -> None:
