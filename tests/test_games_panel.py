@@ -33,6 +33,15 @@ ALPHA, BRAVO, CHARLIE, DELTA = entry("alpha"), entry("bravo", "Action"), entry("
 ANT, BEE, CAT = entry("ant", year=2003), entry("bee", "Action", year=2002), entry("cat", year=2001)
 SORT_KEYS = [lambda r: r.title.lower(), lambda r: r.year]
 
+# On macOS smart_list's list is a DataViewCtrl; what GamesPanel deliberately does only on a ListCtrl skips there
+DATAVIEW = wx.Platform == "__WXMAC__"
+TYPE_AHEAD = pytest.mark.skipif(DATAVIEW, reason="no type-ahead of the view's own on the macOS DataViewCtrl "
+                                                 "(GamesPanel.on_char leaves characters to the control)")
+SCROLLS = pytest.mark.skipif(DATAVIEW, reason="GamesPanel never scrolls the macOS DataViewCtrl itself "
+                                              "(_select, _in_view)")
+WIDTHS = pytest.mark.skipif(DATAVIEW, reason="the macOS DataViewCtrl keeps its own column widths: GamesPanel "
+                                             "neither restores nor saves them")
+
 
 class Saves:
     """In place of the manager's save_config: counts the saves, and can fail as a full disk does"""
@@ -99,10 +108,15 @@ def titles(view):
 
 
 def selected(view):
-    return view.list_ctrl.GetFirstSelected()
+    return view.list.get_selected_index()
 
 
 def focused(view):
+    """The list's focused row (smart_list has none of its own; on a DataViewCtrl the current item, which macOS
+    keeps on the selected row)"""
+    if view.list.control.use_dataview:
+        item = view.list_ctrl.GetCurrentItem()
+        return view.list.control.wx_model.GetRow(item) if item.IsOk() else -1
     return view.list_ctrl.GetFocusedItem()
 
 
@@ -115,9 +129,11 @@ def saves(view):
 
 
 def player_selects(view, index):
-    """What an arrow key or a click does"""
-    view.list_ctrl.Select(index)
-    view.list_ctrl.Focus(index)
+    """What an arrow key or a click does: the row is selected (and on a ListCtrl also focused; smart_list does that
+    only through SetSelectedIndex, which a DataViewCtrl can't take)"""
+    view.list.control.Select(index)
+    if not view.list.control.use_dataview:
+        view.list_ctrl.Focus(index)
 
 
 def tree_nodes(view):
@@ -209,7 +225,20 @@ def click_header(view, column):
 
 
 def headers(view):
-    return [view.list_ctrl.GetColumn(i).GetText() for i in range(view.list_ctrl.GetColumnCount())]
+    """The column headers as shown (smart_list has no header text of its own)"""
+    columns = [view.list_ctrl.GetColumn(i) for i in range(view.list_ctrl.GetColumnCount())]
+    if view.list.control.use_dataview:
+        return [column.GetTitle() for column in columns]
+    return [column.GetText() for column in columns]
+
+
+def as_shown(view, names):
+    """Headers as `view` shows them: a DataViewCtrl (macOS) has no sort arrow (GamesPanel._show_sort)"""
+    if isinstance(names, str):
+        return as_shown(view, [names])[0]
+    if view.list.control.use_dataview:
+        return [name.rstrip(" \u25b2\u25bc") for name in names]
+    return names
 
 
 def test_label_and_description_follow_the_row_when_its_number_stays_but_the_game_changes(make_view):
@@ -358,22 +387,22 @@ def test_saved_search_and_sort_are_read_when_the_view_is_built(make_view):
                      sort_keys=SORT_KEYS)
     view.set_rows(rows(ANT, BEE, CAT))
     assert view.search_combo.GetValue() == "a" and titles(view) == ["Ant", "Cat"]  # newest first; no "a" in Bee
-    assert headers(view) == ["Title", "Year ▼"]
+    assert headers(view) == as_shown(view, ["Title", "Year ▼"])
 
 
 def test_sorting_keeps_the_game_selected_and_its_label_right(make_view):
     view = make_view(sort_keys=SORT_KEYS)
     view.set_rows(rows(ANT, BEE, CAT))
-    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title ▲", "Year"]
+    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == as_shown(view, ["Title ▲", "Year"])
     click_header(view, 1)  # by year, oldest first: Ant moves from row 0 to row 2
-    assert titles(view) == ["Cat", "Bee", "Ant"] and headers(view) == ["Title", "Year ▲"]
+    assert titles(view) == ["Cat", "Bee", "Ant"] and headers(view) == as_shown(view, ["Title", "Year ▲"])
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (2, 2, "Install Ant")
     click_header(view, 1)  # the same column again: the other way round
-    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title", "Year ▼"]
+    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == as_shown(view, ["Title", "Year ▼"])
     assert (selected(view), focused(view), view.action_btn.GetLabel()) == (0, 0, "Install Ant")
     assert (saved(view)["sort_column"], saved(view)["sort_ascending"]) == (1, False)
     press(view.list_ctrl, ord("1"), wx.wxEVT_CHAR)  # a digit key sorts by that column
-    assert headers(view) == ["Title ▲", "Year"] and saved(view)["sort_column"] == 0
+    assert headers(view) == as_shown(view, ["Title ▲", "Year"]) and saved(view)["sort_column"] == 0
 
 
 def test_rows_that_tie_in_the_sorted_column_are_in_title_order(make_view):
@@ -440,6 +469,7 @@ def test_library_rows_launch_describe_and_are_remembered_by_id(make_view):
     assert (view.action_btn.GetLabel(), view.action_btn.IsEnabled()) == ("Launch", False)
 
 
+@WIDTHS
 def test_column_widths_are_restored_and_saved(make_view):
     view = make_view({"column_widths": [123, 45]})
     assert [view.list_ctrl.GetColumnWidth(i) for i in range(2)] == [123, 45]
@@ -550,6 +580,7 @@ def test_a_selected_catalog_game_whose_object_was_replaced_stays_selected(make_v
     assert saved(view)["last_selected"] == "alpha"
 
 
+@SCROLLS
 def test_a_background_refill_scrolls_only_to_a_selected_row_that_was_in_view(make_view):
     """A finished job or a Status result must not scroll the list away from where the player scrolled it. The
     list is never shown here, so what it has in view is given by hand."""
@@ -574,6 +605,7 @@ def test_a_background_refill_scrolls_only_to_a_selected_row_that_was_in_view(mak
     assert scrolled == [52, 50, 70, 70]
 
 
+@SCROLLS
 def test_the_first_fill_brings_the_remembered_row_into_view(make_view):
     view = make_view({"last_selected": "game090"})
     scrolled = []
@@ -694,7 +726,8 @@ def test_a_view_uses_only_saved_state_keys_the_default_config_has(make_view, pre
     assert set(state) == defaults
     assert (state[prefix + "last_selected"], state[prefix + "last_search"], state[prefix + "tree_selections"]) == \
         ("alpha", "a", ["Genre/Puzzle"])
-    assert len(state[prefix + "column_widths"]) == 2 and state[prefix + "splitter_position"] > 0
+    widths = state[prefix + "column_widths"]  # none kept for the macOS DataViewCtrl, which keeps its own
+    assert (widths is None if DATAVIEW else len(widths) == 2) and state[prefix + "splitter_position"] > 0
     assert (state[prefix + "sort_column"], state[prefix + "sort_ascending"]) == (1, True)
     assert (state[other + "sort_column"], state[other + "sort_ascending"]) == (0, True)
     assert (state[other + "last_selected"], state[other + "last_search"], state[other + "tree_selections"],
@@ -796,11 +829,12 @@ def test_a_saved_sort_column_the_list_does_not_have_is_ignored(make_view, column
     """A hand-edited config.json must not stop every fill with an IndexError"""
     view = make_view({"sort_column": column, "sort_ascending": False}, sort_keys=SORT_KEYS)
     view.set_rows(rows(CAT, ANT, BEE))
-    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == ["Title ▲", "Year"]
+    assert titles(view) == ["Ant", "Bee", "Cat"] and headers(view) == as_shown(view, ["Title ▲", "Year"])
 
 
 # ---- type-ahead: typing in the list jumps to the title that starts with what was typed --------------------------
 
+@TYPE_AHEAD
 def test_typing_jumps_to_the_title_as_the_players_own_move(make_view):
     """As an arrow key: the label, the description, the focused item, the scroll and the remembered game follow"""
     view, _ = typing_view(make_view)
@@ -816,6 +850,7 @@ def test_typing_jumps_to_the_title_as_the_players_own_move(make_view):
     assert restarted.selected_row().title == "Temple Of Doom"
 
 
+@TYPE_AHEAD
 def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_view):
     acted = []
     view, now = typing_view(make_view, on_action=lambda: acted.append(view.selected_row().title))
@@ -845,6 +880,21 @@ def test_space_belongs_to_the_text_for_three_seconds_and_acts_after_that(make_vi
     assert acted[-1] == "Temple Run" and len(acted) == 4
 
 
+@pytest.mark.parametrize("held", [{}, {"shift": True}, {"ctrl": True}, {"ctrl": True, "shift": True},
+                                  {"ctrl": True, "alt": True}, {"alt": True, "shift": True}])
+def test_with_nothing_typed_any_space_but_alt_alone_acts_once(make_view, held):
+    """The part of the next test that holds where the view types nothing (the macOS DataViewCtrl): any Space but
+    Alt alone acts on the selected game, once while it is held, and Alt+Space is passed on (the window menu)"""
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    player_selects(view, 1)
+    assert press(view.list_ctrl, wx.WXK_SPACE, **held) and acted == ["Bravo"]
+    assert press(view.list_ctrl, wx.WXK_SPACE, repeat=True, **held) and acted == ["Bravo"]
+    assert not press(view.list_ctrl, wx.WXK_SPACE, alt=True) and acted == ["Bravo"]
+
+
+@TYPE_AHEAD
 @pytest.mark.parametrize("held", [{"shift": True}, {"ctrl": True}, {"ctrl": True, "shift": True},
                                   {"ctrl": True, "alt": True}, {"alt": True, "shift": True}])
 def test_a_space_with_any_modifier_but_alt_alone_is_a_plain_space(make_view, held):
@@ -862,16 +912,17 @@ def test_a_space_with_any_modifier_but_alt_alone_is_a_plain_space(make_view, hel
     assert not press(view.list_ctrl, wx.WXK_SPACE, alt=True) and acted == ["Temple Run"]
 
 
+@TYPE_AHEAD
 def test_a_digit_belongs_to_the_text_while_typing_and_sorts_otherwise(make_view):
     view, now = typing_view(make_view)
     type_text(view, "area 51")
-    assert selected(view) == 1 and headers(view) == ["Title ▲", "Year"]  # "5" and "1" did not sort
+    assert selected(view) == 1 and headers(view) == as_shown(view, ["Title ▲", "Year"])  # "5" and "1" did not sort
     now[0] += 2
     type_text(view, "2")  # nothing is being typed: the digit sorts by its column
-    assert headers(view) == ["Title", "Year ▲"] and view.selected_row().title == "Area 51"
+    assert headers(view) == as_shown(view, ["Title", "Year ▲"]) and view.selected_row().title == "Area 51"
     now[0] += 2
     type_text(view, "9")  # no such column, and a digit never starts a text
-    assert headers(view) == ["Title", "Year ▲"] and view.selected_row().title == "Area 51"
+    assert headers(view) == as_shown(view, ["Title", "Year ▲"]) and view.selected_row().title == "Area 51"
     assert not view.type_ahead.typing()
 
 
@@ -888,6 +939,7 @@ def test_typing_that_matches_no_title_and_keys_with_ctrl_alone_or_alt_alone_chan
     assert selected(view) == 2 and saves(view).count == before and not view.type_ahead.typing()
 
 
+@TYPE_AHEAD
 def test_typing_looks_at_titles_only_in_the_order_the_list_shows(make_view):
     view, now = typing_view(make_view, {"sort_column": 0, "sort_ascending": False})
     assert titles(view)[0] == "Temple Run" and selected(view) == 0
@@ -898,6 +950,7 @@ def test_typing_looks_at_titles_only_in_the_order_the_list_shows(make_view):
     assert view.selected_row().title == "Temple Of Doom"
 
 
+@TYPE_AHEAD
 def test_space_in_a_text_never_moves_the_selection(make_view):
     """The player types `a`, lands on Alpha and presses Space: the text is then "a ", which only "A Hero's Call"
     starts with, and the selection must not go there"""
@@ -921,6 +974,7 @@ def test_space_in_a_text_never_moves_the_selection(make_view):
 @pytest.mark.parametrize("key", [
     "ESCAPE", "BACK", "UP", "DOWN", "HOME", "END", "PAGEUP", "PAGEDOWN",
     "NUMPAD_UP", "NUMPAD_DOWN", "NUMPAD_HOME", "NUMPAD_END", "NUMPAD_PAGEUP", "NUMPAD_PAGEDOWN"])  # Num Lock off
+@TYPE_AHEAD
 def test_a_typed_text_ends_on_a_key_that_ends_a_thought(make_view, key):
     """Escape, Backspace and the keys that move through the list: what is typed next is a new text, and Space
     acts at once on the row the player moved to"""
@@ -938,6 +992,7 @@ def test_a_typed_text_ends_on_a_key_that_ends_a_thought(make_view, key):
     assert acted == ["Bravo"]
 
 
+@TYPE_AHEAD
 def test_a_character_typed_with_altgr_is_text(make_view):
     """Ctrl and Alt both down is what AltGr is to Windows. wx hands over a letter outside the system code page
     that way (\u0119 and \u017c on a Polish layout, under code page 1252), and with no key code"""
@@ -951,9 +1006,9 @@ def test_a_digit_sorts_only_with_neither_ctrl_nor_alt_held(make_view):
     view, _ = typing_view(make_view)
     for modifiers in ({"alt": True}, {"ctrl": True}, {"ctrl": True, "alt": True}):
         press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR, **modifiers)
-        assert headers(view) == ["Title \u25b2", "Year"] and not view.type_ahead.typing()
+        assert headers(view) == as_shown(view, ["Title \u25b2", "Year"]) and not view.type_ahead.typing()
     press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR, shift=True)  # some layouts (French) give digits only with Shift
-    assert headers(view) == ["Title", "Year \u25b2"]
+    assert headers(view) == as_shown(view, ["Title", "Year \u25b2"])
 
 
 # ---- the macOS list control (a DataViewCtrl) sends its own events -------------------------------------------------

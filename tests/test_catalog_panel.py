@@ -11,7 +11,7 @@ wx = pytest.importorskip("wx")
 
 from catalog_panel import CatalogPanel  # noqa: E402
 from engine import messages  # noqa: E402
-from tests.test_games_panel import (FakeFrame, Saves, app, click_header, entry, headers, press,  # noqa: E402,F401
+from tests.test_games_panel import (FakeFrame, Saves, app, as_shown, click_header, entry, headers, press,  # noqa: E402,F401
                                     saved, titles)  # (app is a fixture)
 
 
@@ -133,23 +133,23 @@ PRICED = [priced("alpha", "Action", "Cy", "Zombies", model="one-time", price=5, 
 def test_the_catalog_list_sorts_by_each_column_and_remembers_it(make_panel):
     view = make_panel(entries=PRICED).view
     assert titles(view) == ["Alpha", "Bravo", "Charlie", "Delta"]
-    assert headers(view) == ["Title ▲", "Developer", "Genre", "Price", "Details"]
+    assert headers(view) == as_shown(view, ["Title ▲", "Developer", "Genre", "Price", "Details"])
     click_header(view, 3)  # Price: free first, then by amount ("Buy once, $10" is before "Buy once, $5" as text)
-    assert titles(view) == ["Charlie", "Alpha", "Delta", "Bravo"] and headers(view)[3] == "Price ▲"
+    assert titles(view) == ["Charlie", "Alpha", "Delta", "Bravo"] and headers(view)[3] == as_shown(view, "Price ▲")
     assert (saved(view)["catalog_sort_column"], saved(view)["catalog_sort_ascending"]) == (3, True)
     click_header(view, 3)
-    assert titles(view) == ["Bravo", "Delta", "Alpha", "Charlie"] and headers(view)[3] == "Price ▼"
+    assert titles(view) == ["Bravo", "Delta", "Alpha", "Charlie"] and headers(view)[3] == as_shown(view, "Price ▼")
     for digit, column, order in (("3", "Genre", ["Alpha", "Delta", "Charlie", "Bravo"]),  # a tie: in title order
                                  ("2", "Developer", ["Bravo", "Charlie", "Alpha", "Delta"]),
                                  ("5", "Details", ["Charlie", "Bravo", "Delta", "Alpha"])):
         press(view.list_ctrl, ord(digit), wx.wxEVT_CHAR)  # a digit key
-        assert titles(view) == order and headers(view)[int(digit) - 1] == f"{column} ▲"
+        assert titles(view) == order and headers(view)[int(digit) - 1] == as_shown(view, f"{column} ▲")
     assert saved(view)["catalog_sort_column"] == 4
 
 
 def test_the_catalog_list_starts_in_the_saved_sort(make_panel):
     view = make_panel(entries=PRICED, saved={"catalog_sort_column": 3, "catalog_sort_ascending": False}).view
-    assert titles(view) == ["Bravo", "Delta", "Alpha", "Charlie"] and headers(view)[3] == "Price ▼"
+    assert titles(view) == ["Bravo", "Delta", "Alpha", "Charlie"] and headers(view)[3] == as_shown(view, "Price ▼")
 
 
 
