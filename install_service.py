@@ -16,9 +16,9 @@
 
 """The install service: ties the catalog index, the install engine and queue, and the game library together.
 
-wx-free. Every member is for the UI thread except `fetch_index`, which is safe on any thread and changes
-nothing: the UI fetches in the background and hands the state to `take_index` on its own thread. The UI calls
-`apply_result` and `job_failed` on its thread when the queue's listener reports a job's end.
+wx-free. Every member is for the UI thread except `fetch_index`, `statuses` and `player_files`, which run on worker
+threads and change no games, records or libraries: the UI hands a fetched state to `take_index` on its own thread.
+The UI calls `apply_result` and `job_failed` on its thread when the queue's listener reports a job's end.
 """
 
 import logging
