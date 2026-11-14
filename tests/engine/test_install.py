@@ -313,6 +313,15 @@ def test_no_verified_source_fails_plainly(tmp_path):
     assert list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and leftovers(ctx, lib) == []
 
 
+def test_a_download_the_server_no_longer_has_is_not_called_unreachable(tmp_path):
+    routes = {}
+    e = game(routes)
+    engine, ctx, lib = setup(tmp_path, [e], routes)
+    ctx.fetcher.gone.add(e["sources"][0]["url"])  # HTTP 404
+    error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
+    assert error.message == messages.NO_SOURCE.format(title="Entombed", reasons=messages.SOURCE_GONE)
+
+
 def test_changed_developer_files_note_once_and_record_the_real_file(tmp_path):
     routes = {}
     e = game(routes, extras=[{"id": "entombed-patch", "required": True}])

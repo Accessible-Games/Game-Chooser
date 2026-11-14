@@ -24,6 +24,10 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   **pricing.py** - how `pricing` reads, the Price filter values and the install confirmation's price warning.
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
+  An HTTP 404 or 410 is `DownloadGone` ("no longer available"), never "couldn't be reached"; `NoVerifiedSource.gone`
+  only when no address failed in a way that may pass. Undo that fails on a changed or gone file, or on a previous
+  version without its unpack details, sets the record's `previous_unavailable` (Undo shown unavailable, with why;
+  the dialog names the backup folder holding the player's copies); one that couldn't reach an address stays offered.
   Uninstall (`apply_uninstall`) removes every empty folder in the game's folder, box ticked or not (one the archive
   shipped empty, like `saves`, has no recorded file under it); a folder holding a player's file stays, with its
   parents; links are never entered. A game folder left with nothing in it goes, and so does its record.

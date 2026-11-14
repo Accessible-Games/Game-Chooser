@@ -8,12 +8,13 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
 from engine.entries import is_mirror_url, platform_sources
-from engine.errors import BlockedHost, DownloadError, NoVerifiedSource
+from engine.errors import BlockedHost, DownloadError, DownloadGone, NoVerifiedSource
 from engine.messages import (
     DEVELOPER_CHANGED_UNVERIFIED,
     DEVELOPER_CHANGED_VERIFIED,
     SOURCE_BLOCKED,
     SOURCE_CHECKSUM_MISMATCH,
+    SOURCE_GONE,
     SOURCE_UNREACHABLE,
     Progress,
 )
@@ -82,8 +83,8 @@ def _walk(sources: list[dict], work_dir: Path, fetcher, progress, cancel, *, kee
                 reasons.append(SOURCE_BLOCKED)
                 drop(folder)
                 continue
-            except DownloadError:
-                reasons.append(SOURCE_UNREACHABLE)
+            except DownloadError as e:
+                reasons.append(SOURCE_GONE if isinstance(e, DownloadGone) else SOURCE_UNREACHABLE)
                 drop(folder)
                 continue
             progress(Progress("verifying"))
@@ -104,7 +105,8 @@ def _walk(sources: list[dict], work_dir: Path, fetcher, progress, cancel, *, kee
         if candidate is not None:
             made.remove(candidate.path.parent)
             return candidate
-        raise NoVerifiedSource(reasons, downloaded)
+        raise NoVerifiedSource(reasons, downloaded,
+                               gone=SOURCE_GONE in reasons and SOURCE_UNREACHABLE not in reasons)
     finally:
         for folder in list(made):
             shutil.rmtree(folder, ignore_errors=True)

@@ -9,7 +9,7 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
-from engine.errors import BlockedHost, Cancelled, DownloadError
+from engine.errors import BlockedHost, Cancelled, DownloadError, DownloadGone
 
 USER_AGENT = "GameChooser/0.1 (+https://catalog.accessiblegames.net/)"
 BLOCKED_DOMAIN = "agarchive.net"
@@ -57,7 +57,8 @@ class Fetcher:
         try:
             return self._opener.open(request, timeout=self.timeout)
         except urllib.error.HTTPError as exc:
-            raise DownloadError(f"{exc.code} {exc.reason}") from exc
+            gone = exc.code in (404, 410)  # the file doesn't exist there: trying again won't help
+            raise (DownloadGone if gone else DownloadError)(f"{exc.code} {exc.reason}") from exc
         except (urllib.error.URLError, http.client.HTTPException, OSError) as exc:
             raise DownloadError(str(getattr(exc, "reason", exc))) from exc
 

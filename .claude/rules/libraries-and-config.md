@@ -31,6 +31,14 @@ paths:
   a record with no game gets one; a game whose record is gone (or unsafe id) becomes a game added by hand; a game
   whose uninstall stopped partway stays linked; one whose uninstall finished but never reached games.json leaves
   the list (the record stays).
+  - A record with no game first looks for a game added by hand (not a web game) that launches the same file: the
+    full path, ignoring case and slashes, or the same library id and relative path while that library is unknown.
+    That game (the first, when two launch it) is linked again (catalog id, library, relative path, installed
+    source and extras from the record) instead of a second game being added. It keeps its title and details until
+    the catalog next refreshes them: an index take sets its genre, and an Update, Repair or Extras result replaces
+    every field (`add_catalog_game`). This undoes one start without the records (another `%APPDATA%`, a missing
+    `installs\`), which unlinks every catalog game. Another exe in the same folder, the same relative path in
+    another library, or an uninstalled record never links a game.
 
 ## Configuration (`config.json`)
 - `libraries`: `[{"id", "path"}]`
@@ -54,7 +62,8 @@ paths:
   saves raise OSError and write nothing.
 - A config that can't be read (bad JSON or the wrong shape) is copied to `config.json.bad` first,
   the app runs on defaults, and the player is told once where the copy is. Re-adding a library mints a new id, so
-  installed games stay "Library not found" until the copy is restored by hand. The same
+  installed games stay "Library not found" until a config listing their libraries is put back by hand (the copy,
+  if it can be read or repaired; it may hold nothing useful, such as a file holding just `{`). The same
   rule covers `games.json` (`games_load_failed` is set; the list starts empty).
 
 ## Paths and executable detection

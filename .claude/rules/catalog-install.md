@@ -72,7 +72,9 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   `MainFrame.confirm_install(plan, fixed_library=None)`, and say things through `MainFrame._tell`.
 - **Progress area** (`ProgressArea`): shows the queue's current job, never the selected game. One copy beside
   each tab's action button, all driven by `MainFrame._sync_progress`; the button stays usable. Done appears while
-  an installer runs; Cancel cancels the job. Focus: see CLAUDE.md (Focus).
+  an installer runs; Cancel cancels the job. Showing or hiding Done lays out the view around the area, so the
+  area grows for Done as far as the window allows; only a window too narrow for the row narrows the status
+  line. Focus: see CLAUDE.md (Focus).
 - **Install while a job runs or waits** (`CatalogPanel._confirm_install`): on a game that itself has a job
   queued or running it says so (`messages.JOB_ALREADY_RUNNING` / `JOB_ALREADY_WAITING`) and changes nothing.
   That includes a running job that is being cancelled (`InstallQueue.job_for` still counts it: it may still be

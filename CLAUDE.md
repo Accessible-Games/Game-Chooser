@@ -31,7 +31,8 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   its columns sort and an "&" in its labels (`tests/test_catalog_panel.py`); in `main_window.py`, the Library
   list's own key (Del), four message boxes of `launch_game` and `on_open_folder`, Locate's file check and a
   games.json save that fails (`tests/test_main_window.py`); in `dialogs.py`, that `GameDialog` saves the year
-  2000 and keeps a typed path when Platform becomes Web Game (`tests/test_dialogs.py`).
+  2000 and keeps a typed path when Platform becomes Web Game, and that Add/Save and Preferences' OK are the
+  default buttons (`tests/test_dialogs.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
@@ -40,21 +41,26 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   library integration, library manager, validation service, wx bridge, catalog fixtures).
 - `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
   except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
-  build check) cover the tracing build.
+  build check) cover the tracing build. `tests/test_collect_licenses.py` covers `scripts/collect_licenses.py`.
 - Mock minimal structures, test edge cases (empty/None, mixed states), keep logic out of the UI layer.
 
 ## Rules that hold everywhere
 
 ### Threading
-UI thread for all wx work and every change to games, records and libraries; both tabs' lists are filtered and
-sorted there too. Background threads: index fetch, status computation, the player-file counts, `GameDialog`'s
-duplicate check, the install queue's worker and notifier.
+UI thread for all wx work and every change to games and libraries; both tabs' lists are filtered and sorted there
+too. Install records are the exception: a queued or running job owns its game's record, and the engine saves it
+(and the records of shared runtimes it installs) on the install queue's worker. UI-thread code that writes records
+leaves a game with a job (`queue.job_for`) alone: `adopt_launch_paths` skips it, Delete refuses to forget it while
+it is busy (`MainFrame._game_busy`), and `remove_library` is refused while one of the library's games has a job.
+Background threads: index fetch, status computation, the player-file counts, `GameDialog`'s duplicate check, the
+install queue's worker and notifier.
 
 **`InstallService` threading rule.** Three members change no games, records or libraries, and the code runs them
 on worker threads: `fetch_index()` (it also saves the fetched index in the cache folder), `statuses()` and
-`player_files()` (both only read). Everything that mutates games, records or libraries runs on the **UI thread
-only**: `take_index`, `load_cached_index`, `adopt_launch_paths`, `apply_result`, `job_failed`,
-`submit`, `forget`, `remove_library`, and so on. Pattern: fetch on a worker, then `take_index` on the UI thread.
+`player_files()` (both only read). Every member that changes games, libraries or records runs on the **UI thread
+only**: `take_index`, `load_cached_index`, `adopt_launch_paths`, `refresh_catalog_genres`, `apply_result`,
+`job_failed`, `submit`, `forget`, `ensure_library`, `remove_library`. Pattern: fetch on a worker, then `take_index`
+on the UI thread.
 What starts each worker: `MainFrame.start_index_fetch` and `MainFrame.refresh_statuses` each start their own
 daemon thread, and the player-file counts and `GameDialog`'s duplicate check go through
 `wx_bridge.run_in_background`.
