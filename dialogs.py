@@ -135,17 +135,16 @@ class GameDialog(wx.Dialog):
         panel = wx.Panel(self)
         sizer = wx.GridBagSizer(5, 5)
 
-        # Title
-        sizer.Add(wx.StaticText(panel, label="Title:"),
-                 pos=(0, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        self.title_ctrl = wx.TextCtrl(panel, value=self.game.title)
-        sizer.Add(self.title_ctrl, pos=(0, 1), flag=wx.EXPAND)
+        def add_row(row, label, make):
+            """A label, then the field `make()` creates (in that order: Windows names a field by the text before it)"""
+            sizer.Add(wx.StaticText(panel, label=label), pos=(row, 0), flag=wx.ALIGN_CENTER_VERTICAL)
+            ctrl = make()
+            sizer.Add(ctrl, pos=(row, 1), flag=wx.EXPAND)
+            return ctrl
 
-        # Platform
-        sizer.Add(wx.StaticText(panel, label="Platform:"),
-                 pos=(1, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        platforms = ["Windows", "macOS", "Web Game"]
-        self.platform_ctrl = wx.ComboBox(panel, choices=platforms, style=wx.CB_DROPDOWN | wx.CB_READONLY)
+        self.title_ctrl = add_row(0, "Title:", lambda: wx.TextCtrl(panel, value=self.game.title))
+        self.platform_ctrl = add_row(1, "Platform:", lambda: wx.ComboBox(
+            panel, choices=["Windows", "macOS", "Web Game"], style=wx.CB_DROPDOWN | wx.CB_READONLY))
 
         if self.game.is_web:
             initial_platform = "Web Game"
@@ -155,8 +154,6 @@ class GameDialog(wx.Dialog):
             system = platform.system()
             initial_platform = "Windows" if system == "Windows" else "macOS"
         self.platform_ctrl.SetValue(initial_platform)
-
-        sizer.Add(self.platform_ctrl, pos=(1, 1), flag=wx.EXPAND)
 
         self.path_label = wx.StaticText(panel, label="Launch Path:")
         sizer.Add(self.path_label, pos=(2, 0), flag=wx.ALIGN_CENTER_VERTICAL)
@@ -168,24 +165,10 @@ class GameDialog(wx.Dialog):
         sizer.Add(self.path_ctrl, pos=(2, 1), flag=wx.EXPAND)
         sizer.Add(self.browse_btn, pos=(2, 2), flag=wx.LEFT, border=5)
 
-        # Genre
-        sizer.Add(wx.StaticText(panel, label="Genre:"),
-                 pos=(3, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        self.genre_ctrl = wx.ComboBox(panel, value=self.game.genre, choices=genres)
-        sizer.Add(self.genre_ctrl, pos=(3, 1), flag=wx.EXPAND)
-
-        # Developer
-        sizer.Add(wx.StaticText(panel, label="Developer:"),
-                 pos=(4, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        self.developer_ctrl = wx.ComboBox(panel, value=self.game.developer,
-                                         choices=developers)
-        sizer.Add(self.developer_ctrl, pos=(4, 1), flag=wx.EXPAND)
-
-        # Year
-        sizer.Add(wx.StaticText(panel, label="Year:"),
-                 pos=(5, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        self.year_ctrl = wx.TextCtrl(panel, value=self.game.year)  # empty: no year
-        sizer.Add(self.year_ctrl, pos=(5, 1), flag=wx.EXPAND)
+        self.genre_ctrl = add_row(3, "Genre:", lambda: wx.ComboBox(panel, value=self.game.genre, choices=genres))
+        self.developer_ctrl = add_row(4, "Developer:", lambda: wx.ComboBox(panel, value=self.game.developer,
+                                                                           choices=developers))
+        self.year_ctrl = add_row(5, "Year:", lambda: wx.TextCtrl(panel, value=self.game.year))  # empty: no year
 
         btn_sizer = wx.StdDialogButtonSizer()
         ok_label = "Add" if self.is_new else "Save"
