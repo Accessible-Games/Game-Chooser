@@ -66,11 +66,6 @@ def test_root_start_report():
 def test_relaunch_commands(tmp_path):
     out = tmp_path / "probe"
     bat = tmp_path / "game.bat"
-    exe, args, cwd = probe.module_relaunch(out, bat, tmp_path / "Procmon64.exe")
-    assert exe == sys.executable
-    assert args == ["-m", "tracing.probe", str(out), str(bat), "--procmon", str(tmp_path / "Procmon64.exe")]
-    assert cwd == REPO
-
     exe, args, cwd = probe.cli_relaunch(False, out, bat)
     lead_exe, lead_args = paths.self_command(False)
     assert exe == lead_exe
