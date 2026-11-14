@@ -59,6 +59,24 @@ def test_add_or_save_is_the_default_button_and_still_checks_the_fields(make_dial
     assert dlg.boxes == ["Error"]  # "Title cannot be empty", and the dialog stays open
 
 
+@pytest.mark.parametrize("game, platform, label", [
+    (Game(title="W", launch_path="https://example.com/", platforms=["Web"]), "Windows", "Launch Path:"),
+    (Game(title="D", launch_path=r"C:\Games\x.exe", platforms=["Windows"]), "Web Game", "URL:")])
+def test_changing_platform_lays_the_fields_out_again(make_dialog, game, platform, label):
+    """Browse shows or hides and the path label changes length: nothing may be left on top of something else"""
+    dlg = make_dialog(game)
+    dlg.platform_ctrl.SetValue(platform)
+    dlg._update_path_ui()  # what choosing a platform runs
+    path, browse, title = dlg.path_ctrl.GetRect(), dlg.browse_btn.GetRect(), dlg.title_ctrl.GetRect()
+    assert dlg.path_label.GetLabel() == label
+    assert dlg.path_label.GetRect().GetRight() < path.GetLeft()
+    assert path.GetLeft() == title.GetLeft() and path.GetTop() > title.GetBottom()
+    if dlg.browse_btn.IsShown():
+        assert browse.GetLeft() > path.GetRight() and browse.GetTop() == path.GetTop()
+    else:
+        assert path.GetRight() == dlg.path_ctrl.GetParent().GetClientSize().width - 1  # it takes Browse's room
+
+
 def test_ok_is_the_preferences_default_button(app, isolated_manager):
     from types import SimpleNamespace
     from contextlib import nullcontext

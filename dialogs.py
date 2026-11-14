@@ -49,7 +49,7 @@ class GameDialog(wx.Dialog):
         genres = sorted(set(g.genre for g in library_manager.games if g.genre))
         developers = sorted(set(g.developer for g in library_manager.games if g.developer))
 
-        panel = wx.Panel(self)
+        panel = self.panel = wx.Panel(self)
         sizer = wx.GridBagSizer(5, 5)
 
         def add_row(row, label, make):
@@ -124,7 +124,8 @@ class GameDialog(wx.Dialog):
             if self.path_ctrl.GetValue() == "https://":
                 self.path_ctrl.SetValue("")
 
-        self.Layout()
+        self.Layout()  # sizes the panel to the dialog
+        self.panel.Layout()  # and its fields: the dialog's Layout() skips them when the panel's size stays the same
 
     def on_browse(self, event):
         with wx.FileDialog(self, "Select Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
