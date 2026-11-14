@@ -904,10 +904,7 @@ def _copy_into(root: Path, tree: Path, copy: PrivateCopy) -> None:
 
 def _remove_copy(copy: PrivateCopy, tree: Path) -> None:
     for path in copy.files:
-        try:
-            path.unlink(missing_ok=True)
-        except OSError:
-            pass
+        _unlink_quietly(path)
     for folder in reversed(copy.dirs):
         _prune_empty_dirs(folder, tree)
     copy.files, copy.dirs = [], []
