@@ -80,35 +80,32 @@ class InstallService:
         """Fetch the catalog index (offline, the saved copy) without changing anything. Safe on any thread."""
         return self._index().refresh()
 
-    def take_index(self, state: IndexState) -> IndexState:
+    def take_index(self, state: IndexState):
         """Use a fetched index, adopt the launch paths it now names and give catalog games its genres.
         UI thread only."""
         self.index_state = state  # one assignment: a reader on the worker thread sees the old or the new
         self.adopt_launch_paths()
         self.refresh_catalog_genres()
-        return state
 
-    def load_cached_index(self) -> IndexState:
+    def load_cached_index(self):
         """Use the saved copy of the index. UI thread only."""
-        return self.take_index(self._index().load_cached())
+        self.take_index(self._index().load_cached())
 
-    def adopt_launch_paths(self) -> int:
-        """Switch guessed launch paths to the catalog's, where the catalog now names one; returns how many.
+    def adopt_launch_paths(self):
+        """Switch guessed launch paths to the catalog's, where the catalog now names one.
 
         UI thread only. A game with a queued or running job is left alone: the job owns its record."""
-        changed = 0
         for game in list(self.manager.games):
             if not game.catalog_id or game.is_web or self.queue.job_for(game.catalog_id) is not None:
                 continue
             try:
-                changed += self._adopt(game.catalog_id)
+                self._adopt(game.catalog_id)
             except Exception:  # a malformed entry or a file error never stops the others
                 log.warning("Couldn't adopt the catalog launch path of %s", game.catalog_id, exc_info=True)
-        return changed
 
-    def refresh_catalog_genres(self) -> int:
+    def refresh_catalog_genres(self):
         """Give each catalog game the catalog's main genre (the first of its genres), so the Library's Genre column
-        and filter follow the catalog; returns how many changed. UI thread only.
+        and filter follow the catalog. UI thread only.
 
         Only the genre is refreshed here. A game with a queued or running job is left alone (its result brings
         the catalog's fields), as is one the catalog no longer lists. When any changed, manager.games is a new
@@ -125,7 +122,6 @@ class InstallService:
         if changed:
             self.manager.games = list(self.manager.games)
             self.manager.save_or_keep(self.manager.save_games, "games.json")
-        return changed
 
     def _adopt(self, catalog_id: str) -> bool:
         platform = current_platform()
