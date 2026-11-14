@@ -30,7 +30,7 @@ from smart_list import Column
 
 from catalog_view import action_kind, action_label, build_rows, install_candidates, link_items, price_sort_key
 from engine import messages
-from engine.entries import current_platform, game_fields, platform_sources
+from engine.entries import current_platform, game_fields, platform_sources, visible_games
 from games_panel import GamesPanel
 from install_service import InstallService
 
@@ -152,7 +152,8 @@ class CatalogPanel(wx.Panel):
     def refresh_rows(self):
         """Rebuild the rows from the service (installed state may have changed) and re-filter, keeping the
         selected game selected"""
-        self.view.set_rows(build_rows(self.service.visible_games(), self.service.installed_ids()))
+        entries = visible_games(self.service.entries, current_platform())
+        self.view.set_rows(build_rows(entries, self.service.installed_ids()))
 
     # ---- actions -------------------------------------------------------------------------------------------------
 

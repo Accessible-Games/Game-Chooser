@@ -32,7 +32,7 @@ paths:
 
 ## Install service (`install_service.py`)
 `InstallService(manager, listener, installer_ui, ...)` ties together the index (`IndexState`), `InstallEngine`,
-`InstallQueue` (log `install.log`), `manager.records` and the libraries. Main members: `visible_games`,
+`InstallQueue` (log `install.log`), `manager.records` and the libraries. Main members:
 `installed_ids`, `plan`, `blocked`, `submit(action, entry_id, library_id, library_path, ...)`, `apply_result`,
 `job_failed`, `forget`, `player_files`, `record_for`, `entry_for`, `statuses`, `ensure_library`, `library_games`,
 `check_library_removable`, `remove_library`, `adopt_launch_paths`.

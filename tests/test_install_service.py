@@ -8,6 +8,7 @@ import catalog_view
 import install_service
 import library_actions
 from engine import messages
+from engine.entries import current_platform, visible_games
 from engine.errors import InstallFailed
 from engine.index import DEFAULT_CATALOG_URL
 from engine.queue import InstallQueue, Job
@@ -126,7 +127,7 @@ def test_offline_first_run_state(rig):
     rig.service.take_index(state)
     assert state.error == messages.CATALOG_OFFLINE_EMPTY and state.entries == {}
     assert rig.service.index_state is state and rig.service.entries == {}
-    assert rig.service.visible_games() == [] and rig.service.installed_ids() == set()
+    assert visible_games(rig.service.entries, current_platform()) == [] and rig.service.installed_ids() == set()
 
 
 def test_real_queue_logs_to_config_dir(isolated_manager):
@@ -145,7 +146,7 @@ def test_load_cached_index_reads_what_refresh_saved(rig):
     rig.service.load_cached_index()
     state = rig.service.index_state
     assert state.from_cache and set(state.entries) == {"entombed"}
-    assert [e["id"] for e in rig.service.visible_games()] == ["entombed"]
+    assert [e["id"] for e in visible_games(rig.service.entries, current_platform())] == ["entombed"]
 
 
 def test_submit_install_then_apply_result_adds_game(rig):
@@ -704,7 +705,8 @@ def test_an_extra_shared_by_two_games_through_the_catalog_and_library(rig):
     rig.publish(alpha, bravo, shared)
 
     def rows():
-        return {r.id: r for r in catalog_view.build_rows(rig.service.visible_games(), rig.service.installed_ids())}
+        visible = visible_games(rig.service.entries, current_platform())
+        return {r.id: r for r in catalog_view.build_rows(visible, rig.service.installed_ids())}
 
     def extras_item(catalog_id):
         game = rig.manager.catalog_game(catalog_id)

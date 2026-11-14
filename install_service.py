@@ -28,7 +28,6 @@ from pathlib import Path
 from engine import messages
 from engine.elevation import WindowsElevator
 from engine.entries import current_platform, game_fields
-from engine.entries import visible_games as _visible_games
 from engine.errors import EngineError
 from engine.extract import Extractor, default_tools_dir
 from engine.http import Fetcher
@@ -137,9 +136,6 @@ class InstallService:
         self.manager.records.save(rec)
         self.manager.add_catalog_game(game_fields_for(entry, rec, platform))
         return True
-
-    def visible_games(self) -> list[dict]:
-        return _visible_games(self.entries, current_platform())
 
     def installed_ids(self) -> set[str]:
         """Catalog ids shown as installed: a game's install record that isn't uninstalled, or a catalog web game.
