@@ -202,12 +202,8 @@ class GameDialog(wx.Dialog):
         panel.SetSizer(sizer)
 
         ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
-        self.platform_ctrl.Bind(wx.EVT_COMBOBOX, self.on_platform_change)
+        self.platform_ctrl.Bind(wx.EVT_COMBOBOX, lambda event: self._update_path_ui())
 
-        self._update_path_ui()
-
-    def on_platform_change(self, event):
-        """Handle platform selection change"""
         self._update_path_ui()
 
     def _update_path_ui(self):
@@ -223,8 +219,7 @@ class GameDialog(wx.Dialog):
             self.path_label.SetLabel("Launch Path:")
             self.browse_btn.Show()
             # If switching from web game, clear the https:// prefix
-            current_value = self.path_ctrl.GetValue()
-            if current_value == "https://":
+            if self.path_ctrl.GetValue() == "https://":
                 self.path_ctrl.SetValue("")
 
         self.Layout()
@@ -235,45 +230,32 @@ class GameDialog(wx.Dialog):
                 self.path_ctrl.SetValue(dlg.GetPath())
 
     def on_ok(self, event):
-        """Validate and save changes"""
-        # Validate title
-        title = self.title_ctrl.GetValue().strip()
-        is_valid, error = validate_title(title)
+        """Validate (the first problem is shown in a box), then look for a duplicate"""
+        is_valid, error = validate_title(self.title_ctrl.GetValue().strip())
         if not is_valid:
-            wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
-            return
+            return wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
 
-        # Validate platform
         platform_val = self.platform_ctrl.GetValue().strip()
         if not platform_val:
-            wx.MessageBox("Platform is required", "Error", wx.OK | wx.ICON_ERROR)
-            return
+            return wx.MessageBox("Platform is required", "Error", wx.OK | wx.ICON_ERROR)
 
-        # Validate path/URL
         path = self.path_ctrl.GetValue().strip()
         if platform_val == "Web Game":
             is_valid, error = validate_url(path)
             if not is_valid:
-                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
-                return
+                return wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
         else:
             if not path:
-                wx.MessageBox("Path cannot be empty", "Error", wx.OK | wx.ICON_ERROR)
-                return
-
+                return wx.MessageBox("Path cannot be empty", "Error", wx.OK | wx.ICON_ERROR)
             problem = executable_problem(path, platform_val)  # the file exists and is a game executable
             if problem:
-                wx.MessageBox(*problem, wx.OK | wx.ICON_ERROR)
-                return
+                return wx.MessageBox(*problem, wx.OK | wx.ICON_ERROR)
 
-        # Validate year if provided
         year_str = self.year_ctrl.GetValue().strip()
         is_valid, error = validate_year(year_str)
         if not is_valid:
-            wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
-            return
+            return wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
 
-        # Asynchronously check for duplicates
         self._check_duplicates_async(path, platform_val, year_str)
 
     def _check_duplicates_async(self, path, platform_val, year_str):
@@ -287,33 +269,22 @@ class GameDialog(wx.Dialog):
                           "duplicate-check")
 
     def _find_duplicate_game(self, path):
-        """Find if a game with this path already exists"""
-        # Normalize the path for comparison
+        """(game, its path, True for the same text) for another game with this file, or None"""
         normalized_path = str(Path(path).resolve())
-
         for game in self.library_manager.games:
             if game == self.game:  # Skip the current game if editing
                 continue
-
-            # Check exact path match
             if game.launch_path == path:
-                return {
-                    'type': 'exact',
-                    'game': game,
-                    'match_path': path
-                }
-
+                return game, path, True
             # For non-web games, also check resolved absolute paths
             if not is_web_path(path) and not game.is_web:
                 try:
                     # A library game's path joined to its library; a game added by hand's as it is
                     game_full_path = self.library_manager.get_full_path(game)
                     if game_full_path and str(Path(game_full_path).resolve()) == normalized_path:
-                        return {'type': 'resolved', 'game': game, 'match_path': game_full_path}
+                        return game, game_full_path, False
                 except (OSError, ValueError):
-                    # Path resolution failed, skip this comparison
-                    continue
-
+                    continue  # its path can't be resolved: skip it
         return None
 
     def _on_duplicate_check_complete(self, duplicate_info, error, path, platform_val, year_str):
@@ -325,11 +296,8 @@ class GameDialog(wx.Dialog):
                           "Duplicate Check Failed", wx.OK | wx.ICON_ERROR)
             return
         if duplicate_info:
-            duplicate_game = duplicate_info['game']
-            match_type = duplicate_info['type']
-            match_path = duplicate_info['match_path']
-
-            if match_type == 'exact':
+            duplicate_game, match_path, exact = duplicate_info
+            if exact:
                 message = f"A game with this exact path already exists:\n\n" \
                          f"Title: {duplicate_game.title}\n" \
                          f"Path: {match_path}\n\n" \
@@ -343,33 +311,19 @@ class GameDialog(wx.Dialog):
 
             wx.MessageBox(message, "Duplicate Game Found", wx.OK | wx.ICON_WARNING)
             return
-
-        # No duplicates found, complete the validation
         self._complete_validation(path, platform_val, year_str)
 
     def _complete_validation(self, path, platform_val, year_str):
-        """Complete validation and save the game"""
-        # Get the current title
-        title = self.title_ctrl.GetValue().strip()
-
-        # Save validated data
-        self.game.title = title
+        """Save the checked fields into the game and close"""
+        self.game.title = self.title_ctrl.GetValue().strip()
         self.game.genre = self.genre_ctrl.GetValue().strip()
         self.game.developer = self.developer_ctrl.GetValue().strip()
         self.game.year = year_str and str(int(year_str))  # "+2000" or "２０００" is kept as "2000"
-
-        # Handle platform and path
-        if platform_val == "Web Game":
-            self.game.platforms = ["Web"]
-        else:
-            self.game.platforms = [platform_val]
-
+        self.game.platforms = ["Web"] if platform_val == "Web Game" else [platform_val]
         # A game added by hand always has an absolute path and no library
         self.game.library_id = ""
         self.game.launch_path = path
-
         self.EndModal(wx.ID_OK)
-
 
 
 class PreferencesDialog(wx.Dialog):
