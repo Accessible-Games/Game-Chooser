@@ -50,9 +50,6 @@ DEFAULT_SILENT_ARGS = {
 # File times can lag time.time() and FAT drives keep them to 2 seconds.
 CLOCK_SLACK = 2.0
 POLL_SECONDS = 0.2
-# A silent installer that has exited while programs it started still run (Inno's [Run] launching the
-# game) is treated as finished after this long, if no one can press Done.
-GRACE_SECONDS = 30.0
 # How long a vendor uninstaller's leftover processes are waited for after the player presses Done.
 SETTLE_SECONDS = 30.0
 # How long a cancelled installer is given to stop.
@@ -255,15 +252,6 @@ class _Outcome:
     tree_done: bool  # the installer and everything it started were seen to finish
 
 
-def _interactive(ctx, installer: dict, title: str) -> bool:
-    """True when the player drives the installer; refuses if no one can."""
-    if silent_args_for(installer) is not None:
-        return False
-    if ctx.installer_ui is None:
-        raise InstallFailed(messages.INSTALLER_NEEDS_PLAYER.format(title=title))
-    return True
-
-
 def _tree_done(error: Exception, done: bool = True) -> Exception:
     """`error`, saying whether the program and all it started were seen to finish (`tree_done`)."""
     error.tree_done = done
@@ -284,10 +272,9 @@ def _start(ctx, exe: str, args: str, elevated: bool, cwd: Path | None, title: st
 def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Path | None,
                   progress, cancel, settle: float = 0.0) -> _Outcome:
     """Start the program and wait until it and everything it started have exited, or the player
-    presses Done (the UI is offered whenever there is one, silent runs included).
+    presses Done (the UI is offered for silent runs too).
 
-    Without a UI, a silent program that has exited while what it started runs on is treated as done
-    after GRACE_SECONDS. After an early Done, `settle` seconds more are given to the process tree.
+    After an early Done, `settle` seconds more are given to the process tree.
     Raises Cancelled (with `tree_done`) once a cancelled program has stopped, or _StillRunning if it
     won't stop.
     """
@@ -304,7 +291,7 @@ def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Pat
         raise
     finished = threading.Event()
     stop = threading.Event()
-    state = {"done": False, "main_exited": None}
+    state = {"done": False}
 
     def watcher() -> None:
         try:
@@ -312,10 +299,8 @@ def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Pat
                 if watch.poll(POLL_SECONDS):
                     state["done"] = True
                     break
-                if state["main_exited"] is None and watch.exit_code() is not None:
-                    state["main_exited"] = time.monotonic()
                 # cancel() is the job's flag check; it is safe to call from this thread too.
-                if ui is not None and cancel():
+                if cancel():
                     break  # The player is in the UI's wait; finishing it lets the engine see the cancel.
         finally:
             finished.set()
@@ -324,17 +309,7 @@ def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Pat
     thread.start()
     try:
         progress(Progress("waiting_for_installer"))
-        if ui is not None:
-            going_on = ui.wait_for_installer(title, finished) and not cancel()
-        else:
-            going_on = True
-            while not finished.wait(POLL_SECONDS):
-                if cancel():
-                    going_on = False
-                    break
-                exited = state["main_exited"]
-                if exited is not None and time.monotonic() - exited >= GRACE_SECONDS:
-                    break
+        going_on = ui.wait_for_installer(title, finished) and not cancel()
         stop.set()
         thread.join(POLL_SECONDS * 10)
         if not going_on:
@@ -447,7 +422,7 @@ def run_installer_untracked(file: Path, installer: dict, target: Path, ctx, prog
     """Run an installer whose files aren't tracked (runtimes). A cancelled or failed silent run removes
     what it added to `target`. Returns notes for the player (a restart it asked for, an exit code)."""
     title = title or Path(target).name
-    interactive = _interactive(ctx, installer, title)
+    interactive = silent_args_for(installer) is None  # the player drives it
     target = Path(target)
     existed = target.exists()
     target.mkdir(parents=True, exist_ok=True)
@@ -471,7 +446,7 @@ def install(ctx, item: RunItem, target: Path, library_id: str, library_path: Pat
     Returns the record and notes for the player.
     """
     title = item.title
-    interactive = _interactive(ctx, item.installer, title)
+    interactive = silent_args_for(item.installer) is None  # the player drives it
     check_cancel(cancel)
     if interactive:
         ctx.installer_ui.announce_target(title, target)
@@ -533,8 +508,6 @@ def _find_folder(ctx, item: RunItem, target: Path, before: set[str], start: floa
     if ranked:
         _, _, folder, values = min(ranked, key=lambda r: r[:2])
         return folder, False, vendor_uninstaller(values)
-    if ctx.installer_ui is None:
-        return None
     folder = ctx.installer_ui.locate_folder(item.title)
     if folder is None or not Path(folder).is_dir() or _unsafe_game_folder(Path(folder), ctx, item.catalog_id):
         return None
@@ -762,7 +735,7 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
     Returns the saved record and notes for the player.
     """
     title = item.title
-    interactive = _interactive(ctx, item.installer, title)
+    interactive = silent_args_for(item.installer) is None  # the player drives it
     check_cancel(cancel)
     player = _player_files(record, game_dir)
     aside = _SetAside.copy(ctx, item.catalog_id, game_dir, [r for r in player if not is_code(r)], title)

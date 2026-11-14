@@ -212,8 +212,6 @@ WORK_FOLDER_NOT_CREATED = ("Game Chooser couldn't create its work folder {path}.
 
 WEB_GAME_NOT_INSTALLED = "{title} is played in your web browser, so there's nothing to install."
 EXTRA_NOT_SUPPORTED = "{extra} has its own installer, so Game Chooser can't add it."
-INSTALLER_NEEDS_PLAYER = ("{title}'s installer asks questions you need to answer, and Game Chooser can't show it "
-                          "right now.")
 INSTALLER_FAILED = "{title}'s installer stopped with error code {code}, so {title} wasn't installed."
 INSTALLER_CODE_NOTE = "{title}'s installer finished with error code {code}. If the game doesn't start, install it again."
 INSTALLER_RESTART_NOTE = "Restart Windows to finish installing {title}."
