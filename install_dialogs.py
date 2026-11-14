@@ -1,6 +1,5 @@
 """Dialogs for installing catalog games. UI thread only; the wording and decisions are in install_choices."""
 
-import logging
 from pathlib import Path
 
 import wx
@@ -11,10 +10,6 @@ from install_choices import (InstallChoice, build_choice, chosen_optional, defau
                              window_title)
 from library_actions import remove_library_checkbox_label, remove_library_text, uninstall_checkbox_label
 from library_manager import LibraryError
-
-log = logging.getLogger(__name__)
-
-__all__ = ["InstallChoice", "InstallConfirmDialog", "UninstallDialog", "RemoveLibraryDialog"]
 
 _WRAP = 450
 _text = wx.Control.EscapeMnemonics  # a title or folder with "&" in a label is shown, not taken as an access key
