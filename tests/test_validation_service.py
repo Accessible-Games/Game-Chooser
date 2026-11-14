@@ -1,8 +1,8 @@
-"""Add Game's checks of what the player typed (ValidationService). wx-free."""
+"""Add Game's checks of what the player typed (validation_service). wx-free."""
 
 import pytest
 
-from validation_service import ValidationService
+from validation_service import validate_url, validate_year
 
 
 # A web address is what the catalog calls one (engine.pricing.http_url): a port, localhost or an IP address too
@@ -11,8 +11,12 @@ from validation_service import ValidationService
                                         ("ftp://example.com", False), ("https://", False),
                                         ("https://example.com/a b", False)])
 def test_a_web_game_address_is_what_the_catalog_calls_one(url, valid):
-    assert ValidationService.validate_url(url) == ((True, None) if valid else (False, "Invalid URL format"))
+    assert validate_url(url) == ((True, None) if valid else (False, "Invalid URL format"))
 
 
 def test_an_empty_address_says_so():
-    assert ValidationService.validate_url("") == (False, "URL cannot be empty")
+    assert validate_url("") == (False, "URL cannot be empty")
+
+
+def test_any_four_digit_year_is_accepted():
+    assert validate_year("2031") == (True, None)

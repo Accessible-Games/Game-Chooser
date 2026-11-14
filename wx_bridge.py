@@ -224,14 +224,13 @@ class WxInstallerUI:
             gate.cancel()
         self._end_wait()
 
-    def cancel_wait(self) -> bool:
-        """The player's Cancel: the installer wait (if one is shown) answers False. True if there was one."""
+    def cancel_wait(self):
+        """The player's Cancel: the installer wait (if one is shown) answers False."""
         wait = self._wait
         if wait is None:
-            return False
-        answered = wait[0].cancel()
+            return
+        wait[0].cancel()
         self._end_wait()
-        return answered
 
     def waiting(self) -> bool:
         """Whether "Waiting for the installer" with Done is showing for a wait that is still open."""
@@ -278,7 +277,7 @@ class WxInstallerUI:
         self.frame.show_installer_wait(self._done)
         if self._timer is None:
             self._timer = wx.Timer()
-            self._timer.Bind(wx.EVT_TIMER, self._poll)
+            self._timer.Bind(wx.EVT_TIMER, self.check_wait)
         self._timer.Start(TIMER_MS)
 
     def _done(self):
@@ -287,12 +286,9 @@ class WxInstallerUI:
             wait[0].answer(True)
         self._end_wait()
 
-    def check_wait(self):
+    def check_wait(self, event=None):
         """Take Done away once the wait is over (the installer finished, or the worker stopped waiting).
         The 1 s timer calls this; MainFrame also does on every queue event, so Done never outlives its job."""
-        self._poll()
-
-    def _poll(self, event=None):
         wait = self._wait
         if wait is None:
             self._end_wait()

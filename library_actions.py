@@ -77,7 +77,7 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
         return []
     links = [MenuItem(LINK, label, url=url) for label, url in link_items(entry)]
     if not game.is_web and is_uninstall_unfinished(record):
-        return [MenuItem(UNINSTALL, messages.MENU_UNINSTALL)] + links
+        return [MenuItem(UNINSTALL, messages.UNINSTALL_BUTTON)] + links
     if game.is_web or not is_game_record(record) or record.uninstalled:
         return links
     if not record.tracked:
@@ -85,12 +85,12 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
         homepage = homepage_item(entry)
         return items + ([MenuItem(LINK, homepage[0], url=homepage[1])] if homepage else [])
     if entry is None:  # left the catalog: it can still be uninstalled, nothing else
-        return [MenuItem(UNINSTALL, messages.MENU_UNINSTALL)]
-    items = [MenuItem(UPDATE, messages.MENU_UPDATE)] if update_available else []
+        return [MenuItem(UNINSTALL, messages.UNINSTALL_BUTTON)]
+    items = [MenuItem(UPDATE, messages.CONFIRM_BUTTON_UPDATE)] if update_available else []
     items += [undo_item(record),
               MenuItem(EXTRAS, messages.MENU_EXTRAS, enabled=extras_to_add),
               MenuItem(REPAIR, messages.MENU_REPAIR),
-              MenuItem(UNINSTALL, messages.MENU_UNINSTALL)]
+              MenuItem(UNINSTALL, messages.UNINSTALL_BUTTON)]
     return items + links
 
 
