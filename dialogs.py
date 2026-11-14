@@ -197,9 +197,7 @@ class GameDialog(wx.Dialog):
         # Year
         sizer.Add(wx.StaticText(panel, label="Year:"),
                  pos=(5, 0), flag=wx.ALIGN_CENTER_VERTICAL)
-        year_val = 2000 if not self.game.year else int(self.game.year)
-        self.year_ctrl = wx.SpinCtrl(panel, value=str(year_val),
-                                    min=1000, max=9999, initial=year_val)
+        self.year_ctrl = wx.TextCtrl(panel, value=self.game.year)  # empty: no year
         sizer.Add(self.year_ctrl, pos=(5, 1), flag=wx.EXPAND)
 
         # Buttons
@@ -290,13 +288,11 @@ class GameDialog(wx.Dialog):
                 return
 
         # Validate year if provided
-        year_val = self.year_ctrl.GetValue()
-        year_str = str(year_val) if year_val != 2000 else ""
-        if year_str:
-            is_valid, error = ValidationService.validate_year(year_str)
-            if not is_valid:
-                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
-                return
+        year_str = self.year_ctrl.GetValue().strip()
+        is_valid, error = ValidationService.validate_year(year_str)
+        if not is_valid:
+            wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
+            return
 
         # Asynchronously check for duplicates
         self._check_duplicates_async(path, platform_val, year_str)
@@ -381,7 +377,7 @@ class GameDialog(wx.Dialog):
         self.game.title = title
         self.game.genre = self.genre_ctrl.GetValue().strip()
         self.game.developer = self.developer_ctrl.GetValue().strip()
-        self.game.year = year_str or ""
+        self.game.year = year_str and str(int(year_str))  # "+2000" or "２０００" is kept as "2000"
 
         # Handle platform and path
         if platform_val == "Web Game":
