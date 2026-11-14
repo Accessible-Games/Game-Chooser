@@ -132,11 +132,6 @@ def _decide(key, path, inst, disk, new, persist, restore_code):
 # ---- applying a plan -------------------------------------------------------
 
 
-@dataclass
-class ApplyResult:
-    backups: list[dict] = field(default_factory=list)
-
-
 def _rel(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
 
@@ -267,23 +262,23 @@ def _write_file(source: Path, target: Path, backup_to: Path | None, game_dir: Pa
         tmp.unlink(missing_ok=True)
 
 
-def apply_plan(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date) -> ApplyResult:
-    """Apply `plan`. If it fails partway, the exception carries `.partial`: the ApplyResult for the
-    backups already made, so the caller can still record them."""
+def apply_plan(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date) -> list[dict]:
+    """Apply `plan`; returns the backups it made. If it fails partway, the exception carries `.partial`:
+    the backups already made, so the caller can still record them."""
     game_dir, incoming_root = Path(game_dir), Path(incoming_root)
-    result = ApplyResult()
+    backups: list[dict] = []
     try:
         preflight(plan, game_dir, incoming_root, today)
         for op in plan.ops:
-            _apply_op(op, plan, game_dir, incoming_root, today, result)
+            _apply_op(op, plan, game_dir, incoming_root, today, backups)
     except BaseException as exc:
-        exc.partial = result
+        exc.partial = backups
         raise
-    return result
+    return backups
 
 
 def _apply_op(op: FileOp, plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date,
-              result: ApplyResult) -> None:
+              backups: list[dict]) -> None:
     if op.op is Op.KEEP:
         return
     target = safe_join(game_dir, op.path)
@@ -312,7 +307,7 @@ def _apply_op(op: FileOp, plan: UpdatePlan, game_dir: Path, incoming_root: Path,
         return
     backup = unique_path(safe_join(game_dir / backup_dir_name(today), op.path))
     _write_file(source, target, backup, game_dir)
-    result.backups.append({
+    backups.append({
         "original": op.path.replace("\\", "/"),
         "backup": _rel(backup, game_dir),
         "installed_sha256": plan.new_files[op.key].sha256,

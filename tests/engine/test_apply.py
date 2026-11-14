@@ -38,7 +38,7 @@ def test_backup_keeps_subfolders(dirs):
     put(inc, "Data/cfg.ini", b"new")
     r = apply_plan(make_plan(("Data/cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
     assert (game / BK / "Data" / "cfg.ini").read_bytes() == b"mine"
-    assert r.backups[0]["backup"] == f"{BK}/Data/cfg.ini"
+    assert r[0]["backup"] == f"{BK}/Data/cfg.ini"
     assert [p.name for p in (game / "Data").iterdir()] == ["cfg.ini"]  # no temp left
 
 
@@ -54,7 +54,7 @@ def test_write_creates_dirs_and_delete_prunes_empty_dirs(dirs):
     assert (game / "a/b/new.txt").read_bytes() == b"n"
     assert not (game / "old").exists()
     assert (game / "keep/other.txt").exists() and not (game / "keep/gone2.txt").exists()
-    assert game.exists() and r.backups == []
+    assert game.exists() and r == []
 
 
 def test_preflight_target_is_directory_changes_nothing(dirs):
@@ -102,7 +102,7 @@ def test_failed_write_keeps_backup_and_cleans_temp(dirs, monkeypatch):
     monkeypatch.setattr(os, "replace", real)
     files = [p for p in game.rglob("*") if p.is_file()]
     assert files == [game / "cfg.ini"] and files[0].read_bytes() == b"mine"  # put back in place, no temp left
-    assert info.value.partial.backups == []  # the backup that was put back is not listed
+    assert info.value.partial == []  # the backup that was put back is not listed
 
 
 def test_missing_incoming_file_leaves_player_file_alone(dirs):
@@ -192,9 +192,9 @@ def test_last_moment_recheck(dirs, path, op, expected, new, on_disk, after, back
     else:
         assert (game / path).read_bytes() == after
     if backup is None:
-        assert r.backups == [] and not (game / BK).exists()
+        assert r == [] and not (game / BK).exists()
     else:
-        assert (game / BK / path).read_bytes() == backup and len(r.backups) == 1
+        assert (game / BK / path).read_bytes() == backup and len(r) == 1
 
 
 def test_plan_update_fills_expected():
