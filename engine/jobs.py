@@ -35,7 +35,6 @@ import logging
 import os
 import shutil
 import stat
-import sys
 import tempfile
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, suppress
@@ -152,8 +151,6 @@ def blocked_reason(entry: dict, library_path: Path, records: RecordStore, librar
 
 def _hide(path: Path) -> None:
     """Give `path` the Windows hidden attribute. Best effort: does nothing elsewhere or on failure."""
-    if sys.platform != "win32":
-        return
     with suppress(OSError, AttributeError):
         import ctypes
         attributes = os.stat(path).st_file_attributes | stat.FILE_ATTRIBUTE_HIDDEN
