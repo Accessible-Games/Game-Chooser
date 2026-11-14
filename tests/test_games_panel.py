@@ -186,7 +186,23 @@ def press_escape_in_tree(view):
     press(view.tree_ctrl, wx.WXK_ESCAPE)
 
 
+def dataview_event(view, kind, row=None, column=None):
+    """Send the list the event a DataViewCtrl (the list on macOS) sends on its own, for a row and column as the
+    list shows them"""
+    from wx import dataview
+    item = view.list.control.wx_model.GetItem(row) if row is not None else dataview.DataViewItem()
+    if column is None:
+        event = dataview.DataViewEvent(kind, view.list_ctrl, item)
+    else:
+        event = dataview.DataViewEvent(kind, view.list_ctrl, view.list_ctrl.GetColumn(column), item)
+    view.list_ctrl.GetEventHandler().ProcessEvent(event)
+
+
 def click_header(view, column):
+    """smart_list has no header click of its own: each control's event"""
+    if view.list.control.use_dataview:
+        dataview_event(view, wx.dataview.wxEVT_DATAVIEW_COLUMN_HEADER_CLICK, column=column)
+        return
     event = wx.ListEvent(wx.wxEVT_LIST_COL_CLICK, view.list_ctrl.GetId())
     event.SetColumn(column)
     view.list_ctrl.GetEventHandler().ProcessEvent(event)
@@ -938,3 +954,47 @@ def test_a_digit_sorts_only_with_neither_ctrl_nor_alt_held(make_view):
         assert headers(view) == ["Title \u25b2", "Year"] and not view.type_ahead.typing()
     press(view.list_ctrl, ord("2"), wx.wxEVT_CHAR, shift=True)  # some layouts (French) give digits only with Shift
     assert headers(view) == ["Title", "Year \u25b2"]
+
+
+# ---- the macOS list control (a DataViewCtrl) sends its own events -------------------------------------------------
+
+needs_dataview = pytest.mark.skipif(not wx.Platform == "__WXMAC__",
+                                    reason="a DataViewCtrl is the list only on macOS (a ListCtrl's events are above)")
+
+
+@needs_dataview
+def test_moving_through_the_dataview_list_updates_the_button_and_description(make_view):
+    view = make_view()
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)  # the player moves to Bravo
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_SELECTION_CHANGED, 1)
+    assert view.action_btn.GetLabel() == "Install Bravo" and view.description.GetValue().startswith("About Bravo.")
+    assert saved(view)["last_selected"] == "bravo"
+
+
+@needs_dataview
+def test_activating_a_dataview_row_acts_on_it(make_view):
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1)
+    assert acted == ["Bravo"]
+
+
+@needs_dataview
+def test_a_dataview_context_menu_is_the_selected_rows(make_view):
+    asked = []
+    view = make_view(context_menu=lambda row: asked.append(row.title))  # None: no menu to show
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_CONTEXT_MENU, 1)
+    assert asked == ["Bravo"]
+
+
+@needs_dataview
+def test_a_dataview_header_click_sorts_by_that_column(make_view):
+    view = make_view()
+    view.set_rows(rows(ANT, BEE, CAT))
+    click_header(view, 1)
+    assert titles(view) == ["Cat", "Bee", "Ant"] and saved(view)["sort_column"] == 1

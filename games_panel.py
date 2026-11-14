@@ -25,6 +25,7 @@ UI thread only. The view shows the rows it is given (`catalog_view.CatalogRow`: 
 import random
 
 import wx
+from wx import dataview
 
 from smart_list import VirtualSmartList
 
@@ -140,15 +141,27 @@ class GamesPanel(wx.Panel):
         sizer.Add(self.description, 0, wx.EXPAND | wx.ALL, 5)
         self.SetSizer(sizer)
 
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_SELECTED, self.on_selected)
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_ACTIVATED, lambda event: self.on_action())
-        self.list_ctrl.Bind(wx.EVT_LIST_ITEM_RIGHT_CLICK, self.on_context)
+        # A ListCtrl's events, or what a DataViewCtrl (macOS) sends in their place: it never sends EVT_LIST_*.
+        # A DataView header click's GetColumn() is the column's model column, which is its place in the list here.
+        if self.list.control.use_dataview:
+            selected, activated, context, header_click = (
+                dataview.EVT_DATAVIEW_SELECTION_CHANGED, dataview.EVT_DATAVIEW_ITEM_ACTIVATED,
+                dataview.EVT_DATAVIEW_ITEM_CONTEXT_MENU, dataview.EVT_DATAVIEW_COLUMN_HEADER_CLICK)
+            on_selected = self._on_dataview_selected
+        else:
+            selected, activated, context, header_click = (
+                wx.EVT_LIST_ITEM_SELECTED, wx.EVT_LIST_ITEM_ACTIVATED, wx.EVT_LIST_ITEM_RIGHT_CLICK,
+                wx.EVT_LIST_COL_CLICK)
+            on_selected = self.on_selected
+        self.list_ctrl.Bind(selected, on_selected)
+        self.list_ctrl.Bind(activated, lambda event: self.on_action())
+        self.list_ctrl.Bind(context, self.on_context)
         self.list_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_list_key)
         self.tree_ctrl.Bind(wx.EVT_TREE_SEL_CHANGED, self.on_tree_selection)
         self.tree_ctrl.Bind(wx.EVT_KEY_DOWN, self.on_tree_key)
         self.search_combo.Bind(wx.EVT_TEXT, lambda event: self.apply_filters())
         self.search_combo.Bind(wx.EVT_COMBOBOX, lambda event: self.apply_filters())
-        self.list_ctrl.Bind(wx.EVT_LIST_COL_CLICK, lambda event: self.sort_by(event.GetColumn()))
+        self.list_ctrl.Bind(header_click, lambda event: self.sort_by(event.GetColumn()))
         self.list_ctrl.Bind(wx.EVT_CHAR, self.on_char)
         self._show_sort()
 
@@ -475,6 +488,12 @@ class GamesPanel(wx.Panel):
         if row is not None and not self._populating:
             self._saved()[self._key("last_selected")] = row.id
             self.save_config()
+
+    def _on_dataview_selected(self, event):
+        """A DataViewCtrl (macOS) sends its selection event for the view's own selects too, and when a refill
+        empties the list; a refill sets the label and description itself."""
+        if not self._populating:
+            self.on_selected(event)
 
     def select_row(self, row):
         for index, shown in enumerate(self.displayed):
