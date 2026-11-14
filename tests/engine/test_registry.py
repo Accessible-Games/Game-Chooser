@@ -117,4 +117,3 @@ def test_can_restore(reg):
     assert not reg.can_restore("HKLM", "REG_BINARY", b"\x01")
     assert reg.can_restore("HKCU", "REG_SZ", r'"C:\G\g.exe" %1')
     assert not reg.can_restore("HKCU", "REG_MULTI_SZ", ["a", "b"])
-    assert not reg.can_restore("HKCR", "REG_SZ", "v")

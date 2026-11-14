@@ -11,7 +11,6 @@ from . import messages
 from .elevation import Elevator
 from .errors import StepError
 
-HIVES = ("HKCU", "HKLM")
 # Types `set` can write; also the types a previous value must have for undo to put it back.
 WRITABLE_TYPES = ("REG_SZ", "REG_EXPAND_SZ", "REG_DWORD", "REG_QWORD")
 _TEXT_TYPES = ("REG_SZ", "REG_EXPAND_SZ")
@@ -80,8 +79,6 @@ class RegistryAccess:
 
     def can_restore(self, hive: str, type_: str | None, value: object) -> bool:
         """True if `set` could later write this value back exactly as it is now."""
-        if hive not in HIVES:
-            return False
         try:
             coerced = _coerce(type_, value)
         except StepError:
