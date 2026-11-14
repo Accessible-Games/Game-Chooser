@@ -40,10 +40,12 @@ def package_texts(name: str) -> list[tuple[str, bytes]]:
     dist = installed(name)
     found = []
     for entry in dist.metadata.get_all("License-File") or []:
-        # Newer wheels keep license files under licenses/ in the dist-info folder, older ones at its top.
-        text = dist.read_text(f"licenses/{entry}") or dist.read_text(entry)
-        if text is not None:
-            found.append((f"{name}-{Path(entry).stem}.txt", text.encode("utf-8")))
+        # Newer wheels keep license files under licenses/ in the dist-info folder, older ones at its top. Copied as
+        # bytes: not every license file is UTF-8.
+        ends = (f".dist-info/licenses/{entry}", f".dist-info/{entry}")
+        path = next((p for p in dist.files or [] if p.as_posix().endswith(ends) and Path(p.locate()).is_file()), None)
+        if path is not None:
+            found.append((f"{name}-{Path(entry).stem}.txt", path.read_binary()))
     if not found:
         fail(f"No license text found in {name}'s dist-info")
     return found
