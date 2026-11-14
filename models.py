@@ -20,7 +20,6 @@ Data models for Game Chooser application
 """
 
 from dataclasses import dataclass, fields
-from typing import List, Dict, Any
 
 
 def is_web_path(path: str) -> bool:
