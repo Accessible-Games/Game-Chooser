@@ -49,7 +49,7 @@ class GameDialog(wx.Dialog):
         genres = sorted(set(g.genre for g in library_manager.games if g.genre))
         developers = sorted(set(g.developer for g in library_manager.games if g.developer))
 
-        panel = wx.Panel(self)
+        panel = self.panel = wx.Panel(self)
         sizer = wx.GridBagSizer(5, 5)
 
         def add_row(row, label, make):
@@ -91,6 +91,7 @@ class GameDialog(wx.Dialog):
         btn_sizer = wx.StdDialogButtonSizer()
         ok_label = "Add" if self.is_new else "Save"
         ok_btn = wx.Button(panel, wx.ID_OK, ok_label)
+        ok_btn.SetDefault()  # Enter in a field presses it (and runs the checks); Escape is Cancel
         cancel_btn = wx.Button(panel, wx.ID_CANCEL, "Cancel")
         btn_sizer.AddButton(ok_btn)
         btn_sizer.AddButton(cancel_btn)
@@ -123,7 +124,8 @@ class GameDialog(wx.Dialog):
             if self.path_ctrl.GetValue() == "https://":
                 self.path_ctrl.SetValue("")
 
-        self.Layout()
+        self.Layout()  # sizes the panel to the dialog
+        self.panel.Layout()  # and its fields: the dialog's Layout() skips them when the panel's size stays the same
 
     def on_browse(self, event):
         with wx.FileDialog(self, "Select Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
@@ -266,6 +268,7 @@ class PreferencesDialog(wx.Dialog):
         btn_sizer.AddStretchSpacer()
         
         ok_btn = wx.Button(btn_panel, wx.ID_OK, "OK")
+        ok_btn.SetDefault()  # Enter in the address field saves and closes (a bad address keeps it open)
         cancel_btn = wx.Button(btn_panel, wx.ID_CANCEL, "Cancel")
         apply_btn = wx.Button(btn_panel, wx.ID_APPLY, "Apply")
         

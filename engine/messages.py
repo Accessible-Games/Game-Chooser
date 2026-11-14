@@ -446,8 +446,9 @@ GAMES_FILE_DAMAGED = ("Game Chooser couldn't read your games list, so it started
 GAMES_FILE_DAMAGED_NOT_COPIED = ("Game Chooser couldn't read your games list, so it started with an empty one. It "
                                  "won't save the list until it can keep a copy of the damaged one: {path}")
 CONFIG_FILE_DAMAGED = ("Game Chooser couldn't read its settings, so it started with the default ones. Games "
-                       "installed into your libraries show \"Library not found\" until the settings are restored. A "
-                       "copy of the damaged settings, which still lists your libraries, was kept here: {path}")
+                       "installed into your libraries show \"Library not found\" until settings that list those "
+                       "libraries are put back. The damaged file was kept as it was, in case it can be repaired or "
+                       "read by hand: {path}")
 CONFIG_FILE_DAMAGED_NOT_COPIED = ("Game Chooser couldn't read its settings, so it started with the default ones. "
                                   "It won't save settings until it can keep a copy of the damaged ones: {path}")
 
