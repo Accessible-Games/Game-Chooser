@@ -32,10 +32,12 @@ paths:
   the list (the record stays).
   - A record with no game first looks for a game added by hand (not a web game) that launches the same file: the
     full path, ignoring case and slashes, or the same library id and relative path while that library is unknown.
-    That game is linked again (catalog id, library, relative path, installed source and extras from the record;
-    its title and details stay) instead of a second game being added. This undoes one start without the records
-    (another `%APPDATA%`, a missing `installs\`), which unlinks every catalog game. Another exe in the same folder,
-    the same relative path in another library, or an uninstalled record never links a game.
+    That game (the first, when two launch it) is linked again (catalog id, library, relative path, installed
+    source and extras from the record) instead of a second game being added. It keeps its title and details until
+    the catalog next refreshes them: an index take sets its genre, and an Update, Repair or Extras result replaces
+    every field (`add_catalog_game`). This undoes one start without the records (another `%APPDATA%`, a missing
+    `installs\`), which unlinks every catalog game. Another exe in the same folder, the same relative path in
+    another library, or an uninstalled record never links a game.
 
 ## Configuration (`config.json`)
 - `libraries`: `[{"id", "path"}]`

@@ -142,19 +142,23 @@ def test_a_start_without_the_install_records_never_duplicates_games(isolated_man
 
 def test_only_a_game_added_by_hand_with_the_records_launch_file_is_linked_to_it(isolated_manager_factory, tmp_path):
     """The same exe (any case or slashes) is the same game on disk; another exe in its folder, the same path in
-    another library, or a web game stays a separate game added by hand."""
+    another library, or a web game stays a separate game added by hand. Of two on the same exe, the first is linked
+    (the likelier original)."""
     main, other = tmp_path / "main", tmp_path / "other"
     config = {"libraries": [{"id": "main", "path": str(main)}, {"id": "other", "path": str(other)}]}
+    exe = str(main / "Entombed" / "e.exe")
     games = [{"title": "Editor", "launch_path": str(main / "Entombed" / "editor.exe"), "library_id": ""},
              {"title": "Elsewhere", "launch_path": "Entombed/e.exe", "library_id": "other"},
              {"title": "Web", "launch_path": "https://example.com/", "library_id": ""},
-             {"title": "Mine", "launch_path": (main / "ENTOMBED" / "E.EXE").as_posix(), "library_id": ""}]
+             {"title": "Mine", "launch_path": (main / "ENTOMBED" / "E.EXE").as_posix(), "library_id": ""},
+             {"title": "Copy", "launch_path": exe, "library_id": ""}]
     isolated_manager_factory(games=games, config=config)
     _seed_records(isolated_manager_factory, _record())
     m = isolated_manager_factory()
     assert [(g.title, g.catalog_id, g.library_id, g.launch_path) for g in m.games] == [
         ("Editor", "", "", str(main / "Entombed" / "editor.exe")), ("Elsewhere", "", "other", "Entombed/e.exe"),
-        ("Web", "", "", "https://example.com/"), ("Mine", "entombed", "main", "Entombed/e.exe")]
+        ("Web", "", "", "https://example.com/"), ("Mine", "entombed", "main", "Entombed/e.exe"),
+        ("Copy", "", "", exe)]
 
 
 def test_an_uninstalled_record_never_takes_a_game_added_by_hand(isolated_manager_factory, tmp_path):

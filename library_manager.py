@@ -255,7 +255,9 @@ class GameLibraryManager:
         A record with no game gets one, using the cached catalog index only (never the network); a game
         whose record is gone becomes a game added by hand and is kept. A record with no game whose launch file is a
         game added by hand's (a start without the records unlinked it) links that game again instead of adding a
-        second one; it keeps its title and details. Only games' records count: a shared
+        second one (the first such game, when two launch it); it keeps its title and details until the catalog next
+        refreshes them (an index take sets the genre; an Update, Repair or Extras result replaces every field). Only
+        games' records count: a shared
         runtime's record (kind "runtime") is never a game.
 
         An uninstalled record: if the uninstall stopped partway (installed files left, or the game's own
@@ -283,14 +285,18 @@ class GameLibraryManager:
         missing = [r for r in records.values() if not r.uninstalled and self.catalog_game(r.catalog_id) is None]
         if missing:
             entries = self._cached_entries()
-            by_hand = {self._launch_key(g): g for g in self.games if not g.catalog_id and not g.is_web}
+            by_hand = {}
+            for g in self.games:
+                if not g.catalog_id and not g.is_web:
+                    by_hand.setdefault(self._launch_key(g), g)  # the first of two on one file: the likelier original
             for rec in missing:
                 entry = entries.get(rec.catalog_id) or {"id": rec.catalog_id}  # titled by its id
                 fields = game_fields_for(entry, rec)
                 same = by_hand.pop(self._launch_key(Game.from_dict(fields)), None)
                 if same is None:
                     self.games.append(Game.from_dict(fields))
-                else:  # the same file on disk (a start without the records unlinked it): link it again, keep its details
+                else:  # the same file on disk (a start without the records unlinked it): link it again,
+                    # keeping its details until the catalog next refreshes them
                     for key in ("launch_path", "library_id", "catalog_id", "installed_source", "installed_extras"):
                         setattr(same, key, fields[key])
             changed = True
