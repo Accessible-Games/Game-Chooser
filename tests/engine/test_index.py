@@ -22,8 +22,7 @@ def test_first_refresh_downloads_and_caches(tmp_path):
     fetcher, idx = make(tmp_path)
     s = idx.refresh()
     assert set(s.entries) == {"a", "b"} and s.entries["a"]["title"] == "A"
-    assert s.from_cache is False and s.error is None and s.newer_app_needed is False
-    assert s.generated_at == "2026-11-04T00:00:00Z"
+    assert s.error is None and s.newer_app_needed is False
     assert sorted(p.name for p in tmp_path.iterdir()) == ["index-meta.json", "index.json.gz"]
 
 
@@ -62,7 +61,7 @@ def test_newer_schema_keeps_cache(tmp_path):
     old = idx.refresh().entries
     publish(fetcher, BASE, [{"id": "z"}], schema_version=3)
     s = idx.refresh()
-    assert s.newer_app_needed and s.entries == old and s.from_cache
+    assert s.newer_app_needed and s.entries == old
     assert idx.load_cached().entries == old
 
 
@@ -74,7 +73,7 @@ def test_newer_schema_in_gz_only_keeps_cache(tmp_path):
     meta["schema_version"] = 2
     fetcher.routes[META] = json.dumps(meta).encode()
     s = idx.refresh()
-    assert s.newer_app_needed and s.entries == old and s.from_cache
+    assert s.newer_app_needed and s.entries == old
 
 
 def serve(fetcher, gz, sha256):
@@ -98,7 +97,7 @@ def test_a_refresh_that_fails_keeps_the_cache(tmp_path, server_breaks):
     before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
     server_breaks(fetcher)
     s = idx.refresh()
-    assert s.error and set(s.entries) == {"a", "b"} and s.from_cache
+    assert s.error and set(s.entries) == {"a", "b"}
     assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
 
 
@@ -118,7 +117,7 @@ def test_corrupt_cache_is_ignored(tmp_path, garbage):
     idx.refresh()
     (tmp_path / "index.json.gz").write_bytes(garbage)
     s = idx.load_cached()
-    assert s.entries == {} and s.from_cache
+    assert s.entries == {}
     s = idx.refresh()  # meta unchanged but cache unusable: re-download
     assert set(s.entries) == {"a", "b"} and fetcher.calls[GZ] == 2
 

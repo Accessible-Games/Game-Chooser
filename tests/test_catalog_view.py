@@ -10,7 +10,7 @@ entombed = {"id": "entombed", "kind": "game", "title": "Entombed", "developer": 
             "pricing": {"model": "free-to-try"}, "sources": SRC}
 troopanum = {"id": "troopanum", "kind": "game", "title": "Troopanum", "developer": ["Other Dev"],
              "genres": ["Strategy"], "year": 2006, "unsupported": True, "tags": ["Multiplayer", "Survival"],
-             "languages": ["en", "fr", "EN", "xx"],
+             "languages": ["en", "fr", "EN", "Xx"],
              "pricing": {"model": "one-time", "price": 20, "currency": "USD"}, "sources": SRC}
 minimal_entry = {"id": "minimal", "kind": "game", "title": "Minimal", "sources": []}
 entry_with_links = {"id": "bsc", "title": "BSC", "description": "A **fun** game.", "links": [
@@ -28,7 +28,7 @@ def test_row_reads_title_developer_genre_price_details():
     assert r.details_text == "Horror, no longer supported, installed"
     t = build_rows([troopanum], set())[0]
     assert (t.price, t.details_text) == ("Buy once, $20", "Multiplayer, Survival, no longer supported")
-    assert t.languages == ["English", "French", "xx"]  # names; a code with no name shows as written
+    assert t.languages == ["English", "French", "Xx"]  # names; a code with no name shows as written
     m = build_rows([minimal_entry], set())[0]
     assert (m.genre, m.price, m.details_text, m.languages) == ("", "", "", [])
 
@@ -42,7 +42,7 @@ def test_tree_categories_and_unknowns():
     assert full["platform"] == {"Windows"} and full["genre"] == {"Adventure", "Puzzle", "Strategy"}
     assert full["tag"] == {"Horror", "Multiplayer", "Survival"} and full["support"] == {"No longer supported"}
     assert full["price"] == {"Free to try", "Can be played for free", "Buy once"}
-    assert full["language"] == {"English", "French", "xx"}
+    assert full["language"] == {"English", "French", "Xx"}
     assert full["year"] == {"2004", "2006"} and full["installed"] == {"Installed", "Not installed"}
 
 

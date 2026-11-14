@@ -111,17 +111,12 @@ def build_catalog(out_dir: Path = DEFAULT_BUILD_DIR, port: int = DEFAULT_PORT, v
         return files / name, f"{base}files/{name}"
 
     # entry id -> (archive name, how to build it)
-    builds: dict[str, tuple[str, object]] = {
-        "test-game": (f"test-game-v{version}.zip", lambda p: _zip_dir(GAMES_DIR / "test-game" / f"v{version}", p)),
-        "test-game-no-path": ("test-game-no-path.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-no-path", p)),
-        "test-game-extras": ("test-game-extras.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-extras", p)),
-        "trace-test": ("trace-test.zip", lambda p: _zip_dir(GAMES_DIR / "trace-test", p)),
-        "test-extra": ("test-extra.zip", lambda p: _zip_dir(GAMES_DIR / "test-extra", p)),
-        "test-shared-extra": ("test-shared-extra.zip", lambda p: _zip_dir(GAMES_DIR / "test-shared-extra", p)),
-        "test-game-page": ("test-game-page.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-page", p)),
-        "test-game-hta": ("test-game-hta.zip", lambda p: _zip_dir(GAMES_DIR / "test-game-hta", p)),
-        "test-game-tar": ("test-game-tar.tar.gz", lambda p: _tar_gz_dir(GAMES_DIR / "test-game-tar" / "TarGame", p)),
-    }
+    builds: dict[str, tuple[str, object]] = {  # each of these is a zip of its own folder
+        i: (f"{i}.zip", lambda p, i=i: _zip_dir(GAMES_DIR / i, p)) for i in (
+            "test-game-no-path", "test-game-extras", "trace-test", "test-extra", "test-shared-extra", "test-game-page",
+            "test-game-hta")}
+    builds["test-game"] = (f"test-game-v{version}.zip", lambda p: _zip_dir(GAMES_DIR / "test-game" / f"v{version}", p))
+    builds["test-game-tar"] = ("test-game-tar.tar.gz", lambda p: _tar_gz_dir(GAMES_DIR / "test-game-tar" / "TarGame", p))
     if seven_zip is not None:
         builds["test-game-7z"] = ("test-game-7z.7z", lambda p: _seven_zip_dir(GAMES_DIR / "test-game-7z", p, seven_zip))
     if TINY_GAME_SOURCE.is_file():

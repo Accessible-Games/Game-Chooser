@@ -1,5 +1,4 @@
 """FILETIME clock: 100 ns ticks since 1601-01-01 UTC, the same clock Process Monitor stamps its events with."""
-import sys
 import time
 from datetime import datetime, timedelta, timezone
 
@@ -8,12 +7,7 @@ _EPOCH_DIFF = 116444736000000000  # 1601-01-01 to 1970-01-01, in ticks
 
 
 def now_filetime() -> int:
-    if sys.platform == "win32":
-        import ctypes
-        from ctypes import wintypes
-        value = wintypes.FILETIME()
-        ctypes.windll.kernel32.GetSystemTimePreciseAsFileTime(ctypes.byref(value))
-        return (value.dwHighDateTime << 32) | value.dwLowDateTime
+    # Python 3.13+ reads time on Windows with GetSystemTimePreciseAsFileTime, the clock Process Monitor uses
     return (time.time_ns() // 100) + _EPOCH_DIFF
 
 

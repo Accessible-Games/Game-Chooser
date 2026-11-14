@@ -53,17 +53,11 @@ def _amount(pricing: dict, key: str) -> str | None:
     return format_amount(pricing.get(key), pricing.get("currency"))
 
 
-def _dict(pricing) -> dict | None:
-    return pricing if isinstance(pricing, dict) else None
-
-
 def model_label(pricing: dict | None) -> str | None:
-    pricing = _dict(pricing)
     return messages.PRICE_MODELS.get(pricing.get("model")) if pricing else None
 
 
 def no_longer_sold(pricing: dict | None) -> bool:
-    pricing = _dict(pricing)
     return bool(pricing) and pricing.get("no_longer_sold") is True and pricing.get("model") in NO_LONGER_SOLD_MODELS
 
 
@@ -106,7 +100,6 @@ def shown_price(pricing: dict | None) -> float | int | None:
 
 def checked_date(pricing: dict | None) -> str | None:
     """pricing.checked as "1 November 2026", or None when missing or not a YYYY-MM-DD date."""
-    pricing = _dict(pricing)
     value = pricing.get("checked") if pricing else None
     if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
         return None
@@ -134,7 +127,6 @@ def description_lines(pricing: dict | None) -> list[str]:
 
 def can_play_free(pricing: dict | None) -> bool:
     """Free, free to try, free with optional purchases, or pay what you want with no minimum (0 or none)."""
-    pricing = _dict(pricing)
     if not pricing:
         return False
     kind = pricing.get("model")
@@ -159,7 +151,6 @@ def http_url(url) -> str | None:
 def purchase_link(pricing: dict | None) -> tuple[str, str] | None:
     """(label, url) of pricing.url, labelled by model ("Buy or register", "Buy", ...). None when there is no
     usable address, or when the full version can no longer be bought (there is nothing to pay for)."""
-    pricing = _dict(pricing)
     url = http_url(pricing.get("url")) if pricing else None
     if url is None or no_longer_sold(pricing):
         return None
@@ -167,7 +158,6 @@ def purchase_link(pricing: dict | None) -> tuple[str, str] | None:
 
 
 def donate_link(pricing: dict | None) -> tuple[str, str] | None:
-    pricing = _dict(pricing)
     url = http_url(pricing.get("donate_url")) if pricing else None
     return (messages.DONATE_LINK, url) if url else None
 

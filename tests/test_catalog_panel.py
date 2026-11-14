@@ -49,7 +49,7 @@ class Service:
         self.queue = SimpleNamespace(
             job_for=lambda cid: SimpleNamespace(state=self.jobs[cid]) if cid in self.jobs else None)
         self.manager = SimpleNamespace(catalog_game=lambda cid: SimpleNamespace(title=cid.title()))
-        self.visible_games = lambda: entries
+        self.entries = {e["id"]: e for e in entries}
         self.installed_ids = lambda: set(installed)
 
     def plan(self, entry_id):
@@ -60,7 +60,8 @@ class Service:
 
 
 @pytest.fixture
-def make_panel(app, isolated_manager_factory):
+def make_panel(app, isolated_manager_factory, monkeypatch):
+    monkeypatch.setattr("catalog_panel.current_platform", lambda: "windows")  # the entries have a windows source only
     frames = []
 
     def make(installed=(), entries=None, saved=None):

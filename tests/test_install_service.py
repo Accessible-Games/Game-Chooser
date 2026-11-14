@@ -8,6 +8,7 @@ import catalog_view
 import install_service
 import library_actions
 from engine import messages
+from engine.entries import current_platform, visible_games
 from engine.errors import InstallFailed
 from engine.index import DEFAULT_CATALOG_URL
 from engine.queue import InstallQueue, Job
@@ -98,7 +99,7 @@ class Rig:
 
     def publish(self, *entries):
         publish(self.fetcher, DEFAULT_CATALOG_URL, list(entries))
-        return self.service.refresh_index()
+        self.service.take_index(self.service.fetch_index())
 
     def run(self, action, catalog_id, **kw):
         """Submit a job, then apply its result as the UI would; returns the job."""
@@ -122,10 +123,11 @@ def _games_json(manager):
 
 
 def test_offline_first_run_state(rig):
-    state = rig.service.refresh_index()
+    state = rig.service.fetch_index()
+    rig.service.take_index(state)
     assert state.error == messages.CATALOG_OFFLINE_EMPTY and state.entries == {}
     assert rig.service.index_state is state and rig.service.entries == {}
-    assert rig.service.visible_games() == [] and rig.service.installed_ids() == set()
+    assert visible_games(rig.service.entries, current_platform()) == [] and rig.service.installed_ids() == set()
 
 
 def test_real_queue_logs_to_config_dir(isolated_manager):
@@ -141,9 +143,10 @@ def test_real_queue_logs_to_config_dir(isolated_manager):
 def test_load_cached_index_reads_what_refresh_saved(rig):
     rig.publish(game_entry(rig.routes))
     rig.fetcher.routes.clear()
-    state = rig.service.load_cached_index()
-    assert state.from_cache and set(state.entries) == {"entombed"}
-    assert [e["id"] for e in rig.service.visible_games()] == ["entombed"]
+    rig.service.load_cached_index()
+    state = rig.service.index_state
+    assert set(state.entries) == {"entombed"}
+    assert [e["id"] for e in visible_games(rig.service.entries, current_platform())] == ["entombed"]
 
 
 def test_submit_install_then_apply_result_adds_game(rig):
@@ -216,18 +219,18 @@ def test_adopt_launch_paths_after_index_load(rig):
     rig.publish(entry)
     rig.run("install", "entombed", library_id=lib["id"])
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"  # guessed
-    counts = []
-    adopt = rig.service.adopt_launch_paths
-    rig.service.adopt_launch_paths = lambda: counts.append(adopt()) or counts[-1]
+    counts = []  # what each adoption did
+    adopt = rig.service._adopt
+    rig.service._adopt = lambda catalog_id: counts.append(adopt(catalog_id)) or counts[-1]
     rig.publish({**entry, "launch": {"windows": {"path": "sub/other.exe"}}})
-    assert counts == [1]
+    assert counts == [True]
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/sub/other.exe"
     assert [g["launch_path"] for g in _games_json(rig.manager)] == ["Entombed/sub/other.exe"]
     rec = rig.manager.records.load("entombed")
     assert rec.launch_path == "sub/other.exe" and rec.launch_from_catalog
-    assert adopt() == 0
+    assert not adopt("entombed")
     rig.service.load_cached_index()
-    assert counts == [1, 0]
+    assert counts == [True, False]
 
 
 def test_adopt_skips_unreachable_library(rig):
@@ -237,7 +240,7 @@ def test_adopt_skips_unreachable_library(rig):
     rig.run("install", "entombed", library_id=lib["id"])
     shutil.rmtree(rig.tmp_path / "Games")
     rig.publish({**entry, "launch": {"windows": {"path": "sub/other.exe"}}})
-    assert rig.service.adopt_launch_paths() == 0
+    rig.service.adopt_launch_paths()
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
 
 
@@ -380,7 +383,7 @@ def test_fetch_index_changes_nothing_until_taken(rig):
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
     assert _games_json(rig.manager) == before_json
     assert not rig.manager.records.load("entombed").launch_from_catalog
-    assert rig.service.take_index(state) is state
+    rig.service.take_index(state)
     assert rig.service.index_state is state and rig.service.entries is state.entries
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/sub/other.exe"
 
@@ -390,7 +393,7 @@ def test_adopt_skips_a_game_with_a_job(rig):
     rig.service.queue.hold.add("entombed")
     rig.service.submit("repair", "entombed")
     rig.publish({**entry, "launch": {"windows": {"path": "sub/other.exe"}}})
-    assert rig.service.adopt_launch_paths() == 0
+    rig.service.adopt_launch_paths()
     assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
     assert not rig.manager.records.load("entombed").launch_from_catalog
 
@@ -685,7 +688,8 @@ def test_catalog_genres_reach_installed_games(rig):
     assert [g.genre for g in rig.manager.games if g.title == "Hand"] == ["Mine"]
     assert {g["title"]: g["genre"] for g in _games_json(rig.manager)}["Entombed"] == "Puzzle"
     same = rig.manager.games
-    assert rig.service.refresh_catalog_genres() == 0 and rig.manager.games is same  # nothing changed, no save
+    rig.service.refresh_catalog_genres()
+    assert rig.manager.games is same  # nothing changed, no save
 
 
 def test_an_extra_shared_by_two_games_through_the_catalog_and_library(rig):
@@ -701,7 +705,8 @@ def test_an_extra_shared_by_two_games_through_the_catalog_and_library(rig):
     rig.publish(alpha, bravo, shared)
 
     def rows():
-        return {r.id: r for r in catalog_view.build_rows(rig.service.visible_games(), rig.service.installed_ids())}
+        visible = visible_games(rig.service.entries, current_platform())
+        return {r.id: r for r in catalog_view.build_rows(visible, rig.service.installed_ids())}
 
     def extras_item(catalog_id):
         game = rig.manager.catalog_game(catalog_id)

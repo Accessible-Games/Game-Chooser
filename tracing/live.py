@@ -125,7 +125,6 @@ class LiveTree:
         return {sid for sid, s in self._sessions.items() if s.alive}
 
     def running_processes(self):
-        """Each running session's members that were in the last snapshot, in snapshot order."""
         return {sid: list(s.live) for sid, s in self._sessions.items() if s.live}
 
 
@@ -137,7 +136,6 @@ def windows_snapshot() -> list[LiveProc]:
 
 
 def _query(pid: int):
-    """(creation FILETIME, image path) of a process; None for what can't be read."""
     import ctypes
     from ctypes import wintypes
 

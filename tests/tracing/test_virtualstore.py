@@ -1,4 +1,4 @@
-from tracing.virtualstore import virtual_store_path
+from tracing.split import virtual_store_path
 
 LOCAL = "C:\\Users\\Ann\\AppData\\Local"
 

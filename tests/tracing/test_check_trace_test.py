@@ -1,5 +1,3 @@
-import subprocess
-import sys
 from pathlib import Path
 
 from tests.tracing.test_output import make_result
@@ -75,15 +73,3 @@ def test_negative_time_write_and_session_problem_fail(tmp_path):
     assert any("before" in p for p in check(session(tmp_path / "a", lines)))
     problems = check(session(tmp_path / "b", good_lines(), problem="no root"))
     assert any("no root" in p for p in problems)
-
-
-def test_command_line_prints_pass_or_problems(tmp_path):
-    cwd = Path(__file__).resolve().parents[2]
-    ok = session(tmp_path / "ok", good_lines())
-    done = subprocess.run([sys.executable, "-m", "tracing.check_trace_test", str(ok)], capture_output=True,
-                          text=True, cwd=cwd)
-    assert done.returncode == 0 and done.stdout.strip() == "PASS"
-    bad = session(tmp_path / "bad", good_lines()[:3])
-    done = subprocess.run([sys.executable, "-m", "tracing.check_trace_test", str(bad)], capture_output=True,
-                          text=True, cwd=cwd)
-    assert done.returncode == 1 and "PASS" not in done.stdout

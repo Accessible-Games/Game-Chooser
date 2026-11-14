@@ -143,7 +143,6 @@ def _rename_handler(operation_name: str, previous):
         if previous is not None:
             previous(io, metadata, event, details_io, extra_detail_io)
     handler.gc_decoder = True
-    handler.previous = previous
     return handler
 
 
@@ -163,35 +162,25 @@ def _disposition_ex_handler(previous):
         if previous is not None:
             previous(io, metadata, event, details_io, extra_detail_io)
     handler.gc_decoder = True
-    handler.previous = previous
     return handler
-
-
-def _already_installed(handler) -> bool:
-    """True if this handler, or any handler it chains to, is one of ours."""
-    while handler is not None:
-        if getattr(handler, "gc_decoder", False):
-            return True
-        handler = getattr(handler, "previous", None)
-    return False
 
 
 def install_detail_handlers() -> None:
     """Decoders for the details procmon-parser leaves out: rename targets and SetDispositionInformationEx.
 
-    Idempotent. A handler already registered for an operation (such as the probe's `_raw` wrapper) is chained and
-    still runs. Each decoder peeks at the stream and puts it back, so the parse carries on as procmon-parser expects.
+    Skips an operation whose top handler is already a decoder; any other handler there (the probe's `_raw` wrapper) is
+    chained and still runs. Each decoder peeks at the stream and puts it back, so procmon-parser's parse carries on.
     """
     from procmon_parser.consts import FilesystemSetInformationOperation
     from procmon_parser.stream_logs_detail_format import FilesystemSubOperationHandler
     for name in RENAME_OPERATIONS:
         operation = FilesystemSetInformationOperation[name]
         previous = FilesystemSubOperationHandler.get(operation)
-        if not _already_installed(previous):
+        if not getattr(previous, "gc_decoder", False):
             FilesystemSubOperationHandler[operation] = _rename_handler(name, previous)
     operation = FilesystemSetInformationOperation.SetDispositionInformationEx
     previous = FilesystemSubOperationHandler.get(operation)
-    if not _already_installed(previous):
+    if not getattr(previous, "gc_decoder", False):
         FilesystemSubOperationHandler[operation] = _disposition_ex_handler(previous)
 
 
@@ -217,7 +206,6 @@ def _raw_handler(previous):
         }
         if previous is not None:
             previous(io, metadata, event, details_io, extra_detail_io)
-    handler.previous = previous
     return handler
 
 

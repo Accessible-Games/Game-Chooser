@@ -32,7 +32,6 @@ def traces_dir(compiled: bool, override: str | None) -> Path:
 
 
 def self_command(compiled: bool) -> tuple[str, list[str]]:
-    """The exe plus the leading args that start this program again."""
     if compiled:
         return str(Path(sys.argv[0]).resolve()), []
     return sys.executable, [str(REPO_DIR / "game-chooser.py")]

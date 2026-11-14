@@ -402,6 +402,36 @@ def test_installer_run_game_keeps_the_copy_it_has_nothing_to_copy_from(tmp_path,
     assert eng.ctx.records.load("lightcars").files["dxlib.dll"].owner == "runtime:dxlib"
 
 
+@pytest.mark.parametrize("action", ["repair", "update"])
+@pytest.mark.parametrize("shared_folder", ["gone", "untrusted"])
+def test_a_copy_with_nothing_to_copy_from_that_cant_be_kept_gets_a_note(tmp_path, monkeypatch, action, shared_folder):
+    monkeypatch.setenv("GC_DXLIB", str(tmp_path / "system"))
+    routes = {}
+    rt = {**layered_runtime(routes), "detect": {"file": "%GC_DXLIB%\\dxlib.dll"}}
+    eng, lib = setup(tmp_path, [rt, game(routes, dependencies=["dxlib"])], routes)
+    run(eng, "install")
+    if shared_folder == "gone":
+        shutil.rmtree(eng.ctx.runtimes_root / "dxlib")
+    else:
+        eng.ctx.security.set_owner(eng.ctx.runtimes_root / "dxlib", "S-1-5-21-3000-3000-3000-1003")
+    (tmp_path / "system").mkdir()
+    (tmp_path / "system" / "dxlib.dll").write_bytes(b"MZ dxlib")  # present by its detect hint
+    real = runtimes._copy_new
+
+    def full_for_helper(src, dest):
+        if src.name == "helper.dll":
+            raise OSError(28, "No space left on device", str(dest))
+        return real(src, dest)
+    monkeypatch.setattr(runtimes, "_copy_new", full_for_helper)
+    if action == "update":
+        eng.ctx.entries["entombed"] = game(eng.ctx.fetcher.routes, files={"entombed.exe": b"exe 2"}, version="2.0",
+                                           dependencies=["dxlib"])
+    r = run(eng, action)
+    folder = lib / "Entombed"
+    assert (folder / "dxlib.dll").exists() and not (folder / "lib" / "helper.dll").exists()
+    assert r.notes == [not_copied(component="DXLIB")]
+
+
 def test_untracked_installer_run_game_gets_a_note_instead(tmp_path, monkeypatch):
     monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
     routes = {}

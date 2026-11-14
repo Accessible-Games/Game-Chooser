@@ -43,7 +43,7 @@ def load(tmp_path, **options):
     build = tmp_path / "build"
     serve.build_catalog(build, PORT, **options)
     state = CatalogIndex(tmp_path / "cache", BASE, LocalFetcher(build)).refresh()
-    assert state.error is None and not state.from_cache
+    assert state.error is None
     return build, state
 
 

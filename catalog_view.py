@@ -14,7 +14,6 @@ from engine import messages
 from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, is_web_game
 from engine.pricing import (can_play_free, description_lines, donate_link, http_url, price_text, pricing_of,
                             purchase_link, shown_price)
-from language_names import language_name
 
 _UNKNOWN = {"genre": "Unknown Genre", "developer": "Unknown Developer", "year": "Unknown Year"}
 _INSTALLED = "Installed"
@@ -63,20 +62,48 @@ def _strings(value) -> list[str]:
     """The non-empty strings of a list, in order, each once; anything else gives []."""
     if not isinstance(value, list):
         return []
-    result: list[str] = []
-    for v in value:
-        if isinstance(v, str) and v.strip() and v.strip() not in result:
-            result.append(v.strip())
-    return result
+    return list(dict.fromkeys(v.strip() for v in value if isinstance(v, str) and v.strip()))
 
 
-def _languages(entry: dict) -> list[str]:
-    names: list[str] = []
-    for code in _strings(entry.get("languages")):
-        name = language_name(code)
-        if name not in names:
-            names.append(name)
-    return names
+# The ISO 639-1 names written out: Python has no such table without a new dependency
+_LANGUAGE_NAMES = {
+    "aa": "Afar", "ab": "Abkhazian", "ae": "Avestan", "af": "Afrikaans", "ak": "Akan", "am": "Amharic",
+    "an": "Aragonese", "ar": "Arabic", "as": "Assamese", "av": "Avaric", "ay": "Aymara", "az": "Azerbaijani",
+    "ba": "Bashkir", "be": "Belarusian", "bg": "Bulgarian", "bi": "Bislama", "bm": "Bambara", "bn": "Bengali",
+    "bo": "Tibetan", "br": "Breton", "bs": "Bosnian", "ca": "Catalan", "ce": "Chechen", "ch": "Chamorro",
+    "co": "Corsican", "cr": "Cree", "cs": "Czech", "cu": "Church Slavic", "cv": "Chuvash", "cy": "Welsh",
+    "da": "Danish", "de": "German", "dv": "Divehi", "dz": "Dzongkha", "ee": "Ewe", "el": "Greek",
+    "en": "English", "eo": "Esperanto", "es": "Spanish", "et": "Estonian", "eu": "Basque", "fa": "Persian",
+    "ff": "Fulah", "fi": "Finnish", "fj": "Fijian", "fo": "Faroese", "fr": "French", "fy": "Western Frisian",
+    "ga": "Irish", "gd": "Scottish Gaelic", "gl": "Galician", "gn": "Guarani", "gu": "Gujarati", "gv": "Manx",
+    "ha": "Hausa", "he": "Hebrew", "hi": "Hindi", "ho": "Hiri Motu", "hr": "Croatian", "ht": "Haitian Creole",
+    "hu": "Hungarian", "hy": "Armenian", "hz": "Herero", "ia": "Interlingua", "id": "Indonesian",
+    "ie": "Interlingue", "ig": "Igbo", "ii": "Sichuan Yi", "ik": "Inupiaq", "io": "Ido", "is": "Icelandic",
+    "it": "Italian", "iu": "Inuktitut", "ja": "Japanese", "jv": "Javanese", "ka": "Georgian", "kg": "Kongo",
+    "ki": "Kikuyu", "kj": "Kuanyama", "kk": "Kazakh", "kl": "Kalaallisut", "km": "Khmer", "kn": "Kannada",
+    "ko": "Korean", "kr": "Kanuri", "ks": "Kashmiri", "ku": "Kurdish", "kv": "Komi", "kw": "Cornish",
+    "ky": "Kyrgyz", "la": "Latin", "lb": "Luxembourgish", "lg": "Ganda", "li": "Limburgish", "ln": "Lingala",
+    "lo": "Lao", "lt": "Lithuanian", "lu": "Luba-Katanga", "lv": "Latvian", "mg": "Malagasy",
+    "mh": "Marshallese", "mi": "Maori", "mk": "Macedonian", "ml": "Malayalam", "mn": "Mongolian",
+    "mr": "Marathi", "ms": "Malay", "mt": "Maltese", "my": "Burmese", "na": "Nauru", "nb": "Norwegian Bokmål",
+    "nd": "North Ndebele", "ne": "Nepali", "ng": "Ndonga", "nl": "Dutch", "nn": "Norwegian Nynorsk",
+    "no": "Norwegian", "nr": "South Ndebele", "nv": "Navajo", "ny": "Chichewa", "oc": "Occitan",
+    "oj": "Ojibwa", "om": "Oromo", "or": "Odia", "os": "Ossetian", "pa": "Punjabi", "pi": "Pali",
+    "pl": "Polish", "ps": "Pashto", "pt": "Portuguese", "qu": "Quechua", "rm": "Romansh", "rn": "Rundi",
+    "ro": "Romanian", "ru": "Russian", "rw": "Kinyarwanda", "sa": "Sanskrit", "sc": "Sardinian",
+    "sd": "Sindhi", "se": "Northern Sami", "sg": "Sango", "si": "Sinhala", "sk": "Slovak", "sl": "Slovenian",
+    "sm": "Samoan", "sn": "Shona", "so": "Somali", "sq": "Albanian", "sr": "Serbian", "ss": "Swati",
+    "st": "Southern Sotho", "su": "Sundanese", "sv": "Swedish", "sw": "Swahili", "ta": "Tamil", "te": "Telugu",
+    "tg": "Tajik", "th": "Thai", "ti": "Tigrinya", "tk": "Turkmen", "tl": "Tagalog", "tn": "Tswana",
+    "to": "Tongan", "tr": "Turkish", "ts": "Tsonga", "tt": "Tatar", "tw": "Twi", "ty": "Tahitian",
+    "ug": "Uyghur", "uk": "Ukrainian", "ur": "Urdu", "uz": "Uzbek", "ve": "Venda", "vi": "Vietnamese",
+    "vo": "Volapük", "wa": "Walloon", "wo": "Wolof", "xh": "Xhosa", "yi": "Yiddish", "yo": "Yoruba",
+    "za": "Zhuang", "zh": "Chinese", "zu": "Zulu",
+}
+
+
+def _languages(entry: dict) -> list[str]:  # a code with no name is shown as written
+    return list(dict.fromkeys(_LANGUAGE_NAMES.get(code.lower(), code) for code in _strings(entry.get("languages"))))
 
 
 def _price_values(pricing: dict | None) -> set[str]:
@@ -92,11 +119,8 @@ def build_rows(entries: list[dict], installed_ids: set[str]) -> list[CatalogRow]
     rows = []
     for entry in entries:
         fields = game_fields(entry)
-        platforms: list[str] = []
-        for source in _sources(entry):
-            label = _PLATFORM_LABELS.get(source.get("platform"))
-            if label and label not in platforms:
-                platforms.append(label)
+        labels = (_PLATFORM_LABELS.get(source.get("platform")) for source in _sources(entry))
+        platforms = list(dict.fromkeys(label for label in labels if label))
         pricing = pricing_of(entry)
         rows.append(CatalogRow(
             id=entry.get("id", ""),
@@ -361,14 +385,10 @@ def entry_links(entry: dict | None) -> list[tuple[str, str]]:
     if not isinstance(entry, dict):
         return []
     pricing = pricing_of(entry)
-    result = _own_links(entry) + [link for link in (purchase_link(pricing), donate_link(pricing)) if link]
-    seen: set[str] = set()
-    unique = []
-    for label, url in result:
-        if url not in seen:
-            seen.add(url)
-            unique.append((label, url))
-    return unique
+    unique: dict[str, str] = {}  # url -> its first label
+    for label, url in _own_links(entry) + [link for link in (purchase_link(pricing), donate_link(pricing)) if link]:
+        unique.setdefault(url, label)
+    return [(label, url) for url, label in unique.items()]
 
 
 def _details_lines(entry: dict) -> list[str]:
@@ -424,11 +444,8 @@ def action_kind(row: CatalogRow, platform: str | None = None) -> str:
     return "add" if is_web_game(row.entry, platform or current_platform()) else "install"
 
 
-_ACTION_VERBS = {"launch": "Launch", "add": "Add", "install": "Install"}
-
-
 def action_verb(row: CatalogRow, platform: str | None = None) -> str:
-    return _ACTION_VERBS[action_kind(row, platform)]
+    return action_kind(row, platform).capitalize()
 
 
 def action_label(row: CatalogRow | None, platform: str | None = None) -> str:

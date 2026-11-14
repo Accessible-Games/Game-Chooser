@@ -32,6 +32,10 @@ def test_traces_dir_override():
     assert cli.traces_dir_override(["--tracing"]) is None
 
 
+def test_an_option_after_traces_dir_is_not_the_folder():
+    assert cli.traces_dir_override(["--traces-dir", "--tracing"]) is None
+
+
 def test_split_command_splits_named_and_leftover_runs(tmp_path, run, monkeypatch, capsys):
     calls = []
 
@@ -180,10 +184,10 @@ def test_help_alone_is_not_a_tracing_command():
 def test_the_recorder_is_built_to_close_only_what_the_app_could_and_never_the_app(run):
     import argparse
     import os
-    from tracing.closing import WindowsCloser, process_identity
+    from tracing.closing import Closer, WindowsProcesses, process_identity
     recorder = cli._build_recorder(argparse.Namespace(trace_recorder=str(run.path), app_pid=os.getpid(),
                                                       procmon="p.exe"))
-    assert isinstance(recorder.closer, WindowsCloser)
+    assert isinstance(recorder.closer._processes, WindowsProcesses)
     # the limit is who the process named by --app-pid runs as, read from that process itself
     assert recorder.closer.limit == process_identity(os.getpid()) and recorder.closer.limit is not None
     assert os.getpid() in recorder._protected_pids

@@ -123,7 +123,7 @@ def test_mark_goes_to_running_sessions_only(tmp_path):
     client.poll()
     procs.pop(1)
     assert client.mark() == [a]
-    read = {s.session_id: s for s in client._run.read_sessions()}
+    read = {s.session_id: s for s in client._run.read_sessions_and_problems()[0]}
     assert read[a].marks == (NOW,) and read[b].marks == ()
 
 
@@ -212,7 +212,7 @@ def test_no_mark_is_made_once_tracing_is_off(tmp_path):
     client._run.write_stop(STOP)
     status(client, "done")
     assert client.mark() == []  # the game is still open, but the run has ended: nothing would hold the mark
-    assert client._run.read_sessions()[0].marks == (NOW,)
+    assert client._run.read_sessions_and_problems()[0][0].marks == (NOW,)
 
 
 def test_a_launch_that_returns_after_a_stop_was_taken_is_not_recorded(tmp_path):

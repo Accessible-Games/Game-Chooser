@@ -34,34 +34,23 @@ def library_choice_labels(libraries: list[dict]) -> list[str]:
 
 
 def default_library_index(plan) -> int:
-    for index, lib in enumerate(plan.libraries):
-        if lib["id"] == plan.default_library:
-            return index
-    return 0
-
-
-def included_titles(plan, entry_titles: dict[str, str]) -> list[str]:
-    """Titles of what always comes with the game: required extras and dependencies that install."""
-    titles = [x.title for x in plan.extras if x.required]
-    titles += [entry_titles.get(d.id) or d.id for d in plan.dependencies if d.installs]
-    return titles
-
-
-def size_text(plan, chosen_extras: set[str]) -> str:
-    """The download size, plus what the game downloads itself the first time it starts (counted in the total)."""
-    size = plan.download_size(chosen_extras)
-    first_run = plan.first_run_size
-    if not first_run:
-        return messages.CONFIRM_DOWNLOAD_SIZE.format(size=messages.format_size(size))
-    if size is None:
-        return messages.CONFIRM_DOWNLOAD_SIZE_PLUS_FIRST_RUN.format(first_run=messages.format_size(first_run))
-    return messages.CONFIRM_DOWNLOAD_SIZE_FIRST_RUN.format(size=messages.format_size(size + first_run),
-                                                           first_run=messages.format_size(first_run))
+    return next((index for index, lib in enumerate(plan.libraries) if lib["id"] == plan.default_library), 0)
 
 
 def intro_text(plan, chosen_extras: set[str], entry_titles: dict[str, str]) -> str:
-    text = size_text(plan, chosen_extras)
-    included = included_titles(plan, entry_titles)
+    """The download size, plus what the game downloads itself the first time it starts (counted in the total), then
+    the titles of what always comes with it: required extras and dependencies that install."""
+    size = plan.download_size(chosen_extras)
+    first_run = plan.first_run_size
+    if not first_run:
+        text = messages.CONFIRM_DOWNLOAD_SIZE.format(size=messages.format_size(size))
+    elif size is None:
+        text = messages.CONFIRM_DOWNLOAD_SIZE_PLUS_FIRST_RUN.format(first_run=messages.format_size(first_run))
+    else:
+        text = messages.CONFIRM_DOWNLOAD_SIZE_FIRST_RUN.format(size=messages.format_size(size + first_run),
+                                                               first_run=messages.format_size(first_run))
+    included = [x.title for x in plan.extras if x.required]
+    included += [entry_titles.get(d.id) or d.id for d in plan.dependencies if d.installs]
     if included:
         text += ". " + messages.CONFIRM_INCLUDES.format(items=", ".join(included))
     return text
