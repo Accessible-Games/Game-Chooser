@@ -510,14 +510,14 @@ def tree(root: Path) -> list[str]:
     return sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
 
 
-def record_naming_the_library(tmp_path, folder):
+def record_naming_the_library(tmp_path, folder, library_id="Games"):
     """Pawprints updated to v2, then its record damaged to name the library itself as its folder. The library
     holds another game's empty folder and another game's file."""
     eng, game = install_v1(tmp_path, play=False)
     publish(eng, V2)
     run(eng, "update")
     rec = record(eng)
-    rec.folder = folder
+    rec.folder, rec.library_id = folder, library_id
     eng.ctx.records.save(rec)
     shutil.rmtree(game)
     lib = tmp_path / "Games"
@@ -538,7 +538,7 @@ def test_uninstall_of_a_record_naming_the_library_touches_nothing_and_forgets_it
     assert r.notes == [messages.GAME_FOLDER_IS_LIBRARY_FORGOTTEN.format(title="Pawprints", path=lib)]
 
 
-@pytest.mark.parametrize("action", ["update", "repair", "undo"])
+@pytest.mark.parametrize("action", ["update", "repair", "undo", "extras"])
 def test_a_record_naming_the_library_is_never_changed(tmp_path, action):
     eng, lib = record_naming_the_library(tmp_path, "")
     if action == "update":
@@ -549,16 +549,107 @@ def test_a_record_naming_the_library_is_never_changed(tmp_path, action):
 
 
 @pytest.mark.windows
-@pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
-def test_uninstall_of_a_linked_game_folder_removes_only_the_link_and_the_record(tmp_path, delete_player_data):
+@pytest.mark.parametrize("action", ["uninstall", "repair"])
+def test_a_record_spelling_the_library_another_way_is_caught(tmp_path, action):
+    spelled = "\\\\?\\" + str(tmp_path / "Games")
+    eng, lib = record_naming_the_library(tmp_path, spelled, library_id="")
+    before = tree(lib)
+    if action == "uninstall":
+        r = run(eng, "uninstall", delete_player_data=True)
+        assert r.notes == [messages.GAME_FOLDER_IS_LIBRARY_FORGOTTEN.format(title="Pawprints", path=Path(spelled))]
+    else:
+        assert fails(run, eng, action).message == messages.GAME_FOLDER_IS_LIBRARY.format(title="Pawprints",
+                                                                                         path=Path(spelled))
+    assert tree(lib) == before and eng.ctx.recycle.calls == []
+
+
+@pytest.mark.windows
+def test_a_game_folder_linked_to_the_library_is_never_changed(tmp_path):
     import _winapi
-    eng, game = install_v1(tmp_path, steps=[reg_step("Path", "x")])
-    target = tmp_path / "Other drive" / "Pawprints"  # the game moved there, with a junction left in its place
+    eng, game = install_v1(tmp_path, play=False)
+    shutil.rmtree(game)
+    lib = tmp_path / "Games"
+    _winapi.CreateJunction(str(lib), str(game))
+    try:
+        before = sorted(os.listdir(lib))
+        assert fails(run, eng, "repair").message == messages.GAME_FOLDER_IS_LIBRARY.format(title="Pawprints",
+                                                                                           path=game)
+        assert sorted(os.listdir(lib)) == before
+    finally:
+        os.rmdir(game)
+
+
+def moved_behind_a_link(tmp_path, **install):
+    """Pawprints, played, then moved to another folder holding unrelated things, with a junction left in its place."""
+    import _winapi
+    eng, game = install_v1(tmp_path, **install)
+    target = tmp_path / "Other drive" / "Pawprints"
     target.parent.mkdir()
     shutil.move(str(game), str(target))
     (target / "unrelated_empty").mkdir()
     put(target, "unrelated/keep.txt", b"not the game's")
     _winapi.CreateJunction(str(target), str(game))
+    return eng, game, target
+
+
+@pytest.mark.windows
+def test_a_linked_game_folder_with_a_vendor_uninstaller_is_left_as_it_is(tmp_path):
+    eng, game, target = moved_behind_a_link(tmp_path, steps=[reg_step("Path", "x")])
+    rec = record(eng)
+    rec.vendor_uninstaller = f'"{game / "unins000.exe"}"'
+    eng.ctx.records.save(rec)
+    try:
+        before = tree(target), snapshot(target)
+        message = fails(run, eng, "uninstall", delete_player_data=True).message
+        assert message == messages.GAME_FOLDER_LINK_VENDOR.format(title="Pawprints", path=game)
+        assert (tree(target), snapshot(target)) == before and os.path.lexists(game) and record(eng) == rec
+        assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Path") == (True, "x", "REG_SZ")
+    finally:
+        os.rmdir(game)
+
+
+@pytest.mark.windows
+def test_a_link_that_cant_be_removed_leaves_its_steps_undone_once(tmp_path, monkeypatch):
+    eng, game, target = moved_behind_a_link(tmp_path, steps=[reg_step("Path", "x")])
+    real_rmdir = os.rmdir
+
+    def rmdir(path, *a, **kw):
+        if Path(path) == game:
+            raise PermissionError(13, "in use", str(path))
+        return real_rmdir(path, *a, **kw)
+
+    monkeypatch.setattr(os, "rmdir", rmdir)
+    try:
+        fails(run, eng, "uninstall")
+        assert record(eng).steps == [] and os.path.lexists(game)
+        assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Path") == (False, None, None)
+        monkeypatch.undo()
+        r = run(eng, "uninstall")
+        assert r.notes == [messages.GAME_FOLDER_LINK_REMOVED.format(title="Pawprints", path=game, target=target)]
+        assert record(eng) is None
+    finally:
+        monkeypatch.undo()
+        if os.path.lexists(game):
+            os.rmdir(game)
+
+
+@pytest.mark.windows
+def test_uninstall_of_a_link_to_a_missing_folder_says_so(tmp_path):
+    eng, game, target = moved_behind_a_link(tmp_path)
+    shutil.rmtree(target)
+    try:
+        r = run(eng, "uninstall")
+        assert r.notes == [messages.GAME_FOLDER_LINK_BROKEN.format(title="Pawprints", path=game, target=target)]
+        assert not os.path.lexists(game) and record(eng) is None
+    finally:
+        if os.path.lexists(game):
+            os.rmdir(game)
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
+def test_uninstall_of_a_linked_game_folder_removes_only_the_link_and_the_record(tmp_path, delete_player_data):
+    eng, game, target = moved_behind_a_link(tmp_path, steps=[reg_step("Path", "x")])
     try:
         before = tree(target), snapshot(target)
         r = run(eng, "uninstall", delete_player_data=delete_player_data)
