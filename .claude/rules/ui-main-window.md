@@ -51,8 +51,10 @@ description. The Catalog tab has its status line and Retry above these.
   "register shared components"). An invalid address saves nothing; a changed address refetches the catalog on close.
 - **Enter in a dialog**: each dialog the app builds has a default button, so Enter in a field presses it: Add or
   Save (`GameDialog`, which still runs every check and stays open on an error box), OK (Preferences), and the
-  action button of the install confirmation, Uninstall and Remove library. A focused button or an open drop-down
-  takes Enter itself; Escape is Cancel.
+  action button of the install confirmation, Uninstall and Remove library. A focused button, an open drop-down or
+  a list takes Enter itself (Enter in Preferences' library list presses nothing: wx keeps a plain Enter for a list
+  control); Escape is Cancel. A key repeat that reaches a dialog presses its default button, so a held Enter that
+  opened Edit Game or Preferences can press Save or OK at once (the key-repeat note under the games view).
 - **First run** (config.json didn't exist): no dialog; `catalog_view.initial_tab(saved, is_first_run)` opens the
   Catalog tab, and an install with no library asks for a folder and makes it a library.
 

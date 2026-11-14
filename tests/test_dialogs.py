@@ -89,6 +89,7 @@ def test_ok_is_the_preferences_default_button(app, isolated_manager):
     finally:
         dlg.Destroy()
         top.Destroy()
+        wx.Yield()  # a dialog's Destroy waits for idle time; with no event loop, run it now
 
 
 @pytest.mark.parametrize("year, shown", [(1995, "1995"), (None, "")])
