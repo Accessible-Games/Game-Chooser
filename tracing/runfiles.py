@@ -23,19 +23,16 @@ READ_TRIES = 5  # status.json can't be read for a moment while the recorder repl
 READ_RETRY_SECONDS = 0.02
 
 
-def replace_with_retry(src: Path, dst: Path, *, replace: Callable | None = None,
-                       sleep: Callable[[float], None] | None = None) -> None:
+def replace_with_retry(src: Path, dst: Path) -> None:
     """os.replace, tried again while Windows says the target is held (a reader or antivirus has it open)."""
-    replace = replace or os.replace
-    sleep = sleep or time.sleep
     for attempt in range(1, REPLACE_TRIES + 1):
         try:
-            replace(src, dst)
+            os.replace(src, dst)
             return
         except PermissionError:
             if attempt == REPLACE_TRIES:
                 raise
-            sleep(REPLACE_DELAY)
+            time.sleep(REPLACE_DELAY)
 
 
 def _temp_for(path: Path) -> Path:
