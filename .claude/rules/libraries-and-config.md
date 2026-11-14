@@ -59,7 +59,8 @@ paths:
   saves raise OSError and write nothing.
 - A config that can't be read (bad JSON or the wrong shape) is copied to `config.json.bad` first,
   the app runs on defaults, and the player is told once where the copy is. Re-adding a library mints a new id, so
-  installed games stay "Library not found" until the copy is restored by hand. The same
+  installed games stay "Library not found" until a config listing their libraries is put back by hand (the copy,
+  if it can be read or repaired; it may hold nothing useful, such as a file holding just `{`). The same
   rule covers `games.json` (`games_load_failed` is set; the list starts empty).
 
 ## Paths and executable detection
