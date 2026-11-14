@@ -219,6 +219,5 @@ def _read_status(run: RunDir) -> dict | None:
 
 
 def leftover_runs(traces_dir: Path, is_alive: IsAlive) -> list[RunDir]:
-    """Runs with a capture that is not split and whose recorder is gone."""
     return [run for run in run_dirs(traces_dir)
             if run.capture_files() and not run.is_split() and not recorder_alive(_read_status(run), is_alive)]

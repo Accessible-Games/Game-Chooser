@@ -117,7 +117,6 @@ class Recorder:
         self._snapshot_unlogged = 0
 
     def _split(self, run: RunDir) -> None:
-        """Split one run and write its problems to the log; raises what the split raises."""
         result = self.split(run)
         for problem in getattr(result, "problems", None) or []:
             log.warning("split problem in %s: %s", run.path, problem)

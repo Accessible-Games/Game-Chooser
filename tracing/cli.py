@@ -24,7 +24,6 @@ def tracing_wanted(argv: list[str], compiled: bool) -> bool:
 
 
 def traces_dir_override(argv: list[str]) -> str | None:
-    """The value of --traces-dir PATH (or --traces-dir=PATH), or None."""
     for i, arg in enumerate(argv):
         if arg == "--traces-dir":
             return argv[i + 1] if i + 1 < len(argv) else None
@@ -89,7 +88,6 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def run_command(argv: list[str], compiled: bool) -> int | None:
-    """Run the tracing command in argv and return its exit code; None when argv holds none."""
     if not any(arg.split("=", 1)[0] in COMMANDS for arg in argv):
         return None
     try:

@@ -108,7 +108,6 @@ def _merge_writes(lines: list[dict]) -> list[dict]:
 
 
 def _process_lines(tree: dict[tuple[int, int], ProcInfo], zero: int) -> list[dict]:
-    """A process_start line for every process, and a process_exit line for every one whose exit is in the capture."""
     lines = []
     for proc in tree.values():
         lines.append({"t": _t(proc.start, zero), "op": "process_start", "pid": proc.pid,

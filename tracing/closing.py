@@ -243,13 +243,11 @@ def _token_sid(token, info_class: int):
 
 
 def _sid_pointer(buffer):
-    """The SID pointer at the start of a TOKEN_USER or TOKEN_MANDATORY_LABEL buffer."""
     import ctypes
     return ctypes.cast(buffer, ctypes.POINTER(ctypes.c_void_p)).contents.value
 
 
 def _visible_windows(pid: int) -> list[int]:
-    """The visible top-level windows that belong to process `pid`."""
     import ctypes
     from ctypes import wintypes
     user32 = ctypes.windll.user32
