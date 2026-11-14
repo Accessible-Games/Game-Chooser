@@ -69,7 +69,6 @@ class InstallRecord:
     previous: dict | None = None
     previous_unavailable: str | None = None
     uninstalled: bool = False
-    format: int = 1
     # Runtime ids the install made private COM copies of (engine.runtimes); None in older records.
     private_runtimes: list[str] | None = None
     # True when launch_path is the catalog's launch path for the entry, False when the engine guessed it.
