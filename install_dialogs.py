@@ -209,7 +209,7 @@ class InstallConfirmDialog(wx.Dialog):
             try:
                 library = self.service.ensure_library(path)
             except LibraryError as e:
-                wx.MessageBox(str(e), messages.CONFIRM_LIBRARY_ERROR_TITLE, wx.OK | wx.ICON_WARNING, self)
+                wx.MessageBox(str(e), messages.CONFIRM_FOLDER_NAME, wx.OK | wx.ICON_WARNING, self)
                 self._folder.SetFocus()
                 return
         self.choice = build_choice(self.plan, library, self._checked())

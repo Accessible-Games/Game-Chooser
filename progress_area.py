@@ -65,7 +65,7 @@ class ProgressArea(wx.Panel):
         self.status.SetName(messages.PROGRESS_STATUS_NAME)
         self.done_btn = wx.Button(self, label=messages.PROGRESS_DONE)
         self.done_btn.Hide()
-        self.cancel_btn = wx.Button(self, label=messages.PROGRESS_CANCEL)
+        self.cancel_btn = wx.Button(self, label=messages.CONFIRM_BUTTON_CANCEL)
 
         sizer.Add(self.gauge, 0, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
         sizer.Add(self.status, 1, wx.ALIGN_CENTER_VERTICAL | wx.RIGHT, 5)
