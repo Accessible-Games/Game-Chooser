@@ -677,6 +677,15 @@ def test_repair_whose_download_is_gone_says_so(tmp_path):
     assert snapshot(game) == before
 
 
+def test_update_whose_download_is_gone_says_so(tmp_path):
+    eng, game = install_v1(tmp_path)
+    eng.ctx.fetcher.gone.add(publish(eng, V2)["sources"][0]["url"])
+    before = snapshot(game)
+    error = fails(run, eng, "update")
+    assert error.message == messages.NO_SOURCE.format(title="Pawprints", reasons=messages.SOURCE_GONE)
+    assert snapshot(game) == before
+
+
 def test_undo_stays_offered_while_one_address_may_come_back(tmp_path):
     eng, game = install_v1(tmp_path, url=DEV_URL)
     v1_mirror = mirror_url_for(record(eng).source.sha256, "pawprints.zip")
