@@ -569,6 +569,10 @@ class GamesPanel(wx.Panel):
 
     def on_context(self, event):
         """The selected row's context menu (right-click, Shift+F10, Applications key)"""
+        if isinstance(event, dataview.DataViewEvent) and event.GetItem().IsOk():
+            # A right-click on the macOS DataViewCtrl selects nothing (a ListCtrl selects the row first): the row
+            # it is on becomes the selected one, as the player's own move
+            self._select(self.list.control.wx_model.GetRow(event.GetItem()))
         menu = self.context_menu(self.selected_row())
         if menu is None:
             return

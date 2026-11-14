@@ -1143,13 +1143,27 @@ def test_return_whose_action_takes_long_acts_once(make_view):
 
 
 @needs_dataview
-def test_a_dataview_context_menu_is_the_selected_rows(make_view):
+def test_a_right_click_on_a_dataview_row_selects_it_and_shows_its_menu(make_view):
+    """A ListCtrl selects the row a right-click is on; nothing on macOS does, and the menu (Uninstall, Delete) was
+    the other, selected game's"""
     asked = []
     view = make_view(context_menu=lambda row: asked.append(row.title))  # None: no menu to show
     view.set_rows(rows(ALPHA, BRAVO))
-    view.list.control.Select(1)
+    view.list.control.Select(0)
     dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_CONTEXT_MENU, 1)
-    assert asked == ["Bravo"]
+    assert asked == ["Bravo"] and selected(view) == 1 and view.action_btn.GetLabel() == "Install Bravo"
+    assert saved(view)["last_selected"] == "bravo"
+
+
+@needs_dataview
+def test_a_dataview_context_menu_without_a_row_is_the_selected_rows(make_view):
+    """Where the event names no row (as a key's), the selected row's menu"""
+    asked = []
+    view = make_view(context_menu=lambda row: asked.append(row.title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_CONTEXT_MENU)
+    assert asked == ["Bravo"] and selected(view) == 1
 
 
 @needs_dataview

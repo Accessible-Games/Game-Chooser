@@ -80,6 +80,8 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   the activation is passed on. wx builds that one with no column (`GetColumn()` is -1) and a double-click's
   with the clicked column: Return's is passed on, to the accelerators (Cmd+Return is Open Folder) and to
   `on_list_key`, which acts once while it is held; a double-click's acts (`_on_dataview_activated`).
+  A right-click there selects nothing by itself (a ListCtrl selects the row first): `on_context` selects the
+  row it is on, as the player's own move, so the menu is that game's.
   smart_list's own `Bind` and `set_selected_index` are not used on it (`Bind` maps
   activation to `EVT_MENU_OPEN`; `set_selected_index` calls `SelectRow`, which only a `DataViewListCtrl` has).
   There the view shows no sort arrow, scrolls nothing into view and keeps no column widths
