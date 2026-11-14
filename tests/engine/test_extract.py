@@ -19,13 +19,14 @@ RUN_BIT = sys.platform != "win32"
 
 
 def test_seven_zip_command():
+    """The tool's path as this system writes it ("bin\\7z.exe" on Windows; the Mac runs bin/7zz the same way)"""
     assert seven_zip_command(Path("bin/7z.exe"), Path("a.7z"), Path("out")) == [
-        "bin\\7z.exe", "x", "-y", "-bso0", "-bsp0", "-oout", "a.7z"]
+        str(Path("bin/7z.exe")), "x", "-y", "-bso0", "-bsp0", "-oout", "a.7z"]
 
 
 def test_innoextract_and_msi_commands():
     assert innoextract_command(Path("bin/innoextract.exe"), Path("s.exe"), Path("o")) == [
-        "bin\\innoextract.exe", "--silent", "--extract", "--output-dir", "o", "s.exe"]
+        str(Path("bin/innoextract.exe")), "--silent", "--extract", "--output-dir", "o", "s.exe"]
     assert msi_admin_command(Path("g.msi"), Path("o")) == ["msiexec", "/a", "g.msi", "/qn", "TARGETDIR=o"]
 
 
