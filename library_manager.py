@@ -212,11 +212,8 @@ class GameLibraryManager:
                     self.games = [Game.from_dict(g) for g in data]
             except _LOAD_ERRORS as e:
                 log.warning("games.json couldn't be read, so the games list starts empty: %s", e)
-                self.games = []
                 self.games_load_failed = True
                 self._damaged(self.games_file, messages.GAMES_FILE_DAMAGED, messages.GAMES_FILE_DAMAGED_NOT_COPIED)
-        else:
-            self.games = []
 
     def save_games(self):
         """Save games to JSON file (atomically). OSError if it can't be saved."""
