@@ -206,9 +206,9 @@ def test_uninstall_keeps_a_changed_copy(tmp_path):
     eng, lib, rt, g = dx8vb_catalog(tmp_path)
     run(eng, "install")
     (lib / "Entombed" / "dx8vb.dll").write_bytes(b"the player's own dx8vb")
-    r = run(eng, "uninstall")
+    run(eng, "uninstall")
     assert (lib / "Entombed" / "dx8vb.dll").read_bytes() == b"the player's own dx8vb"
-    assert r.kept_player_files == 1 and not (lib / "Entombed" / "entombed.exe").exists()
+    assert not (lib / "Entombed" / "entombed.exe").exists()
 
 
 def test_repair_recreates_a_missing_copy(tmp_path):

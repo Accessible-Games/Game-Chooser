@@ -95,7 +95,6 @@ class JobResult:
     game: dict | None
     notes: list[str]
     backups: int = 0
-    kept_player_files: int = 0
 
 
 @dataclass
@@ -1038,7 +1037,7 @@ class InstallEngine:
             plan = plan_uninstall(rec, game_dir)
             if vendor:
                 plan = run_installer.keep_vendor_uninstaller(plan, vendor, game_dir)
-            kept = apply_uninstall(plan, game_dir, req.delete_player_data, ctx.recycle)
+            apply_uninstall(plan, game_dir, req.delete_player_data, ctx.recycle)
         except Exception as e:
             if not vendor:
                 self._uninstall_failed(rec, game_dir, title, notes, e)
@@ -1052,7 +1051,7 @@ class InstallEngine:
                 raise
             rec.vendor_uninstaller = None
             try:  # The record's leftovers: the uninstaller's own files, and anything it couldn't remove.
-                kept = apply_uninstall(plan_uninstall(rec, game_dir), game_dir, req.delete_player_data, ctx.recycle)
+                apply_uninstall(plan_uninstall(rec, game_dir), game_dir, req.delete_player_data, ctx.recycle)
             except Exception as e:
                 self._uninstall_failed(rec, game_dir, title, notes, e)
         if os.path.lexists(game_dir):
@@ -1062,7 +1061,7 @@ class InstallEngine:
             ctx.records.save(rec)
         else:
             ctx.records.delete(rec.catalog_id)
-        return JobResult("uninstall", rec.catalog_id, title, None, notes, kept_player_files=kept)
+        return JobResult("uninstall", rec.catalog_id, title, None, notes)
 
     def _uninstall_failed(self, rec: InstallRecord, game_dir: Path, title: str, notes: list[str],
                           e: Exception) -> None:
