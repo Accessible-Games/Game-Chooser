@@ -30,10 +30,6 @@ class SessionResult:
     stop: dict | None = None  # for a session the stop found running: time (FILETIME), close_games and the pid lists
 
 
-def _name(path: str) -> str:
-    return ntpath.basename(path)
-
-
 def _t(time: int, zero: int) -> float:
     return round((time - zero) / TICKS_PER_SECOND, 6)
 
@@ -57,8 +53,8 @@ def _length(details: dict) -> int:
 
 def _write_line(kind: str, event: RawEvent, proc: ProcInfo, zero: int, info: SessionInfo) -> dict:
     local_appdata = info.env["local_appdata"]
-    line = {"t": _t(event.time, zero), "op": kind, "process": _name(proc.image_path), "pid": event.pid,
-            "path": event.path, "result": event.result}
+    line = {"t": _t(event.time, zero), "op": kind, "process": ntpath.basename(proc.image_path),
+            "pid": event.pid, "path": event.path, "result": event.result}
     if kind == "rename":
         line["new_path"] = event.details.get("FileName")
     if kind == "reg_set_value":
@@ -96,11 +92,11 @@ def _process_lines(tree: dict[tuple[int, int], ProcInfo], zero: int) -> list[dic
     lines = []
     for proc in tree.values():
         lines.append({"t": _t(proc.start, zero), "op": "process_start", "pid": proc.pid,
-                      "parent_pid": proc.parent_pid, "process": _name(proc.image_path),
+                      "parent_pid": proc.parent_pid, "process": ntpath.basename(proc.image_path),
                       "image_path": proc.image_path, "command_line": proc.command_line})
         if proc.end is not None:
             lines.append({"t": _t(proc.end, zero), "op": "process_exit", "pid": proc.pid,
-                          "process": _name(proc.image_path)})
+                          "process": ntpath.basename(proc.image_path)})
     return lines
 
 
