@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
 from engine.entries import is_mirror_url, platform_sources
-from engine.errors import BlockedHost, Cancelled, DownloadError, NoVerifiedSource
+from engine.errors import BlockedHost, DownloadError, NoVerifiedSource
 from engine.messages import (
     DEVELOPER_CHANGED_UNVERIFIED,
     DEVELOPER_CHANGED_VERIFIED,
@@ -78,8 +78,6 @@ def _walk(sources: list[dict], work_dir: Path, fetcher, progress, cancel, *, kee
                     lambda done, total: progress(Progress("downloading", done, total)),
                     cancel,
                 )
-            except Cancelled:
-                raise
             except BlockedHost:
                 reasons.append(SOURCE_BLOCKED)
                 drop(folder)
