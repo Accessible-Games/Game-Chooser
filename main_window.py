@@ -998,7 +998,8 @@ class MainFrame(wx.Frame):
         self.library_manager.config["SavedState"]["tree_filters"] = keys
         # The view rebuilds the tree, filters again (a selection under a category that went no longer applies)
         # and then saves the config
-        self.library_view.set_tree_keys(keys)  # the clicked check item already ticked or unticked itself
+        self.library_view.set_tree_keys(keys)
+        self.update_filter_menu_state()  # the tree may differ from the clicked item (a key repeated in config.json)
 
     def update_filter_menu_state(self):
         for key, item in self.filter_items.items():
