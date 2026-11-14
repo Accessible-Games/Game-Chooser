@@ -432,8 +432,9 @@ def test_a_copy_with_nothing_to_copy_from_that_cant_be_kept_gets_a_note(tmp_path
     assert r.notes == [not_copied(component="DXLIB")]
 
 
+@pytest.mark.parametrize("players", [False, True], ids=["removed", "the-players-own-file"])
 @pytest.mark.parametrize("action", ["repair", "update", "undo"])
-def test_a_copy_the_installer_removes_with_nothing_to_copy_from_gets_a_note(tmp_path, monkeypatch, action):
+def test_a_copy_the_installer_removes_with_nothing_to_copy_from_gets_a_note(tmp_path, monkeypatch, action, players):
     monkeypatch.setenv("GC_DXLIB", str(tmp_path / "system"))
     routes = {}
     rt = {**layered_runtime(routes), "detect": {"file": "%GC_DXLIB%\\dxlib.dll"}}
@@ -447,6 +448,8 @@ def test_a_copy_the_installer_removes_with_nothing_to_copy_from_gets_a_note(tmp_
     if action == "undo":
         run(eng, "update", id="lightcars")
     assert (folder / "lib" / "helper.dll").exists()
+    if players:
+        (folder / "lib" / "helper.dll").write_bytes(b"the player's own helper")  # kept, so nothing is lost
     shutil.rmtree(eng.ctx.runtimes_root / "dxlib")
     (tmp_path / "system").mkdir()
     (tmp_path / "system" / "dxlib.dll").write_bytes(b"MZ dxlib")  # present by its detect hint
@@ -454,10 +457,12 @@ def test_a_copy_the_installer_removes_with_nothing_to_copy_from_gets_a_note(tmp_
 
     def removes_the_copy(exe, args, elevated):
         writes(exe, args, elevated)
-        (folder / "lib" / "helper.dll").unlink(missing_ok=True)
+        if not players:
+            (folder / "lib" / "helper.dll").unlink(missing_ok=True)
     eng.ctx.elevator.on_start = removes_the_copy
     r = run(eng, action, id="lightcars")
-    assert not (folder / "lib" / "helper.dll").exists() and not_copied("Light Cars", "DXLIB") in r.notes
+    assert (folder / "lib" / "helper.dll").exists() == players
+    assert (not_copied("Light Cars", "DXLIB") in r.notes) != players
 
 
 def test_untracked_installer_run_game_gets_a_note_instead(tmp_path, monkeypatch):

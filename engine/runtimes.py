@@ -1295,7 +1295,7 @@ def copies_after_installer(ctx, entry: dict, rec: InstallRecord, game_dir: Path,
         rec.files[norm_key(rel)] = RecordedFile(rel, sha, runtime_owner(runtime_id))
     for key, f in (had or {}).items():
         gone = [s.runtime for s in sources if s.folder is None and runtime_owner(s.runtime["id"]) == f.owner]
-        if gone and key not in rec.files:
+        if gone and key not in rec.files and not os.path.lexists(game_dir / f.path):
             notes[gone[0]["id"]] = messages.RUNTIME_FILES_NOT_COPIED.format(title=title, component=title_of(gone[0]))
     ctx.records.save(rec)
     return list(notes.values())
