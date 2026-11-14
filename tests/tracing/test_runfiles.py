@@ -39,7 +39,6 @@ def test_sessions_round_trip_sorted(tmp_path, run):
     run.write_session(session("b", 200))
     run.write_session(session("a", 100))
     (run.sessions_dir / "bad.json").write_text("{oops", encoding="utf-8")
-    assert [s.session_id for s in run.read_sessions()] == ["a", "b"]
     sessions, problems = run.read_sessions_and_problems()
     assert [s.session_id for s in sessions] == ["a", "b"]
     assert len(problems) == 1 and "bad.json" in problems[0]
@@ -102,22 +101,26 @@ class FlakyReplace:
         self.replace(src, dst)
 
 
-def test_replace_retries_a_held_file(tmp_path):
+def test_replace_retries_a_held_file(tmp_path, monkeypatch):
     src, dst = tmp_path / "a.tmp", tmp_path / "a"
     src.write_text("new", encoding="utf-8")
     dst.write_text("old", encoding="utf-8")
     replace, sleeps = FlakyReplace(2), []
-    replace_with_retry(src, dst, replace=replace, sleep=sleeps.append)
+    monkeypatch.setattr(runfiles.os, "replace", replace)
+    monkeypatch.setattr(runfiles.time, "sleep", sleeps.append)
+    replace_with_retry(src, dst)
     assert dst.read_text(encoding="utf-8") == "new" and not src.exists()
     assert replace.calls == 3 and sleeps == [0.015, 0.015]
 
 
-def test_replace_gives_up_after_ten_tries(tmp_path):
+def test_replace_gives_up_after_ten_tries(tmp_path, monkeypatch):
     src, dst = tmp_path / "a.tmp", tmp_path / "a"
     src.write_text("new", encoding="utf-8")
     replace, sleeps = FlakyReplace(100), []
+    monkeypatch.setattr(runfiles.os, "replace", replace)
+    monkeypatch.setattr(runfiles.time, "sleep", sleeps.append)
     with pytest.raises(PermissionError):
-        replace_with_retry(src, dst, replace=replace, sleep=sleeps.append)
+        replace_with_retry(src, dst)
     assert replace.calls == 10 and len(sleeps) == 9
 
 

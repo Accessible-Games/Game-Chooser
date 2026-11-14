@@ -84,7 +84,7 @@ class Recorder:
         # neither may crash the recorder.
         if self._accept_sessions:
             try:
-                for info in self.run_dir.read_sessions():
+                for info in self.run_dir.read_sessions_and_problems()[0]:
                     if info.session_id not in self._added:
                         self._added.add(info.session_id)
                         self.tree.add_session(info.session_id, info.root_pid, info.root_start,
@@ -117,7 +117,6 @@ class Recorder:
         self._snapshot_unlogged = 0
 
     def _split(self, run: RunDir) -> None:
-        """Split one run and write its problems to the log; raises what the split raises."""
         result = self.split(run)
         for problem in getattr(result, "problems", None) or []:
             log.warning("split problem in %s: %s", run.path, problem)

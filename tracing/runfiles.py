@@ -23,19 +23,16 @@ READ_TRIES = 5  # status.json can't be read for a moment while the recorder repl
 READ_RETRY_SECONDS = 0.02
 
 
-def replace_with_retry(src: Path, dst: Path, *, replace: Callable | None = None,
-                       sleep: Callable[[float], None] | None = None) -> None:
+def replace_with_retry(src: Path, dst: Path) -> None:
     """os.replace, tried again while Windows says the target is held (a reader or antivirus has it open)."""
-    replace = replace or os.replace
-    sleep = sleep or time.sleep
     for attempt in range(1, REPLACE_TRIES + 1):
         try:
-            replace(src, dst)
+            os.replace(src, dst)
             return
         except PermissionError:
             if attempt == REPLACE_TRIES:
                 raise
-            sleep(REPLACE_DELAY)
+            time.sleep(REPLACE_DELAY)
 
 
 def _temp_for(path: Path) -> Path:
@@ -81,50 +78,17 @@ def _read_dict(path: Path) -> dict | None:
 class RunDir:
     def __init__(self, path: Path):
         self.path = Path(path)
-
-    @property
-    def traces_dir(self) -> Path:
-        """The traces folder this run sits in (traces/_runs/<run>, as new_run makes it)."""
-        return self.path.parent.parent
-
-    @property
-    def status_path(self) -> Path:
-        return self.path / "status.json"
-
-    @property
-    def sessions_dir(self) -> Path:
-        return self.path / "sessions"
-
-    @property
-    def config_path(self) -> Path:
-        return self.path / "filter.pmc"
-
-    @property
-    def capture_path(self) -> Path:
-        return self.path / "capture.pml"
-
-    @property
-    def log_path(self) -> Path:
-        return self.path / "recorder.log"
-
-    @property
-    def split_path(self) -> Path:
-        return self.path / "split.json"
-
-    @property
-    def stop_request_path(self) -> Path:
-        """Written by --trace-stop: asks the recorder to end the run."""
-        return self.path / "stop-request.json"
-
-    @property
-    def stop_taken_path(self) -> Path:
-        """The request once the recorder has claimed it (renamed, so it can be claimed or withdrawn, never both)."""
-        return self.path / "stop-request.taken.json"
-
-    @property
-    def stop_path(self) -> Path:
-        """Written by the recorder when it takes a stop request: what the stop did."""
-        return self.path / "stop.json"
+        self.traces_dir = self.path.parent.parent  # traces/_runs/<run>, as new_run makes it
+        self.status_path = self.path / "status.json"
+        self.sessions_dir = self.path / "sessions"
+        self.config_path = self.path / "filter.pmc"
+        self.capture_path = self.path / "capture.pml"
+        self.log_path = self.path / "recorder.log"
+        self.split_path = self.path / "split.json"
+        self.stop_request_path = self.path / "stop-request.json"  # written by --trace-stop: end the run
+        # the request once the recorder has claimed it (renamed, so it can be claimed or withdrawn, never both)
+        self.stop_taken_path = self.path / "stop-request.taken.json"
+        self.stop_path = self.path / "stop.json"  # written by the recorder when it takes a stop request
 
     def capture_files(self) -> list[Path]:
         found = []
@@ -196,9 +160,6 @@ class RunDir:
         self.sessions_dir.mkdir(parents=True, exist_ok=True)
         _atomic_write(self.sessions_dir / f"{info.session_id}.json", json.dumps(info.to_json()))
 
-    def read_sessions(self) -> list[SessionInfo]:
-        return self.read_sessions_and_problems()[0]
-
     def read_sessions_and_problems(self) -> tuple[list[SessionInfo], list[str]]:
         """The readable sessions in launch order, and one problem per session file that couldn't be read."""
         sessions, problems = [], []
@@ -255,6 +216,5 @@ def _read_status(run: RunDir) -> dict | None:
 
 
 def leftover_runs(traces_dir: Path, is_alive: IsAlive) -> list[RunDir]:
-    """Runs with a capture that is not split and whose recorder is gone."""
     return [run for run in run_dirs(traces_dir)
             if run.capture_files() and not run.is_split() and not recorder_alive(_read_status(run), is_alive)]

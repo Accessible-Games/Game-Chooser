@@ -1,5 +1,6 @@
 """Splits one system-wide capture into per-session lines, attributing events by process tree."""
 import ntpath
+import re
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -7,10 +8,29 @@ from tracing.attribution import UNKNOWN_PID, find_root, session_tree
 from tracing.clock import TICKS_PER_SECOND
 from tracing.kinds import classify
 from tracing.model import ProcInfo, RawEvent, SessionInfo
-from tracing.virtualstore import virtual_store_path
 
 MAX_VALUE_CHARS = 256
 PROBLEM_NO_ROOT = "The game's first process isn't in the capture, so no events could be attributed to this session."
+
+_REGISTRY_PREFIX = re.compile(r"^HKLM\\SOFTWARE\\(.+)$", re.I)
+_NOT_VIRTUALIZED = ("classes\\", "microsoft\\windows\\", "microsoft\\windows nt\\")
+_FILE_PREFIX = re.compile(r"^[A-Za-z]:\\(?:Program Files|Program Files \(x86\)|Windows|ProgramData)\\", re.I)
+
+
+def virtual_store_path(path: str, virtualized: bool, local_appdata: str) -> str | None:
+    """Where Windows redirects a virtualized (non-elevated, legacy 32-bit) process's write under UAC VirtualStore."""
+    if not virtualized or "\\virtualstore\\" in path.lower():
+        return None
+    match = _REGISTRY_PREFIX.match(path)
+    if match:
+        rest = match.group(1)
+        if rest.lower().startswith(_NOT_VIRTUALIZED):
+            return None
+        return "HKCU\\Software\\Classes\\VirtualStore\\MACHINE\\SOFTWARE\\" + rest
+    if _FILE_PREFIX.match(path):
+        return local_appdata.rstrip("\\") + "\\VirtualStore\\" + path[3:]
+    return None
+
 
 _ORDER = {"process_start": 0, "file_write": 1, "mark": 2, "process_exit": 3}
 
@@ -30,10 +50,6 @@ class SessionResult:
     stop: dict | None = None  # for a session the stop found running: time (FILETIME), close_games and the pid lists
 
 
-def _name(path: str) -> str:
-    return ntpath.basename(path)
-
-
 def _t(time: int, zero: int) -> float:
     return round((time - zero) / TICKS_PER_SECOND, 6)
 
@@ -48,17 +64,10 @@ def _value_text(data) -> str:
     return text[:MAX_VALUE_CHARS]
 
 
-def _length(details: dict) -> int:
-    try:
-        return int(details.get("Length", 0))
-    except (TypeError, ValueError):
-        return 0
-
-
 def _write_line(kind: str, event: RawEvent, proc: ProcInfo, zero: int, info: SessionInfo) -> dict:
     local_appdata = info.env["local_appdata"]
-    line = {"t": _t(event.time, zero), "op": kind, "process": _name(proc.image_path), "pid": event.pid,
-            "path": event.path, "result": event.result}
+    line = {"t": _t(event.time, zero), "op": kind, "process": ntpath.basename(proc.image_path),
+            "pid": event.pid, "path": event.path, "result": event.result}
     if kind == "rename":
         line["new_path"] = event.details.get("FileName")
     if kind == "reg_set_value":
@@ -72,7 +81,7 @@ def _write_line(kind: str, event: RawEvent, proc: ProcInfo, zero: int, info: Ses
         if new_mapped is not None:
             line["new_virtual_store_path"] = new_mapped
     if kind == "file_write":
-        line["bytes"] = _length(event.details)
+        line["bytes"] = event.details.get("Length", 0)
         line["count"] = 1
     return line
 
@@ -92,15 +101,14 @@ def _merge_writes(lines: list[dict]) -> list[dict]:
 
 
 def _process_lines(tree: dict[tuple[int, int], ProcInfo], zero: int) -> list[dict]:
-    """A process_start line for every process, and a process_exit line for every one whose exit is in the capture."""
     lines = []
     for proc in tree.values():
         lines.append({"t": _t(proc.start, zero), "op": "process_start", "pid": proc.pid,
-                      "parent_pid": proc.parent_pid, "process": _name(proc.image_path),
+                      "parent_pid": proc.parent_pid, "process": ntpath.basename(proc.image_path),
                       "image_path": proc.image_path, "command_line": proc.command_line})
         if proc.end is not None:
             lines.append({"t": _t(proc.end, zero), "op": "process_exit", "pid": proc.pid,
-                          "process": _name(proc.image_path)})
+                          "process": ntpath.basename(proc.image_path)})
     return lines
 
 
