@@ -368,7 +368,8 @@ def _run_installer(ctx, title: str, file: Path, installer: dict, target: Path, i
     for an interactive one, the player's Done decides.
     """
     exe, args = installer_command(file, installer, target)
-    outcome = _run_and_wait(ctx, title, exe, args, _elevated(installer), Path(file).parent, progress, cancel)
+    outcome = _run_and_wait(ctx, title, exe, args, bool(installer.get("elevation")), Path(file).parent,
+                            progress, cancel)
     if not interactive and outcome.code not in (None, 0, *_RESTART_CODES):
         raise _tree_done(InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code)),
                          outcome.tree_done)
@@ -381,10 +382,6 @@ def _code_notes(title: str, code: int | None) -> list[str]:
     if code:
         return [messages.INSTALLER_CODE_NOTE.format(title=title, code=code)]
     return []
-
-
-def _elevated(installer: dict) -> bool:
-    return bool(installer.get("elevation"))
 
 
 # ---- file steps on a live folder ---------------------------------------------------------------------------
@@ -914,7 +911,7 @@ def run_vendor_uninstaller(ctx, record: InstallRecord, game_dir: Path, title: st
     aside = _SetAside.copy(ctx, record.catalog_id, game_dir, list(_player_files(record, game_dir)), title)
     progress(Progress("vendor_uninstaller"))
     try:
-        outcome = _run_and_wait(ctx, title, exe, args, _elevated(installer), None, progress, cancel,
+        outcome = _run_and_wait(ctx, title, exe, args, bool(installer.get("elevation")), None, progress, cancel,
                                 settle=SETTLE_SECONDS)
     except _StillRunning as e:
         raise InstallFailed("\n\n".join([messages.INSTALLER_STILL_RUNNING.format(title=title),
