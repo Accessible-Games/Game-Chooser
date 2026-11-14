@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -78,7 +79,8 @@ def test_a_library_is_never_an_installed_games_folder_or_inside_one(isolated_man
             catalog_id=cid, kind="game", library_id=library_id, folder=folder, launch_path="g.exe", source=source,
             extras={}, files={}, steps=[], method="run"))
     other = isolated_manager.add_library(_folder(tmp_path, "Other"))
-    for path in (outside, _folder(tmp_path, "Program Files", "Foo", "Sub")):
+    sub = _folder(tmp_path, "Program Files", "Foo", "Sub")
+    for path in (outside, sub, *(["\\\\?\\" + sub] if os.name == "nt" else [])):  # the last: another spelling
         with pytest.raises(LibraryError) as e:
             isolated_manager.add_library(path)
         assert str(e.value) == messages.LIBRARY_IN_GAME_FOLDER.format(path=outside)
