@@ -26,7 +26,7 @@ def tracing_wanted(argv: list[str], compiled: bool) -> bool:
 def traces_dir_override(argv: list[str]) -> str | None:
     for i, arg in enumerate(argv):
         if arg == "--traces-dir":
-            return argv[i + 1] if i + 1 < len(argv) else None
+            return argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("-") else None
         if arg.startswith("--traces-dir="):
             return arg.split("=", 1)[1]
     return None

@@ -32,6 +32,10 @@ def test_traces_dir_override():
     assert cli.traces_dir_override(["--tracing"]) is None
 
 
+def test_an_option_after_traces_dir_is_not_the_folder():
+    assert cli.traces_dir_override(["--traces-dir", "--tracing"]) is None
+
+
 def test_split_command_splits_named_and_leftover_runs(tmp_path, run, monkeypatch, capsys):
     calls = []
 

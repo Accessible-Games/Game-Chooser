@@ -36,8 +36,9 @@ Build: see `.claude/rules/build.md`.
   `--trace-probe OUT [--workload BAT]` (one short capture to learn what the real capture holds),
   `--trace-check FOLDER` (the trace-test acceptance check on a session folder, for a machine with only the compiled
   build: prints `PASS` or one problem per line; exit 0 pass, 1 problems, 2 not a session folder), `--traces-dir PATH`
-  (use another traces folder). Exit codes: 2 for a bad command line. `--trace-split`: 0 done, 1 when a run
-  couldn't be split or its split had a problem. `--trace-recorder`: 0, 1 when the recorder recorded a failure, 2
+  (use another traces folder; at app start a missing PATH, or an option in its place, is ignored). Exit codes: 2
+  for a bad command line. `--trace-split`: 0 done, 1 when a run couldn't be split or its split had a problem.
+  `--trace-recorder`: 0, 1 when the recorder recorded a failure, 2
   when it could not start. `--trace-probe`: 0, 1 on a missing file, a declined administrator prompt or an error
   (started unelevated, it passes on the elevated probe's code). `--trace-stop`: 0 when the run ended cleanly or no
   run was in progress ("No tracing run is in progress."), or a named RUN had already ended ("already ended, nothing
