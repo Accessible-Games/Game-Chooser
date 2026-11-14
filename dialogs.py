@@ -234,7 +234,7 @@ class GameDialog(wx.Dialog):
             self.path_label.SetLabel("URL:")
             self.browse_btn.Hide()
             # If switching to web game and field is empty, prefill with https://
-            if not is_web_path(self.path_ctrl.GetValue()):
+            if not self.path_ctrl.GetValue():
                 self.path_ctrl.SetValue("https://")
         else:
             self.path_label.SetLabel("Launch Path:")

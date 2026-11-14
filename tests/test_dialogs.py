@@ -37,3 +37,11 @@ def test_a_game_from_2000_keeps_its_year(make_dialog, tmp_path):
     dlg = make_dialog(game)
     dlg.on_ok(None)
     assert dlg.boxes == [] and game.year == "2000"
+
+
+def test_choosing_web_game_keeps_a_typed_path(make_dialog):
+    dlg = make_dialog()
+    dlg.path_ctrl.SetValue(r"C:\Games\x.exe")
+    dlg.platform_ctrl.SetValue("Web Game")
+    dlg._update_path_ui()
+    assert dlg.path_ctrl.GetValue() == r"C:\Games\x.exe"

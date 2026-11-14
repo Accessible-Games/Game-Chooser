@@ -31,7 +31,7 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   its columns sort and an "&" in its labels (`tests/test_catalog_panel.py`); in `main_window.py`, the Library
   list's own key (Del), four message boxes of `launch_game` and `on_open_folder`, Locate's file check and a
   games.json save that fails (`tests/test_main_window.py`); in `dialogs.py`, that `GameDialog` saves the year
-  2000 (`tests/test_dialogs.py`).
+  2000 and keeps a typed path when Platform becomes Web Game (`tests/test_dialogs.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two
   tracing rules: no `tracing/` module except `app_glue.py` imports wx, and nothing outside `tracing/` imports it
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
