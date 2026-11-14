@@ -910,13 +910,13 @@ class InstallEngine:
                          [*staged.notes(), *notes], backups=len(backups))
 
     def _undo_failed(self, e: NoVerifiedSource | _NoUnpackSpec, rec: InstallRecord, title: str) -> InstallFailed:
-        """Why Undo couldn't get the previous version back. Unless nothing could be reached (maybe only for
-        now, so Undo stays offered), the record says it is unavailable."""
-        if isinstance(e, NoVerifiedSource) and not e.downloaded:
+        """Why Undo couldn't get the previous version back. Unless an address couldn't be reached (maybe only
+        for now, so Undo stays offered), the record says it is unavailable (changed, or gone from the server)."""
+        if isinstance(e, NoVerifiedSource) and not (e.downloaded or e.gone):
             return InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title))
         rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
         self.ctx.records.save(rec)
-        return InstallFailed(rec.previous_unavailable)
+        return InstallFailed(messages.UNDO_NOT_POSSIBLE.format(title=title))
 
     def _retarget_backups(self, rec: InstallRecord, game_dir: Path, untouched: list[dict],
                           incoming: dict[str, RecordedFile]) -> None:
@@ -960,7 +960,7 @@ class InstallEngine:
                     tree = self._stage_recorded(entry, rec.source, base_extras, game_dir.name, staging, work,
                                                 progress, cancel, copies=False).tree
                 except NoVerifiedSource as e:
-                    text = (messages.EXTRAS_NEED_UPDATE if e.downloaded else messages.DOWNLOAD_UNREACHABLE)
+                    text = (messages.EXTRAS_NEED_UPDATE if e.downloaded or e.gone else messages.DOWNLOAD_UNREACHABLE)
                     raise InstallFailed(text.format(title=title)) from e
                 except _NoUnpackSpec as e:
                     raise InstallFailed(messages.EXTRAS_NEED_UPDATE.format(title=title)) from e
@@ -1273,12 +1273,12 @@ def _holds(game_dir: Path, rel: str, files: dict[str, RecordedFile]) -> bool:
 
 
 def _repair_failure_text(e: NoVerifiedSource | _NoUnpackSpec, game_id: str, title: str) -> str:
-    """Why Repair couldn't get an installed file back: not reachable now, changed (naming an extra), or
-    not known how it was unpacked."""
+    """Why Repair couldn't get an installed file back: not reachable now, gone from the server, changed (naming an
+    extra), or not known how it was unpacked."""
     if isinstance(e, _NoUnpackSpec):
         return messages.REPAIR_NOT_POSSIBLE.format(title=title)
     if not e.downloaded:
-        return messages.DOWNLOAD_UNREACHABLE.format(title=title)
+        return (messages.REPAIR_FILE_GONE if e.gone else messages.DOWNLOAD_UNREACHABLE).format(title=title)
     item = getattr(e, "item", None) or {"id": game_id}
     if item["id"] != game_id:
         return messages.REPAIR_EXTRA_CHANGED.format(extra=title_of(item), title=title)

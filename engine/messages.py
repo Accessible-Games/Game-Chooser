@@ -14,6 +14,9 @@ REPAIR_EXTRA_CHANGED = ("The download for {extra} has changed since it was added
                         "restore it. Use Update instead.")
 DOWNLOAD_UNREACHABLE = "{title}'s download couldn't be reached right now. Check your connection and try again later."
 UNDO_UNAVAILABLE = "The previous version of {title} is no longer available to download."
+UNDO_NOT_POSSIBLE = ("The previous version of {title} is no longer available to download, so the update can't be "
+                     "undone. {title} is still installed, unchanged, on the current version.")
+REPAIR_FILE_GONE = "A file {title} was installed from is no longer available to download, so Repair can't restore it."
 ELEVATION_DECLINED = "Administrator permission was declined, so {what} wasn't installed."
 NO_SOURCE = "{title} couldn't be downloaded. {reasons}"
 INSTALLED = "{title} is installed"

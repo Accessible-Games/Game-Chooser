@@ -15,6 +15,7 @@ from engine import messages
 from engine.entries import mirror_url_for
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord, RecordedFile
+from library_actions import undo_item
 from tests.engine.fakes import (BK, MIRROR, FakeElevator, FakeFetcher, fails, make_engine, never, put, quiet, reg_step,
                                 served_source, sha, snapshot, zip_bytes)
 
@@ -665,6 +666,35 @@ def test_repair_when_the_games_download_changed_and_the_mirror_is_unreachable(tm
     eng.ctx.fetcher.routes[DEV_URL] = zip_bytes(V2)       # changed; the mirror never had it
     (game / "pawprints.exe").unlink()
     assert fails(run, eng, "repair").message == messages.REPAIR_FILE_CHANGED.format(title="Pawprints")
+
+
+def test_repair_whose_download_is_gone_says_so(tmp_path):
+    eng, game = install_v1(tmp_path)
+    eng.ctx.fetcher.gone.add(record(eng).source.url)      # HTTP 404: the mirror no longer has it
+    (game / "pawprints.exe").unlink()
+    before = snapshot(game)
+    assert fails(run, eng, "repair").message == messages.REPAIR_FILE_GONE.format(title="Pawprints")
+    assert snapshot(game) == before
+
+
+def test_undo_stays_offered_while_one_address_may_come_back(tmp_path):
+    eng, game = install_v1(tmp_path, url=DEV_URL)
+    v1_mirror = mirror_url_for(record(eng).source.sha256, "pawprints.zip")
+    publish(eng, V2)
+    run(eng, "update")
+    eng.ctx.fetcher.gone.add(DEV_URL)                     # the developer took v1 down; the mirror can't be reached
+    assert fails(run, eng, "undo").message == messages.DOWNLOAD_UNREACHABLE.format(title="Pawprints")
+    assert undo_item(record(eng)).enabled
+    eng.ctx.fetcher.gone.add(v1_mirror)                   # and the mirror doesn't have it either
+    assert fails(run, eng, "undo").message == messages.UNDO_NOT_POSSIBLE.format(title="Pawprints")
+    assert not undo_item(record(eng)).enabled
+
+
+def test_adding_extras_when_the_installed_download_is_gone_says_update_first(tmp_path):
+    eng, game = install_v1(tmp_path, optional=())
+    eng.ctx.fetcher.gone.add(record(eng).source.url)
+    error = fails(run, eng, "extras", extras=("pawprints-voices",))
+    assert error.message == messages.EXTRAS_NEED_UPDATE.format(title="Pawprints")
 
 
 def test_adding_extras_offline_says_try_again_later(tmp_path):

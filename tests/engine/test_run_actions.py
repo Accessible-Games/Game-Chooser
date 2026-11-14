@@ -11,6 +11,7 @@ import pytest
 from engine import jobs, messages, run_actions, run_installer
 from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
+from library_actions import undo_item
 from tests.engine import test_update_flows as archive
 from tests.engine.fakes import (MIRROR, FakeUninstallKeys, fails, never, put, quiet, reg_step, served_source, sha,
                                 snapshot, zip_bytes)
@@ -146,21 +147,25 @@ def test_repair_whose_download_changed_changes_nothing(tmp_path, kind):
 
 
 @pytest.mark.parametrize("kind", ["archive", "installer-run"])
-@pytest.mark.parametrize("served", [b"MZ not that file", None], ids=["changed", "unreachable"])
+@pytest.mark.parametrize("served", [b"MZ not that file", "gone", None], ids=["changed", "gone", "unreachable"])
 def test_undo_whose_previous_download_is_gone_changes_nothing(tmp_path, kind, served):
-    """Changed for good, Undo is no longer offered; unreachable (maybe only for now), it stays offered."""
+    """Changed or gone (HTTP 404) for good, Undo is no longer offered; unreachable (maybe only for now), it stays
+    offered."""
     eng, game_id, title, folder = any_game(tmp_path, kind, updated=True)
     url = eng.ctx.records.load(game_id).previous["source"]["url"]
     if served is None:
         del eng.ctx.fetcher.routes[url]
+    elif served == "gone":
+        eng.ctx.fetcher.gone.add(url)
     else:
         eng.ctx.fetcher.routes[url] = served
     files = snapshot(folder)
     error = fails(eng.run, InstallRequest("undo", game_id, "Games"), quiet, never)
-    expected = (messages.UNDO_UNAVAILABLE if served else messages.DOWNLOAD_UNREACHABLE).format(title=title)
+    expected = (messages.UNDO_NOT_POSSIBLE if served else messages.DOWNLOAD_UNREACHABLE).format(title=title)
     rec = eng.ctx.records.load(game_id)
     assert error.message == expected and rec.previous is not None
-    assert rec.previous_unavailable == (expected if served else None) and snapshot(folder) == files
+    assert rec.previous_unavailable == (messages.UNDO_UNAVAILABLE.format(title=title) if served else None)
+    assert undo_item(rec).enabled is (served is None) and snapshot(folder) == files
 
 
 def test_repair_runs_the_recorded_system_steps_under_the_update_rules(tmp_path):
