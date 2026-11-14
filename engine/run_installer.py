@@ -264,10 +264,9 @@ def _interactive(ctx, installer: dict, title: str) -> bool:
     return True
 
 
-def _not_started(message: str) -> InstallFailed:
-    """The program didn't start, so nothing of it can still be running (`tree_done`)."""
-    error = InstallFailed(message)
-    error.tree_done = True
+def _tree_done(error: Exception, done: bool = True) -> Exception:
+    """`error`, saying whether the program and all it started were seen to finish (`tree_done`)."""
+    error.tree_done = done
     return error
 
 
@@ -275,11 +274,11 @@ def _start(ctx, exe: str, args: str, elevated: bool, cwd: Path | None, title: st
     try:
         return ctx.elevator.start(exe, args, elevated, cwd), elevated
     except ElevationDeclined as e:
-        raise _not_started(messages.ELEVATION_DECLINED.format(what=title)) from e
+        raise _tree_done(InstallFailed(messages.ELEVATION_DECLINED.format(what=title))) from e
     except StepError as e:
         if not elevated and getattr(e.__cause__, "winerror", None) == _ERROR_ELEVATION_REQUIRED:
             return _start(ctx, exe, args, True, cwd, title)  # Its manifest asks for administrator rights.
-        raise _not_started(str(e)) from e
+        raise _tree_done(InstallFailed(str(e))) from e
 
 
 def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Path | None,
@@ -295,9 +294,7 @@ def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Pat
     if cancel():
         # Cancelled before it started (the player told where it goes cancelled, or the app quit and released
         # that prompt): it never runs. Nothing of it can be running, so set-aside files go back as usual.
-        error = Cancelled()
-        error.tree_done = True
-        raise error
+        raise _tree_done(Cancelled())
     ui = ctx.installer_ui
     process, elevated = _start(ctx, exe, args, elevated, cwd, title)
     try:
@@ -345,9 +342,7 @@ def _run_and_wait(ctx, title: str, exe: str, args: str, elevated: bool, cwd: Pat
             stopped = _poll_for(watch, STOP_SECONDS, never=lambda: False)
             if not stopped:
                 raise _StillRunning()
-            error = Cancelled()
-            error.tree_done = watch.tree_observed()
-            raise error
+            raise _tree_done(Cancelled(), watch.tree_observed())
         done = state["done"] or (settle > 0 and _poll_for(watch, settle, cancel))
         return _Outcome(watch.exit_code(), done and watch.tree_observed())
     finally:
@@ -375,9 +370,8 @@ def _run_installer(ctx, title: str, file: Path, installer: dict, target: Path, i
     exe, args = installer_command(file, installer, target)
     outcome = _run_and_wait(ctx, title, exe, args, _elevated(installer), Path(file).parent, progress, cancel)
     if not interactive and outcome.code not in (None, 0, *_RESTART_CODES):
-        error = InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code))
-        error.tree_done = outcome.tree_done
-        raise error
+        raise _tree_done(InstallFailed(messages.INSTALLER_FAILED.format(title=title, code=outcome.code)),
+                         outcome.tree_done)
     return outcome
 
 
