@@ -19,6 +19,7 @@
 Data models for Game Chooser application
 """
 
+from dataclasses import dataclass, fields
 from typing import List, Dict, Any
 
 
@@ -26,55 +27,34 @@ def is_web_path(path: str) -> bool:
     return path.lower().startswith(("http://", "https://"))
 
 
+@dataclass(eq=False)  # eq=False: a game equals only itself (rows find their game with `is`, lists remove by identity)
 class Game:
     """Represents a game in the library"""
-    def __init__(self, title="", genre="", developer="", year="",
-                 platforms=None, launch_path="", library_id="",
-                 catalog_id="", installed_source=None, installed_extras=None):
-        self.title = title
-        self.genre = genre
-        self.developer = developer
-        self.year = year
-        self.platforms = platforms or []
-        self.launch_path = launch_path
-        self.library_id = library_id
-        self.catalog_id = catalog_id
-        self.installed_source = installed_source
-        self.installed_extras = installed_extras
+    title: str = ""
+    genre: str = ""
+    developer: str = ""
+    year: str = ""
+    platforms: list = None
+    launch_path: str = ""
+    library_id: str = ""
+    catalog_id: str = ""
+    installed_source: dict = None
+    installed_extras: list = None
+
+    def __post_init__(self):
+        self.platforms = self.platforms or []
 
     @property
     def is_web(self):
         return is_web_path(self.launch_path)
 
     def to_dict(self):
-        data = {
-            "title": self.title,
-            "genre": self.genre,
-            "developer": self.developer,
-            "year": self.year,
-            "platforms": self.platforms,
-            "launch_path": self.launch_path,
-            "library_id": self.library_id
-        }
-        if self.catalog_id:
-            data["catalog_id"] = self.catalog_id
-        if self.installed_source is not None:
-            data["installed_source"] = self.installed_source
-        if self.installed_extras is not None:
-            data["installed_extras"] = self.installed_extras
-        return data
-    
+        """Every field, in order; catalog_id only when set, installed_source and installed_extras only when not None"""
+        data = {f.name: getattr(self, f.name) for f in fields(self)}
+        if not self.catalog_id:
+            del data["catalog_id"]
+        return {k: v for k, v in data.items() if v is not None or not k.startswith("installed_")}
+
     @classmethod
     def from_dict(cls, data):
-        return cls(
-            title=data.get("title", ""),
-            genre=data.get("genre", ""),
-            developer=data.get("developer", ""),
-            year=data.get("year", ""),
-            platforms=data.get("platforms", []),
-            launch_path=data.get("launch_path", ""),
-            library_id=data.get("library_id", ""),
-            catalog_id=data.get("catalog_id", ""),
-            installed_source=data.get("installed_source"),
-            installed_extras=data.get("installed_extras")
-        )
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})  # a row that is no object raises

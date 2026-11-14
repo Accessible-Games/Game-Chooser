@@ -203,6 +203,15 @@ def test_wrong_shape_config_is_treated_as_damaged(isolated_manager_factory):
     assert config.with_name("config.json.bad").read_text(encoding="utf-8") == '{"libraries": ["D:/Games"]}'
 
 
+@pytest.mark.parametrize("text", ['[["Hand added"]]', '["Hand added"]'])  # valid JSON, a row that isn't an object
+def test_a_games_json_row_that_is_not_an_object_is_treated_as_damaged(isolated_manager_factory, text):
+    games = isolated_manager_factory.app_dir / "games.json"
+    games.write_text(text, encoding="utf-8")
+    m = isolated_manager_factory()
+    assert m.games == [] and m.games_load_failed
+    assert games.with_name("games.json.bad").read_text(encoding="utf-8") == text
+
+
 def test_an_earlier_bad_copy_is_never_overwritten(isolated_manager_factory):
     games = isolated_manager_factory.app_dir / "games.json"
     first = games.with_name("games.json.bad")
