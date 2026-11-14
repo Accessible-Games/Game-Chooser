@@ -310,7 +310,8 @@ def test_hkcu_set_and_undo_restores_previous(tmp_path, real_hkcu_key):
     assert elev.calls == []
 
 
-@pytest.mark.parametrize("src,dst", [("a", "a"), ("A", "a"), ("data", "data/sub"), ("data/f", "data")])
+@pytest.mark.parametrize("src,dst", [("a", "a"), ("A", "a"), ("data", "data/sub"), ("data/f", "data"),
+                                     ("DATA", "data/sub"), ("data/f", "DATA")])  # case alone: one file on most disks
 def test_file_steps_refuse_overlapping_source_and_target(tmp_path, src, dst):
     (tmp_path / "a").write_text("A")
     (tmp_path / "data").mkdir()
