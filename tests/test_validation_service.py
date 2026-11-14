@@ -16,3 +16,7 @@ def test_a_web_game_address_is_what_the_catalog_calls_one(url, valid):
 
 def test_an_empty_address_says_so():
     assert ValidationService.validate_url("") == (False, "URL cannot be empty")
+
+
+def test_any_four_digit_year_is_accepted():
+    assert ValidationService.validate_year("2031") == (True, None)

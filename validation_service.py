@@ -90,8 +90,8 @@ class ValidationService:
 
         try:
             year_int = int(year)
-            if year_int < 1970 or year_int > 2030:
-                return False, "Year must be between 1970 and 2030"
+            if year_int < 1000 or year_int > 9999:
+                return False, "Year must be between 1000 and 9999"
             return True, None
         except ValueError:
             return False, "Year must be a number"
