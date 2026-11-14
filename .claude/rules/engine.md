@@ -25,8 +25,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
   An HTTP 404 or 410 is `DownloadGone` ("no longer available"), never "couldn't be reached"; `NoVerifiedSource.gone`
-  only when no address failed in a way that may pass. Undo that fails on a changed or gone file sets the record's
-  `previous_unavailable` (Undo shown unavailable, with why); one that couldn't reach an address stays offered.
+  only when no address failed in a way that may pass. Undo that fails on a changed or gone file, or on a previous
+  version without its unpack details, sets the record's `previous_unavailable` (Undo shown unavailable, with why;
+  the dialog names the backup folder holding the player's copies); one that couldn't reach an address stays offered.
 - **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
   refused); **run_installer.py** / **run_actions.py** / **installer_watch.py** - installers that run.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain

@@ -914,9 +914,16 @@ class InstallEngine:
         for now, so Undo stays offered), the record says it is unavailable (changed, or gone from the server)."""
         if isinstance(e, NoVerifiedSource) and not (e.downloaded or e.gone):
             return InstallFailed(messages.DOWNLOAD_UNREACHABLE.format(title=title))
-        rec.previous_unavailable = messages.UNDO_UNAVAILABLE.format(title=title)
+        why = messages.UNDO_NO_DETAILS if isinstance(e, _NoUnpackSpec) else messages.UNDO_UNAVAILABLE
+        rec.previous_unavailable = why.format(title=title)
         self.ctx.records.save(rec)
-        return InstallFailed(messages.UNDO_NOT_POSSIBLE.format(title=title))
+        text = messages.UNDO_NOT_POSSIBLE.format(reason=rec.previous_unavailable.rstrip("."), title=title)
+        folders = [b["backup"].split("/")[0] for b in (rec.previous or {}).get("backups") or []
+                   if isinstance(b, dict) and isinstance(b.get("backup"), str)]
+        if folders:  # the player's copies the update moved aside stay where it put them
+            text += " " + messages.UNDO_BACKUPS_WHERE.format(folders=messages.names(list(dict.fromkeys(folders))),
+                                                             title=title)
+        return InstallFailed(text)
 
     def _retarget_backups(self, rec: InstallRecord, game_dir: Path, untouched: list[dict],
                           incoming: dict[str, RecordedFile]) -> None:

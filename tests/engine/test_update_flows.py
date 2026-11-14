@@ -702,6 +702,24 @@ def test_undo_stays_offered_while_one_address_may_come_back(tmp_path):
     assert not undo_item(record(eng)).enabled
 
 
+def test_undo_without_the_previous_versions_unpack_details_says_so(tmp_path):
+    eng, game = install_v1(tmp_path)
+    publish(eng, V2)
+    run(eng, "update")
+    rec = record(eng)
+    rec.previous = {**rec.previous, "source": {**rec.previous["source"], "install": None}}  # as before specs were kept
+    eng.ctx.records.save(rec)
+    before = snapshot(game)
+    assert fails(run, eng, "undo").message == (
+        "Game Chooser doesn't have the details it needs to rebuild the previous version of Pawprints, so the update "
+        "can't be undone. Pawprints is still installed, unchanged, on the current version. Your copies of the files "
+        f"the update replaced are still in {BK}, in Pawprints's folder.")
+    item = undo_item(record(eng))
+    assert not item.enabled and item.label == ("Undo last update (not available: Game Chooser doesn't have the details "
+                                               "it needs to rebuild the previous version of Pawprints)")
+    assert snapshot(game) == before
+
+
 @pytest.mark.parametrize("served, why", [("gone", "is no longer available to download"),
                                          (b"a different file", "has changed since then")], ids=["gone", "changed"])
 def test_adding_extras_when_an_installed_download_is_gone_or_changed_says_so(tmp_path, served, why):

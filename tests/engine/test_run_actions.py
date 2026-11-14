@@ -13,7 +13,7 @@ from engine.errors import InstallFailed
 from engine.jobs import InstallRequest
 from library_actions import undo_item
 from tests.engine import test_update_flows as archive
-from tests.engine.fakes import (MIRROR, FakeUninstallKeys, fails, never, put, quiet, reg_step, served_source, sha,
+from tests.engine.fakes import (BK, MIRROR, FakeUninstallKeys, fails, never, put, quiet, reg_step, served_source, sha,
                                 snapshot, zip_bytes)
 from tests.engine.test_run_installer import (SETUP, install, installed_run_game, publish_v2, run_game,
                                              run_game_with_patch, setaside, setup_engine, writes)
@@ -161,7 +161,12 @@ def test_undo_whose_previous_download_is_gone_changes_nothing(tmp_path, kind, se
         eng.ctx.fetcher.routes[url] = served
     files = snapshot(folder)
     error = fails(eng.run, InstallRequest("undo", game_id, "Games"), quiet, never)
-    expected = (messages.UNDO_NOT_POSSIBLE if served else messages.DOWNLOAD_UNREACHABLE).format(title=title)
+    expected = messages.DOWNLOAD_UNREACHABLE.format(title=title)
+    if served:
+        expected = (f"The previous version of {title} is no longer available to download, so the update can't be "
+                    f"undone. {title} is still installed, unchanged, on the current version.")
+        if kind == "archive":  # its update moved the player's edited pawprints.ini aside; an installer's moved nothing
+            expected += f" Your copies of the files the update replaced are still in {BK}, in {title}'s folder."
     rec = eng.ctx.records.load(game_id)
     assert error.message == expected and rec.previous is not None
     assert rec.previous_unavailable == (messages.UNDO_UNAVAILABLE.format(title=title) if served else None)
