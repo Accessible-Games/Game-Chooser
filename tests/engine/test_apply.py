@@ -18,7 +18,7 @@ def make_plan(*ops):
     plan = UpdatePlan()
     for path, op, data in ops:
         key = path.lower()
-        plan.ops.append(FileOp(key, path, op, ""))
+        plan.ops.append(FileOp(key, path, op))
         if data is not None:
             plan.new_files[key] = RecordedFile(path, sha(data), "game")
     return plan
@@ -162,7 +162,7 @@ def test_restore_never_deletes_other_backup_files(dirs):
 
 def make_op_plan(path, op, expected, new=b"new"):
     plan = UpdatePlan()
-    plan.ops.append(FileOp(path.lower(), path, op, "", expected))
+    plan.ops.append(FileOp(path.lower(), path, op, expected))
     if new is not None:
         plan.new_files[path.lower()] = RecordedFile(path, sha(new), "game")
     return plan

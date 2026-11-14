@@ -42,7 +42,6 @@ class FileOp:
     key: str
     path: str
     op: Op
-    reason: str
     # What the file on disk looked like at planning time: its sha256, or ABSENT.
     # None means "not recorded"; apply_plan then skips its last-moment re-check.
     expected: str | None = None
@@ -92,9 +91,9 @@ def plan_update(
         disk = on_disk.get(key)
         new = incoming.get(key)
         path = new.path if new else disk[0] if disk else inst.path
-        op, reason = _decide(key, path, inst, disk, new, persist, restore_changed_code)
+        op = _decide(key, path, inst, disk, new, persist, restore_changed_code)
         if op is not None:
-            plan.ops.append(FileOp(key, path, op, reason, disk[1] if disk else ABSENT))
+            plan.ops.append(FileOp(key, path, op, disk[1] if disk else ABSENT))
         if new is not None and not matches_persist(key, persist):
             plan.new_files[key] = new
     return plan
@@ -103,30 +102,30 @@ def plan_update(
 def _decide(key, path, inst, disk, new, persist, restore_code):
     if matches_persist(key, persist):
         if disk is not None:
-            return Op.KEEP, "persist path is player data"
-        return (Op.WRITE, "persist default, nothing on disk") if new else (None, "")
+            return Op.KEEP  # a persist path is player data
+        return Op.WRITE if new else None  # a persist default, with nothing on disk
 
     if disk is None:
-        return (Op.WRITE, "missing on disk") if new else (None, "gone and not shipped")
+        return Op.WRITE if new else None
 
     d = disk[1]
-    if inst is not None and d == inst.sha256:
+    if inst is not None and d == inst.sha256:  # unchanged since install
         if new is None:
-            return Op.DELETE, "unchanged and removed by new version"
+            return Op.DELETE
         if new.sha256 == d:
-            return Op.KEEP, "unchanged and same"
-        return Op.WRITE, "unchanged, new version differs"
+            return Op.KEEP
+        return Op.WRITE
 
     # Player-owned: changed since install, or never recorded.
     if new is None:
-        return Op.KEEP, "player-owned and not shipped"
+        return Op.KEEP
     if new.sha256 == d:
-        return Op.KEEP, "already equals new version"
+        return Op.KEEP
     if inst is not None and new.sha256 == inst.sha256 and not (restore_code and is_code(path)):
-        return Op.KEEP, "player changed, new version same as installed"
+        return Op.KEEP
     if is_code(path):
-        return Op.WRITE, "code replaced without copy"
-    return Op.BACKUP_AND_WRITE, "player-owned file replaced"
+        return Op.WRITE  # code is replaced without a copy
+    return Op.BACKUP_AND_WRITE
 
 
 # ---- applying a plan -------------------------------------------------------
