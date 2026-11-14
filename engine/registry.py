@@ -5,6 +5,7 @@ written by an elevated reg.exe, because Game Chooser itself never runs as admini
 """
 
 import re
+from contextlib import suppress
 
 from . import messages
 from .elevation import Elevator
@@ -103,11 +104,8 @@ class RegistryAccess:
         """Remove one value. A value that is already gone is not an error."""
         if hive == "HKCU":
             w = self._winreg
-            try:
-                with w.OpenKey(w.HKEY_CURRENT_USER, key, 0, w.KEY_SET_VALUE) as handle:
-                    w.DeleteValue(handle, name)
-            except FileNotFoundError:
-                pass
+            with suppress(FileNotFoundError), w.OpenKey(w.HKEY_CURRENT_USER, key, 0, w.KEY_SET_VALUE) as handle:
+                w.DeleteValue(handle, name)
         elif hive == "HKLM":
             if self.get(hive, key, name)[0]:  # reg.exe fails on a missing value; also spares a UAC prompt.
                 self._reg_exe("delete", key, name, "")

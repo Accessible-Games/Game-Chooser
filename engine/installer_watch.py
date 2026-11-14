@@ -18,6 +18,7 @@ couldn't be read, or a child couldn't be opened), callers must not assume nothin
 import ctypes
 import sys
 import time
+from contextlib import suppress
 from ctypes import wintypes
 from typing import Protocol
 
@@ -132,17 +133,14 @@ class _WindowsProcesses:
         except Exception:
             return  # gone, or elevated: usually refused
         try:
-            win32api.TerminateProcess(handle, 1)
-        except Exception:
-            pass
+            with suppress(Exception):
+                win32api.TerminateProcess(handle, 1)
         finally:
             handle.Close()
 
     def close(self, handle) -> None:
-        try:
+        with suppress(Exception):
             handle.Close()
-        except Exception:
-            pass
 
     def job_running(self, job) -> bool:
         import win32job
@@ -151,10 +149,8 @@ class _WindowsProcesses:
 
     def kill_job(self, job) -> None:
         import win32job
-        try:
+        with suppress(Exception):
             win32job.TerminateJobObject(job, 1)
-        except Exception:
-            pass
 
 
 class _TreeWatch:

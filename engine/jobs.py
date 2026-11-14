@@ -156,12 +156,10 @@ def _hide(path: Path) -> None:
     """Give `path` the Windows hidden attribute. Best effort: does nothing elsewhere or on failure."""
     if sys.platform != "win32":
         return
-    try:
+    with suppress(OSError, AttributeError):
         import ctypes
         attributes = os.stat(path).st_file_attributes | stat.FILE_ATTRIBUTE_HIDDEN
         ctypes.windll.kernel32.SetFileAttributesW(str(path), attributes)
-    except (OSError, AttributeError):
-        pass
 
 
 def _file_states(root: Path) -> dict[str, tuple[int, int, int]]:

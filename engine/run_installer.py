@@ -21,6 +21,7 @@ import shutil
 import threading
 import time
 from collections.abc import Callable, Iterator
+from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -237,10 +238,8 @@ def _remove_new_files(folder: Path, before: set[str], existed: bool) -> None:
                 continue
             _prune_empty_dirs(full.parent, folder)
     if not existed:
-        try:
+        with suppress(OSError):
             folder.rmdir()
-        except OSError:
-            pass
 
 
 # ---- running and waiting -----------------------------------------------------------------------------------
