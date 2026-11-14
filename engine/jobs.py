@@ -76,8 +76,6 @@ _WINERROR_VANISHED = {2, 3}          # ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUN
 
 # Install methods whose files Game Chooser unpacked and recorded itself.
 EXTRACT_METHODS = frozenset({"zip", "7z", "installer", "cab", "tar", "none"})
-# Run-mode installs are recorded with method "run". When tracked, these actions work on them.
-RUN_ACTIONS = frozenset(ACTIONS)
 
 
 @dataclass
@@ -1118,7 +1116,7 @@ def _prefetched(fetch: Fetch, item_id: str, fetched: Fetched) -> Fetch:
 def _require_changeable(rec: InstallRecord, title: str, action: str) -> None:
     """Only tracked games are changed: those Game Chooser unpacked itself, and those an installer put
     in place whose files were found. Runtimes never are."""
-    changeable = rec.method in EXTRACT_METHODS or (rec.method == "run" and action in RUN_ACTIONS)
+    changeable = rec.method in EXTRACT_METHODS or rec.method == "run"
     if rec.kind == "runtime" or not rec.tracked or not changeable:
         raise InstallFailed(messages.INSTALL_NOT_CHANGEABLE.format(title=title))
 
