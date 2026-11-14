@@ -52,7 +52,7 @@ from .errors import EngineError, InstallFailed, NoVerifiedSource, StepError, Uns
 from .folders import library_label, target_folder
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import STAGING_DIR_NAME, is_engine_dir, is_link, norm_key, safe_join, same_folder, walk_files
+from .paths import STAGING_DIR_NAME, is_engine_dir, is_link, norm_key, safe_join, same_folder, same_on_disk, walk_files
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
 from .recycle import send_to_recycle_bin
 from .installer_watch import ProcessWatch, watch_process
@@ -1139,12 +1139,8 @@ def _holds_a_library(game_dir: Path, libraries: list[dict]) -> bool:
         if not lib.get("path"):
             continue
         folder = Path(os.path.abspath(lib["path"]))
-        if inside(folder, game_dir):
+        if inside(folder, game_dir) or any(same_on_disk(game_dir, f) for f in (folder, *folder.parents)):
             return True
-        for f in (folder, *folder.parents):
-            with suppress(OSError):  # a folder that isn't there can't be the game's
-                if os.path.samefile(game_dir, f):
-                    return True
     return False
 
 

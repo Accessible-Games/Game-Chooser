@@ -564,6 +564,24 @@ def test_a_record_spelling_the_library_another_way_is_caught(tmp_path, action):
     assert tree(lib) == before and eng.ctx.recycle.calls == []
 
 
+def test_folders_whose_drive_gives_no_ids_are_never_taken_for_the_library(tmp_path, monkeypatch):
+    from engine.jobs import _holds_a_library
+    lib, game = tmp_path / "Games", tmp_path / "Network" / "Pawprints"
+    lib.mkdir()
+    game.mkdir(parents=True)
+    real_stat = os.stat
+
+    def stat(path, *args, **kwargs):  # some network drives give every file the ID 0
+        s = real_stat(path, *args, **kwargs)
+        if Path(path) in (lib, game):
+            return os.stat_result((s.st_mode, 0, 0, *tuple(s)[3:]))
+        return s
+
+    monkeypatch.setattr(os, "stat", stat)
+    assert not _holds_a_library(game, [{"id": "Games", "path": str(lib)}])
+    assert _holds_a_library(lib, [{"id": "Games", "path": str(lib)}])
+
+
 @pytest.mark.windows
 def test_a_game_folder_linked_to_the_library_is_never_changed(tmp_path):
     import _winapi

@@ -32,8 +32,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   shipped empty, like `saves`, has no recorded file under it); a folder holding a player's file stays, with its
   parents; links are never entered. A game folder left with nothing in it goes, and so does its record.
   Before that, `jobs._uninstall` guards the game folder itself. A game folder that is, or holds, a library folder
-  (`_holds_a_library`, compared as text and on disk with `samefile`, so another spelling or a link to the library
-  counts; a library can't be added there, so only a damaged record or config reaches it) has only its record
+  (`_holds_a_library`, compared as text and on disk with `paths.same_on_disk`, so another spelling or a link to the
+  library counts, but never on a drive that gives every file the ID 0; a library can't be added there, so only a
+  damaged record or config reaches it) has only its record
   deleted, nothing on disk touched (`GAME_FOLDER_IS_LIBRARY_FORGOTTEN`); Update, Repair, Undo and Extras refuse it
   (`_installed`, `GAME_FOLDER_IS_LIBRARY`). A game folder that is itself a link (a game moved to another drive) has
   its system steps undone and cleared from the record, then only the link and the record go: nothing behind the
@@ -61,7 +62,7 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   purpose: `library_actions._same_file` follows links for the `.hta` check, and a Game's "title, else catalog id"
   in `dialogs.py` and `install_service.py` is a game's, not an entry's): `entries.title_of` (an entry's title,
   else its id), `runs_installer`, `is_web_game`, `dependency_order` (also used for the catalog's visibility, which
-  further requires each runtime to be usable here); `paths.same_folder` and `folder_key`, `is_link`, `is_code`,
+  further requires each runtime to be usable here); `paths.same_folder` and `folder_key` (as text), `same_on_disk`, `is_link`, `is_code`,
   `walk_files` (skips only linked folders and those `skip` names: backups are the player's), `write_atomic` (temp
   file, then replace; the temp file goes if that fails); `pricing.http_url` (an http or https address with a host
   and no spaces); `safety.plain_file` ("is this still the recorded file", read errors raised) and
