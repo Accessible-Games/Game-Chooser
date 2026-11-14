@@ -32,17 +32,11 @@ def main():
     import wx
     from main_window import MainFrame
 
-    class GameChooserApp(wx.App):
-        """Main application class"""
-
-        def OnInit(self):
-            frame = MainFrame()
-            frame.Show()
-            if tracing_cli is not None and tracing_cli.tracing_wanted(sys.argv[1:], compiled):
-                tracing_cli.attach_app(frame, compiled, sys.argv[1:])
-            return True
-
-    app = GameChooserApp()
+    app = wx.App()
+    frame = MainFrame()
+    frame.Show()
+    if tracing_cli is not None and tracing_cli.tracing_wanted(sys.argv[1:], compiled):
+        tracing_cli.attach_app(frame, compiled, sys.argv[1:])
     app.MainLoop()
 
 
