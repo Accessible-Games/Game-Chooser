@@ -54,6 +54,7 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
             raise engine._undo_failed(e, rec, title) from e
         # Decided before anything changes: a backup goes back only over the file the update wrote.
         untouched = jobs._untouched_backups(game_dir, (previous or {}).get("backups") or [])
+        had = rec.files  # run_installer.update replaces this dict, never changes it
         try:
             # The undo point stays until the backups are back, so a failed Undo can be tried again.
             record, notes = run_installer.update(ctx, _run_item(engine, entry, fetched, source), rec, game_dir,
@@ -62,8 +63,9 @@ def undo(engine, entry: dict, rec: InstallRecord, game_dir: Path, source: Instal
             extra_notes, backups = engine._extras_after_installer(entry, record, unpacked, staging, prior,
                                                                   cancel, recorded=extra_sources)
             extra_notes += engine._private_after_installer(entry, record, copies)
-            extra_notes += engine._copies_after_installer(entry, record, copies, record.runtime_copies
-                                                          if previous is None else jobs._previous_copies(previous, rec))
+            extra_notes += engine._copies_after_installer(
+                entry, record, copies,
+                record.runtime_copies if previous is None else jobs._previous_copies(previous, rec), had)
         except BaseException:
             _retarget_rewritten(ctx, rec, game_dir, untouched)
             raise

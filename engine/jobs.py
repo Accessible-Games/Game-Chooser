@@ -403,7 +403,7 @@ class InstallEngine:
                      staging: Path, action: str,
                      place: Callable[[RunItem], tuple[InstallRecord, list[str]]],
                      cancel, prior: dict | None = None,
-                     private: list[runtimes.PrivateCopy] = ()) -> JobResult:
+                     private: list[runtimes.PrivateCopy] = (), had: dict | None = None) -> JobResult:
         """Hand a downloaded installer that must run to engine.run_installer, through `place` (given the
         item), then apply the already unpacked extras over the game's folder, then
         the already unpacked private COM copies (the preference off) beside its launch exe."""
@@ -415,13 +415,13 @@ class InstallEngine:
         record, notes = place(item)
         extra_notes, backups = self._extras_after_installer(entry, record, unpacked, staging, prior, cancel)
         private_notes = self._private_after_installer(entry, record, list(private))
-        copy_notes = self._copies_after_installer(entry, record, list(private))
+        copy_notes = self._copies_after_installer(entry, record, list(private), had=had)
         return JobResult(action, entry["id"], title, game_fields_for(entry, record, self.ctx.platform),
                          [*([fetched.note] if fetched.note else []), *notes, *extra_notes, *private_notes,
                           *copy_notes], backups=backups)
 
     def _copies_after_installer(self, entry: dict, rec: InstallRecord, copies: list[runtimes.PrivateCopy],
-                                ids: list[str] | None = None) -> list[str]:
+                                ids: list[str] | None = None, had: dict | None = None) -> list[str]:
         """Copy the DLL and OCX files of a game's runtimes beside its launch exe, once its installer has run
         (engine.runtimes; `ids`: the runtimes a rebuilt version had). An untracked folder, or one outside the
         libraries that needs administrator permission, gets none: the notes say so."""
@@ -431,7 +431,7 @@ class InstallEngine:
         if blocked:
             text = messages.RUNTIME_FILES_UNTRACKED if blocked == "untracked" else messages.RUNTIME_FILES_NEED_ADMIN
             return runtimes.copies_skipped_notes(self.ctx, entry, copies, title, text, path=game_dir)
-        return runtimes.copies_after_installer(self.ctx, entry, rec, game_dir, copies, title, ids)
+        return runtimes.copies_after_installer(self.ctx, entry, rec, game_dir, copies, title, ids, had)
 
     def _private_after_installer(self, entry: dict, rec: InstallRecord,
                                  copies: list[runtimes.PrivateCopy]) -> list[str]:
@@ -773,7 +773,7 @@ class InstallEngine:
                         result = self._install_run(entry, fetched, unpacked, staging, action, lambda item: (
                             run_installer.update(ctx, item, rec, game_dir, progress, cancel, previous=prior,
                                                  spare_steps=_extra_steps(unpacked))), cancel, prior,
-                            private=private)
+                            private=private, had=rec.files)
                         result.notes += [*runtime_notes, *runtimes.needs_shared_notes(title, deps.skipped)]
                         return result
                 self._require_writable(rec, game_dir, title)
