@@ -85,7 +85,8 @@ class GameDialog(wx.Dialog):
         self.genre_ctrl = add_row(3, "Genre:", lambda: wx.ComboBox(panel, value=self.game.genre, choices=genres))
         self.developer_ctrl = add_row(4, "Developer:", lambda: wx.ComboBox(panel, value=self.game.developer,
                                                                            choices=developers))
-        self.year_ctrl = add_row(5, "Year:", lambda: wx.TextCtrl(panel, value=self.game.year))  # empty: no year
+        # Empty means no year; a hand-edited games.json may hold a number or null
+        self.year_ctrl = add_row(5, "Year:", lambda: wx.TextCtrl(panel, value=str(self.game.year or "")))
 
         btn_sizer = wx.StdDialogButtonSizer()
         ok_label = "Add" if self.is_new else "Save"
