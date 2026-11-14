@@ -690,74 +690,67 @@ class MainFrame(wx.Frame):
             self._tell(f"Failed to open folder: {e}", "Error")
 
     def launch_game(self, game):
-        # Check platform compatibility for non-web games
-        if not game.is_web:
-            current_platform = platform_label(catalog_platform())
-            if current_platform not in game.platforms:
-                # Build supported platforms string
-                supported = ", ".join(game.platforms) if game.platforms else "no platforms"
-
-                self._tell(f"You're trying to run {game.title} on {current_platform}, but it only supports "
-                           f"{supported}.", "Uh-oh")
-                return
-
         if game.is_web:
-            # Web game
             webbrowser.open(game.launch_path)
-        else:
-            # Regular game
-            full_path = self.library_manager.get_full_path(game)
-            if not full_path or not Path(full_path).exists():
-                problem = launch_problem(game, self.library_manager.library_reachable(game.library_id),
-                                         self.service.record_for(game), self.service.entry_for(game))
-                if problem != "locate":
-                    self._launch_problem(game, problem)
-                    return
-                with self.modal_dialog():
-                    self._tell(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE)
-                    with wx.FileDialog(self, "Locate Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
-                        located = dlg.ShowModal() == wx.ID_OK
-                        new_path = dlg.GetPath()
-                    # Any file Add Game accepts will do; the game is no longer tied to a library
-                    problem = located and executable_problem(new_path, platform_label(catalog_platform()))
-                    if problem:
-                        self._tell(*problem)
-                    live = self._live_game(game)
-                    if located and not problem and live is not None:
-                        live.launch_path = new_path
-                        live.library_id = ""
-                        self._save_games()  # the view finds it again by the Game object, under its new id
+            return
+        current_platform = platform_label(catalog_platform())
+        if current_platform not in game.platforms:
+            supported = ", ".join(game.platforms) if game.platforms else "no platforms"
+            self._tell(f"You're trying to run {game.title} on {current_platform}, but it only supports "
+                       f"{supported}.", "Uh-oh")
+            return
+        full_path = self.library_manager.get_full_path(game)
+        if not full_path or not Path(full_path).exists():
+            problem = launch_problem(game, self.library_manager.library_reachable(game.library_id),
+                                     self.service.record_for(game), self.service.entry_for(game))
+            if problem != "locate":
+                self._launch_problem(game, problem)
+                return
+            with self.modal_dialog():
+                self._tell(messages.LAUNCH_NOT_FOUND_LOCATE, messages.LAUNCH_NOT_FOUND_TITLE)
+                with wx.FileDialog(self, "Locate Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
+                    located = dlg.ShowModal() == wx.ID_OK
+                    new_path = dlg.GetPath()
+                # Any file Add Game accepts will do; the game is no longer tied to a library
+                problem = located and executable_problem(new_path, platform_label(catalog_platform()))
+                if problem:
+                    self._tell(*problem)
+                live = self._live_game(game)
+                if located and not problem and live is not None:
+                    live.launch_path = new_path
+                    live.library_id = ""
+                    self._save_games()  # the view finds it again by the Game object, under its new id
+            return
+
+        # Tracing watches a program launch only; a web page is never observed
+        observe = self.launch_observer is not None and launch_kind(full_path) == "program"
+        token = None
+        if observe:
+            token = self.launch_observer.before_launch(game)
+            if token is None:
                 return
 
-            # Tracing watches a program launch only; a web page is never observed
-            observe = self.launch_observer is not None and launch_kind(full_path) == "program"
-            token = None
-            if observe:
-                token = self.launch_observer.before_launch(game)
-                if token is None:
-                    return
+        try:
+            game_dir = str(Path(full_path).parent)
+            system = platform.system()
+            if system == "Darwin" and full_path.endswith(".app"):
+                subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
+            else:
+                # Regular executable (one marked "run as administrator" goes through Windows' prompt)
+                # start_launch_file decides whether an .hta may run (only the one the catalog named)
+                started = start_launch_file(full_path, game_dir, game, self.service.record_for,
+                                            self.library_manager.config["libraries"])
+                if started.kind == "page":
+                    return  # a web page opens in the browser; the window stays as it is
+                if observe:
+                    self.launch_observer.launched(token, game, started.pid, full_path, game_dir)
 
-            try:
-                game_dir = str(Path(full_path).parent)
-                system = platform.system()
-                if system == "Darwin" and full_path.endswith(".app"):
-                    subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
-                else:
-                    # Regular executable (one marked "run as administrator" goes through Windows' prompt)
-                    # start_launch_file decides whether an .hta may run (only the one the catalog named)
-                    started = start_launch_file(full_path, game_dir, game, self.service.record_for,
-                                                self.library_manager.config["libraries"])
-                    if started.kind == "page":
-                        return  # a web page opens in the browser; the window stays as it is
-                    if observe:
-                        self.launch_observer.launched(token, game, started.pid, full_path, game_dir)
+            self.Iconize(True)
 
-                self.Iconize(True)
-
-            except LaunchCancelled:
-                pass  # the player declined the administrator prompt: nothing started, nothing to say
-            except Exception as e:
-                self._tell(f"Failed to launch game: {e}", "Launch Error")
+        except LaunchCancelled:
+            pass  # the player declined the administrator prompt: nothing started, nothing to say
+        except Exception as e:
+            self._tell(f"Failed to launch game: {e}", "Launch Error")
 
     def _launch_problem(self, game, problem):
         """A launch found no executable: the library is unreachable, or a catalog game's files are missing (a
