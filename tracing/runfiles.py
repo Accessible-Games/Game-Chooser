@@ -81,50 +81,17 @@ def _read_dict(path: Path) -> dict | None:
 class RunDir:
     def __init__(self, path: Path):
         self.path = Path(path)
-
-    @property
-    def traces_dir(self) -> Path:
-        """The traces folder this run sits in (traces/_runs/<run>, as new_run makes it)."""
-        return self.path.parent.parent
-
-    @property
-    def status_path(self) -> Path:
-        return self.path / "status.json"
-
-    @property
-    def sessions_dir(self) -> Path:
-        return self.path / "sessions"
-
-    @property
-    def config_path(self) -> Path:
-        return self.path / "filter.pmc"
-
-    @property
-    def capture_path(self) -> Path:
-        return self.path / "capture.pml"
-
-    @property
-    def log_path(self) -> Path:
-        return self.path / "recorder.log"
-
-    @property
-    def split_path(self) -> Path:
-        return self.path / "split.json"
-
-    @property
-    def stop_request_path(self) -> Path:
-        """Written by --trace-stop: asks the recorder to end the run."""
-        return self.path / "stop-request.json"
-
-    @property
-    def stop_taken_path(self) -> Path:
-        """The request once the recorder has claimed it (renamed, so it can be claimed or withdrawn, never both)."""
-        return self.path / "stop-request.taken.json"
-
-    @property
-    def stop_path(self) -> Path:
-        """Written by the recorder when it takes a stop request: what the stop did."""
-        return self.path / "stop.json"
+        self.traces_dir = self.path.parent.parent  # traces/_runs/<run>, as new_run makes it
+        self.status_path = self.path / "status.json"
+        self.sessions_dir = self.path / "sessions"
+        self.config_path = self.path / "filter.pmc"
+        self.capture_path = self.path / "capture.pml"
+        self.log_path = self.path / "recorder.log"
+        self.split_path = self.path / "split.json"
+        self.stop_request_path = self.path / "stop-request.json"  # written by --trace-stop: end the run
+        # the request once the recorder has claimed it (renamed, so it can be claimed or withdrawn, never both)
+        self.stop_taken_path = self.path / "stop-request.taken.json"
+        self.stop_path = self.path / "stop.json"  # written by the recorder when it takes a stop request
 
     def capture_files(self) -> list[Path]:
         found = []
