@@ -288,7 +288,7 @@ def names(items: list[str]) -> str:
 LIBRARY_ALREADY_ADDED = "That folder is already a library."
 LIBRARY_INSIDE = "That folder is inside the library {label}."
 LIBRARY_CONTAINS = "That folder contains the library {label}."
-LIBRARY_IN_GAME_FOLDER = "That folder is, or is inside, {path}, the folder of an installed game."
+LIBRARY_IN_GAME_FOLDER = "That folder is, or is inside, {path}, the folder of a game Game Chooser installed."
 LIBRARY_FOLDER_MISSING = "That folder doesn't exist."
 LIBRARY_UNREACHABLE = ("The library folder {path} can't be reached. If it's on a drive that isn't connected, "
                        "connect it and try again. If it moved, use Change folder in Preferences.")
