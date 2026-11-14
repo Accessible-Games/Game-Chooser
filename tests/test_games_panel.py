@@ -1078,12 +1078,28 @@ def test_moving_through_the_dataview_list_updates_the_button_and_description(mak
 
 
 @needs_dataview
-def test_activating_a_dataview_row_acts_on_it(make_view):
+def test_a_double_click_on_a_dataview_row_acts_on_it(make_view):
     acted = []
     view = make_view(on_action=lambda: acted.append(view.selected_row().title))
     view.set_rows(rows(ALPHA, BRAVO))
     view.list.control.Select(1)
-    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1)
+    dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1)  # a double-click: no key with it
+    wx.GetApp().ProcessPendingEvents()
+    assert acted == ["Bravo"]
+
+
+@needs_dataview
+def test_return_on_a_dataview_row_acts_once_and_once_while_held(make_view):
+    """The macOS DataViewCtrl sends its activation for Return before the key-down (seen in a real run): Return
+    acts once, through on_list_key, and a held Return's repeats act on nothing"""
+    acted = []
+    view = make_view(on_action=lambda: acted.append(view.selected_row().title))
+    view.set_rows(rows(ALPHA, BRAVO))
+    view.list.control.Select(1)
+    for repeat in (False, True, True):
+        dataview_event(view, wx.dataview.wxEVT_DATAVIEW_ITEM_ACTIVATED, 1)
+        press(view.list_ctrl, wx.WXK_RETURN, repeat=repeat)
+        wx.GetApp().ProcessPendingEvents()
     assert acted == ["Bravo"]
 
 

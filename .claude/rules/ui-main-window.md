@@ -76,7 +76,10 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   `EVT_DATAVIEW_SELECTION_CHANGED`, `ITEM_ACTIVATED`, `ITEM_CONTEXT_MENU` and `COLUMN_HEADER_CLICK` in their
   place (one table where the list's events are bound). It sends its selection event for the view's own selects
   too, and when a refill empties the list, so that one is ignored while the view refills
-  (`_on_dataview_selected`). smart_list's own `Bind` and `set_selected_index` are not used on it (`Bind` maps
+  (`_on_dataview_selected`). Its activation comes for Return too, before the key-down, which follows only when
+  the activation is passed on: it is passed on, Return acts in `on_list_key` (once while held), and the
+  activation acts only with no Return within `RETURN_ACTIVATION_SECONDS` (a double-click;
+  `_on_dataview_activated`). smart_list's own `Bind` and `set_selected_index` are not used on it (`Bind` maps
   activation to `EVT_MENU_OPEN`; `set_selected_index` calls `SelectRow`, which only a `DataViewListCtrl` has).
   There the view shows no sort arrow, scrolls nothing into view and keeps no column widths
   (`tests/test_games_panel.py` skips those tests on macOS, with the reason).
