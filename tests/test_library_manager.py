@@ -5,7 +5,7 @@ import pytest
 from engine import messages
 from engine.folders import library_label
 from library_manager import LibraryError
-from path_manager import PathManager
+from models import Game
 
 
 def _seed(tmp_path):
@@ -112,8 +112,8 @@ def test_old_alpha_config_loads(isolated_manager_factory, tmp_path):
     assert m.games[0].library_id == "" and not hasattr(m.games[0], "library_name")
 
 
-def test_get_full_path_old_name_rows_resolve_to_launch_path():
-    assert PathManager.get_full_path("Old/play.exe", [{"id": "a", "path": "C:/x"}], "") == "Old/play.exe"
+def test_get_full_path_old_name_rows_resolve_to_launch_path(isolated_manager):
+    assert isolated_manager.get_full_path(Game(title="Old", launch_path="Old/play.exe")) == "Old/play.exe"
 
 
 def test_ids_are_assigned_once(isolated_manager_factory, tmp_path):

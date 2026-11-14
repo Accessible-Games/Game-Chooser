@@ -37,7 +37,6 @@ from engine.records import RecordStore
 from install_prefs import current_catalog_url
 from library_actions import is_uninstall_unfinished
 from models import Game
-from path_manager import PathManager
 
 
 log = logging.getLogger(__name__)
@@ -106,7 +105,6 @@ class GameLibraryManager:
         self.games_file = self.app_dir / "games.json"
         self.config_file = self.get_config_path()
         self.is_first_run = not self.config_file.exists()
-        self.path_manager = PathManager()
         # Files that couldn't be read whose damaged copy isn't kept yet: nothing writes over them until it is
         self._uncopied_damage = set()
         self._damage_copies = {}  # damaged file -> the copy kept of it
@@ -384,11 +382,9 @@ class GameLibraryManager:
         self.save_config()
     
     def get_full_path(self, game):
-        """Construct full path from relative path and library"""
-        if game.is_web:
+        """The launch file joined to its library's folder (None when that library is gone); a web address or an
+        absolute path as it is"""
+        if game.is_web or not game.library_id:
             return game.launch_path
-        return self.path_manager.get_full_path(
-            game.launch_path,
-            self.config["libraries"],
-            game.library_id
-        )
+        lib = self.library_by_id(game.library_id)
+        return str(Path(lib["path"]) / game.launch_path) if lib else None

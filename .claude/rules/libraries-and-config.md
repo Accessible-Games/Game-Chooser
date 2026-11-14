@@ -2,7 +2,6 @@
 paths:
   - "/library_manager.py"
   - "/models.py"
-  - "/path_manager.py"
   - "/validation_service.py"
   - "/dialogs.py"
   - "/tests/test_library_manager.py"
@@ -13,8 +12,7 @@ paths:
 
 ## Files
 - **library_manager.py** - `GameLibraryManager`: config, games.json, libraries, catalog game bookkeeping
-- **path_manager.py**, **validation_service.py** - a game's full path from its library, the executable check,
-  and title/URL/path/year validation used by `GameDialog`
+- **validation_service.py** - title/URL/path/year validation used by `GameDialog`
 
 ## Libraries (install folders)
 - Stored in `config["libraries"]` as `{"id": <secrets.token_hex(6)>, "path": <folder>}`. The id is stable; games
@@ -62,7 +60,7 @@ paths:
 ## Paths and executable detection
 - Paths inside a library use forward slashes internally and are library-relative; `GameLibraryManager.get_full_path`
   joins one to its library's folder (a web address or an absolute path is returned as it is).
-- Executable detection (`PathManager.is_executable`, used by Add Game and Locate through
-  `library_actions.executable_problem`): a file ending in `.exe` or `.bat`, or
+- Executable detection (`library_actions.executable_problem`, used by Add Game and Locate): a file ending in
+  `.exe` or `.bat`, or
   a folder ending in `.app` (a macOS bundle). Nothing else counts: `.cmd` is not accepted, the executable bit is
   not checked and there is no Linux case.
