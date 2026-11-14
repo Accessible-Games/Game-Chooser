@@ -42,9 +42,7 @@ class FileOp:
     key: str
     path: str
     op: Op
-    # What the file on disk looked like at planning time: its sha256, or ABSENT.
-    # None means "not recorded"; apply_plan then skips its last-moment re-check.
-    expected: str | None = None
+    expected: str  # what the file on disk looked like at planning time: its sha256, or ABSENT
 
 
 @dataclass
@@ -269,12 +267,12 @@ def _apply_op(op: FileOp, plan: UpdatePlan, game_dir: Path, incoming_root: Path,
         return
     target = safe_join(game_dir, op.path)
     # Re-check the disk just before acting: the game may have written something since planning.
-    state = _current_state(target) if op.expected is not None else None
+    state = _current_state(target)
     if state in ("<link>", "<other>"):
         if op.op is Op.DELETE:
             return
         raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=op.path, kind="folder"))
-    changed = state is not None and state != op.expected
+    changed = state != op.expected
 
     if op.op is Op.DELETE:
         if not changed:

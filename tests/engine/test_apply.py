@@ -13,12 +13,12 @@ from tests.engine.fakes import BK, put, sha
 DAY = date(2026, 11, 4)
 
 
-def make_plan(*ops):
-    """ops: (path, Op, incoming_bytes|None)"""
+def make_plan(game, *ops):
+    """ops: (path, Op, incoming_bytes|None), each expecting what `game` holds now"""
     plan = UpdatePlan()
     for path, op, data in ops:
         key = path.lower()
-        plan.ops.append(FileOp(key, path, op))
+        plan.ops.append(FileOp(key, path, op, safety._current_state(game / path)))
         if data is not None:
             plan.new_files[key] = RecordedFile(path, sha(data), "game")
     return plan
@@ -36,7 +36,7 @@ def test_backup_keeps_subfolders(dirs):
     game, inc = dirs
     put(game, "Data/cfg.ini", b"mine")
     put(inc, "Data/cfg.ini", b"new")
-    r = apply_plan(make_plan(("Data/cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
+    r = apply_plan(make_plan(game, ("Data/cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
     assert (game / BK / "Data" / "cfg.ini").read_bytes() == b"mine"
     assert r[0]["backup"] == f"{BK}/Data/cfg.ini"
     assert [p.name for p in (game / "Data").iterdir()] == ["cfg.ini"]  # no temp left
@@ -48,7 +48,7 @@ def test_write_creates_dirs_and_delete_prunes_empty_dirs(dirs):
     put(game, "old/deep/gone.txt", b"g")
     put(game, "keep/other.txt", b"k")
     put(game, "keep/gone2.txt", b"g")
-    plan = make_plan(("a/b/new.txt", Op.WRITE, b"n"), ("old/deep/gone.txt", Op.DELETE, None),
+    plan = make_plan(game, ("a/b/new.txt", Op.WRITE, b"n"), ("old/deep/gone.txt", Op.DELETE, None),
                      ("keep/gone2.txt", Op.DELETE, None), ("keep/other.txt", Op.KEEP, None))
     r = apply_plan(plan, game, inc, DAY)
     assert (game / "a/b/new.txt").read_bytes() == b"n"
@@ -63,7 +63,7 @@ def test_preflight_target_is_directory_changes_nothing(dirs):
     put(game, "other.txt", b"old")
     put(inc, "data", b"file")
     put(inc, "other.txt", b"new")
-    plan = make_plan(("other.txt", Op.WRITE, b"new"), ("data", Op.WRITE, b"file"))
+    plan = make_plan(game, ("other.txt", Op.WRITE, b"new"), ("data", Op.WRITE, b"file"))
     with pytest.raises(EngineError):
         apply_plan(plan, game, inc, DAY)
     assert (game / "other.txt").read_bytes() == b"old"
@@ -75,14 +75,14 @@ def test_preflight_parent_is_file(dirs):
     put(game, "data", b"player file")
     put(inc, "data/x.txt", b"n")
     with pytest.raises(EngineError):
-        apply_plan(make_plan(("data/x.txt", Op.WRITE, b"n")), game, inc, DAY)
+        apply_plan(make_plan(game, ("data/x.txt", Op.WRITE, b"n")), game, inc, DAY)
     assert (game / "data").read_bytes() == b"player file"
 
 
 def test_unsafe_path_rejected(dirs):
     game, inc = dirs
     with pytest.raises(EngineError):
-        apply_plan(make_plan(("../evil.txt", Op.WRITE, b"n")), game, inc, DAY)
+        apply_plan(make_plan(game, ("../evil.txt", Op.WRITE, b"n")), game, inc, DAY)
 
 
 def test_failed_write_keeps_backup_and_cleans_temp(dirs, monkeypatch):
@@ -98,7 +98,7 @@ def test_failed_write_keeps_backup_and_cleans_temp(dirs, monkeypatch):
 
     monkeypatch.setattr(os, "replace", boom)
     with pytest.raises(OSError) as info:
-        apply_plan(make_plan(("cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
+        apply_plan(make_plan(game, ("cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
     monkeypatch.setattr(os, "replace", real)
     files = [p for p in game.rglob("*") if p.is_file()]
     assert files == [game / "cfg.ini"] and files[0].read_bytes() == b"mine"  # put back in place, no temp left
@@ -109,7 +109,7 @@ def test_missing_incoming_file_leaves_player_file_alone(dirs):
     game, inc = dirs
     put(game, "cfg.ini", b"mine")
     with pytest.raises(OSError):
-        apply_plan(make_plan(("cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
+        apply_plan(make_plan(game, ("cfg.ini", Op.BACKUP_AND_WRITE, b"new")), game, inc, DAY)
     assert (game / "cfg.ini").read_bytes() == b"mine"
     assert not (game / BK).exists()
 
@@ -211,7 +211,7 @@ def test_preflight_catches_backup_path_blocked_by_file(dirs):
     put(game, BK, b"a file where the backup folder goes")
     put(inc, "Data/cfg.ini", b"new")
     put(inc, "other.txt", b"new")
-    plan = make_plan(("other.txt", Op.WRITE, b"new"), ("Data/cfg.ini", Op.BACKUP_AND_WRITE, b"new"))
+    plan = make_plan(game, ("other.txt", Op.WRITE, b"new"), ("Data/cfg.ini", Op.BACKUP_AND_WRITE, b"new"))
     with pytest.raises(EngineError):
         apply_plan(plan, game, inc, DAY)
     assert (game / "other.txt").read_bytes() == b"old"
