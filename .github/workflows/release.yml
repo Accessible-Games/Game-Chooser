@@ -117,7 +117,8 @@ jobs:
       # A missing module or dylib makes the app exit at once, so after 15 seconds it must still be running. That is
       # all this checks: no way to see the app's window without Accessibility or Screen Recording permission was found
       # with evidence that it works on a hosted runner. It runs from a copy with HOME pointed at an empty folder
-      # (the config folder and games.json live under HOME on macOS); the copy must not differ from the build after.
+      # (the config folder and games.json live under HOME on macOS). Its output is always printed and must hold no
+      # Traceback (one on a worker thread leaves the app running), and the copy must not differ from the build after.
       - name: Smoke start
         run: |
           app="$RUNNER_TEMP/Game Chooser.app"
@@ -128,17 +129,25 @@ jobs:
           HOME="$home" "$app/Contents/MacOS/game-chooser" > "$log" 2>&1 &
           pid=$!
           sleep 15
-          if ! kill -0 "$pid" 2> /dev/null; then
-            status=0
+          status=0
+          if kill -0 "$pid" 2> /dev/null; then
+            alive=yes
+            kill -KILL "$pid"
+            wait "$pid" || true
+          else
+            alive=no
             wait "$pid" || status=$?
-            cat "$log"
+          fi
+          cat "$log"
+          if [ "$alive" = no ]; then
             echo "game-chooser exited within 15 seconds (exit code $status)"
             exit 1
           fi
-          kill -KILL "$pid"
-          wait "$pid" || true
+          if grep -q Traceback "$log"; then
+            echo "game-chooser printed a traceback (above)"
+            exit 1
+          fi
           if ! diff -r "build/Game Chooser.app" "$app"; then
-            cat "$log"
             echo "game-chooser wrote into its app bundle (above)"
             exit 1
           fi
@@ -213,10 +222,11 @@ jobs:
             The Mac version is for Macs with Apple silicon only.
             It is not notarized by Apple, so macOS blocks it the first time you open it.
             To open it, first unzip the download if your browser has not already done so, and open the Game Chooser
-            app. macOS says it cannot open the app; close that message.
+            app. macOS says it cannot open the app; choose Done, not Move to Trash.
             Then open the Apple menu, choose System Settings, and choose Privacy & Security in the sidebar.
             Scroll down to the Security section and choose Open Anyway.
             This button is there for about an hour after you tried to open the app.
-            macOS asks once more whether to open the app; choose Open, then enter your login password and choose OK.
+            macOS asks once more whether to open the app; choose Open or Open Anyway, then confirm with your login
+            password or Touch ID.
             After that, Game Chooser opens like any other app.
         run: gh release create "$GITHUB_REF_NAME" "$WIN" "$MAC" SHA256SUMS.txt --verify-tag --generate-notes --prerelease --notes "$NOTES"

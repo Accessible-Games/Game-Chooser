@@ -1,6 +1,7 @@
 ---
 paths:
   - "/build_windows.sh"
+  - "/build_macos.sh"
   - "/pyproject.toml"
   - "scripts/**/*.py"
   - "/.github/workflows/*.yml"
@@ -48,7 +49,8 @@ file). Windows' smoke start: a copy of the build, with `APPDATA` pointed at an e
 after 15 seconds with a main window titled `Game Chooser (`... (a missing DLL leaves Windows' error box, titled after
 `game-chooser.exe`, which keeps the process alive); the folder is zipped as `GameChooser-<tag>-windows-x64.zip` (one
 top-level `GameChooser` folder). The Mac smoke start runs a copy of the app with `HOME` pointed at an empty folder;
-it must still be running after 15 seconds (no window check) and the copy must not differ from the build afterwards.
+it must still be running after 15 seconds (no window check), its output (always printed) must hold no `Traceback`,
+and the copy must not differ from the build afterwards.
 The app is zipped with `ditto -c -k --keepParent` as `GameChooser-<tag>-macos-arm64.zip` (never 7zz or `zip`, which
 lose the signature and symlinks), and its signature is checked before zipping and again in the unpacked zip.
 `publish` (needs both) downloads the two zips (`skip-decompress`, or download-artifact unpacks them), finds them
