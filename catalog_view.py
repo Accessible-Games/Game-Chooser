@@ -408,11 +408,8 @@ def action_kind(row: CatalogRow, platform: str | None = None) -> str:
     return "add" if is_web_game(row.entry, platform or current_platform()) else "install"
 
 
-_ACTION_VERBS = {"launch": "Launch", "add": "Add", "install": "Install"}
-
-
 def action_verb(row: CatalogRow, platform: str | None = None) -> str:
-    return _ACTION_VERBS[action_kind(row, platform)]
+    return action_kind(row, platform).capitalize()
 
 
 def action_label(row: CatalogRow | None, platform: str | None = None) -> str:
