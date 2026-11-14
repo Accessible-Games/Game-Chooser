@@ -747,8 +747,9 @@ def test_focus_goes_to_the_list_when_the_progress_area_hides_with_focus_inside(m
     assert view.action_btn.IsShown() and view.action_btn.IsEnabled()  # the button stays after the job
 
 
-def test_the_progress_area_grows_for_done_and_keeps_its_status_line_whole(make_view):
-    """Done shows while an installer runs: the area makes room for it instead of narrowing the status line"""
+def test_the_progress_area_grows_for_done_in_a_window_wide_enough(make_view):
+    """Done shows while an installer runs: the area makes room for it instead of narrowing the status line (a
+    window too narrow for the whole row still narrows it)"""
     view = make_view()
     view.GetParent().SetSize((1200, 600))  # room for the button, the gauge, the status line, Done and Cancel
     view.GetParent().SendSizeEvent()  # the frame's one child fills it, as the shown window's page does
