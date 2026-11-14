@@ -82,6 +82,10 @@ which keeps a Mac app's links and its programs' "can run" bit (7-Zip drops links
 `zipfile` drops the bit); 7z, cab, NSIS and other 7-Zip installers go through `bin/7zz` (7-Zip's Mac build, arm64
 only); Inno and MSI raise `EXTRACT_NEEDS_WINDOWS` before anything runs. `fetch_tools.py` on a Mac fetches only
 `7zz` and its license.
+After unpacking on a Mac, `mark_mac_programs` gives each `.app`'s own program (Info.plist's `CFBundleExecutable`, a
+name in `Contents/MacOS` or NVGT's `MacOS/<name>`) the run bit for whoever may read it, since a zip or 7z made on
+Windows keeps no Unix modes. It skips an app whose plist can't be read, a name that leaves `Contents/MacOS`, and
+anything through a link. Nothing else gets the bit.
 
 ## Temporary launch fallback
 

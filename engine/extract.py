@@ -6,12 +6,15 @@ import gzip
 import logging
 import lzma
 import os
+import plistlib
 import shutil
+import stat
 import subprocess
 import sys
 import tarfile
 import zlib
 from pathlib import Path
+from xml.parsers.expat import ExpatError
 from typing import Callable
 
 from . import messages
@@ -145,6 +148,37 @@ def _refuse_links_leaving(dest: Path) -> None:
                 raise ExtractError(messages.EXTRACT_UNSAFE_LINK)
 
 
+def _app_program(app: Path) -> Path | None:
+    """The program a Mac app's Info.plist names (CFBundleExecutable: a name in Contents/MacOS, or, as NVGT games
+    write it, "MacOS/<name>"), when it is a plain file there and nothing on the way is a link; else None."""
+    contents = app / "Contents"
+    try:
+        with open(contents / "Info.plist", "rb") as plist:
+            name = plistlib.load(plist).get("CFBundleExecutable")
+    except (OSError, ValueError, ExpatError, AttributeError):  # AttributeError: a plist that isn't a dict
+        return None
+    if isinstance(name, str) and name.startswith("MacOS/"):
+        name = name[len("MacOS/"):]
+    if not isinstance(name, str) or not name or name in (".", "..") or "/" in name or "\\" in name:
+        return None
+    program = contents / "MacOS" / name
+    if any(p.is_symlink() for p in (app, contents, program.parent, program)) or not program.is_file():
+        return None
+    return program
+
+
+def mark_mac_programs(dest: Path) -> None:
+    """Give each Mac app's own program the run bit for whoever may read it. A zip or 7z made on Windows keeps no
+    Unix modes, and macOS won't start an app whose program lacks the bit."""
+    for current, dirs, _files in os.walk(dest):
+        for name in dirs:
+            if name.lower().endswith(".app"):
+                program = _app_program(Path(current) / name)
+                if program is not None:
+                    mode = program.stat().st_mode
+                    program.chmod(stat.S_IMODE(mode) | (mode & 0o444) >> 2)
+
+
 class Extractor:
     def __init__(self, tools_dir: Path, run: Run | None = None, platform: str | None = None):
         self.tools_dir = Path(tools_dir)
@@ -214,4 +248,6 @@ class Extractor:
             if stray.is_file():
                 stray.unlink()
         _refuse_links_leaving(dest)
+        if mac:
+            mark_mac_programs(dest)
         return content_root(dest, install.get("extract_dir"))

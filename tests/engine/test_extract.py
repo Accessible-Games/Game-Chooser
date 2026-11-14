@@ -398,3 +398,59 @@ def test_real_ditto_writes_nothing_through_a_link_that_leaves(tmp_path):
         Extractor(tmp_path / "no-tools", platform="darwin").extract(archive, tmp_path / "out", {"method": "zip"},
                                                                     lambda: False)
     assert list(outside.iterdir()) == []
+
+
+def _app_unpacker(name="Game.app", program="Game", plist_program="Game", mode=0o644):
+    """A fake 7-Zip run that leaves a Mac app whose program lacks the run bit, as a zip made on Windows does."""
+    import plistlib
+
+    def unpack(argv):
+        dest = Path(next(a for a in argv if a.startswith("-o"))[2:])
+        contents = dest / name / "Contents"
+        (contents / "MacOS").mkdir(parents=True)
+        (contents / "Info.plist").write_bytes(plistlib.dumps({"CFBundleExecutable": plist_program}))
+        (contents / "MacOS" / program).write_bytes(b"program")
+        (contents / "MacOS" / program).chmod(mode)
+        (contents / "MacOS" / "helper").write_bytes(b"not the app's program")
+        (contents / "MacOS" / "helper").chmod(mode)
+    return unpack
+
+
+def test_mac_gives_each_apps_program_the_run_bit(tmp_path):
+    run = FakeRun(side_effect=_app_unpacker())
+    dest = tmp_path / "o"
+    _extractor(run, "darwin").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
+    macos = dest / "Game.app" / "Contents" / "MacOS"
+    assert stat.S_IMODE((macos / "Game").stat().st_mode) == 0o755
+    assert stat.S_IMODE((macos / "helper").stat().st_mode) == 0o644
+
+
+def test_mac_skips_a_plist_that_names_a_path_out_of_the_app(tmp_path):
+    run = FakeRun(side_effect=_app_unpacker(plist_program="../../Game.app/Contents/MacOS/helper"))
+    dest = tmp_path / "o"
+    _extractor(run, "darwin").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
+    assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "helper").stat().st_mode) == 0o644
+
+
+def test_mac_skips_an_app_without_a_readable_plist(tmp_path):
+    def unpack(argv):
+        _app_unpacker()(argv)
+        dest = Path(next(a for a in argv if a.startswith("-o"))[2:])
+        (dest / "Game.app" / "Contents" / "Info.plist").write_bytes(b"not a plist")
+    dest = tmp_path / "o"
+    _extractor(FakeRun(side_effect=unpack), "darwin").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
+    assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o644
+
+
+def test_windows_leaves_an_apps_program_alone(tmp_path):
+    run = FakeRun(side_effect=_app_unpacker())
+    dest = tmp_path / "o"
+    _extractor(run, "win32").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
+    assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o644
+
+
+def test_mac_takes_a_program_named_from_contents_as_nvgt_writes_it(tmp_path):
+    run = FakeRun(side_effect=_app_unpacker(plist_program="MacOS/Game"))
+    dest = tmp_path / "o"
+    _extractor(run, "darwin").extract(tmp_path / "a.7z", dest, {"method": "7z"}, lambda: False)
+    assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o755
