@@ -43,7 +43,8 @@ fetch_tools_if_missing() {
     fi
 }
 
-# ship_tools DIST: copy bin/ (tools and licenses), THIRD_PARTY.md and LICENSE.txt into the built app's folder.
+# ship_tools DIST: copy bin/ (tools and licenses), THIRD_PARTY.md and LICENSE.txt into the built app's folder, and
+# the license texts of what is built into the exe into licenses/ (scripts/collect_licenses.py).
 ship_tools() {
     local dist="$1"
     if [ ! -d "$dist" ]; then
@@ -57,13 +58,14 @@ ship_tools() {
     done
     cp bin/licenses/* "$dist/bin/licenses/" || return 1
     cp THIRD_PARTY.md LICENSE.txt "$dist/" || return 1
+    uv run python scripts/collect_licenses.py "$dist" || return 1
     for tool in "${TOOLS[@]}"; do
         if [ ! -f "$dist/$tool" ]; then
             echo "$dist/$tool was not shipped."
             return 1
         fi
     done
-    echo "Shipped bin/ ($(ls "$dist/bin" | grep -c -v '^licenses$') tools, $(ls "$dist/bin/licenses" | wc -l) license files), THIRD_PARTY.md and LICENSE.txt"
+    echo "Shipped bin/ ($(ls "$dist/bin" | grep -c -v '^licenses$') tools, $(ls "$dist/bin/licenses" | wc -l) license files), THIRD_PARTY.md, LICENSE.txt and licenses/"
 }
 
 # `bash build_windows.sh --ship-only DIST` only copies the tools into an existing build folder (a dry run).
@@ -153,7 +155,7 @@ if [ $? -eq 0 ]; then
     if [ "$TRACING" -eq 1 ]; then
         echo "$TRACING_WARNING"
     else
-        echo "To distribute, copy the entire '$DIST' folder (it includes bin/, THIRD_PARTY.md and LICENSE.txt)"
+        echo "To distribute, copy the entire '$DIST' folder (it includes bin/, licenses/, THIRD_PARTY.md and LICENSE.txt)"
     fi
 else
     echo ""
