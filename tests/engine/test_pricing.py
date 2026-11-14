@@ -53,6 +53,7 @@ def test_nothing_shows_without_readable_pricing():
         assert install_warning(pricing) is None
         assert not can_play_free(pricing)
     assert pricing_of({"pricing": p("donationware")}) is None and pricing_of(None) is None
+    assert pricing_of({"pricing": []}) is None and pricing_of({"pricing": "free"}) is None
     assert pricing_of({"pricing": p("free")}) == p("free")
 
 
