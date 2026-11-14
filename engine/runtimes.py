@@ -182,15 +182,14 @@ def write_marker_args(marker: Path, source_sha256: str) -> str:
     return f'/d /v:off /s /c "{_write_marker_command(marker, source_sha256)}"'
 
 
-def lock_down_commands(folder: Path, user_sid: str, staging: Path, files: dict[str, str],
+def lock_down_commands(folder: Path, staging: Path, files: dict[str, str],
                        existing: set[str] | None = None) -> list[tuple[str, str]]:
     """The elevated commands that make and fill a runtime's folder and lock it, and the two folders above
     it, down: [(exe, arguments)], one per administrator prompt (usually one; more only if the command
     line would be too long). `files` maps each of the download's files, relative to `folder` and to
     `staging` (where the player unpacked them) with forward slashes, to its sha256. `existing` is None
     when `folder` isn't there yet; else the expected entries it already holds (an Administrators-owned
-    folder being adopted). `user_sid` is checked by the caller and appears in no command: the installing
-    user gets no grant.
+    folder being adopted). The installing user gets no grant.
 
     The chain stops at the first command that fails, and never changes the owner or permissions of a
     FILE (a hard link shares them with its other names): icacls runs on folders only, one explicit path
@@ -764,7 +763,7 @@ def _lock_down(ctx, target: Path, title: str, staging: Path, incoming: dict[str,
             or any("%" in f for f in files) or not all(_HEX64.fullmatch(sha) for sha in files.values())):
         raise InstallFailed(messages.RUNTIME_FOLDER_NOT_SECURED.format(title=title, path=target))  # cmd expands %
     existing = {rel for rel, _ in _depth_first_order(list(files)) if os.path.lexists(target / rel)} if found else None
-    for exe, args in lock_down_commands(target, user, staging, files, existing):
+    for exe, args in lock_down_commands(target, staging, files, existing):
         try:
             code = ctx.elevator.run(exe, args, True, show=False)
         except ElevationDeclined as e:
