@@ -19,7 +19,6 @@ from pathlib import Path
 
 import wx
 import platform
-from contextlib import nullcontext
 from library_manager import LibraryError
 from engine import messages
 from engine.folders import library_label
@@ -244,10 +243,10 @@ class PreferencesDialog(wx.Dialog):
         self.library_manager = library_manager
         self.service = service
         # Nested prompts are modal dialogs that may hold games: they defer job results like any other
-        self._modal = getattr(parent, "modal_dialog", None) or nullcontext
-        self._notify = getattr(parent, "notify", None)  # the main window's notification, for a slow count
+        self._modal = parent.modal_dialog
+        self._notify = parent.notify  # the main window's notification, for a slow count
         # Runs work once no prompt is open over Preferences (the main window's; it doesn't count Preferences itself)
-        self._when_no_prompt = getattr(parent, "run_when_no_dialog", None) or (lambda fn, *args: fn(*args))
+        self._when_no_prompt = parent.run_when_no_dialog
         self._counting = False  # a Remove is counting the player's files in the background
         # The catalog address when Preferences opened, so the main window can tell if it changed (even over
         # several Applies, and even when the player then chooses Cancel)
@@ -473,7 +472,7 @@ class PreferencesDialog(wx.Dialog):
         self._counting = True
         run_in_background(lambda: sum(service.player_files(cid) for cid in ids),
                           lambda count: self._counted(library_id, count), "library-player-files",
-                          slow=(lambda: notify(messages.COUNTING_LIBRARY_FILES.format(label=label))) if notify else None,
+                          slow=lambda: notify(messages.COUNTING_LIBRARY_FILES.format(label=label)),
                           default=0)
 
     def _counted(self, library_id, player_files):
