@@ -58,7 +58,7 @@ from .recycle import send_to_recycle_bin
 from .installer_watch import ProcessWatch, watch_process
 from .run_installer import InstallerUI, RunItem
 from .runtimes import _clear, _clear_or_fail
-from .uninstall_keys import UninstallReader, _winreg_reader, inside
+from .uninstall_keys import UninstallReader, _winreg_reader, inside, is_missing_program
 from .safety import (UpdatePlan, _resolve_game_path, apply_plan, apply_uninstall,
                      plain_file, plan_uninstall, plan_update, preflight, restore_backups)
 from .sources import Fetched, fetch_exact, fetch_verified, hash_file
@@ -1041,7 +1041,8 @@ class InstallEngine:
             return JobResult("uninstall", rec.catalog_id, title, None,
                              [messages.GAME_FOLDER_IS_LIBRARY_FORGOTTEN.format(title=title, path=game_dir)])
         if is_link(game_dir):  # the game moved elsewhere and left a link: nothing behind the link is touched
-            if rec.vendor_uninstaller:  # Windows' entry runs it through the link, so the link must stay
+            # Windows' entry runs it through the link, so the link stays while the uninstaller is there.
+            if rec.vendor_uninstaller and not is_missing_program(rec.vendor_uninstaller):
                 raise InstallFailed(messages.GAME_FOLDER_LINK_VENDOR.format(title=title, path=game_dir))
             target = Path(os.path.realpath(game_dir))
             notes = undo_steps(rec.steps, StepContext(game_dir.absolute(), ctx.elevator, ctx.registry))

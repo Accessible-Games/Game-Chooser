@@ -611,12 +611,18 @@ def moved_behind_a_link(tmp_path, **install):
     return eng, game, target
 
 
-@pytest.mark.windows
-def test_a_linked_game_folder_with_a_vendor_uninstaller_is_left_as_it_is(tmp_path):
+def linked_with_vendor_uninstaller(tmp_path):
     eng, game, target = moved_behind_a_link(tmp_path, steps=[reg_step("Path", "x")])
     rec = record(eng)
-    rec.vendor_uninstaller = f'"{game / "unins000.exe"}"'
+    rec.vendor_uninstaller = f'"{game / "unins000.exe"}" /SILENT'
     eng.ctx.records.save(rec)
+    return eng, game, target, rec
+
+
+@pytest.mark.windows
+def test_a_linked_game_folder_with_a_vendor_uninstaller_is_left_as_it_is(tmp_path):
+    eng, game, target, rec = linked_with_vendor_uninstaller(tmp_path)
+    put(target, "unins000.exe", b"the vendor's uninstaller")
     try:
         before = tree(target), snapshot(target)
         message = fails(run, eng, "uninstall", delete_player_data=True).message
@@ -625,6 +631,19 @@ def test_a_linked_game_folder_with_a_vendor_uninstaller_is_left_as_it_is(tmp_pat
         assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Path") == (True, "x", "REG_SZ")
     finally:
         os.rmdir(game)
+
+
+@pytest.mark.windows
+def test_a_linked_game_folder_whose_vendor_uninstaller_is_gone_loses_only_the_link(tmp_path):
+    eng, game, target, rec = linked_with_vendor_uninstaller(tmp_path)  # the player ran it from Windows
+    try:
+        before = tree(target), snapshot(target)
+        r = run(eng, "uninstall")
+        assert r.notes == [messages.GAME_FOLDER_LINK_REMOVED.format(title="Pawprints", path=game, target=target)]
+        assert (tree(target), snapshot(target)) == before and not os.path.lexists(game) and record(eng) is None
+    finally:
+        if os.path.lexists(game):
+            os.rmdir(game)
 
 
 @pytest.mark.windows
