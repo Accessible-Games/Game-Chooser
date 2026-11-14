@@ -19,6 +19,17 @@ REPORT="$OUT/compilation-report.xml"
 
 echo "Building Game Chooser for macOS ($(uname -m))..."
 
+# engine/extract.py runs 7-Zip's Mac build (7zz) from the bin/ folder beside the program, for 7z and cab
+# downloads; zips go through macOS' own ditto.
+if [ ! -x bin/7zz ] || [ ! -s bin/licenses/7-Zip-License.txt ]; then
+    echo "7-Zip missing from bin/; fetching it..."
+    uv run python scripts/fetch_tools.py || exit 1
+fi
+if ! lipo -archs bin/7zz | grep -qw "$(uname -m)"; then
+    echo "bin/7zz doesn't run on $(uname -m); 7-Zip's Mac download only runs on Apple Silicon."
+    exit 1
+fi
+
 # Clean the previous build (only Nuitka's own folders and the app: build/ may hold other things)
 rm -rf "$BUILT_APP" "$APP" "$OUT/game-chooser.build" "$OUT/game-chooser.dist"
 rm -f "$REPORT"
@@ -54,6 +65,11 @@ uv run python scripts/check_no_tracing.py "$REPORT" "$APP" || {
     echo "Removed $APP so it can't be distributed by mistake."
     exit 1
 }
+
+TOOLS="$APP/Contents/MacOS/bin"
+mkdir -p "$TOOLS/licenses"
+cp bin/7zz "$TOOLS/" || exit 1
+cp bin/licenses/7-Zip-License.txt "$TOOLS/licenses/" || exit 1
 
 RESOURCES="$APP/Contents/Resources"
 mkdir -p "$RESOURCES"

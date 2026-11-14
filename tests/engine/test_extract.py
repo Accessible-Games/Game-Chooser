@@ -9,8 +9,8 @@ import pytest
 
 from engine import messages
 from engine.errors import Cancelled, ExtractError, UnsafePath
-from engine.extract import (Extractor, content_root, flatten_inno, innoextract_command, msi_admin_command,
-                            run_process, seven_zip_command)
+from engine.extract import (Extractor, content_root, ditto_command, flatten_inno, innoextract_command,
+                            msi_admin_command, run_process, seven_zip_command)
 from tests.conftest import REPO_ROOT
 
 TOOLS_DIR = REPO_ROOT / "bin"
@@ -88,8 +88,8 @@ class FakeRun:
         return self.code
 
 
-def _extractor(run):
-    return Extractor(Path("tools"), run=run)
+def _extractor(run, platform="win32"):
+    return Extractor(Path("tools"), run=run, platform=platform)
 
 
 @pytest.mark.parametrize("install", [
@@ -339,3 +339,62 @@ def test_tar_cancel_and_damaged_archive(tmp_path):
     not_tar.write_bytes(b"not an archive at all")
     with pytest.raises(ExtractError):
         _extractor(FakeRun()).extract(not_tar, tmp_path / "o3", {"method": "tar"}, lambda: False)
+
+
+def test_mac_unzips_with_ditto(tmp_path):
+    run = FakeRun()
+    dest = tmp_path / "o"
+    assert _extractor(run, "darwin").extract(tmp_path / "a.zip", dest, {"method": "zip"}, lambda: False) == dest
+    assert run.calls == [ditto_command(tmp_path / "a.zip", dest)]
+    assert run.calls[0][:3] == ["/usr/bin/ditto", "-x", "-k"]
+
+
+@pytest.mark.parametrize("install", [
+    {"method": "7z"},
+    {"method": "cab"},
+    {"method": "installer", "installer": {"type": "nsis", "mode": "extract"}},
+])
+def test_mac_uses_the_mac_seven_zip(tmp_path, install):
+    run = FakeRun()
+    _extractor(run, "darwin").extract(tmp_path / "a.bin", tmp_path / "o", install, lambda: False)
+    assert Path(run.calls[0][0]) == Path("tools") / "7zz"
+
+
+@pytest.mark.parametrize("kind", ["inno", "msi"])
+def test_mac_refuses_windows_installers_without_running_anything(tmp_path, kind):
+    run = FakeRun()
+    install = {"method": "installer", "installer": {"type": kind, "mode": "extract"}}
+    with pytest.raises(ExtractError) as err:
+        _extractor(run, "darwin").extract(tmp_path / "s.exe", tmp_path / "o", install, lambda: False)
+    assert str(err.value) == messages.EXTRACT_NEEDS_WINDOWS
+    assert run.calls == [] and not (tmp_path / "o").exists()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="ditto is macOS'")
+def test_real_ditto_keeps_the_run_bit(tmp_path):
+    src = tmp_path / "src" / "Game.app" / "Contents" / "MacOS"
+    src.mkdir(parents=True)
+    (src / "Game").write_bytes(b"program")
+    (src / "Game").chmod(0o755)
+    archive = tmp_path / "game.zip"
+    subprocess.run(["/usr/bin/zip", "-qry", str(archive), "Game.app"], cwd=tmp_path / "src", check=True)
+    out = tmp_path / "out"
+    Extractor(tmp_path / "no-tools", platform="darwin").extract(archive, out, {"method": "zip"}, lambda: False)
+    assert (out / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode & stat.S_IXUSR
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="ditto is macOS'")
+def test_real_ditto_writes_nothing_through_a_link_that_leaves(tmp_path):
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (tmp_path / "a").mkdir()
+    (tmp_path / "a" / "link").symlink_to(outside)
+    (tmp_path / "b" / "link").mkdir(parents=True)
+    (tmp_path / "b" / "link" / "evil.txt").write_text("bad")
+    archive = tmp_path / "evil.zip"
+    subprocess.run(["/usr/bin/zip", "-qy", str(archive), "link"], cwd=tmp_path / "a", check=True)
+    subprocess.run(["/usr/bin/zip", "-q", str(archive), "link/evil.txt"], cwd=tmp_path / "b", check=True)
+    with pytest.raises(ExtractError):
+        Extractor(tmp_path / "no-tools", platform="darwin").extract(archive, tmp_path / "out", {"method": "zip"},
+                                                                    lambda: False)
+    assert list(outside.iterdir()) == []

@@ -1,3 +1,20 @@
+# Third-party tools
+
+Game Chooser ships this program inside the app (in `Contents/MacOS/bin/`) and runs it as a separate process to
+unpack 7z and cab downloads. It is not linked into Game Chooser. `scripts/fetch_tools.py` downloads a pinned
+version and checks its SHA256. Its license text is in `Contents/MacOS/bin/licenses/`.
+
+## 7-Zip 26.06
+
+- File: `7zz`
+- License: GNU LGPL, with the unRAR license restriction on some code, and BSD 2-clause and 3-clause parts. See `bin/licenses/7-Zip-License.txt`.
+- Source and downloads: https://www.7-zip.org/ (fetched from https://github.com/ip7z/7zip/releases/download/26.06/7z2606-mac.tar.xz)
+- Copyright Igor Pavlov.
+
+## ditto
+
+Part of macOS. Used to unpack zip downloads. Not shipped.
+
 # Bundled in the app
 
 The macOS build compiles these into `Game Chooser.app`. `build_macos.sh` copies their license texts into

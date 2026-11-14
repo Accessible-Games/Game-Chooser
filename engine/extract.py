@@ -1,4 +1,5 @@
-"""Unpack downloaded archives with the bundled 7-Zip, innoextract, Windows' msiexec, or Python's tarfile."""
+"""Unpack downloaded archives with the bundled 7-Zip, innoextract, Windows' msiexec, macOS' ditto, or Python's
+tarfile."""
 
 import bz2  # noqa: F401  tarfile imports it lazily; imported here so the build includes it
 import gzip
@@ -26,6 +27,8 @@ _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 _POLL_SECONDS = 0.2
 _SEVEN_ZIP_METHODS = {"zip", "7z", "cab"}
 _SEVEN_ZIP_INSTALLERS = {"nsis", "installshield", "other"}
+# 7-Zip's program in bin/: the Windows build, or the macOS console build (7zz)
+_SEVEN_ZIP_NAMES = {"win32": "7z.exe", "darwin": "7zz"}
 
 
 def default_tools_dir() -> Path:
@@ -42,6 +45,11 @@ def innoextract_command(tool: Path, archive: Path, dest: Path) -> list[str]:
 
 def msi_admin_command(msi: Path, dest: Path) -> list[str]:
     return ["msiexec", "/a", str(msi), "/qn", f"TARGETDIR={dest}"]
+
+
+def ditto_command(archive: Path, dest: Path) -> list[str]:
+    """macOS' own unzip for a zip: unlike 7-Zip it keeps a Mac app's links and its programs' "can run" bit."""
+    return ["/usr/bin/ditto", "-x", "-k", str(archive), str(dest)]
 
 
 def _merge_move(src: Path, target: Path) -> None:
@@ -138,9 +146,10 @@ def _refuse_links_leaving(dest: Path) -> None:
 
 
 class Extractor:
-    def __init__(self, tools_dir: Path, run: Run | None = None):
+    def __init__(self, tools_dir: Path, run: Run | None = None, platform: str | None = None):
         self.tools_dir = Path(tools_dir)
         self.run = run or run_process
+        self.platform = platform or sys.platform
 
     def _run_checked(self, argv: list[str], cancel: CancelCheck) -> None:
         code = self.run(argv, cancel)
@@ -179,13 +188,22 @@ class Extractor:
         else:
             raise ValueError(f"Nothing to extract for method {method!r}")
 
+        mac = self.platform == "darwin"
+        if mac and tool in ("inno", "msi"):
+            raise ExtractError(messages.EXTRACT_NEEDS_WINDOWS)
+        if mac and method == "zip":
+            tool = "ditto"
+
         dest.mkdir(parents=True, exist_ok=True)
         if tool == "copy":
             shutil.copy2(archive, dest / archive.name)
         elif tool == "tar":
             extract_tar(archive, dest, cancel)
+        elif tool == "ditto":
+            self._run_checked(ditto_command(archive, dest), cancel)
         elif tool == "7z":
-            self._run_checked(seven_zip_command(self.tools_dir / "7z.exe", archive, dest), cancel)
+            seven_zip = self.tools_dir / _SEVEN_ZIP_NAMES.get(self.platform, "7z.exe")
+            self._run_checked(seven_zip_command(seven_zip, archive, dest), cancel)
         elif tool == "inno":
             self._run_checked(innoextract_command(self.tools_dir / "innoextract.exe", archive, dest), cancel)
             flatten_inno(dest)

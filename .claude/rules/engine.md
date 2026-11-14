@@ -77,6 +77,12 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
 sits beside them. `scripts/fetch_tools.py` downloads them (SHA256-pinned) into `bin/` with their licenses in
 `bin/licenses/`. Without `bin/`, every zip, 7z, cab, Inno and NSIS install fails.
 
+On macOS (`Extractor(platform=...)`, default `sys.platform`): a zip goes through macOS' own `/usr/bin/ditto -x -k`,
+which keeps a Mac app's links and its programs' "can run" bit (7-Zip drops links that go through other links, and
+`zipfile` drops the bit); 7z, cab, NSIS and other 7-Zip installers go through `bin/7zz` (7-Zip's Mac build, arm64
+only); Inno and MSI raise `EXTRACT_NEEDS_WINDOWS` before anything runs. `fetch_tools.py` on a Mac fetches only
+`7zz` and its license.
+
 ## Temporary launch fallback
 
 `engine.launch.select_best_executable` (prefers `game`/`launch`/`play`, then an exe named like the folder, then

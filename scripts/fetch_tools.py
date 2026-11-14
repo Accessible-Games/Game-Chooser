@@ -1,4 +1,4 @@
-"""Download the bundled extraction tools (7-Zip, innoextract) into bin/.
+"""Download the bundled extraction tools into bin/: 7-Zip and innoextract on Windows, 7-Zip (7zz) on macOS.
 
 Run: uv run python scripts/fetch_tools.py
 Each download is checked against a pinned SHA256. The binaries are not committed (bin/ is ignored).
@@ -8,6 +8,7 @@ import hashlib
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import urllib.request
 import zipfile
@@ -22,6 +23,8 @@ SEVEN_ZIP_URL = "https://github.com/ip7z/7zip/releases/download/26.06/7z2606-x64
 SEVEN_ZIP_SHA256 = "9b697f65ecc2d9b0152f5ee96d72dde522a7827690349d9307935dacf40f42ec"
 INNOEXTRACT_URL = "https://constexpr.org/innoextract/files/innoextract-1.9-windows.zip"
 INNOEXTRACT_SHA256 = "6989342c9b026a00a72a38f23b62a8e6a22cc5de69805cf47d68ac2fec993065"
+SEVEN_ZIP_MAC_URL = "https://github.com/ip7z/7zip/releases/download/26.06/7z2606-mac.tar.xz"
+SEVEN_ZIP_MAC_SHA256 = "b6f17920b4240940461dac8ef4009891881ac44d2a5ead625ede2ec8472185dd"
 
 
 def download(url: str, dest: Path, expected: str) -> None:
@@ -41,10 +44,26 @@ def extract(zf: zipfile.ZipFile, name: str, dest: Path, url: str) -> None:
         shutil.copyfileobj(src, dst)
 
 
+def fetch_mac_tools(licenses: Path) -> None:
+    with tempfile.TemporaryDirectory() as tmp_name:
+        archive = Path(tmp_name) / "7z-mac.tar.xz"
+        download(SEVEN_ZIP_MAC_URL, archive, SEVEN_ZIP_MAC_SHA256)
+        with tarfile.open(archive) as tar:
+            for name, dest in (("7zz", BIN / "7zz"), ("License.txt", licenses / "7-Zip-License.txt")):
+                member = tar.getmember(name)
+                with tar.extractfile(member) as src, open(dest, "wb") as dst:
+                    shutil.copyfileobj(src, dst)
+    (BIN / "7zz").chmod(0o755)
+
+
 def main() -> None:
     BIN.mkdir(exist_ok=True)
     licenses = BIN / "licenses"
     licenses.mkdir(exist_ok=True)
+    if sys.platform == "darwin":
+        fetch_mac_tools(licenses)
+        print("Tools are in", BIN)
+        return
     with tempfile.TemporaryDirectory() as tmp_name:
         tmp = Path(tmp_name)
         seven_zr = tmp / "7zr.exe"

@@ -13,7 +13,7 @@ uv sync                      # install dependencies
 uv run game-chooser.py       # run the app
 uv run pytest -q             # the whole tests/ tree: no wxPython, pywin32 or network needed
 uv run pytest -q -m tools    # only the tests that need the bundled extraction tools in bin/
-uv run python scripts/fetch_tools.py   # fetch 7z.exe, 7z.dll, innoextract.exe into bin/ (not committed)
+uv run python scripts/fetch_tools.py   # fetch 7z.exe, 7z.dll, innoextract.exe (on a Mac: 7zz) into bin/ (not committed)
 ```
 
 Markers (`pyproject.toml`): `tools` tests need `bin/7z.exe` and skip when it is absent; `windows` tests touch the

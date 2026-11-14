@@ -32,8 +32,9 @@ distributed.
 
 ## macOS build
 `./build_macos.sh` (on a Mac only) builds `build/Game Chooser.app` for the Mac's own processor with the same pinned
-Nuitka (`--mode=app`), leaves tracing out and runs `check_no_tracing.py` on the bundle. It ships no `bin/` (the
-tools are Windows programs) and has no tracing variant. It copies `LICENSE.txt`, `THIRD_PARTY-macos.md` (as
+Nuitka (`--mode=app`), leaves tracing out and runs `check_no_tracing.py` on the bundle. It has no tracing variant.
+It fetches `bin/7zz` when missing, stops when `7zz` doesn't run on this processor (7-Zip's Mac download is arm64
+only), and ships it with its license in `Contents/MacOS/bin/` (where `default_tools_dir` looks). It copies `LICENSE.txt`, `THIRD_PARTY-macos.md` (as
 `THIRD_PARTY.md`) and `licenses/` into `Contents/Resources/`, then signs the bundle again ad hoc, since adding files
 breaks Nuitka's signature. `collect_licenses.py` takes Python's license from `lib/python3.X/` off Windows and skips
 pywin32 there. A new component built into the Mac app needs an entry in `THIRD_PARTY-macos.md`.

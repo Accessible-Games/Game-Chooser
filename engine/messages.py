@@ -163,6 +163,7 @@ RECYCLE_FAILED = "Your files couldn't be moved to the Recycle Bin, so they were 
 EXTRACT_FAILED = "The downloaded files couldn't be unpacked."
 EXTRACT_FOLDER_MISSING = "The game's folder wasn't found in the download."
 EXTRACT_UNSAFE_LINK = "The download contained a shortcut that points outside the game folder, so it was not unpacked."
+EXTRACT_NEEDS_WINDOWS = "This download is a Windows installer, which can only be unpacked on Windows."
 
 STEP_UNKNOWN_ACTION = "This game needs a setup step Game Chooser doesn't know, so it wasn't installed."
 STEP_UNSAFE_PATH = "A setup step points outside the game folder, so it wasn't run."
