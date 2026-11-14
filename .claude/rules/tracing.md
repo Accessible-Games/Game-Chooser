@@ -149,8 +149,8 @@ Build: see `.claude/rules/build.md`.
     modules use
   - `output.py` - writes `session.json` and `events.jsonl`; `model.py`, `clock.py`, `paths.py`
   - `probe.py` - the `--trace-probe` command
-  - `check_trace_test.py` - `python -m tracing.check_trace_test <session folder>` checks a session of the
-    trace test game (`tests/catalog_fixtures/games/trace-test`)
+  - `check_trace_test.py` - the `--trace-check` command: checks a session of the trace test game
+    (`tests/catalog_fixtures/games/trace-test`)
 - **Tests of the stop:** `test_recorder_stop.py` (the recorder, with a fake machine and closer), `test_stop.py` (the
   command, and command plus recorder through the run folder's files), `test_closing_policy.py` (who the closer
   refuses, on fake processes), `test_closing.py` and
