@@ -32,7 +32,7 @@ from install_prefs import check_install_prefs, current_catalog_url, register_sha
 from library_actions import executable_problem, library_row_name
 from wx_bridge import run_in_background
 from models import Game, is_web_path
-from validation_service import ValidationService
+from validation_service import validate_title, validate_url, validate_year
 from smart_list import SmartList, Column
 
 # The file picker of Add Game and Locate: the files PathManager.is_executable accepts first
@@ -257,7 +257,7 @@ class GameDialog(wx.Dialog):
         """Validate and save changes"""
         # Validate title
         title = self.title_ctrl.GetValue().strip()
-        is_valid, error = ValidationService.validate_title(title)
+        is_valid, error = validate_title(title)
         if not is_valid:
             wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
             return
@@ -271,15 +271,13 @@ class GameDialog(wx.Dialog):
         # Validate path/URL
         path = self.path_ctrl.GetValue().strip()
         if platform_val == "Web Game":
-            is_valid, error = ValidationService.validate_url(path)
+            is_valid, error = validate_url(path)
             if not is_valid:
                 wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
                 return
         else:
-            # Validate path format
-            is_valid, error = ValidationService.validate_path(path, must_exist=False)
-            if not is_valid:
-                wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
+            if not path:
+                wx.MessageBox("Path cannot be empty", "Error", wx.OK | wx.ICON_ERROR)
                 return
 
             problem = executable_problem(path, platform_val)  # the file exists and is a game executable
@@ -289,7 +287,7 @@ class GameDialog(wx.Dialog):
 
         # Validate year if provided
         year_str = self.year_ctrl.GetValue().strip()
-        is_valid, error = ValidationService.validate_year(year_str)
+        is_valid, error = validate_year(year_str)
         if not is_valid:
             wx.MessageBox(error, "Error", wx.OK | wx.ICON_ERROR)
             return
