@@ -375,8 +375,9 @@ def test_start_game_passes_on_an_hta_that_would_not_start(tmp_path):
     (32, WINDOWS_32, "C:\\Windows\\system32\\mshta.exe"),  # on 32-bit Windows the system folder is the 32-bit one
     (64, WINDOWS_64, "C:\\Windows\\system32\\mshta.exe"),
 ])
-def test_hta_host_is_mshta_in_the_windows_system_folder(bits, dirs, host):
-    assert hta_host(bits, system_dirs=lambda: dirs) == host
+def test_hta_host_is_mshta_in_the_windows_system_folder(monkeypatch, bits, dirs, host):
+    monkeypatch.setattr(launch, "HTA_HOST_BITS", bits)
+    assert hta_host(system_dirs=lambda: dirs) == host
 
 
 @pytest.mark.parametrize("bits, host", [(32, "C:\\Windows\\SysWOW64\\mshta.exe"),
@@ -428,7 +429,7 @@ def test_an_hta_does_not_start_on_another_system():
 
 
 @pytest.mark.windows
-def test_the_real_hosts_are_syswow64_for_32_bits_and_system32_for_64():
+def test_the_real_hosts_are_syswow64_for_32_bits_and_system32_for_64(monkeypatch):
     # Nothing injected: the answer Windows itself gives. (A 32768-character buffer once got no text back for the
     # 32-bit folder, and the 64-bit host ran in silence.)
     import sys
@@ -440,8 +441,9 @@ def test_the_real_hosts_are_syswow64_for_32_bits_and_system32_for_64():
     assert os.path.normcase(system) == os.path.normcase(str(windows / "System32"))
     assert (wow64 is None) if twin == "System32" else \
         os.path.normcase(wow64) == os.path.normcase(str(windows / "SysWOW64"))
-    assert os.path.normcase(hta_host(32)) == os.path.normcase(str(windows / twin / "mshta.exe"))
-    assert os.path.normcase(hta_host(64)) == os.path.normcase(str(windows / "System32" / "mshta.exe"))
+    for bits, folder in ((32, twin), (64, "System32")):
+        monkeypatch.setattr(launch, "HTA_HOST_BITS", bits)
+        assert os.path.normcase(hta_host()) == os.path.normcase(str(windows / folder / "mshta.exe"))
 
 
 def _folder_call(*answers):
