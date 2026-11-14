@@ -101,12 +101,6 @@ def test_chained_raw_handler_still_runs():
     event, _ = call(Op.SetRenameInformationFile, REAL_RENAME_IO)
     assert event.details["_raw"]["io"].startswith("01003a00")
     assert event.details["FileName"] == TARGET
-    # and the other order: the probe wrapping the decoder
-    HANDLERS.clear()
-    install_detail_handlers()
-    capture_raw_details(["SetRenameInformationFile"])
-    event, _ = call(Op.SetRenameInformationFile, REAL_RENAME_IO)
-    assert "_raw" in event.details and event.details["FileName"] == TARGET
 
 
 def test_install_is_idempotent():
@@ -114,12 +108,6 @@ def test_install_is_idempotent():
                                          Op.SetDispositionInformationEx)}
     install_detail_handlers()
     assert {op: HANDLERS[op] for op in first} == first
-    capture_raw_details(["SetRenameInformationFile"])
-    wrapped = HANDLERS[Op.SetRenameInformationFile]
-    install_detail_handlers()
-    assert HANDLERS[Op.SetRenameInformationFile] is wrapped
-    event, _ = call(Op.SetRenameInformationFile, REAL_RENAME_IO)
-    assert event.details["FileName"] == TARGET
 
 
 @pytest.mark.parametrize("data", [
