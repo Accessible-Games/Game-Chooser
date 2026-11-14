@@ -6,11 +6,12 @@ rewrote bass.dll. v2 changes the exe, the ini and the dll, removes sounds/a.wav 
 sounds/b.wav.
 """
 
+import os
 import shutil
-
-import pytest
 from dataclasses import asdict
 from pathlib import Path
+
+import pytest
 
 import engine.safety
 from engine import messages
@@ -503,6 +504,71 @@ def test_uninstall_after_keeping_data_can_remove_it_later(tmp_path):
     run(eng, "uninstall")
     run(eng, "uninstall", delete_player_data=True)
     assert not game.exists() and record(eng) is None
+
+
+def tree(root: Path) -> list[str]:
+    return sorted(p.relative_to(root).as_posix() for p in root.rglob("*"))
+
+
+def record_naming_the_library(tmp_path, folder):
+    """Pawprints updated to v2, then its record damaged to name the library itself as its folder. The library
+    holds another game's empty folder and another game's file."""
+    eng, game = install_v1(tmp_path, play=False)
+    publish(eng, V2)
+    run(eng, "update")
+    rec = record(eng)
+    rec.folder = folder
+    eng.ctx.records.save(rec)
+    shutil.rmtree(game)
+    lib = tmp_path / "Games"
+    (lib / "Other" / "saves").mkdir(parents=True)
+    put(lib, "Another/keep.txt", b"another game's file")
+    return eng, lib
+
+
+@pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
+@pytest.mark.parametrize("folder", ["", "."])
+def test_uninstall_of_a_record_naming_the_library_touches_nothing_and_forgets_it(tmp_path, folder,
+                                                                                  delete_player_data):
+    eng, lib = record_naming_the_library(tmp_path, folder)
+    before = tree(lib)
+    r = run(eng, "uninstall", delete_player_data=delete_player_data)
+    assert tree(lib) == before and eng.ctx.recycle.calls == []
+    assert record(eng) is None
+    assert r.notes == [messages.GAME_FOLDER_IS_LIBRARY_FORGOTTEN.format(title="Pawprints", path=lib)]
+
+
+@pytest.mark.parametrize("action", ["update", "repair", "undo"])
+def test_a_record_naming_the_library_is_never_changed(tmp_path, action):
+    eng, lib = record_naming_the_library(tmp_path, "")
+    if action == "update":
+        publish(eng, V3, version="3.0")
+    before = tree(lib)
+    assert fails(run, eng, action).message == messages.GAME_FOLDER_IS_LIBRARY.format(title="Pawprints", path=lib)
+    assert tree(lib) == before and record(eng).folder == ""
+
+
+@pytest.mark.windows
+@pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
+def test_uninstall_of_a_linked_game_folder_removes_only_the_link_and_the_record(tmp_path, delete_player_data):
+    import _winapi
+    eng, game = install_v1(tmp_path, steps=[reg_step("Path", "x")])
+    target = tmp_path / "Other drive" / "Pawprints"  # the game moved there, with a junction left in its place
+    target.parent.mkdir()
+    shutil.move(str(game), str(target))
+    (target / "unrelated_empty").mkdir()
+    put(target, "unrelated/keep.txt", b"not the game's")
+    _winapi.CreateJunction(str(target), str(game))
+    try:
+        before = tree(target), snapshot(target)
+        r = run(eng, "uninstall", delete_player_data=delete_player_data)
+        assert (tree(target), snapshot(target)) == before and eng.ctx.recycle.calls == []
+        assert not os.path.lexists(game) and record(eng) is None
+        assert eng.ctx.registry.get("HKCU", r"Software\Pawprints", "Path") == (False, None, None)
+        assert r.notes == [messages.GAME_FOLDER_LINK_REMOVED.format(title="Pawprints", path=game, target=target)]
+    finally:
+        if os.path.lexists(game):
+            os.rmdir(game)
 
 
 # ---- failures, retries and catalog changes -------------------------------------
