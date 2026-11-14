@@ -16,7 +16,7 @@ jobs:
   release:
     runs-on: windows-latest
     env:
-      # The tested local build used uv's own Python, not one found on the machine.
+      # uv's own Python, never one found on the machine: scripts/collect_licenses.py needs its BUILD file.
       UV_PYTHON_PREFERENCE: only-managed
     defaults:
       run:
