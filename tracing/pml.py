@@ -168,8 +168,8 @@ def _disposition_ex_handler(previous):
 def install_detail_handlers() -> None:
     """Decoders for the details procmon-parser leaves out: rename targets and SetDispositionInformationEx.
 
-    Idempotent. A handler already registered for an operation (such as the probe's `_raw` wrapper) is chained and
-    still runs. Each decoder peeks at the stream and puts it back, so the parse carries on as procmon-parser expects.
+    Skips an operation whose top handler is already a decoder; any other handler there (the probe's `_raw` wrapper) is
+    chained and still runs. Each decoder peeks at the stream and puts it back, so procmon-parser's parse carries on.
     """
     from procmon_parser.consts import FilesystemSetInformationOperation
     from procmon_parser.stream_logs_detail_format import FilesystemSubOperationHandler
