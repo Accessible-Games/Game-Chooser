@@ -98,7 +98,7 @@ class Rig:
 
     def publish(self, *entries):
         publish(self.fetcher, DEFAULT_CATALOG_URL, list(entries))
-        return self.service.refresh_index()
+        return self.service.take_index(self.service.fetch_index())
 
     def run(self, action, catalog_id, **kw):
         """Submit a job, then apply its result as the UI would; returns the job."""
@@ -122,7 +122,7 @@ def _games_json(manager):
 
 
 def test_offline_first_run_state(rig):
-    state = rig.service.refresh_index()
+    state = rig.service.take_index(rig.service.fetch_index())
     assert state.error == messages.CATALOG_OFFLINE_EMPTY and state.entries == {}
     assert rig.service.index_state is state and rig.service.entries == {}
     assert rig.service.visible_games() == [] and rig.service.installed_ids() == set()

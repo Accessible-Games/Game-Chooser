@@ -52,7 +52,7 @@ duplicate check, the install queue's worker and notifier.
 **`InstallService` threading rule.** Three members change no games, records or libraries, and the code runs them
 on worker threads: `fetch_index()` (it also saves the fetched index in the cache folder), `statuses()` and
 `player_files()` (both only read). Everything that mutates games, records or libraries runs on the **UI thread
-only**: `take_index`, `load_cached_index`, `refresh_index`, `adopt_launch_paths`, `apply_result`, `job_failed`,
+only**: `take_index`, `load_cached_index`, `adopt_launch_paths`, `apply_result`, `job_failed`,
 `submit`, `forget`, `remove_library`, and so on. Pattern: fetch on a worker, then `take_index` on the UI thread.
 What starts each worker: `MainFrame.start_index_fetch` and `MainFrame.refresh_statuses` each start their own
 daemon thread, and the player-file counts and `GameDialog`'s duplicate check go through

@@ -92,11 +92,6 @@ class InstallService:
         """Use the saved copy of the index. UI thread only."""
         return self.take_index(self._index().load_cached())
 
-    def refresh_index(self) -> IndexState:
-        """Fetch and use the index in one step. UI thread only (it changes games.json); never call it from
-        another thread, use fetch_index there and take_index back on the UI thread."""
-        return self.take_index(self.fetch_index())
-
     def adopt_launch_paths(self) -> int:
         """Switch guessed launch paths to the catalog's, where the catalog now names one; returns how many.
 
