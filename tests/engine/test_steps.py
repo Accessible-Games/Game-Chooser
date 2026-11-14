@@ -1,4 +1,5 @@
 import os
+import pathlib
 import posixpath
 import subprocess
 import sys
@@ -340,6 +341,8 @@ class SpelledAsWritten:
 def test_the_overlap_check_ignores_case_where_paths_keep_it(monkeypatch, a, b):
     """On a Mac's usual disk these are one file or folder; normcase there lowers nothing (stood in on any system)"""
     monkeypatch.setattr(steps, "os", SimpleNamespace(path=SimpleNamespace(normcase=posixpath.normcase)))
+    # Windows' PurePath compares without case, which would hide a missing lower()
+    monkeypatch.setattr(steps, "PurePath", pathlib.PurePosixPath)
     assert steps._overlaps(SpelledAsWritten(a), SpelledAsWritten(b))
     assert not steps._overlaps(SpelledAsWritten(a), SpelledAsWritten("/g/other"))
 
