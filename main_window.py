@@ -15,10 +15,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""
-Main window for Game Chooser application
-"""
-
 import wx
 import wx.adv
 import logging
@@ -59,7 +55,6 @@ LIBRARY_TREE = [("platform", "Platform"), ("genre", "Genre"), ("developer", "Dev
 
 
 class MainFrame(wx.Frame):
-    """Main application window"""
     
     def __init__(self):
         super().__init__(None, title="Game Chooser (0)")
@@ -100,13 +95,10 @@ class MainFrame(wx.Frame):
         self.hidden_libraries = set(self.library_manager.saved("hidden_libraries", list, [], str))
         self.library_menu_items = []  # (library name, menu item) pairs in the Libraries submenu
 
-        # Set up UI
         self.init_ui()
         
-        # Load saved state
         self.load_saved_state()
         
-        # Initial library check
         self.check_libraries()
 
         # A games.json or config.json that couldn't be read: say so once, after the window is up
@@ -120,11 +112,9 @@ class MainFrame(wx.Frame):
         self.refresh_statuses()
         self.start_index_fetch()
         
-        # Bind close event
         self.Bind(wx.EVT_CLOSE, self.on_close)
     
     def init_ui(self):
-        """Initialize the user interface"""
         # Notebook: page 0 Library (the player's games), page 1 Catalog. Both tabs are built from GamesPanel;
         # what differs between them is in the settings passed here and in CatalogPanel.
         self.notebook = wx.Notebook(self)
@@ -165,17 +155,14 @@ class MainFrame(wx.Frame):
         self.notebook.AddPage(self.library_view, "Library")
         self.notebook.AddPage(self.catalog_panel, "Catalog")
 
-        # Set up keyboard shortcuts
         self.setup_accelerators()
 
         # Fill the Library list (the view has read its saved search and sort itself)
         self._refresh_library_rows()
 
     def create_menu_bar(self):
-        """Create the menu bar"""
         menu_bar = wx.MenuBar()
 
-        # File menu
         file_menu = wx.Menu()
         add_game_item = file_menu.Append(wx.ID_ANY, "&Add Game\tCtrl+N")
         self.Bind(wx.EVT_MENU, self.on_add_game, add_game_item)
@@ -192,7 +179,6 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_exit, exit_item)
         menu_bar.Append(file_menu, "&File")
 
-        # Edit menu
         edit_menu = wx.Menu()
         # Kept so they can be disabled while the Catalog tab is active
         self.edit_game_item = edit_menu.Append(wx.ID_ANY, "&Edit Game\tCtrl+E")
@@ -208,10 +194,8 @@ class MainFrame(wx.Frame):
         self.Bind(wx.EVT_MENU, self.on_preferences, pref_item)
         menu_bar.Append(edit_menu, "&Edit")
 
-        # View menu
         view_menu = wx.Menu()
 
-        # Filter Tree submenu
         filter_tree_menu = wx.Menu()
 
         self.filter_items = {}  # criteria key -> check item, for state updates
@@ -227,7 +211,6 @@ class MainFrame(wx.Frame):
 
         menu_bar.Append(view_menu, "&View")
 
-        # Launch menu
         launch_menu = wx.Menu()
         random_game_item = launch_menu.Append(wx.ID_ANY, "&Random Game\tCtrl+R")
         self.Bind(wx.EVT_MENU, self.on_random_game, random_game_item)
@@ -455,7 +438,6 @@ class MainFrame(wx.Frame):
         return None
 
     def check_libraries(self):
-        """Check if first run and show setup dialog"""
         if self.library_manager.is_first_run:
             with self.modal_dialog(), FirstTimeSetupDialog(self, self.library_manager) as dlg:
                 dlg.ShowModal()
@@ -463,7 +445,6 @@ class MainFrame(wx.Frame):
             # Refresh UI in case they added stuff
             self.games_changed()
 
-        # Always continue to main window
         self.initializing = False
         self.focus_active_list()
     
@@ -698,29 +679,24 @@ class MainFrame(wx.Frame):
         if game.is_web:
             return
 
-        # Get full path to game
         full_path = self.library_manager.get_full_path(game)
         if not full_path or not Path(full_path).exists():
             self._tell("Game folder not found.", "Folder Not Found")
             return
 
-        # Get the game directory
         game_dir = str(Path(full_path).parent)
 
-        # Open folder with platform-specific command
         try:
             system = platform.system()
             if system == "Windows":
                 # Open folder and highlight the executable
                 subprocess.Popen(['explorer', '/select,', full_path])
             elif system == "Darwin":
-                # macOS - just open the folder
                 subprocess.Popen(['open', game_dir])
         except Exception as e:
             self._tell(f"Failed to open folder: {e}", "Error")
 
     def launch_game(self, game):
-        """Launch a specific game"""
         # Check platform compatibility for non-web games
         if not game.is_web:
             current_platform = platform_label(catalog_platform())
@@ -768,12 +744,10 @@ class MainFrame(wx.Frame):
                 if token is None:
                     return
 
-            # Launch the game
             try:
                 game_dir = str(Path(full_path).parent)
                 system = platform.system()
                 if system == "Darwin" and full_path.endswith(".app"):
-                    # macOS .app bundle
                     subprocess.Popen(["open", "-a", full_path], cwd=game_dir)
                 else:
                     # Regular executable (one marked "run as administrator" goes through Windows' prompt)
@@ -785,7 +759,6 @@ class MainFrame(wx.Frame):
                     if observe:
                         self.launch_observer.launched(token, game, started.pid, full_path, game_dir)
 
-                # Minimize window
                 self.Iconize(True)
 
             except LaunchCancelled:
@@ -809,7 +782,6 @@ class MainFrame(wx.Frame):
             self._submit_catalog("repair", live)
 
     def on_launch(self, event):
-        """Launch selected game"""
         game = self.selected_game()
         if not game:
             return
@@ -840,7 +812,6 @@ class MainFrame(wx.Frame):
         self.catalog_panel.on_random_install()
 
     def on_edit_game(self, event):
-        """Edit selected game"""
         if self.active_tab() != "library":
             return
         game = self._live_game(self.selected_game())
@@ -857,7 +828,6 @@ class MainFrame(wx.Frame):
                 self._save_games()
 
     def on_delete_game(self, event):
-        """Delete selected game"""
         if self.active_tab() != "library":
             return
         game = self._live_game(self.selected_game())
@@ -1038,7 +1008,6 @@ class MainFrame(wx.Frame):
             self.focus_active_list()
     
     def on_add_game(self, event):
-        """Add a new game"""
         # Block spurious selection events (and game-changing refreshes) while modal dialog is active
         with self.modal_dialog(), GameDialog(self, self.library_manager) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
@@ -1059,13 +1028,10 @@ class MainFrame(wx.Frame):
         self.update_filter_menu_state()
 
     def update_filter_menu_state(self):
-        """Update filter menu item check states based on current filters"""
         for key, item in self.filter_items.items():
             item.Check(key in self.library_view.tree_keys)
 
     def build_libraries_menu(self):
-        """Build/rebuild the libraries submenu with current libraries"""
-        # Clear existing items and their handlers
         for _, item in self.library_menu_items:
             self.Unbind(wx.EVT_MENU, id=item.GetId())
             self.libraries_menu.Delete(item)
@@ -1082,7 +1048,6 @@ class MainFrame(wx.Frame):
             menu_item.Check(library_id not in self.hidden_libraries)
 
     def on_toggle_library(self, event, library_id):
-        """Toggle library visibility"""
         if library_id in self.hidden_libraries:
             self.hidden_libraries.discard(library_id)
         else:
@@ -1134,12 +1099,10 @@ class MainFrame(wx.Frame):
         self.Close()
     
     def update_title(self):
-        """Update window title with game count"""
         count = len(self.library_manager.games)
         self.SetTitle(f"Game Chooser{self.title_note} ({count})")
     
     def load_saved_state(self):
-        """Load saved window state"""
         size, position = (self.library_manager.saved(key, list, [], int) for key in ("window_size", "window_position"))
         if len(size) == 2:
             self.SetSize(size)
@@ -1156,10 +1119,8 @@ class MainFrame(wx.Frame):
         for view in self.views.values():
             view.restore_sash()
 
-        # Update menu item check states based on current filters
         self.update_filter_menu_state()
 
-        # Build libraries menu with current state
         self.build_libraries_menu()
 
         # Opening tab: the saved one, else Catalog on a first run and Library otherwise.
@@ -1169,7 +1130,6 @@ class MainFrame(wx.Frame):
         self.update_tab_menus()
 
     def save_state(self):
-        """Save current window state"""
         state = self.library_manager.config["SavedState"]
 
         state["window_size"] = list(self.GetSize())

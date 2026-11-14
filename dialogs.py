@@ -15,10 +15,6 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""
-Dialog classes for Game Chooser application
-"""
-
 from pathlib import Path
 
 import wx
@@ -58,11 +54,9 @@ class FirstTimeSetupDialog(wx.Dialog):
         self.Bind(wx.EVT_CLOSE, self.on_close)
 
     def init_ui(self):
-        """Initialize the dialog UI"""
         panel = wx.Panel(self)
         main_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        # Welcome message
         welcome_text = wx.StaticText(panel,
             label="Welcome to Game Chooser!\n\nChoose how you'd like to get started:")
         main_sizer.Add(welcome_text, 0, wx.ALL, 20)
@@ -89,7 +83,6 @@ class FirstTimeSetupDialog(wx.Dialog):
         self.SetClientSize(panel.GetSize())
 
     def on_add_library(self, event):
-        """Open directory picker to add library"""
         with wx.DirDialog(self, "Choose Game Library Directory") as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 try:
@@ -98,14 +91,12 @@ class FirstTimeSetupDialog(wx.Dialog):
                     wx.MessageBox(str(e), "Library", wx.OK | wx.ICON_ERROR)
 
     def on_add_game(self, event):
-        """Open add game dialog"""
         with GameDialog(self, self.library_manager) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.library_manager.games.append(dlg.game)
                 self.parent_frame._save_games()
 
     def on_preferences(self, event):
-        """Open preferences dialog"""
         with PreferencesDialog(self, self.library_manager, getattr(self.parent_frame, "service", None)) as dlg:
             dlg.ShowModal()
 
@@ -139,7 +130,6 @@ class GameDialog(wx.Dialog):
         self.library_manager = library_manager
         self.original_path = game.launch_path if game else ""
 
-        # Get existing genres and developers for combo boxes
         genres = sorted(set(g.genre for g in library_manager.games if g.genre))
         developers = sorted(set(g.developer for g in library_manager.games if g.developer))
 
@@ -158,7 +148,6 @@ class GameDialog(wx.Dialog):
         platforms = ["Windows", "macOS", "Web Game"]
         self.platform_ctrl = wx.ComboBox(panel, choices=platforms, style=wx.CB_DROPDOWN | wx.CB_READONLY)
 
-        # Determine initial platform
         if self.game.is_web:
             initial_platform = "Web Game"
         elif self.game.platforms:
@@ -170,7 +159,6 @@ class GameDialog(wx.Dialog):
 
         sizer.Add(self.platform_ctrl, pos=(1, 1), flag=wx.EXPAND)
 
-        # Path/URL field (dynamic based on platform)
         self.path_label = wx.StaticText(panel, label="Launch Path:")
         sizer.Add(self.path_label, pos=(2, 0), flag=wx.ALIGN_CENTER_VERTICAL)
 
@@ -200,7 +188,6 @@ class GameDialog(wx.Dialog):
         self.year_ctrl = wx.TextCtrl(panel, value=self.game.year)  # empty: no year
         sizer.Add(self.year_ctrl, pos=(5, 1), flag=wx.EXPAND)
 
-        # Buttons
         btn_sizer = wx.StdDialogButtonSizer()
         ok_label = "Add" if self.is_new else "Save"
         ok_btn = wx.Button(panel, wx.ID_OK, ok_label)
@@ -215,11 +202,9 @@ class GameDialog(wx.Dialog):
         sizer.AddGrowableCol(1)
         panel.SetSizer(sizer)
 
-        # Event bindings
         ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
         self.platform_ctrl.Bind(wx.EVT_COMBOBOX, self.on_platform_change)
 
-        # Update UI based on initial platform
         self._update_path_ui()
 
     def on_platform_change(self, event):
@@ -227,7 +212,6 @@ class GameDialog(wx.Dialog):
         self._update_path_ui()
 
     def _update_path_ui(self):
-        """Update the path field UI based on platform selection"""
         platform = self.platform_ctrl.GetValue()
 
         if platform == "Web Game":
@@ -244,11 +228,9 @@ class GameDialog(wx.Dialog):
             if current_value == "https://":
                 self.path_ctrl.SetValue("")
 
-        # Force layout update
         self.Layout()
 
     def on_browse(self, event):
-        """Browse for executable file"""
         with wx.FileDialog(self, "Select Game Executable", wildcard=EXECUTABLE_WILDCARD) as dlg:
             if dlg.ShowModal() == wx.ID_OK:
                 self.path_ctrl.SetValue(dlg.GetPath())
@@ -418,18 +400,14 @@ class PreferencesDialog(wx.Dialog):
         # several Applies, and even when the player then chooses Cancel)
         self.catalog_url_at_open = current_catalog_url(library_manager.config["install"])
 
-        # Create notebook
         self.notebook = wx.Notebook(self)
 
-        # Create tabs
         self.create_library_paths_tab()
         self.create_installing_tab()
 
-        # Main sizer with buttons
         main_sizer = wx.BoxSizer(wx.VERTICAL)
         main_sizer.Add(self.notebook, 1, wx.EXPAND)
         
-        # Buttons
         btn_panel = wx.Panel(self)
         btn_sizer = wx.BoxSizer(wx.HORIZONTAL)
         btn_sizer.AddStretchSpacer()
@@ -447,17 +425,14 @@ class PreferencesDialog(wx.Dialog):
         
         self.SetSizer(main_sizer)
         
-        # Bind events
         ok_btn.Bind(wx.EVT_BUTTON, self.on_ok)
         apply_btn.Bind(wx.EVT_BUTTON, self.on_apply)
         
     
     def create_library_paths_tab(self):
-        """Create library paths tab"""
         tab_panel = wx.Panel(self.notebook)
         tab_sizer = wx.BoxSizer(wx.VERTICAL)
 
-        # Library paths section
         lib_label = wx.StaticText(tab_panel, label="Game Library Paths:")
         tab_sizer.Add(lib_label, 0, wx.ALL, 5)
 
@@ -471,12 +446,10 @@ class PreferencesDialog(wx.Dialog):
             Column(title="Path", model_field="path", width=400)
         ])
 
-        # Populate library list
         self._fill_library_list()
 
         lib_sizer.Add(self.lib_list.control.control, 1, wx.EXPAND | wx.RIGHT, 5)
 
-        # Library buttons
         lib_btn_panel = wx.Panel(lib_container)
         lib_btn_sizer = wx.BoxSizer(wx.VERTICAL)
 
@@ -497,7 +470,6 @@ class PreferencesDialog(wx.Dialog):
         tab_panel.SetSizer(tab_sizer)
         self.notebook.AddPage(tab_panel, "Library Paths")
 
-        # Bind events
         add_lib_btn.Bind(wx.EVT_BUTTON, self.on_add_library)
         change_lib_btn.Bind(wx.EVT_BUTTON, self.on_change_library_folder)
         remove_lib_btn.Bind(wx.EVT_BUTTON, self.on_remove_library)
