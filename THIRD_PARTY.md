@@ -4,11 +4,11 @@ Game Chooser ships these programs next to the app (in `bin/`) and runs them as s
 They are not linked into Game Chooser. `scripts/fetch_tools.py` downloads pinned versions and checks their SHA256.
 Their license texts are kept in `bin/licenses/`.
 
-## 7-Zip 24.09
+## 7-Zip 26.06
 
 - Files: `7z.exe`, `7z.dll`
 - License: GNU LGPL, with the unRAR license restriction on some code, and BSD 2-clause and 3-clause parts. See `License.txt`.
-- Source and downloads: https://www.7-zip.org/ (fetched from https://www.7-zip.org/a/7z2409-x64.exe)
+- Source and downloads: https://www.7-zip.org/ (fetched from https://github.com/ip7z/7zip/releases/download/26.06/7z2606-x64.exe, the link on its download page)
 - Copyright Igor Pavlov.
 
 ## innoextract 1.9
