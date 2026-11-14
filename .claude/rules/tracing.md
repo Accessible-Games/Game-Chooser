@@ -71,7 +71,7 @@ Build: see `.claude/rules/build.md`.
     writes no session. The instant between that poll and the write is not closed: such a session is split like
     any other and, if Process Monitor had already stopped, becomes a split problem (exit 1, capture kept).
   - `--close-games` (opt-in; without it no process is touched): the recorder, before stopping Process Monitor, asks
-    each running process of those sessions to close (`closing.WindowsCloser.ask_close`: WM_CLOSE to its visible
+    each running process of those sessions to close (`closing.Closer.ask_close`: WM_CLOSE to its visible
     top-level windows), waits `CLOSE_WAIT_SECONDS` (15 s, less when all are gone), ends what is left (`end`:
     TerminateProcess after checking the start time on the opened handle), then waits `END_WAIT_SECONDS` (5 s).
     Candidates come from `LiveTree.running_processes()` for the sessions listed in `stop.json`, by (pid, start),
@@ -133,7 +133,7 @@ Build: see `.claude/rules/build.md`.
   - `stop.py` - the `--trace-stop` command (unelevated): finds the run, writes the request, waits, reports
   - `closing.py` - `Closer` (the rules: start time, then who the process runs as) over `ProcessAccess`
     (`WindowsProcesses`: lazy ctypes; also how `live.py` and `cli._recorder_is_alive` open a process and read
-    its start time), `WindowsCloser`, `Identity`, `process_identity`, the `not_closed` reasons
+    its start time), `Identity`, `process_identity`, the `not_closed` reasons
   - `procmon.py` - Process Monitor's filter file, start, ready check, stop
   - `pml.py` - reads a capture into `ProcInfo` and `RawEvent` (lazy `procmon_parser`). `read_capture` swaps
     in `event_offsets` for procmon-parser's event offsets reader, which drops bits 32 to 39 of each offset and so

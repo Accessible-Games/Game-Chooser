@@ -122,11 +122,6 @@ class Closer:
             self._processes.close(handle)
 
 
-class WindowsCloser(Closer):
-    def __init__(self, limit: Identity | None):
-        super().__init__(limit, WindowsProcesses())
-
-
 def process_identity(pid: int) -> Identity | None:
     """Who the running process `pid` runs as; None when it has gone or can't be read."""
     processes = WindowsProcesses()

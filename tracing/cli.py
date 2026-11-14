@@ -222,7 +222,7 @@ def _recorder(args, compiled: bool) -> int:
 
 
 def _build_recorder(args) -> "Recorder":
-    from tracing.closing import WindowsCloser, process_identity
+    from tracing.closing import Closer, WindowsProcesses, process_identity
     from tracing.live import windows_snapshot
     from tracing.pml import read_capture
     from tracing.procmon import WindowsProcmon
@@ -235,4 +235,4 @@ def _build_recorder(args) -> "Recorder":
         lambda: shutil.disk_usage(run.path).free, time.monotonic, time.sleep,
         # --close-games closes only what runs as the app's user with no more rights than the app: both are read
         # here, once, from the app's own process (the one that started this recorder and named itself).
-        closer=WindowsCloser(process_identity(args.app_pid)), protected_pids=(args.app_pid,))
+        closer=Closer(process_identity(args.app_pid), WindowsProcesses()), protected_pids=(args.app_pid,))
