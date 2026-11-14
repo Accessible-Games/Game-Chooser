@@ -8,7 +8,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import unquote, urlparse
 
 from engine.entries import is_mirror_url, platform_sources
-from engine.errors import BlockedHost, Cancelled, DownloadError, DownloadWriteError, NoVerifiedSource
+from engine.errors import BlockedHost, Cancelled, DownloadError, NoVerifiedSource
 from engine.messages import (
     DEVELOPER_CHANGED_UNVERIFIED,
     DEVELOPER_CHANGED_VERIFIED,
@@ -80,10 +80,6 @@ def _walk(sources: list[dict], work_dir: Path, fetcher, progress, cancel, *, kee
                 )
             except Cancelled:
                 raise
-            except DownloadWriteError as e:
-                # The drive, not the address: no other source helps. The OSError gets its plain words at the
-                # engine's boundary (jobs.InstallEngine.run).
-                raise e.__cause__ if isinstance(e.__cause__, OSError) else e
             except BlockedHost:
                 reasons.append(SOURCE_BLOCKED)
                 drop(folder)

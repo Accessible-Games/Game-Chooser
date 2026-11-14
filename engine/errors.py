@@ -22,11 +22,6 @@ class DownloadError(EngineError):
     pass
 
 
-class DownloadWriteError(DownloadError):
-    """The download couldn't be written to disk (the drive is full, the file is locked). The OSError is
-    the cause; another address won't help, so the engine reports the file error instead of trying one."""
-
-
 class NoVerifiedSource(EngineError):
     """No source gave a file that verified.
 
