@@ -64,13 +64,6 @@ def _value_text(data) -> str:
     return text[:MAX_VALUE_CHARS]
 
 
-def _length(details: dict) -> int:
-    try:
-        return int(details.get("Length", 0))
-    except (TypeError, ValueError):
-        return 0
-
-
 def _write_line(kind: str, event: RawEvent, proc: ProcInfo, zero: int, info: SessionInfo) -> dict:
     local_appdata = info.env["local_appdata"]
     line = {"t": _t(event.time, zero), "op": kind, "process": ntpath.basename(proc.image_path),
@@ -88,7 +81,7 @@ def _write_line(kind: str, event: RawEvent, proc: ProcInfo, zero: int, info: Ses
         if new_mapped is not None:
             line["new_virtual_store_path"] = new_mapped
     if kind == "file_write":
-        line["bytes"] = _length(event.details)
+        line["bytes"] = event.details.get("Length", 0)
         line["count"] = 1
     return line
 
