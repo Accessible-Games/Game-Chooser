@@ -91,6 +91,13 @@ After unpacking on a Mac, `mark_mac_programs` gives each `.app`'s own program (I
 name in `Contents/MacOS` or NVGT's `MacOS/<name>`) the run bit for whoever may read it, since a zip or 7z made on
 Windows keeps no Unix modes. It skips an app whose plist can't be read, a name that leaves `Contents/MacOS`, and
 anything through a link. Nothing else gets the bit.
+A disk image (`method: "dmg"`, or a `.dmg` inside a zip, 7z or tar that the source's `install.dmg` names, relative
+to the archive root) is opened read-only with `/usr/bin/hdiutil attach -nobrowse -readonly -noautoopen` on a
+temporary mount folder, stdin closed so an image that asks to accept a license fails (`EXTRACT_DISK_IMAGE_FAILED`).
+Its top-level items are copied with `/usr/bin/ditto`, leaving out hidden ones (`.DS_Store`, `.fseventsd`,
+`.background`) and links (the usual shortcut to /Applications). A nested image is copied into the folder that holds
+it, then deleted, before `extract_dir` is applied; one that isn't there is `EXTRACT_DISK_IMAGE_MISSING`. The image is
+always detached, after a cancel or a failure too. Elsewhere both raise `EXTRACT_NEEDS_MAC` before anything runs.
 
 ## Temporary launch fallback
 

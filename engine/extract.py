@@ -1,5 +1,5 @@
-"""Unpack downloaded archives with the bundled 7-Zip, innoextract, Windows' msiexec, macOS' ditto, or Python's
-tarfile."""
+"""Unpack downloaded archives with the bundled 7-Zip, innoextract, Windows' msiexec, macOS' ditto and hdiutil, or
+Python's tarfile."""
 
 import bz2  # noqa: F401  tarfile imports it lazily; imported here so the build includes it
 import gzip
@@ -12,6 +12,7 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import zlib
 from pathlib import Path
 from xml.parsers.expat import ExpatError
@@ -53,6 +54,22 @@ def msi_admin_command(msi: Path, dest: Path) -> list[str]:
 def ditto_command(archive: Path, dest: Path) -> list[str]:
     """macOS' own unzip for a zip: unlike 7-Zip it keeps a Mac app's links and its programs' "can run" bit."""
     return ["/usr/bin/ditto", "-x", "-k", str(archive), str(dest)]
+
+
+def hdiutil_attach_command(image: Path, mountpoint: Path) -> list[str]:
+    """Open a disk image read-only, without showing it in Finder. stdin is closed, so an image that asks to
+    accept a license fails instead of waiting."""
+    return ["/usr/bin/hdiutil", "attach", "-nobrowse", "-readonly", "-noautoopen", "-mountpoint", str(mountpoint),
+            str(image)]
+
+
+def hdiutil_detach_command(mountpoint: Path) -> list[str]:
+    return ["/usr/bin/hdiutil", "detach", "-force", str(mountpoint)]
+
+
+def ditto_copy_command(source: Path, target: Path) -> list[str]:
+    """macOS' own copy, which keeps a Mac app's links and its programs' "can run" bit."""
+    return ["/usr/bin/ditto", str(source), str(target)]
 
 
 def _merge_move(src: Path, target: Path) -> None:
@@ -179,6 +196,12 @@ def mark_mac_programs(dest: Path) -> None:
                     program.chmod(stat.S_IMODE(mode) | (mode & 0o444) >> 2)
 
 
+def _image_entries(mountpoint: Path) -> list[Path]:
+    """What to copy from an opened disk image: its top-level items, without Finder's hidden files (.DS_Store,
+    .fseventsd, .background) or links (the usual shortcut to /Applications)."""
+    return [p for p in sorted(mountpoint.iterdir()) if not p.name.startswith(".") and not p.is_symlink()]
+
+
 class Extractor:
     def __init__(self, tools_dir: Path, run: Run | None = None, platform: str | None = None):
         self.tools_dir = Path(tools_dir)
@@ -190,6 +213,29 @@ class Extractor:
         if code != 0:
             log.warning("%s exited with %s", Path(argv[0]).name, code)
             raise ExtractError(messages.EXTRACT_FAILED)
+
+    def _copy_disk_image(self, image: Path, dest: Path, cancel: CancelCheck) -> None:
+        """Open `image`, copy its files into `dest` with ditto (which keeps a Mac app's links and run bits), and
+        always close it again, even after a cancel or a failure."""
+        mountpoint = Path(tempfile.mkdtemp(prefix="gamechooser-dmg-"))
+        try:
+            try:
+                attached = self.run(hdiutil_attach_command(image, mountpoint), cancel)
+            except ExtractError:
+                raise ExtractError(messages.EXTRACT_DISK_IMAGE_FAILED) from None
+            if attached != 0:
+                log.warning("hdiutil attach exited with %s", attached)
+                raise ExtractError(messages.EXTRACT_DISK_IMAGE_FAILED)
+            for entry in _image_entries(mountpoint):
+                self._run_checked(ditto_copy_command(entry, dest / entry.name), cancel)
+        finally:
+            detached = self.run(hdiutil_detach_command(mountpoint), lambda: False)
+            if detached != 0:
+                log.warning("hdiutil detach exited with %s", detached)
+            try:
+                mountpoint.rmdir()
+            except OSError:
+                log.warning("could not remove the disk image's mount folder %s", mountpoint)
 
     def extract(self, archive: Path, dest: Path, install: dict, cancel: CancelCheck) -> Path:
         """Unpack `archive` into `dest` and return the folder that holds the game.
@@ -219,6 +265,8 @@ class Extractor:
             tool = "tar"
         elif method == "none":
             tool = "copy"
+        elif method == "dmg":
+            tool = "dmg"
         else:
             raise ValueError(f"Nothing to extract for method {method!r}")
 
@@ -227,6 +275,9 @@ class Extractor:
             raise ExtractError(messages.EXTRACT_NEEDS_WINDOWS)
         if mac and method == "zip":
             tool = "ditto"
+        nested_image = install.get("dmg") if method != "dmg" else None
+        if not mac and (tool == "dmg" or nested_image):
+            raise ExtractError(messages.EXTRACT_NEEDS_MAC)
 
         dest.mkdir(parents=True, exist_ok=True)
         if tool == "copy":
@@ -235,6 +286,8 @@ class Extractor:
             extract_tar(archive, dest, cancel)
         elif tool == "ditto":
             self._run_checked(ditto_command(archive, dest), cancel)
+        elif tool == "dmg":
+            self._copy_disk_image(archive, dest, cancel)
         elif tool == "7z":
             seven_zip = self.tools_dir / _SEVEN_ZIP_NAMES.get(self.platform, "7z.exe")
             self._run_checked(seven_zip_command(seven_zip, archive, dest), cancel)
@@ -248,6 +301,13 @@ class Extractor:
             if stray.is_file():
                 stray.unlink()
         _refuse_links_leaving(dest)
+        if nested_image:
+            image = safe_join(dest, nested_image)
+            if not image.is_file():
+                raise ExtractError(messages.EXTRACT_DISK_IMAGE_MISSING)
+            self._copy_disk_image(image, image.parent, cancel)
+            image.unlink()
+            _refuse_links_leaving(dest)
         if mac:
             mark_mac_programs(dest)
         return content_root(dest, install.get("extract_dir"))

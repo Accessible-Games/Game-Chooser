@@ -1,3 +1,4 @@
+import shutil
 import stat
 import subprocess
 import sys
@@ -10,7 +11,7 @@ import pytest
 from engine import messages
 from engine.errors import Cancelled, ExtractError, UnsafePath
 from engine.extract import (Extractor, _app_program, content_root, ditto_command, flatten_inno,
-                            innoextract_command, msi_admin_command, run_process, seven_zip_command)
+                            hdiutil_detach_command, innoextract_command, msi_admin_command, run_process, seven_zip_command)
 from tests.conftest import REPO_ROOT
 
 TOOLS_DIR = REPO_ROOT / "bin"
@@ -467,3 +468,137 @@ def test_mac_takes_a_program_named_from_contents_as_nvgt_writes_it(tmp_path):
     assert _app_program(dest / "Game.app") == dest / "Game.app" / "Contents" / "MacOS" / "Game"
     if RUN_BIT:
         assert stat.S_IMODE((dest / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode) == 0o755
+
+
+def _disk_image_run(contents=None, attach_code=0, cancel_on_copy=False):
+    """A fake run for hdiutil and ditto: attach fills the mount folder with `contents` (name -> bytes, or None for
+    the usual link to /Applications), ditto copies what it is given, and detach is only recorded."""
+    contents = contents if contents is not None else {"Game.app/Contents/MacOS/Game": b"program"}
+
+    def run(argv, cancel):
+        run.calls.append(argv)
+        if argv[:2] == ["/usr/bin/hdiutil", "attach"]:
+            mountpoint = Path(argv[argv.index("-mountpoint") + 1])
+            for name, data in contents.items():
+                path = mountpoint / name
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if data is None:
+                    path.symlink_to("/Applications")
+                else:
+                    path.write_bytes(data)
+            return attach_code
+        if argv[:2] == ["/usr/bin/hdiutil", "detach"]:
+            shutil.rmtree(argv[-1], ignore_errors=True)
+            Path(argv[-1]).mkdir()
+            return 0
+        if argv[0] == "/usr/bin/ditto" and argv[1] != "-x":
+            if cancel_on_copy:
+                raise Cancelled()
+            source, target = Path(argv[1]), Path(argv[2])
+            if source.is_dir():
+                shutil.copytree(source, target, symlinks=True, dirs_exist_ok=True)
+            else:
+                shutil.copy2(source, target)
+        return 0
+    run.calls = []
+    return run
+
+
+def _hdiutil(run, verb):
+    return [argv for argv in run.calls if argv[:2] == ["/usr/bin/hdiutil", verb]]
+
+
+def test_mac_disk_image_is_copied_without_finder_files_or_links(tmp_path):
+    run = _disk_image_run({"Game.app/Contents/MacOS/Game": b"program", "sounds/a.ogg": b"a", ".DS_Store": b"d",
+                           ".fseventsd/x": b"f", "Applications": None})
+    dest = tmp_path / "o"
+    assert _extractor(run, "darwin").extract(tmp_path / "g.dmg", dest, {"method": "dmg"}, lambda: False) == dest
+    assert sorted(p.name for p in dest.iterdir()) == ["Game.app", "sounds"]
+    assert (dest / "sounds" / "a.ogg").read_bytes() == b"a"
+    attach, = _hdiutil(run, "attach")
+    assert attach[-1] == str(tmp_path / "g.dmg") and "-readonly" in attach and "-nobrowse" in attach
+    mountpoint = attach[attach.index("-mountpoint") + 1]
+    assert _hdiutil(run, "detach") == [hdiutil_detach_command(Path(mountpoint))]
+    assert not Path(mountpoint).exists()
+
+
+def test_mac_disk_image_that_wont_open_is_still_closed(tmp_path):
+    run = _disk_image_run(attach_code=1)
+    with pytest.raises(ExtractError) as err:
+        _extractor(run, "darwin").extract(tmp_path / "g.dmg", tmp_path / "o", {"method": "dmg"}, lambda: False)
+    assert str(err.value) == messages.EXTRACT_DISK_IMAGE_FAILED
+    assert len(_hdiutil(run, "detach")) == 1
+
+
+def test_mac_disk_image_cancelled_while_copying_is_still_closed(tmp_path):
+    run = _disk_image_run(cancel_on_copy=True)
+    with pytest.raises(Cancelled):
+        _extractor(run, "darwin").extract(tmp_path / "g.dmg", tmp_path / "o", {"method": "dmg"}, lambda: True)
+    assert len(_hdiutil(run, "detach")) == 1
+
+
+def _zip_holding_an_image(dest_files):
+    """A fake ditto -x -k that leaves `dest_files` (name -> bytes) in the folder it unpacks into."""
+    def unpack(argv):
+        dest = Path(argv[-1])
+        for name, data in dest_files.items():
+            (dest / name).parent.mkdir(parents=True, exist_ok=True)
+            (dest / name).write_bytes(data)
+    return unpack
+
+
+def test_mac_disk_image_inside_a_zip_is_copied_beside_it(tmp_path):
+    image_run = _disk_image_run()
+    unzip = _zip_holding_an_image({"Game/game.dmg": b"image", "Game/sounds/a.ogg": b"a"})
+
+    def run(argv, cancel):
+        if argv[:3] == ["/usr/bin/ditto", "-x", "-k"]:
+            unzip(argv)
+            return 0
+        return image_run(argv, cancel)
+
+    dest = tmp_path / "o"
+    install = {"method": "zip", "dmg": "Game/game.dmg", "extract_dir": "Game"}
+    assert _extractor(run, "darwin").extract(tmp_path / "g.zip", dest, install, lambda: False) == dest / "Game"
+    assert sorted(p.name for p in (dest / "Game").iterdir()) == ["Game.app", "sounds"]
+    assert len(_hdiutil(image_run, "attach")) == len(_hdiutil(image_run, "detach")) == 1
+
+
+def test_mac_missing_disk_image_inside_an_archive(tmp_path):
+    run = FakeRun()
+    with pytest.raises(ExtractError) as err:
+        _extractor(run, "darwin").extract(tmp_path / "g.zip", tmp_path / "o", {"method": "zip", "dmg": "game.dmg"},
+                                          lambda: False)
+    assert str(err.value) == messages.EXTRACT_DISK_IMAGE_MISSING
+
+
+def test_mac_disk_image_path_must_stay_inside_the_archive(tmp_path):
+    (tmp_path / "game.dmg").write_bytes(b"image")
+    with pytest.raises(UnsafePath):
+        _extractor(FakeRun(), "darwin").extract(tmp_path / "g.zip", tmp_path / "o",
+                                                {"method": "zip", "dmg": "../game.dmg"}, lambda: False)
+
+
+@pytest.mark.parametrize("install", [{"method": "dmg"}, {"method": "zip", "dmg": "game.dmg"}])
+def test_windows_refuses_disk_images_without_running_anything(tmp_path, install):
+    run = FakeRun()
+    with pytest.raises(ExtractError) as err:
+        _extractor(run, "win32").extract(tmp_path / "g.bin", tmp_path / "o", install, lambda: False)
+    assert str(err.value) == messages.EXTRACT_NEEDS_MAC
+    assert run.calls == [] and not (tmp_path / "o").exists()
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="hdiutil is macOS'")
+def test_real_disk_image(tmp_path):
+    src = tmp_path / "src"
+    (src / "Game.app" / "Contents" / "MacOS").mkdir(parents=True)
+    (src / "Game.app" / "Contents" / "MacOS" / "Game").write_bytes(b"program")
+    (src / "Game.app" / "Contents" / "MacOS" / "Game").chmod(0o755)
+    (src / "Applications").symlink_to("/Applications")
+    image = tmp_path / "game.dmg"
+    subprocess.run(["/usr/bin/hdiutil", "create", "-quiet", "-fs", "HFS+", "-srcfolder", str(src), "-format", "UDZO",
+                    str(image)], check=True, stdin=subprocess.DEVNULL)
+    out = tmp_path / "out"
+    Extractor(tmp_path / "no-tools", platform="darwin").extract(image, out, {"method": "dmg"}, lambda: False)
+    assert sorted(p.name for p in out.iterdir()) == ["Game.app"]
+    assert (out / "Game.app" / "Contents" / "MacOS" / "Game").stat().st_mode & stat.S_IXUSR

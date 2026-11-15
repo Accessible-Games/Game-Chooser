@@ -173,6 +173,10 @@ EXTRACT_FAILED = "The downloaded files couldn't be unpacked."
 EXTRACT_FOLDER_MISSING = "The game's folder wasn't found in the download."
 EXTRACT_UNSAFE_LINK = "The download contained a shortcut that points outside the game folder, so it was not unpacked."
 EXTRACT_NEEDS_WINDOWS = "This download is a Windows installer, which can only be unpacked on Windows."
+EXTRACT_NEEDS_MAC = "This download is a Mac disk image, which can only be unpacked on a Mac."
+EXTRACT_DISK_IMAGE_FAILED = ("The disk image in the download couldn't be opened. An image that asks you to accept a "
+                             "license can't be opened by Game Chooser.")
+EXTRACT_DISK_IMAGE_MISSING = "The disk image the catalog names wasn't found in the download."
 
 STEP_UNKNOWN_ACTION = "This game needs a setup step Game Chooser doesn't know, so it wasn't installed."
 STEP_UNSAFE_PATH = "A setup step points outside the game folder, so it wasn't run."

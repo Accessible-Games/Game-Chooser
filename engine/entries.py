@@ -15,7 +15,7 @@ from . import messages
 from .errors import InstallFailed
 
 KNOWN_KINDS = frozenset({"game", "extra", "runtime", "access-mod"})
-KNOWN_METHODS = frozenset({"zip", "7z", "installer", "cab", "tar", "none", "url"})
+KNOWN_METHODS = frozenset({"zip", "7z", "installer", "cab", "tar", "none", "url", "dmg"})
 KNOWN_INSTALLER_TYPES = frozenset({"inno", "nsis", "msi", "installshield", "other"})
 KNOWN_INSTALLER_MODES = frozenset({"extract", "run"})
 KNOWN_STEP_ACTIONS = frozenset({"copy", "move", "delete", "registry", "register", "run"})
