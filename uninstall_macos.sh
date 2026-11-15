@@ -18,11 +18,10 @@ if [ "$(uname)" != "Darwin" ]; then
 fi
 
 APP_NAME="Game Chooser"
-APP_BUNDLE="game-chooser.app"
-BUNDLE_ID="game-chooser"
+# Builds before the rename to game-chooser used "Game Chooser" for the app bundle and the bundle id.
+BUNDLE_IDS=("game-chooser" "Game Chooser")
 PROCESS_NAME="game-chooser"
 CONFIG_DIR="$HOME/Library/Application Support/GameChooser"
-PREFS_FILE="$HOME/Library/Preferences/$BUNDLE_ID.plist"
 
 dry_run=0
 assume_yes=0
@@ -51,20 +50,22 @@ if [ -f "$CONFIG_DIR/config.json" ]; then
 fi
 
 targets=()
-if [ -e "./$APP_BUNDLE" ]; then
-	targets+=("$PWD/$APP_BUNDLE")
-elif [ -e "$HOME/Applications/$APP_BUNDLE" ]; then
-	targets+=("$HOME/Applications/$APP_BUNDLE")
-fi
-for candidate in \
-	"$CONFIG_DIR" \
-	"$PREFS_FILE" \
-	"$HOME/Library/Saved Application State/$BUNDLE_ID.savedState" \
-	"$HOME/Library/Caches/$BUNDLE_ID" \
-	"$HOME/Library/HTTPStorages/$BUNDLE_ID" \
-	"$HOME/Library/WebKit/$BUNDLE_ID"
-do
-	[ -e "$candidate" ] && targets+=("$candidate")
+[ -e "$CONFIG_DIR" ] && targets+=("$CONFIG_DIR")
+for bundle_id in "${BUNDLE_IDS[@]}"; do
+	if [ -e "./$bundle_id.app" ]; then
+		targets+=("$PWD/$bundle_id.app")
+	elif [ -e "$HOME/Applications/$bundle_id.app" ]; then
+		targets+=("$HOME/Applications/$bundle_id.app")
+	fi
+	for candidate in \
+		"$HOME/Library/Preferences/$bundle_id.plist" \
+		"$HOME/Library/Saved Application State/$bundle_id.savedState" \
+		"$HOME/Library/Caches/$bundle_id" \
+		"$HOME/Library/HTTPStorages/$bundle_id" \
+		"$HOME/Library/WebKit/$bundle_id"
+	do
+		[ -e "$candidate" ] && targets+=("$candidate")
+	done
 done
 if [ "$delete_games" -eq 1 ] && [ "${#library_folders[@]}" -gt 0 ]; then
 	targets+=("${library_folders[@]}")
@@ -92,9 +93,11 @@ if [ "$assume_yes" -eq 0 ]; then
 fi
 
 # The preferences daemon keeps its own copy of the plist, so it must forget the domain or it writes the file back.
-if [ -e "$PREFS_FILE" ]; then
-	defaults delete "$BUNDLE_ID" 2>/dev/null
-fi
+for bundle_id in "${BUNDLE_IDS[@]}"; do
+	if [ -e "$HOME/Library/Preferences/$bundle_id.plist" ]; then
+		defaults delete "$bundle_id" 2>/dev/null
+	fi
+done
 
 failed=0
 for target in "${targets[@]}"; do
