@@ -1,3 +1,4 @@
+from engine import messages
 from engine.messages import Progress, format_size, phase_label, update_summary
 
 
@@ -71,3 +72,14 @@ def test_quit_while_busy_text_per_action():
     assert quit_while_busy_text("undo", "Entombed") == \
         "Entombed is still being restored to the previous version. Cancel it and quit?"
     assert quit_while_busy_text("extras", "Entombed") == "Entombed's extras are still installing. Cancel them and quit?"
+
+
+def test_install_not_started_names_the_step_and_the_error():
+    text = messages.install_not_started("Rhythm Rage", messages.STEP_PLANNING, KeyError("sources"))
+    assert text.startswith("Game Chooser couldn't start installing Rhythm Rage. Try again.")
+    assert text.endswith("While planning the install: KeyError: 'sources'")
+
+
+def test_install_not_started_with_an_empty_error_shows_its_type():
+    text = messages.install_not_started("Rhythm Rage", messages.STEP_QUEUEING, RuntimeError())
+    assert text.endswith("While adding the install to the queue: RuntimeError")

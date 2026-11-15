@@ -184,18 +184,20 @@ class CatalogPanel(wx.Panel):
             return
         try:
             plan = self.service.plan(row.id)
-        except Exception:
+        except Exception as error:
             log.exception("Couldn't plan installing %s", row.id)
-            self.frame._tell(messages.INSTALL_NOT_STARTED.format(title=row.title), "Catalog", wx.ICON_ERROR)
+            text = messages.install_not_started(row.title, messages.STEP_PLANNING, error)
+            self.frame._tell(text, "Catalog", wx.ICON_ERROR)
             self.frame.focus_active_list()
             return
         choice = self.frame.confirm_install(plan)
         if choice is not None:
             try:
                 self.service.submit(plan.action, row.id, choice.library_id, choice.library_path, choice.extras)
-            except Exception:
+            except Exception as error:
                 log.exception("Couldn't queue installing %s", row.id)
-                self.frame._tell(messages.INSTALL_NOT_STARTED.format(title=row.title), "Catalog", wx.ICON_ERROR)
+                text = messages.install_not_started(row.title, messages.STEP_QUEUEING, error)
+                self.frame._tell(text, "Catalog", wx.ICON_ERROR)
             self.frame.games_changed()
         self.frame.focus_active_list()  # back to the row: it stayed selected
 

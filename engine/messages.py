@@ -367,7 +367,9 @@ QUIT_WHILE_ADDING_EXTRAS = "{title}'s extras are still installing. Cancel them a
 QUIT_WHILE_BUSY_TITLE = "Quit Game Chooser"
 JOB_ALREADY_RUNNING = "{title} is already installing. Its progress is shown below the games list."
 JOB_ALREADY_WAITING = "{title} is already waiting to install. It starts when the install before it finishes."
-INSTALL_NOT_STARTED = "Game Chooser couldn't start installing {title}. Try again."
+INSTALL_NOT_STARTED = "Game Chooser couldn't start installing {title}. Try again.\n\nWhile {step}: {detail}"
+STEP_PLANNING = "planning the install"
+STEP_QUEUEING = "adding the install to the queue"
 # The failure notification, by action (FAILED is the install one)
 FAILED_UPDATE = "{title} couldn't be updated"
 FAILED_UNINSTALL = "{title} couldn't be uninstalled"
@@ -381,6 +383,12 @@ def with_waiting(label: str, waiting: int) -> str:
     if waiting <= 0:
         return label
     return f"{label}, " + (ONE_MORE_WAITING if waiting == 1 else MORE_WAITING.format(count=waiting))
+
+
+def install_not_started(title: str, step: str, error: BaseException) -> str:
+    """INSTALL_NOT_STARTED with the step that failed and the error's type and text"""
+    detail = f"{type(error).__name__}: {error}" if str(error) else type(error).__name__
+    return INSTALL_NOT_STARTED.format(title=title, step=step, detail=detail)
 
 
 def _sentence(text: str) -> str:

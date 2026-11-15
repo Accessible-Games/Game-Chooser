@@ -81,6 +81,8 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   changing the game's files), for which the queue's `submit` would queue a new job; for any other, `submit`
   would return that same job anyway. Another game is planned, confirmed and queued as usual. An installed row
   reads Launch, which is the Library's launch and is not held back by a job.
+- **Install that can't start**: when `InstallService.plan` or `submit` raises, the alert
+  (`messages.install_not_started`) names the step (planning or queueing) and the error's type and text.
 - **Library catalog actions** (`library_actions.py`): context menu for catalog games (Update, Undo, Extras,
   Repair, Uninstall, plus links). Delete on a tracked catalog install is **Uninstall** (`delete_kind`: "uninstall";
   "forget" for an untracked install, files untouched; else "delete"). An uninstall that stopped partway (record
