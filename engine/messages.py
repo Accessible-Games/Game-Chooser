@@ -1,10 +1,19 @@
 """All player-facing copy for the install engine."""
 
+import sys
 from dataclasses import dataclass
 
 DEFENDER_NOTE = ("Windows Defender sometimes removes files from older audio games. To stop that, add your game "
                  "library folder to Defender's exclusions: open Windows Security, choose Virus & threat protection, "
                  "choose Manage settings, choose Add or remove exclusions, and add the folder.")
+
+
+def defender_paragraph(system: str = sys.platform) -> str:
+    """DEFENDER_NOTE as a paragraph to add to a message, on Windows only: elsewhere there is no Defender."""
+    return "\n\n" + DEFENDER_NOTE if system == "win32" else ""
+
+
+DEFENDER_PARAGRAPH = defender_paragraph()
 NO_EXE = "{title} was downloaded, but no program to start it was found."
 FOLDER_EXISTS = 'A folder named "{folder}" is already in {library}. Game Chooser didn\'t install it, so it won\'t install over it.'
 DEVELOPER_CHANGED_VERIFIED = "The developer has published a different file; installed the catalog's verified copy."
@@ -452,9 +461,9 @@ LAUNCH_NOT_FOUND_TITLE = "File Not Found"
 FILE_MISSING = "File does not exist: {path}"
 INVALID_EXECUTABLE = "File is not a valid executable.\n\nSupported types for {platform}: {types}"
 INVALID_EXECUTABLE_TITLE = "Invalid Executable"
-LAUNCH_NOT_FOUND_LOCATE = "Game executable not found. Please locate the game.\n\n" + DEFENDER_NOTE
-LAUNCH_NOT_FOUND_REPAIR = "Game executable not found.\n\n" + DEFENDER_NOTE + "\n\nRepair {title} now?"
-LAUNCH_NOT_FOUND_CATALOG = "Game executable not found.\n\n" + DEFENDER_NOTE
+LAUNCH_NOT_FOUND_LOCATE = "Game executable not found. Please locate the game." + DEFENDER_PARAGRAPH
+LAUNCH_NOT_FOUND_REPAIR = "Game executable not found." + DEFENDER_PARAGRAPH + "\n\nRepair {title} now?"
+LAUNCH_NOT_FOUND_CATALOG = "Game executable not found." + DEFENDER_PARAGRAPH
 # An .hta game that can't be started (engine.launch.start_hta); shown after "Failed to launch game: "
 HTA_NEEDS_WINDOWS = "This game only runs on Windows."
 HTA_HOST_MISSING = ("This game needs mshta.exe, a part of Windows that runs this kind of game, and it wasn't found "

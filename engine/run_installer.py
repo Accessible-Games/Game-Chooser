@@ -546,7 +546,7 @@ def _track_and_record(ctx, item: RunItem, folder: Path, in_target: bool, before:
     tracked = bool(claimed)
     exe = find_launch_exe(folder, item.launch_hint, _only(ctx.exclude, folder, claimed if tracked else None))
     if exe is None:
-        raise InstallFailed(messages.NO_EXE.format(title=item.title) + "\n\n" + messages.DEFENDER_NOTE)
+        raise InstallFailed(messages.NO_EXE.format(title=item.title) + messages.DEFENDER_PARAGRAPH)
     stored_library, stored_folder = _where(folder, library_id, library_path, ctx.libraries)
     record = InstallRecord(
         catalog_id=item.catalog_id, kind=item.kind, library_id=stored_library, folder=stored_folder,

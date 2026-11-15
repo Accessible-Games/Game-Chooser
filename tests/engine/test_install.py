@@ -9,7 +9,7 @@ from engine import jobs, messages, runtimes
 from engine.errors import Cancelled, ExtractError, InstallFailed
 from engine.folders import target_folder
 from engine.jobs import InstallRequest, JobResult, blocked_reason
-from engine.messages import DEFENDER_NOTE
+from engine.messages import DEFENDER_PARAGRAPH
 from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, ZipExtractor, fails, make_engine, never,
                                 reg_step, served_source, zip_bytes)
 
@@ -213,8 +213,8 @@ def test_no_exe_fails_with_defender_note(tmp_path):
     e = game(routes, files={"readme.txt": b"r", "setup.exe": b"installer"})   # setup.exe is auto-excluded
     engine, ctx, lib = setup(tmp_path, [e], routes)
     error = fails(engine.run, InstallRequest("install", "entombed", "Games", lib), lambda p: None, never)
-    assert error.message == messages.NO_EXE.format(title="Entombed") + "\n\n" + DEFENDER_NOTE
-    assert DEFENDER_NOTE in error.message and list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and not any((lib / ".gamechooser-staging").iterdir())
+    assert error.message == messages.NO_EXE.format(title="Entombed") + DEFENDER_PARAGRAPH
+    assert list(lib.iterdir()) in ([], [lib / ".gamechooser-staging"]) and not any((lib / ".gamechooser-staging").iterdir())
     assert leftovers(ctx, lib) == [] and ctx.records.load("entombed") is None
 
 

@@ -542,7 +542,7 @@ class InstallEngine:
         copied = runtimes.is_private_file(private_copies)
         exe = find_launch_exe(tree, launch, lambda path: self.ctx.exclude(path) or copied(path))
         if exe is None:
-            raise InstallFailed(messages.NO_EXE.format(title=title_of(entry)) + "\n\n" + messages.DEFENDER_NOTE)
+            raise InstallFailed(messages.NO_EXE.format(title=title_of(entry)) + messages.DEFENDER_PARAGRAPH)
         notes, private_ids = runtimes.finish_private(tree, exe, private_copies, title_of(entry))
         notes = [*(c.note for c in private_copies if c.note), *notes]
         copy_owners, copy_notes, copied_ids = {}, [], []

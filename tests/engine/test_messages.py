@@ -83,3 +83,8 @@ def test_install_not_started_names_the_step_and_the_error():
 def test_install_not_started_with_an_empty_error_shows_its_type():
     text = messages.install_not_started("Rhythm Rage", messages.STEP_QUEUEING, RuntimeError())
     assert text.endswith("While adding the install to the queue: RuntimeError")
+
+
+def test_defender_paragraph_only_on_windows():
+    assert messages.defender_paragraph("win32") == "\n\n" + messages.DEFENDER_NOTE
+    assert messages.defender_paragraph("darwin") == ""

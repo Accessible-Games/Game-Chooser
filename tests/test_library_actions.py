@@ -132,9 +132,9 @@ def test_uninstall_and_remove_library_text():
 
 def test_launch_problem_copy():
     assert messages.LAUNCH_NOT_FOUND_REPAIR.format(title="Entombed") == (
-        "Game executable not found.\n\n" + messages.DEFENDER_NOTE + "\n\nRepair Entombed now?")
+        "Game executable not found." + messages.DEFENDER_PARAGRAPH + "\n\nRepair Entombed now?")
     assert messages.LAUNCH_NOT_FOUND_LOCATE == (
-        "Game executable not found. Please locate the game.\n\n" + messages.DEFENDER_NOTE)
+        "Game executable not found. Please locate the game." + messages.DEFENDER_PARAGRAPH)
 
 
 def test_library_row_name():

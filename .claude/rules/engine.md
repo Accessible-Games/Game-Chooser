@@ -18,6 +18,8 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
 - **jobs.py** - `InstallEngine.run(InstallRequest)` routes install/update/repair/undo/extras/uninstall; raises
   `InstallFailed` (plain words from `messages.py`) or `Cancelled` for what the player can act on, and `ValueError`
   for an unknown action or a library that is not configured, which the queue reports as an unexpected error.
+  The Windows Defender advice (`messages.DEFENDER_PARAGRAPH`, on "no program found" and "executable not
+  found") is added on Windows only.
 - **index.py**, **entries.py** - catalog index fetch/cache (`CatalogIndex`, `IndexState`) and entry helpers.
   `platform_sources` skips sources whose `arch` this machine can't run (`runs_on`, `current_arch`: x86 runs on x64
   Windows and Linux; Windows on Arm runs x64 and x86; an Apple Silicon Mac runs x64; pass `machine` in tests).
