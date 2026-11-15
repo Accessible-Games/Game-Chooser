@@ -156,7 +156,7 @@ class InstallService:
             elevator=self.elevator,
             registry=self.registry,
             work_root=Path(tempfile.gettempdir()) / "GameChooser",
-            runtimes_root=default_runtimes_root(),
+            runtimes_root=default_runtimes_root(self.manager.config_dir),
             libraries=[dict(lib) for lib in self.manager.config["libraries"]],
             register_shared_components=register_shared_components(self.manager.config["install"]),
             platform=current_platform(),
@@ -169,7 +169,8 @@ class InstallService:
         return build_install_plan(entry_id, self.entries, self.manager.config["libraries"], self.manager.records,
                                   self.registry, register_shared_components(install),
                                   install.get("last_library"), current_platform(), action,
-                                  runtimes_root=default_runtimes_root(), security=self.security)
+                                  runtimes_root=default_runtimes_root(self.manager.config_dir),
+                                  security=self.security)
 
     def blocked(self, entry_id: str, library_path: Path) -> str | None:
         """Why the game can't be installed into this library folder right now, or None."""

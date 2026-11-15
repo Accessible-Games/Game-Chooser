@@ -121,7 +121,7 @@ def rig(isolated_manager, tmp_path, monkeypatch):
     temp.mkdir()
     monkeypatch.setattr(install_service, "InstallQueue", SyncQueue)
     monkeypatch.setattr(tempfile, "gettempdir", lambda: str(temp))
-    monkeypatch.setattr(install_service, "default_runtimes_root", lambda: tmp_path / "runtimes")
+    monkeypatch.setattr(install_service, "default_runtimes_root", lambda config_dir: tmp_path / "runtimes")
     return Rig(isolated_manager, tmp_path)
 
 

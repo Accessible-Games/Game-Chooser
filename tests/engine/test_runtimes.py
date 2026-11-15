@@ -110,9 +110,16 @@ def private_com(monkeypatch):
 # ---- detecting what's present --------------------------------------------------------------------------
 
 
-def test_default_runtimes_root(monkeypatch, tmp_path):
+def test_default_runtimes_root_on_windows(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "win32")
     monkeypatch.setenv("PROGRAMDATA", str(tmp_path))
-    assert default_runtimes_root() == tmp_path / "GameChooser" / "runtimes"
+    assert default_runtimes_root(tmp_path / "config") == tmp_path / "GameChooser" / "runtimes"
+
+
+def test_default_runtimes_root_elsewhere_is_in_the_config_dir(monkeypatch, tmp_path):
+    monkeypatch.setattr(sys, "platform", "darwin")
+    monkeypatch.delenv("PROGRAMDATA", raising=False)
+    assert default_runtimes_root(tmp_path / "config") == tmp_path / "config" / "runtimes"
 
 
 def test_detect_registry_key_value_and_classes_root():

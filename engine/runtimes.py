@@ -58,6 +58,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -293,7 +294,10 @@ def _has_elevated_steps(entry: dict) -> bool:
 _HIVE_NAMES = {"HKEY_CLASSES_ROOT": "HKCR", "HKEY_LOCAL_MACHINE": "HKLM", "HKEY_CURRENT_USER": "HKCU"}
 
 
-def default_runtimes_root() -> Path:
+def default_runtimes_root(config_dir: Path) -> Path:
+    """%ProgramData%\\GameChooser\\runtimes on Windows. Elsewhere no runtime installs, so the config dir's runtimes."""
+    if sys.platform != "win32":
+        return config_dir / "runtimes"
     return Path(os.environ["PROGRAMDATA"]) / "GameChooser" / "runtimes"
 
 

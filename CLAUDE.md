@@ -136,7 +136,8 @@ or an `http://` or `https://` URL (any case) for web games: `is_web`, the one te
   - `installs\<catalog id>.json` - per-user install records (`engine/records.py`, `RecordStore`)
   - `catalog\` - cached index (`index.json.gz`, `index-meta.json`); offline, the saved copy is used
   - `install.log` - the install queue's log
-- Shared runtimes: `%ProgramData%\GameChooser\runtimes\<id>`.
+- Shared runtimes: `%ProgramData%\GameChooser\runtimes\<id>` on Windows. Elsewhere the path is `<config dir>/runtimes`
+  (`default_runtimes_root`; nothing installs a runtime there, but a plan needs the path).
 
 ## Detail by area (`.claude/rules/`)
 Each file loads when a file it covers is read or edited.
