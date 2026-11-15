@@ -27,3 +27,5 @@ tests/catalog_fixtures/_build/
 # Save tracing (build-time variant)
 traces/
 tracing-tools/
+
+.DS_Store
