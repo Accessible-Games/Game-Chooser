@@ -52,7 +52,8 @@ from .errors import EngineError, InstallFailed, NoVerifiedSource, StepError, Uns
 from .folders import library_label, target_folder
 from .launch import find_launch_exe, is_catalog_launch
 from .messages import Progress
-from .paths import STAGING_DIR_NAME, is_engine_dir, is_link, norm_key, safe_join, same_folder, same_on_disk, walk_files
+from .paths import (STAGING_DIR_NAME, is_engine_dir, is_link, is_link_state, keeps_links, norm_key, safe_join,
+                    same_folder, same_on_disk, walk_entries)
 from .records import InstalledSource, InstallRecord, RecordedFile, RecordStore, hash_tree, record_folder
 from .recycle import send_to_recycle_bin
 from .installer_watch import ProcessWatch, watch_process
@@ -159,8 +160,8 @@ def _hide(path: Path) -> None:
 def _file_states(root: Path) -> dict[str, tuple[int, int, int]]:
     """norm_key -> (file id, size, mtime) for every file under `root`, walked the way hash_tree walks."""
     states = {}
-    for full in walk_files(root, is_engine_dir):
-        st = full.stat()
+    for full in walk_entries(root, is_engine_dir):
+        st = full.lstat() if keeps_links() else full.stat()
         states[norm_key(full.relative_to(root).as_posix())] = (st.st_ino, st.st_size, st.st_mtime_ns)
     return states
 
@@ -571,7 +572,7 @@ class InstallEngine:
             extra_id = extra["id"]
             before = _file_states(tree)
             shipped = set(_file_states(x_root))
-            shutil.copytree(x_root, tree, dirs_exist_ok=True)
+            shutil.copytree(x_root, tree, symlinks=keeps_links(), dirs_exist_ok=True)
             runtimes.run_file_steps_or_fail(_steps(x_fetched), tree)
             after = _file_states(tree)
             for key, state in after.items():
@@ -1333,6 +1334,7 @@ def _failure_text(e: Exception, title: str) -> str:
 
 def _still_there(game_dir: Path, recorded: RecordedFile) -> bool:
     try:
-        return plain_file(game_dir, recorded.path) is not None
+        return plain_file(game_dir, recorded.path,
+                          recorded.sha256 if is_link_state(recorded.sha256) else None) is not None
     except UnsafePath:
         return False

@@ -6,10 +6,11 @@ so it round-trips untouched; every other nested value is rebuilt into its datacl
 
 import json
 import logging
+import os
 from dataclasses import asdict, dataclass, fields
 from pathlib import Path
 
-from .paths import is_engine_dir, norm_key, same_folder, walk_files, write_atomic
+from .paths import is_engine_dir, keeps_links, link_state, norm_key, same_folder, walk_entries, write_atomic
 from .sources import hash_file
 
 log = logging.getLogger(__name__)
@@ -86,13 +87,21 @@ def record_folder(record: InstallRecord, libraries: list[dict]) -> Path | None:
     return None
 
 
+def file_state(path: Path) -> str:
+    """A file's sha256, or on a Mac a link's LINK_PREFIX and target, never what it points to."""
+    if keeps_links() and os.path.islink(path):
+        return link_state(path)
+    return hash_file(path)
+
+
 def hash_tree(root: Path) -> dict[str, tuple[str, str]]:
-    """Map norm_key -> (display path with forward slashes, sha256) for every file under root."""
+    """Map norm_key -> (display path with forward slashes, sha256) for every file under root; on a Mac every link
+    too, with its link state."""
     root = Path(root)
     result: dict[str, tuple[str, str]] = {}
-    for full in walk_files(root, is_engine_dir):
+    for full in walk_entries(root, is_engine_dir):
         rel = full.relative_to(root).as_posix()
-        result[norm_key(rel)] = (rel, hash_file(full))
+        result[norm_key(rel)] = (rel, file_state(full))
     return result
 
 

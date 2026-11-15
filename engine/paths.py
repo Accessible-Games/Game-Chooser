@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 from collections.abc import Iterator
 from contextlib import suppress
 from datetime import date
@@ -12,6 +13,10 @@ from .errors import UnsafePath
 STAGING_DIR_NAME = ".gamechooser-staging"
 BACKUP_PREFIX = "Game Chooser backup "
 EXECUTABLE_CODE_SUFFIXES = frozenset({".exe", ".dll", ".ocx"})
+# On a Mac, links a download ships (a framework's Versions/Current) are game files, recorded as LINK_PREFIX plus
+# their target in place of a checksum. Elsewhere every link is the player's.
+KEEPS_LINKS = sys.platform == "darwin"
+LINK_PREFIX = "link:"
 
 _RESERVED = {"CON", "PRN", "AUX", "NUL"} | {f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10)}
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
@@ -60,6 +65,29 @@ def walk_files(root: Path, skip=lambda name: False) -> Iterator[Path]:
     for dirpath, dirnames, filenames in os.walk(root):
         dirnames[:] = [d for d in dirnames if not skip(d) and not is_link(Path(dirpath) / d)]
         yield from (Path(dirpath) / name for name in filenames)
+
+
+def keeps_links() -> bool:
+    return KEEPS_LINKS
+
+
+def link_state(path) -> str:
+    return LINK_PREFIX + os.readlink(path)
+
+
+def is_link_state(sha256: str | None) -> bool:
+    return isinstance(sha256, str) and sha256.startswith(LINK_PREFIX)
+
+
+def walk_entries(root: Path, skip=lambda name: False) -> Iterator[Path]:
+    """walk_files, and on a Mac also every linked folder, as an entry of its own (never entered)."""
+    if not keeps_links():
+        yield from walk_files(root, skip)
+        return
+    for dirpath, dirnames, filenames in os.walk(root):
+        linked = [d for d in dirnames if os.path.islink(Path(dirpath) / d)]
+        dirnames[:] = [d for d in dirnames if not skip(d) and d not in linked]
+        yield from (Path(dirpath) / name for name in filenames + linked)
 
 
 def is_code(path) -> bool:

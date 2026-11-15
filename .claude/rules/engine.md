@@ -32,7 +32,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   the dialog names the backup folder holding the player's copies); one that couldn't reach an address stays offered.
   Uninstall (`apply_uninstall`) removes every empty folder in the game's folder, box ticked or not (one the archive
   shipped empty, like `saves`, has no recorded file under it); a folder holding a player's file stays, with its
-  parents; links are never entered. A game folder left with nothing in it goes, and so does its record.
+  parents; links are never entered. On a Mac a link the download shipped is recorded and removed like a file (the
+  link itself, never what it points to) while its target is unchanged; a changed one is the player's. A game
+  folder left with nothing in it goes, and so does its record.
   Before that, `jobs._uninstall` guards the game folder itself. A game folder that is, or holds, a library folder
   (`_holds_a_library`, compared as text and on disk with `paths.same_on_disk`, so another spelling or a link to the
   library counts, but never on a drive that gives every file the ID 0; a library can't be added there, so only a
@@ -45,7 +47,8 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   through the link, so it refuses and changes nothing (`GAME_FOLDER_LINK_VENDOR`). Update, Repair and Undo still
   work through such a link, changing only the game's own files.
 - **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
-  refused); **run_installer.py** / **run_actions.py** / **installer_watch.py** - installers that run.
+  refused; on a Mac other archives keep links that stay inside, see below); **run_installer.py** /
+  **run_actions.py** / **installer_watch.py** - installers that run.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain
   when the runtime has an elevated step, marker `.gamechooser-runtime.json`), or private COM copies
   (`comfree.py`). By default every runtime the game depends on that has a folder (not an installer that runs)
@@ -91,6 +94,12 @@ After unpacking on a Mac, `mark_mac_programs` gives each `.app`'s own program (I
 name in `Contents/MacOS` or NVGT's `MacOS/<name>`) the run bit for whoever may read it, since a zip or 7z made on
 Windows keeps no Unix modes. It skips an app whose plist can't be read, a name that leaves `Contents/MacOS`, and
 anything through a link. Nothing else gets the bit.
+Mac apps ship links (a framework's `Versions/Current -> B`), so on a Mac (`paths.KEEPS_LINKS`) `_refuse_links_leaving`
+keeps a link whose target is relative and names something that exists inside the folder; an absolute, leaving or
+broken link is still `EXTRACT_UNSAFE_LINK`. Such a link is a game file: `hash_tree` records it with `link:` plus its
+target in place of a checksum (`walk_entries`, never entering it), and Update, Repair and Undo write, keep or
+delete it like a file (`safety._current_state`, `_write_file`), never writing through a link (`UPDATE_PATH_CONFLICT`).
+Elsewhere every link is refused and nothing of this applies.
 A disk image (`method: "dmg"`, or a `.dmg` inside a zip, 7z or tar that the source's `install.dmg` names, relative
 to the archive root) is opened read-only with `/usr/bin/hdiutil attach -nobrowse -readonly -noautoopen` on a
 temporary mount folder, stdin closed so an image that asks to accept a license fails (`EXTRACT_DISK_IMAGE_FAILED`).

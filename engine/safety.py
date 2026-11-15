@@ -21,8 +21,9 @@ from typing import Sequence
 
 from . import messages
 from .errors import EngineError, UnsafePath
-from .paths import STAGING_DIR_NAME, backup_dir_name, is_code, is_link, norm_key, safe_join, unique_path
-from .records import RecordedFile
+from .paths import (STAGING_DIR_NAME, backup_dir_name, is_code, is_link, is_link_state, keeps_links, link_state,
+                    norm_key, safe_join, unique_path)
+from .records import RecordedFile, file_state
 from .sources import hash_file
 
 
@@ -150,8 +151,18 @@ def _resolve_game_path(game_dir: Path, rel: str) -> tuple[Path, bool]:
 def plain_file(root: Path, rel: str, sha256: str | None = None) -> Path | None:
     """The plain file at `rel` under `root`, not through a link (with contents `sha256`, if given), else None.
     Raises UnsafePath, and OSError if it can't be read: an unreadable file is never taken as changed."""
+    if keeps_links() and is_link_state(sha256):
+        return _recorded_link(root, rel, sha256)
     path, linked = _resolve_game_path(root, rel)
     if linked or not path.is_file() or (sha256 is not None and hash_file(path) != sha256):
+        return None
+    return path
+
+
+def _recorded_link(root: Path, rel: str, state: str) -> Path | None:
+    """The link at `rel` under `root`, not through another link, whose target is still the recorded one."""
+    path = _entry_path(root, rel)
+    if _has_link_component(path.parent, root) or not os.path.islink(path) or link_state(path) != state:
         return None
     return path
 
@@ -200,6 +211,8 @@ def _has_link_component(path: Path, root: Path) -> bool:
 
 
 def _current_state(path: Path) -> str:
+    if keeps_links() and os.path.islink(path):
+        return link_state(path)
     if is_link(path):
         return "<link>"
     if path.is_file():
@@ -232,7 +245,7 @@ def preflight(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date
         target = safe_join(game_dir, op.path)
         if op.op not in (Op.WRITE, Op.BACKUP_AND_WRITE):
             continue
-        if target.is_dir():
+        if target.is_dir() and not (keeps_links() and os.path.islink(target)):
             raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=op.path, kind="folder"))
         for base in (game_dir, game_dir / backup_dir_name(today)):  # the target's folders, then its backup's
             parent = safe_join(base, op.path).parent
@@ -240,7 +253,8 @@ def preflight(plan: UpdatePlan, game_dir: Path, incoming_root: Path, today: date
                 if parent.exists() and not parent.is_dir():
                     raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=_rel(parent, game_dir), kind="file"))
                 parent = parent.parent
-        if not safe_join(incoming_root, op.path).is_file():
+        incoming = safe_join(incoming_root, op.path)
+        if not incoming.is_file() and not (keeps_links() and os.path.islink(incoming)):
             raise FileNotFoundError(f"Incoming file is missing: {op.path}")
 
 
@@ -252,7 +266,11 @@ def _write_file(source: Path, target: Path, backup_to: Path | None, game_dir: Pa
     tmp = Path(tmp_name)
     moved = False
     try:
-        shutil.copyfile(source, tmp)
+        if keeps_links() and os.path.islink(source):
+            tmp.unlink()
+            os.symlink(os.readlink(source), tmp)
+        else:
+            shutil.copyfile(source, tmp)
         if backup_to is not None:
             backup_to.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(target), str(backup_to))
@@ -301,6 +319,9 @@ def _apply_op(op: FileOp, plan: UpdatePlan, game_dir: Path, incoming_root: Path,
             _prune_empty_dirs(target.parent, game_dir)
         return  # a changed file is the player's now
 
+    if keeps_links() and _has_link_component(target.parent, game_dir):  # never write through a link
+        link = _first_link(target.parent, game_dir)
+        raise EngineError(messages.UPDATE_PATH_CONFLICT.format(path=_rel(link, game_dir), kind="file"))
     source = safe_join(incoming_root, op.path)
     needs_backup = op.op is Op.BACKUP_AND_WRITE
     if op.op is Op.WRITE and changed and state != ABSENT:
@@ -328,7 +349,7 @@ def restore_backups(game_dir: Path, backups: list[dict]) -> list[str]:
         backup = safe_join(game_dir, b["backup"])
         if not backup.is_file() or original.is_dir():
             continue
-        if original.exists() and hash_file(original) != b["installed_sha256"]:
+        if original.exists() and file_state(original) != b["installed_sha256"]:
             continue
         try:
             original.parent.mkdir(parents=True, exist_ok=True)
@@ -368,7 +389,8 @@ def plan_uninstall(record, game_dir: Path) -> UninstallPlan:
             if d == STAGING_DIR_NAME:
                 continue
             if is_link(Path(dirpath) / d):
-                player.append(_rel(Path(dirpath) / d, game_dir))  # listed, never descended into
+                if norm_key(_rel(Path(dirpath) / d, game_dir)) not in deleting:
+                    player.append(_rel(Path(dirpath) / d, game_dir))  # listed, never descended into
             else:
                 kept_dirs.append(d)
         dirnames[:] = kept_dirs
@@ -408,16 +430,27 @@ def _prune_all_empty(root: Path) -> None:
                 pass
 
 
+def _is_kept_link(expected: str | None) -> bool:
+    return keeps_links() and is_link_state(expected)
+
+
 def apply_uninstall(plan: UninstallPlan, game_dir: Path, delete_player_data: bool,
                     recycle: Callable[[list[Path]], None]) -> int:
     """Returns how many player files (a link counts as one) were left in the game folder."""
     game_dir = Path(game_dir)
     # Resolve every path first, so a refusal happens before the first deletion.
-    delete_paths = [(rel, *_resolve_game_path(game_dir, rel)) for rel in plan.delete]
+    delete_paths = [(rel, _entry_path(game_dir, rel), False) if _is_kept_link(plan.hashes.get(rel))
+                    else (rel, *_resolve_game_path(game_dir, rel)) for rel in plan.delete]
     player = [_entry_path(game_dir, rel) for rel in plan.player_files]
     for rel, path, linked in delete_paths:
         expected = plan.hashes.get(rel)
-        if linked:
+        if _is_kept_link(expected):
+            if _recorded_link(game_dir, rel, expected) is None:
+                player.append(path)  # changed since planning: now the player's
+            else:
+                path.unlink()
+                _prune_empty_dirs(path.parent, game_dir)
+        elif linked:
             pass  # never touched; its link entry is kept below
         elif expected is not None and path.exists() and (not path.is_file() or hash_file(path) != expected):
             player.append(path)  # changed since planning: now the player's

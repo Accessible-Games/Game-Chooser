@@ -155,12 +155,23 @@ def extract_tar(archive: Path, dest: Path, cancel: CancelCheck) -> None:
         raise ExtractError(messages.EXTRACT_FAILED) from exc
 
 
-def _refuse_links_leaving(dest: Path) -> None:
-    """Archives must not leave links (symlinks or junctions) in `dest`: they could point anywhere."""
+def _link_stays_inside(path: Path, dest: Path) -> bool:
+    """A Mac app's own link: a relative target that names something inside `dest` (a framework's Versions/Current)."""
+    target = os.readlink(path)
+    resolved = Path(os.path.realpath(path))
+    return (not os.path.isabs(target) and resolved.exists()
+            and resolved.is_relative_to(Path(os.path.realpath(dest))))
+
+
+def _refuse_links_leaving(dest: Path, mac: bool = False) -> None:
+    """Archives must not leave links (symlinks or junctions) in `dest`: they could point anywhere. On a Mac a link
+    that stays inside `dest` is kept, as Mac apps ship them."""
     for current, dirs, files in os.walk(dest):
         for name in dirs + files:
             path = Path(current) / name
             if path.is_symlink() or path.is_junction():
+                if mac and path.is_symlink() and _link_stays_inside(path, dest):
+                    continue
                 log.warning("extraction produced a link: %s", path)
                 raise ExtractError(messages.EXTRACT_UNSAFE_LINK)
 
@@ -300,14 +311,14 @@ class Extractor:
             stray = target / msi.name
             if stray.is_file():
                 stray.unlink()
-        _refuse_links_leaving(dest)
+        _refuse_links_leaving(dest, mac)
         if nested_image:
             image = safe_join(dest, nested_image)
             if not image.is_file():
                 raise ExtractError(messages.EXTRACT_DISK_IMAGE_MISSING)
             self._copy_disk_image(image, image.parent, cancel)
             image.unlink()
-            _refuse_links_leaving(dest)
+            _refuse_links_leaving(dest, mac)
         if mac:
             mark_mac_programs(dest)
         return content_root(dest, install.get("extract_dir"))
