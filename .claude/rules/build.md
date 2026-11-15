@@ -32,13 +32,22 @@ is deleted before Nuitka runs; a build that fails the check has its dist folder 
 distributed.
 
 ## macOS build
-`./build_macos.sh` (on a Mac only) builds `build/Game Chooser.app` for the Mac's own processor with the same pinned
+`./build_macos.sh` (on a Mac only) builds `build/game-chooser.app` for the Mac's own processor with the same pinned
 Nuitka (`--mode=app`), leaves tracing out and runs `check_no_tracing.py` on the bundle. It has no tracing variant.
 It fetches `bin/7zz` when missing, stops when `7zz` doesn't run on this processor (7-Zip's Mac download is arm64
 only), and ships it with its license in `Contents/MacOS/bin/` (where `default_tools_dir` looks). It copies `LICENSE.txt`, `THIRD_PARTY-macos.md` (as
 `THIRD_PARTY.md`) and `licenses/` into `Contents/Resources/`, then signs the bundle again ad hoc, since adding files
 breaks Nuitka's signature. `collect_licenses.py` takes Python's license from `lib/python3.X/` off Windows and skips
 pywin32 there. A new component built into the Mac app needs an entry in `THIRD_PARTY-macos.md`.
+
+## macOS uninstall
+`bash uninstall_macos.sh [--dry-run] [--yes] [--delete-games]` removes the app (`./game-chooser.app` in the
+current directory, else `~/Applications/game-chooser.app`), the config dir, `~/Library/Preferences/game-chooser.plist` (through `defaults delete` first, so
+cfprefsd doesn't write it back), and the saved state, cache, HTTPStorages and WebKit folders named after the bundle
+id (`game-chooser`, Nuitka's default from `--macos-app-name`). It also removes the same items under the
+old name, `Game Chooser`, which builds used before the rename. It stops when `game-chooser` is running. Library
+folders are kept unless `--delete-games` is given; their paths come from `config.json`, so that flag only works
+while the config dir still exists.
 
 ## Release workflow
 `.github/workflows/release.yml` runs when a tag starting with `v` is pushed, in three jobs. `windows` (on
