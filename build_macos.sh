@@ -2,7 +2,7 @@
 # Build script for the Game Chooser macOS app bundle using Nuitka
 # Run this on a Mac with: bash build_macos.sh
 #
-# Builds build/Game Chooser.app for the Mac's current processor (arm64 or x86_64).
+# Builds build/game-chooser.app for the Mac's current processor (arm64 or x86_64).
 
 set -u
 
@@ -12,8 +12,7 @@ if [ "$(uname)" != "Darwin" ]; then
 fi
 
 OUT=build
-APP_NAME="Game Chooser"
-BUILT_APP="$OUT/game-chooser.app"
+APP_NAME="game-chooser"
 APP="$OUT/$APP_NAME.app"
 REPORT="$OUT/compilation-report.xml"
 
@@ -31,7 +30,7 @@ if ! lipo -archs bin/7zz | grep -qw "$(uname -m)"; then
 fi
 
 # Clean the previous build (only Nuitka's own folders and the app: build/ may hold other things)
-rm -rf "$BUILT_APP" "$APP" "$OUT/game-chooser.build" "$OUT/game-chooser.dist"
+rm -rf "$APP" "$OUT/game-chooser.build" "$OUT/game-chooser.dist"
 rm -f "$REPORT"
 
 # nuitka isn't a project dependency; uv supplies it for this run, pinned like the Windows build's
@@ -53,11 +52,10 @@ uv run --with nuitka==4.3.5 python -m nuitka \
     exit 1
 }
 
-if [ ! -x "$BUILT_APP/Contents/MacOS/game-chooser" ]; then
-    echo "$BUILT_APP/Contents/MacOS/game-chooser not found."
+if [ ! -x "$APP/Contents/MacOS/game-chooser" ]; then
+    echo "$APP/Contents/MacOS/game-chooser not found."
     exit 1
 fi
-mv "$BUILT_APP" "$APP" || exit 1
 
 uv run python scripts/check_no_tracing.py "$REPORT" "$APP" || {
     echo "The build failed the tracing check (see above); it must not be distributed."

@@ -17,7 +17,7 @@ Part of macOS. Used to unpack zip downloads. Not shipped.
 
 # Bundled in the app
 
-The macOS build compiles these into `Game Chooser.app`. `build_macos.sh` copies their license texts into
+The macOS build compiles these into `game-chooser.app`. `build_macos.sh` copies their license texts into
 `Contents/Resources/licenses/` at build time (`scripts/collect_licenses.py`).
 
 - **Python** (the standard library and its extension modules): Python Software Foundation License.

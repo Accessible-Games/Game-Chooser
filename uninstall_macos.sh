@@ -18,8 +18,8 @@ if [ "$(uname)" != "Darwin" ]; then
 fi
 
 APP_NAME="Game Chooser"
-APP_BUNDLE="$APP_NAME.app"
-BUNDLE_ID="Game Chooser"
+APP_BUNDLE="game-chooser.app"
+BUNDLE_ID="game-chooser"
 PROCESS_NAME="game-chooser"
 CONFIG_DIR="$HOME/Library/Application Support/GameChooser"
 PREFS_FILE="$HOME/Library/Preferences/$BUNDLE_ID.plist"
