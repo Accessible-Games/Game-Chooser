@@ -81,3 +81,23 @@ def test_one_scan_at_a_time_and_one_more_after():
     assert gate.done() is True                                         # one more scan, now running
     assert gate.done() is False
     assert gate.request() is True
+
+
+def test_a_stale_row_is_replaced_in_the_same_pass():
+    other = {"dice": dict(ENTRY, stores=[{"store": "steam", "app_id": 7, "platforms": ["windows"]}])}
+    assert change(found(7), [row()], other) == ([("dice", 7)], [FULL])               # the entry's Steam id changed
+    no_demo = {"dice": dict(ENTRY, stores=[{"store": "steam", "app_id": FULL, "platforms": ["windows"]}])}
+    assert change(found(FULL, DEMO), [row(DEMO)], no_demo) == ([("dice", FULL)], [DEMO])   # the entry dropped its demo
+    assert change(found(DEMO), [row(DEMO)], no_demo) == ([], [DEMO])                 # and the full game is not installed
+
+
+def test_two_steam_rows_for_one_entry_become_one():
+    first, second = row(FULL), row(DEMO)
+    add, remove = steam_changes(ENTRIES, found(FULL), [first, second], "windows")
+    assert add == [] and len(remove) == 1 and remove[0] is second                    # the very object from the list
+    add, remove = steam_changes(ENTRIES, found(FULL, DEMO), [row(DEMO), row(DEMO)], "windows")
+    assert [(f["catalog_id"], f["steam_app_id"]) for f in add] == [("dice", FULL)] and len(remove) == 2
+
+
+def test_a_row_whose_entry_is_no_longer_a_game_leaves():
+    assert change(found(FULL), [row()], {"dice": dict(ENTRY, kind="extra")}) == ([], [FULL])
