@@ -53,9 +53,21 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   columns Title / Developer / Genre (the main one) / Price / Details (tags, no longer supported, installed), each
   one sortable (Price by `catalog_view.price_sort_key`: what can be played for free first, then by the amount
   shown, amounts compared as plain numbers whatever the currency; nothing recorded last), and an
-  action button that reads Install / Add / Launch per row (`catalog_view.action_kind`). Links open in the
+  action button that reads Install / Add / Get / Launch per row (`catalog_view.action_kind`). Links open in the
   browser only when the player chooses them. The panel never fetches: `MainFrame.start_index_fetch` fetches on a
   worker and hands the state to `_take_index` through `run_when_no_dialog`. Retry and F5 fetch again.
+- **Stores** (an entry's `stores`, read by `engine.stores.stores_of`). A row's places (`engine.entries.places`,
+  `CatalogRow.places`) are the ways to get it on this system, in order: the app's own (Install or Add with Game
+  Chooser), then each store in entry order (Steam, then "Steam demo" when it has one, or the store's name). A row
+  with any place but the app's alone reads Get (`CatalogPanel._get`): one place is gone to at once, several open
+  `MainFrame.choose_place` (a list inside `modal_dialog()`; Cancel changes nothing). The app's place opens the
+  install confirmation; a store opens its page in the browser; Steam is reached only through
+  `MainFrame.steam_send(steam.GET_ACTION, app id)`. When Steam is absent (not installed, or not Windows:
+  `messages.steam_absent`) the app asks whether to open the full game's Steam page instead, for the demo too; an
+  address Windows refused is told and nothing more opens. "Random Game to Install" picks by
+  `catalog_view.app_action` (the app installs it), so a game that also has a store is still offered, and Yes
+  opens the install confirmation. Each store's page is also a link ("<store> store page"), from `entry_links`,
+  after the entry's own links and before the pricing pages.
 - **Catalog schema v2** (index `schema_version` 2; a saved v1 index still loads, and its old shapes, `flags` and
   `links` as an object, are skipped). The description lists the entry's text, then Price (`engine/pricing.py`:
   player wording, "price as of", `pricing.note`), genres, tags, languages, `contains`, "No longer supported", then

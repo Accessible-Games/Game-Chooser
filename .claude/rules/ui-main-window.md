@@ -168,8 +168,8 @@ What differs between the tabs, each a setting passed to `GamesPanel`:
 | `row_filter` | View > Libraries (hidden libraries) | none |
 | `on_key` | Del | none |
 | `on_shown` | `update_tab_menus` (Edit Game follows the selection) | none |
-| `on_action`, `context_menu` | launch; `build_list_menu` | install, add or launch; the action and links |
-| `random_game` candidates, and what Yes does | the listed games that run on this system; launch | any listed row, its own action (Ctrl+R); the rows that install, the install confirmation (Ctrl+Shift+R) |
+| `on_action`, `context_menu` | launch; `build_list_menu` | install, add, get or launch; the action and links |
+| `random_game` candidates, and what Yes does | the listed games that run on this system; launch | any listed row, its own action (Ctrl+R); the rows the app installs (not those got only from a store), the install confirmation (Ctrl+Shift+R) |
 
 Each view saves under its own prefix (none for the Library, `catalog_` for the Catalog): the selected row, the
 search, the tree selections, the sort, the column widths and the splitter position. The Catalog's status line and Retry are
@@ -193,9 +193,10 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - **F5**: Library: rebuild list, tree and menu and recheck Status. Catalog: check for catalog updates.
 - **Ctrl+R**: random game from the active tab's filtered list (`GamesPanel.random_game`: it asks with the row's
   own verb, and on Yes selects the row and acts). Library: among the games that run on this system (web games
-  included); Yes launches. Catalog: any listed row; Yes runs that row's action (Install, Add or Launch).
+  included); Yes launches. Catalog: any listed row; Yes runs that row's action (Install, Add, Get or Launch).
 - **Ctrl+Shift+R** (Launch > Random Game to Install): random game from the Catalog tab's filtered list that
-  installs (`catalog_view.install_candidates`: not installed, not a web game, no job queued or running); switches to
+  installs (`catalog_view.install_candidates`: not installed, not a web game, not got only from a store, no job
+  queued or running); switches to
   the Catalog tab first, asks, then opens the install confirmation as the Install button does.
 - **Del**: Library only (Uninstall for a tracked catalog install, forget for an untracked one, else delete).
 - **Ctrl+E**: Library only; refuses catalog games and says why (its accelerator stays enabled for that, while the
@@ -203,7 +204,7 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
   both down) is a letter on several layouts and is not Ctrl+E.
 - **Ctrl+N** add game, **Ctrl+F** the active tab's search box, **Ctrl+Enter** open folder, **Ctrl+,** preferences.
 - In a games list (both tabs; the games-view rules above): **Enter** runs the row's action (Launch on the
-  Library; Install, Add or Launch on the Catalog), always. **Space** does too, except for 3 seconds after a typed
+  Library; Install, Add, Get or Launch on the Catalog), always. **Space** does too, except for 3 seconds after a typed
   character, when it belongs to the text. **Typing** jumps to the title that starts with what was typed; Escape,
   Backspace and the navigation keys end the text. A **digit** sorts by that column, with neither Ctrl nor Alt
   held and no text being typed.
@@ -227,7 +228,9 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
   catalog game can't be edited (Ctrl+E); in the forget flow when nothing was forgotten; after a catalog action
   from the context menu (Update, Extras, Undo, Repair, Uninstall); when Uninstall is refused, and after its
   dialog; after the damaged-file message at startup. Catalog: at every exit of Install (already queued, could not
-  be planned, the confirmation confirmed or cancelled) and of adding a web game. Add, Edit, Delete of a game
+  be planned, the confirmation confirmed or cancelled), of adding a web game, and of Get when it showed a dialog
+  (the choice of places, Steam's "couldn't be opened" or the offer of its store page; Get with one place and no
+  dialog makes none). Add, Edit, Delete of a game
   added by hand, a forget that succeeded, Locate, the random-game prompt and the Catalog's "not in the Library"
   message make no focus call. Inside `random_game` the action runs within `modal_dialog()`, so a
   `focus_active_list()` call it makes is refused.

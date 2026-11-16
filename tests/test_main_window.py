@@ -13,6 +13,7 @@ if not wx.App.IsDisplayAvailable():
 import main_window  # noqa: E402
 from main_window import MainFrame  # noqa: E402
 from engine import messages  # noqa: E402
+from engine.entries import Place  # noqa: E402
 from models import Game  # noqa: E402
 from tests.test_games_panel import app, key_event as key_down  # noqa: E402,F401  (app is a fixture)
 
@@ -117,3 +118,35 @@ def test_locate_accepts_only_the_files_add_game_accepts(frame, monkeypatch, tmp_
         assert frame.game.launch_path == str(picked) and frame.boxes[1:] == ["saved"]
     else:
         assert frame.game.launch_path == gone and [box[0] for box in frame.boxes[1:]] == ["Invalid Executable"]
+
+
+def test_steam_send_checks_that_steam_is_there_first(frame, monkeypatch, tmp_path):
+    sent = []
+    monkeypatch.setattr(main_window.steam, "send", lambda action, app_id: sent.append((action, app_id)))
+    monkeypatch.setattr(main_window.steam, "steam_folder", lambda: None)
+    assert MainFrame.steam_send(frame, "run", 1234560) == "absent" and sent == [] and frame.boxes == []
+    monkeypatch.setattr(main_window.steam, "steam_folder", lambda: tmp_path)
+    assert MainFrame.steam_send(frame, "run", 1234560) == "sent" and sent == [("run", 1234560)]
+    monkeypatch.setattr(main_window.steam, "send", refuse)
+    assert MainFrame.steam_send(frame, "uninstall", 1234560) == "failed"
+    assert [(caption, inside) for caption, _, _, inside in frame.boxes] == [("Steam", True)]
+
+
+def test_the_choice_of_places_is_a_list_inside_modal_dialog(frame, monkeypatch):
+    seen = []
+
+    class Choice:
+        def __init__(self, parent, message, caption, choices):
+            seen.append((message, caption, choices, frame.dialog_active))
+        def __enter__(self): return self
+        def __exit__(self, *exc): return False
+        def ShowModal(self): return self.answer
+        def GetSelection(self): return 1
+
+    monkeypatch.setattr(main_window.wx, "SingleChoiceDialog", Choice)
+    places = [Place("app", "Install with Game Chooser"), Place("store", "itch.io")]
+    Choice.answer = wx.ID_OK
+    assert MainFrame.choose_place(frame, "Alpha", places) is places[1]
+    Choice.answer = wx.ID_CANCEL
+    assert MainFrame.choose_place(frame, "Alpha", places) is None
+    assert seen[0] == ("Where do you want to get Alpha?", "Get Game", ["Install with Game Chooser", "itch.io"], True)

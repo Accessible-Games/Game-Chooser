@@ -505,3 +505,15 @@ PLACE_ADD = "Add to Game Chooser"
 PLACE_STEAM = "Steam"
 PLACE_STEAM_DEMO = "Steam demo"
 STORE_LINK = "{store} store page"
+
+PLACES_PROMPT = "Where do you want to get {title}?"
+PLACES_CAPTION = "Get Game"
+STEAM_CAPTION = "Steam"
+STEAM_NOT_INSTALLED = "Steam isn't installed on this computer."
+STEAM_OPEN_PAGE_INSTEAD = "{why} Open the game's Steam page in your browser instead?"
+STEAM_SEND_FAILED = "Steam couldn't be opened: {error}"
+
+
+def steam_absent(platform: str) -> str:
+    """Why Steam can't be opened, for a catalog platform name"""
+    return STEAM_NOT_INSTALLED if platform == "windows" else STEAM_NEEDS_WINDOWS

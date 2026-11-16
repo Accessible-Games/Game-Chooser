@@ -97,6 +97,11 @@ and `library_actions.may_start_hta` allows only the file that is exactly the ins
 (`launch_from_catalog`), whatever path games.json holds. A game added by hand never gets the host. `MainFrame`
 launches through `library_actions.start_launch_file`, never `start_game` directly.
 
+### Steam
+A Steam address is built only by `engine.steam.address`, from a whole number (the app id). No text from the
+catalog, the saved index, games.json or Steam's files is ever handed to Windows as an address. The app sends one
+only through `MainFrame.steam_send`, which first checks that Steam is installed. Steam is opened on Windows only.
+
 ### Tracing
 Nothing outside `tracing/` and its tests (`tests/tracing/`) imports it; the one exception in app code is
 `game-chooser.py`, inside `try/except ImportError`.

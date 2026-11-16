@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
-"""The Catalog tab: browse the curated catalog, filter it, and install, add or launch a game.
+"""The Catalog tab: browse the curated catalog, filter it, and install, add, get or launch a game.
 
 UI thread only. The panel never fetches anything itself: MainFrame fetches the index on a worker thread and
 hands the result to `set_index_state`. Links open in the browser only when the player chooses them.
@@ -28,8 +28,9 @@ import wx
 
 from smart_list import Column
 
-from catalog_view import action_kind, action_label, build_rows, install_candidates, link_items, price_sort_key
-from engine import messages
+from catalog_view import (action_kind, action_label, app_action, build_rows, install_candidates, link_items,
+                          price_sort_key)
+from engine import messages, steam
 from engine.entries import current_platform, game_fields, places, platform_sources, visible_games
 from games_panel import GamesPanel
 from install_service import InstallService
@@ -156,14 +157,39 @@ class CatalogPanel(wx.Panel):
     # ---- actions -------------------------------------------------------------------------------------------------
 
     def on_action(self):
-        """Enter, Space, double-click or the button: launch an installed game; otherwise install or add it"""
+        """Enter, Space, double-click or the button: launch an installed game; get one from a store (or ask where);
+        otherwise install or add it"""
         row = self.view.selected_row()
         if row is None:
             return
         if row.installed:
             self._launch(row)
+        elif action_kind(row) == "get":
+            self._get(row)
         else:
             self._confirm_install(row)
+
+    def _get(self, row):
+        """Get: go to the row's one place, or ask which of its places"""
+        asked = len(row.places) > 1
+        place = self.frame.choose_place(row.title, row.places) if asked else row.places[0]
+        if place is not None and place.kind == "app":
+            self._confirm_install(row)  # it moves focus back itself
+            return
+        if place is None:
+            pass
+        elif place.kind == "store":
+            webbrowser.open(place.store.url)
+        else:  # "steam" or "steam-demo"
+            app_id = place.store.app_id if place.kind == "steam" else place.store.demo_app_id
+            sent = self.frame.steam_send(steam.GET_ACTION, app_id)
+            if sent == "absent":
+                why = messages.steam_absent(current_platform())
+                if self.frame._ask(messages.STEAM_OPEN_PAGE_INSTEAD.format(why=why), messages.STEAM_CAPTION):
+                    webbrowser.open(place.store.url)  # the full game's page, for the demo too
+            asked = asked or sent != "sent"  # "failed" was told, "absent" asked
+        if asked:
+            self.frame.focus_active_list()
 
     def _launch(self, row):
         game = self.service.manager.catalog_game(row.id)
@@ -175,7 +201,7 @@ class CatalogPanel(wx.Panel):
 
     def _confirm_install(self, row):
         """Install: confirm where and what first. A web game just gets added to the Library."""
-        if action_kind(row) == "add":
+        if app_action(row) == "add":
             self._add_web_game(row)
             return
         job = self.service.queue.job_for(row.id)
@@ -218,13 +244,15 @@ class CatalogPanel(wx.Panel):
         self.frame.focus_active_list()
 
     def on_random_game(self):
-        """Ctrl+R: a random game from the list as shown (filters applied); Yes runs the row's own action"""
+        """Ctrl+R: a random game from the list as shown (filters applied); Yes runs the row's own action (Install,
+        Add, Get or Launch)"""
         self.view.random_game(self.view.displayed, (messages.CATALOG_NO_GAMES, "No Games"),
                               lambda row: self.on_action())
 
     def on_random_install(self):
         """Ctrl+Shift+R: a random game to install from the list as shown (filters applied), leaving out installed
-        games, web games and games already queued; Yes opens the install confirmation"""
+        games, web games, games got only from a store (Get) and games already queued; Yes opens the install
+        confirmation, also for a game that has a store too"""
         busy = {r.id for r in self.view.displayed if self.service.queue.job_for(r.id) is not None}
         self.view.random_game(install_candidates(self.view.displayed, busy),
                               (messages.CATALOG_NO_GAMES_TO_INSTALL, "No Games"), self._confirm_install,

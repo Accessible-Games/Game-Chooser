@@ -35,7 +35,7 @@ from engine.launch import LaunchCancelled, launch_kind
 from games_panel import GamesPanel
 from catalog_panel import CatalogPanel
 from dialogs import EXECUTABLE_WILDCARD, GameDialog, PreferencesDialog
-from engine import messages
+from engine import messages, steam
 from engine.entries import current_platform as catalog_platform, platform_label
 from engine.records import record_folder
 from engine.status import update_available
@@ -924,6 +924,25 @@ class MainFrame(wx.Frame):
         when they cancelled"""
         with self.modal_dialog(), InstallConfirmDialog(self, plan, self.service, fixed_library=fixed_library) as dlg:
             return dlg.choice if dlg.ShowModal() == wx.ID_OK else None
+
+    def choose_place(self, title, places):
+        """Where to get a game: the Place the player chose, or None when they cancelled"""
+        with self.modal_dialog(), wx.SingleChoiceDialog(self, messages.PLACES_PROMPT.format(title=title),
+                                                        messages.PLACES_CAPTION, [p.label for p in places]) as dlg:
+            return places[dlg.GetSelection()] if dlg.ShowModal() == wx.ID_OK else None
+
+    def steam_send(self, action, app_id) -> str:
+        """Hand Steam an address: "sent"; "absent" when Steam isn't installed (nothing sent, nothing said);
+        "failed" when Windows refused it (the player has been told)"""
+        if steam.steam_folder() is None:
+            return "absent"
+        try:
+            steam.send(action, app_id)
+        except (OSError, ValueError) as error:
+            log.warning("Couldn't send Steam %s %s: %s", action, app_id, error)
+            self._tell(messages.STEAM_SEND_FAILED.format(error=error), messages.STEAM_CAPTION)
+            return "failed"
+        return "sent"
 
     def _confirm_change(self, game, action):
         """Update or Extras: the confirmation dialog for that plan, with the game's library fixed"""

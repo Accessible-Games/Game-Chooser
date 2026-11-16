@@ -10,7 +10,7 @@ import pytest
 wx = pytest.importorskip("wx")
 
 from catalog_panel import CatalogPanel  # noqa: E402
-from engine import messages  # noqa: E402
+from engine import messages, steam  # noqa: E402
 from tests.test_games_panel import (FakeFrame, Saves, app, as_shown, click_header, entry, headers, press,  # noqa: E402,F401
                                     saved, titles)  # (app is a fixture)
 
@@ -22,6 +22,22 @@ class Frame(FakeFrame):
         super().__init__(manager)
         self.confirmed, self.launched, self.changes = [], [], 0
         self.choice = SimpleNamespace(library_id="lib", library_path="C:/Games", extras=("manual",))
+        self.picks, self.sent, self.asked = [], [], []
+        self.pick = lambda places: None
+        self.steam = "sent"
+        self.yes = True
+
+    def choose_place(self, title, places):
+        self.picks.append((title, [p.label for p in places]))
+        return self.pick(places)
+
+    def steam_send(self, action, app_id):
+        self.sent.append((action, app_id))
+        return self.steam
+
+    def _ask(self, text, caption, style=None):
+        self.asked.append((text, caption))
+        return self.yes
 
     def active_tab(self):
         return "catalog"
@@ -162,3 +178,80 @@ def test_an_ampersand_in_a_title_or_a_link_label_is_shown_not_taken_as_an_access
     menu = panel.context_menu(view.selected_row())
     assert [item.GetItemLabelText() for item in menu.GetMenuItems()] == ["Install Tom & Jerry", "Open Manual & FAQ"]
     menu.Destroy()
+
+
+# ---- Get: a row that is got from a store ------------------------------------------------------------------------
+
+STEAM = {"store": "steam", "app_id": 1234560, "platforms": ["windows"]}
+STEAM_DEMO = dict(STEAM, demo_app_id=1234570)
+ITCH = {"store": "itch.io", "url": "https://dev.itch.io/game", "platforms": ["windows"]}
+PAGE = "https://store.steampowered.com/app/1234560/"
+
+
+def store_entry(id, *stores, download=True):
+    e = dict(entry(id), stores=list(stores))
+    if not download:
+        del e["sources"]
+    return e
+
+
+@pytest.fixture
+def opened(monkeypatch):
+    pages = []
+    monkeypatch.setattr("catalog_panel.webbrowser.open", pages.append)
+    return pages
+
+
+def test_one_store_goes_straight_to_its_page(make_panel, opened):
+    panel = make_panel(entries=[store_entry("alpha", ITCH, download=False)])
+    press_action_button(panel, "Alpha")
+    assert panel.view.action_btn.GetLabel() == "Get Alpha"
+    assert opened == ["https://dev.itch.io/game"] and panel.frame.picks == [] and panel.frame.sent == []
+
+
+def test_steam_alone_sends_the_get_address(make_panel, opened):
+    panel = make_panel(entries=[store_entry("alpha", STEAM, download=False)])
+    press_action_button(panel, "Alpha")
+    assert panel.frame.sent == [(steam.GET_ACTION, 1234560)] and panel.frame.picks == [] and opened == []
+
+
+def test_more_than_one_place_asks_and_goes_where_the_player_chose(make_panel, opened):
+    panel = make_panel(entries=[store_entry("alpha", STEAM_DEMO, ITCH)])
+    labels = ["Install with Game Chooser", "Steam", "Steam demo", "itch.io"]
+    for chosen in (None, 0, 1, 2, 3):
+        panel.frame.pick = lambda places, i=chosen: None if i is None else places[i]
+        press_action_button(panel, "Alpha")
+    assert panel.frame.picks == [("Alpha", labels)] * 5
+    assert panel.frame.confirmed == ["alpha"]                       # only choice 0 opens the install confirmation
+    assert panel.frame.sent == [(steam.GET_ACTION, 1234560), (steam.GET_ACTION, 1234570)]
+    assert opened == ["https://dev.itch.io/game"]
+
+
+@pytest.mark.parametrize("platform, why", [("windows", messages.STEAM_NOT_INSTALLED),
+                                           ("macos", messages.STEAM_NEEDS_WINDOWS)])
+def test_steam_missing_offers_the_store_page_of_the_full_game(make_panel, opened, monkeypatch, platform, why):
+    demo_mac = dict(STEAM_DEMO, platforms=["windows", "macos"])
+    panel = make_panel(entries=[store_entry("alpha", demo_mac)])     # its windows download is the app's place
+    monkeypatch.setattr("catalog_panel.current_platform", lambda: platform)
+    panel.refresh_rows()
+    panel.frame.steam = "absent"
+    panel.frame.pick = lambda places: places[-1]                     # the demo
+    press_action_button(panel, "Alpha")
+    assert panel.frame.asked == [(messages.STEAM_OPEN_PAGE_INSTEAD.format(why=why), "Steam")]
+    assert opened == [PAGE]
+    panel.frame.yes = False
+    press_action_button(panel, "Alpha")
+    assert opened == [PAGE]                                          # No opens nothing
+
+
+def test_a_refused_address_opens_nothing_more(make_panel, opened):
+    panel = make_panel(entries=[store_entry("alpha", STEAM, download=False)])
+    panel.frame.steam = "failed"                                     # steam_send has told the player
+    press_action_button(panel, "Alpha")
+    assert panel.frame.asked == [] and opened == []
+
+
+def test_a_random_install_of_a_game_with_a_store_opens_the_install_confirmation(make_panel, opened):
+    panel = make_panel(entries=[store_entry("alpha", ITCH)])
+    panel._confirm_install(panel.view.displayed[0])                  # what Ctrl+Shift+R runs on its pick
+    assert panel.frame.confirmed == ["alpha"] and panel.frame.picks == []
