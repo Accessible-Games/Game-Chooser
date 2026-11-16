@@ -820,5 +820,17 @@ def test_an_id_stays_pending_until_a_scan_sees_it_change(rig):
     assert service.steam_pending == {}
     service.steam_sent(FULL)                                   # an uninstall: installed when sent
     assert service.steam_pending == {FULL: True}
+    service.take_steam_scan(found(complete=False))             # a library was not read: it cannot tell
+    assert service.steam_pending == {FULL: True}
     service.take_steam_scan(Scan("absent"))
     assert service.steam_pending == {}
+
+
+def test_matching_with_no_scan_kept_writes_nothing(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    service.manager.games.append(Game(title="Hand", launch_path="C:/hand.exe"))
+    service.manager.save_games()
+    before = service.manager.games_file.read_bytes()
+    assert service.match_steam() is False
+    assert service.manager.games_file.read_bytes() == before

@@ -163,9 +163,11 @@ class InstallService:
         self.steam_scan = scan
         if scan.state == "absent":
             self.steam_pending.clear()
-        else:
-            self.steam_pending = {i: was for i, was in self.steam_pending.items()
-                                  if i in scan.unsure or (i in scan.apps) == was}
+        else:  # settled only when the scan saw it installed, or saw it surely gone
+            def settled(i, was):
+                gone = i not in scan.apps and scan.complete and i not in scan.unsure
+                return (i in scan.apps and not was) or (gone and was)
+            self.steam_pending = {i: was for i, was in self.steam_pending.items() if not settled(i, was)}
         return self.match_steam()
 
     def match_steam(self) -> bool:
