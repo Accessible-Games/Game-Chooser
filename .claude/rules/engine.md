@@ -24,6 +24,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   `platform_sources` skips sources whose `arch` this machine can't run (`runs_on`, `current_arch`: x86 runs on x64
   Windows and Linux; Windows on Arm runs x64 and x86; an Apple Silicon Mac runs x64; pass `machine` in tests).
   **pricing.py** - how `pricing` reads, the Price filter values and the install confirmation's price warning.
+  **steam.py** - the only builder of a Steam address (`address`, from a plain positive int), `store_page`, and
+  where Steam is installed. **stores.py** - `stores_of(entry)` reads an entry's `stores` into `Store`s (name,
+  platforms, page address, Steam's app and demo ids); an item of the wrong shape is skipped.
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
   An HTTP 404 or 410 is `DownloadGone` ("no longer available"), never "couldn't be reached"; `NoVerifiedSource.gone`
@@ -70,7 +73,8 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   further requires each runtime to be usable here); `paths.same_folder` and `folder_key` (as text),
   `same_on_disk`, `is_link`, `is_code`, `walk_files` (skips only linked folders and those `skip` names: backups are
   the player's), `write_atomic` (temp file, then replace; the temp file goes if that fails); `pricing.http_url` (an
-  http or https address with a host and no spaces); `safety.plain_file` ("is this still the recorded file", read
+  http or https address with a host and no spaces); `steam.address` (the only builder of a Steam address, from a
+  plain positive int); `stores.stores_of` (the only reader of an entry's `stores`); `safety.plain_file` ("is this still the recorded file", read
   errors raised) and `remove_unchanged`; `runtimes.runtime_route` (shared, private or skipped); `errors.check_cancel`.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan (the price warning on installs, `first_run_download_size` added to the size), and
