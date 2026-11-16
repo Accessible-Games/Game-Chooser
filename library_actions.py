@@ -71,7 +71,8 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
     (catalog_view.homepage_item).
     A tracked install gets Update (when one is available), Undo last update, Extras…, Repair, Uninstall and its
     links; while the game is no longer in the catalog, only Uninstall. One whose uninstall stopped partway gets
-    Uninstall (to finish it) and its links.
+    Uninstall (to finish it) and its links. A Steam row gets "Uninstall through Steam" (Steam's own uninstall) and
+    its links, whatever its record says.
     """
     if not game.catalog_id:
         return []
@@ -98,9 +99,10 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
 
 
 def delete_kind(game, record) -> str:
-    """What Delete does with a game: "uninstall" (a tracked catalog install, or one whose uninstall stopped partway:
-    the Uninstall dialog), "forget" (an untracked one: remove it from the list and forget its record, files
-    untouched) or "delete" (anything else: the usual confirmation, then it leaves the list)."""
+    """What Delete does with a game: "uninstall" (a Steam row: Steam's own uninstall; a tracked catalog install, or one
+    whose uninstall stopped partway: the Uninstall dialog), "forget" (an untracked one: remove it from the list and
+    forget its record, files untouched) or "delete" (anything else: the usual confirmation, then it leaves the
+    list)."""
     if game.is_steam:
         return "uninstall"
     if not game.catalog_id or game.is_web:

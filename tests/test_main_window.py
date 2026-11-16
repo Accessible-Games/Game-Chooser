@@ -12,7 +12,7 @@ if not wx.App.IsDisplayAvailable():
 
 import main_window  # noqa: E402
 from main_window import MainFrame  # noqa: E402
-from engine import messages  # noqa: E402
+from engine import messages, steam  # noqa: E402
 from engine.entries import Place  # noqa: E402
 from models import Game  # noqa: E402
 from engine import steam_scan  # noqa: E402
@@ -213,3 +213,57 @@ def test_f5_scans_on_either_tab(frame, scans):
         MainFrame.on_refresh(frame, None)
         scans[-1][1](Scan("unknown"))                        # that scan ends
     assert len(scans) == 2
+
+
+# ---- a Steam row ------------------------------------------------------------------------------------------------
+
+@pytest.fixture
+def steam_frame(frame, monkeypatch):
+    frame.game = Game(title="Dugout Dice", catalog_id="dice", platforms=[], steam_app_id=5054570)
+    frame.selected_game = lambda: frame.game
+    frame.sent, frame.scans, frame.pending, frame.answer = [], [], [], "sent"
+    frame.steam_send = lambda action, app_id: frame.sent.append((action, app_id)) or frame.answer
+    frame.start_steam_scan = lambda: frame.scans.append(1)
+    frame.service.steam_sent = frame.pending.append
+    frame.focus_active_list = lambda: None
+    monkeypatch.setattr(main_window, "start_launch_file", refuse)      # a Steam row has no file to start
+    return frame
+
+
+def test_a_steam_row_launches_through_steam_and_does_not_minimize(steam_frame):
+    MainFrame.launch_game(steam_frame, steam_frame.game)               # its platforms are empty: not asked
+    assert steam_frame.sent == [(steam.LAUNCH_ACTION, 5054570)]
+    assert steam_frame.boxes == [] and steam_frame.pending == [] and steam_frame.scans == []
+
+
+def test_a_steam_row_is_uninstalled_through_steam_with_no_dialog_of_the_apps(steam_frame):
+    MainFrame.uninstall_game(steam_frame, steam_frame.game)
+    assert steam_frame.sent == [("uninstall", 5054570)] and steam_frame.pending == [5054570]
+    assert steam_frame.boxes == []
+
+
+@pytest.mark.parametrize("act", [MainFrame.launch_game, MainFrame.uninstall_game])
+def test_steam_gone_says_so_sends_nothing_more_and_scans(steam_frame, act):
+    steam_frame.answer = "absent"
+    act(steam_frame, steam_frame.game)
+    assert [(caption, inside) for caption, _, _, inside in steam_frame.boxes] == [("Steam", True)]
+    assert steam_frame.scans == [1] and steam_frame.pending == []
+
+
+def test_a_refused_uninstall_address_is_not_pending(steam_frame):
+    steam_frame.answer = "failed"                                      # steam_send has told the player
+    MainFrame.uninstall_game(steam_frame, steam_frame.game)
+    assert steam_frame.pending == [] and steam_frame.scans == []
+
+
+def test_open_folder_on_a_steam_row_opens_the_folder_the_scan_found(steam_frame, monkeypatch, tmp_path):
+    opened = []
+    monkeypatch.setattr(main_window.subprocess, "Popen", opened.append)
+    steam_frame.service.steam_folder_of = lambda game: tmp_path
+    MainFrame.on_open_folder(steam_frame, None)
+    assert opened == [["explorer", str(tmp_path)]] and steam_frame.boxes == []
+    for folder in (None, tmp_path / "gone"):
+        steam_frame.service.steam_folder_of = lambda game, folder=folder: folder
+        MainFrame.on_open_folder(steam_frame, None)
+    assert len(opened) == 1
+    assert [caption for caption, *_ in steam_frame.boxes] == ["Folder Not Found"] * 2

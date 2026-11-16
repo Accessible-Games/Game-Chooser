@@ -370,7 +370,7 @@ class MainFrame(wx.Frame):
 
     def start_steam_scan(self):
         """Look for installed Steam games on a worker (startup, F5, a library added, the window coming forward while
-        a request to Steam is pending). While a scan runs, one more follows it."""
+        a request to Steam is pending, Steam found absent on a Steam row). While a scan runs, one more follows it."""
         if self._steam_gate.request():
             self._run_steam_scan()
 
@@ -692,16 +692,21 @@ class MainFrame(wx.Frame):
         if game.is_web:
             return
 
-        full_path = self.library_manager.get_full_path(game)
+        if game.is_steam:  # the folder the last scan found, opened itself: there is no launch file to highlight
+            folder = self.service.steam_folder_of(game)
+            full_path = game_dir = str(folder) if folder is not None and folder.is_dir() else None
+        else:
+            full_path = self.library_manager.get_full_path(game)
+            game_dir = full_path and str(Path(full_path).parent)
         if not full_path or not Path(full_path).exists():
             self._tell("Game folder not found.", "Folder Not Found")
             return
 
-        game_dir = str(Path(full_path).parent)
-
         try:
             system = platform.system()
-            if system == "Windows":
+            if system == "Windows" and game.is_steam:
+                subprocess.Popen(['explorer', game_dir])
+            elif system == "Windows":
                 # Open folder and highlight the executable
                 subprocess.Popen(['explorer', '/select,', full_path])
             elif system == "Darwin":
@@ -710,6 +715,11 @@ class MainFrame(wx.Frame):
             self._tell(f"Failed to open folder: {e}", "Error")
 
     def launch_game(self, game):
+        if game.is_steam:  # Steam starts it: no platform check, no launch observer, and the window stays as it is
+            if self.steam_send(steam.LAUNCH_ACTION, game.steam_app_id) == "absent":
+                self._tell(messages.steam_absent(catalog_platform()), messages.STEAM_CAPTION, wx.ICON_INFORMATION)
+                self.start_steam_scan()  # its row leaves
+            return
         if game.is_web:
             webbrowser.open(game.launch_path)
             return
@@ -992,7 +1002,18 @@ class MainFrame(wx.Frame):
         unless ticked. The game leaves the list when the uninstall finishes.
 
         The player's files are counted (hashed) on a worker thread first, after the checks that could refuse it;
-        a slow count is announced with a notification, and the dialog opens when the count arrives."""
+        a slow count is announced with a notification, and the dialog opens when the count arrives.
+
+        A Steam row is handed to Steam, which asks the player itself: no count and no dialog of the app's own."""
+        if game.is_steam:
+            sent = self.steam_send("uninstall", game.steam_app_id)
+            if sent == "sent":
+                self.service.steam_sent(game.steam_app_id)  # the window coming forward scans until Steam is done
+            elif sent == "absent":
+                self._tell(messages.steam_absent(catalog_platform()), messages.STEAM_CAPTION, wx.ICON_INFORMATION)
+                self.start_steam_scan()  # its row leaves
+            self.focus_active_list()
+            return
         cid = game.catalog_id
         if cid in self._counting:  # already counting for this game: its dialog is coming
             return

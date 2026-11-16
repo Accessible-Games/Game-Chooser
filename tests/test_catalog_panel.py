@@ -64,7 +64,7 @@ class Service:
 
     def __init__(self, entries, installed=()):
         self.index_state = SimpleNamespace(newer_app_needed=False, error=None, entries=entries)
-        self.jobs, self.submitted, self.added = {}, [], []
+        self.jobs, self.submitted, self.added, self.pending = {}, [], [], []
         self.queue = SimpleNamespace(
             job_for=lambda cid: SimpleNamespace(state=self.jobs[cid]) if cid in self.jobs else None)
         self.manager = SimpleNamespace(catalog_game=lambda cid: SimpleNamespace(title=cid.title()),
@@ -78,6 +78,9 @@ class Service:
 
     def submit(self, *args):
         self.submitted.append(args)
+
+    def steam_sent(self, app_id):
+        self.pending.append(app_id)
 
 
 @pytest.fixture
@@ -254,6 +257,14 @@ def test_a_refused_address_opens_nothing_more(make_panel, opened):
     panel.frame.steam = "failed"                                     # steam_send has told the player
     press_action_button(panel, "Alpha")
     assert panel.frame.asked == [] and opened == []
+
+
+def test_a_get_sent_to_steam_is_pending_and_a_refused_one_is_not(make_panel, opened):
+    panel = make_panel(entries=[store_entry("alpha", STEAM, download=False)])
+    for answer in ("sent", "failed", "absent"):
+        panel.frame.steam = answer
+        press_action_button(panel, "Alpha")
+    assert panel.service.pending == [1234560]
 
 
 def test_a_random_install_of_a_game_with_a_store_opens_the_install_confirmation(make_panel, opened):

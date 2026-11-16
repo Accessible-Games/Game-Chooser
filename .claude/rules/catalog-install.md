@@ -8,10 +8,12 @@ paths:
   - "/main_window.py"
   - "/progress_area.py"
   - "/description_field.py"
+  - "/steam_games.py"
   - "/tests/test_install_*.py"
   - "/tests/test_catalog_view.py"
   - "/tests/test_library_*.py"
   - "/tests/test_wx_bridge.py"
+  - "/tests/test_steam_games.py"
 ---
 
 # Catalog, installing and launching
@@ -27,13 +29,16 @@ paths:
   player's games), filters, `pick_index`, the type-ahead matching, description text, links, and the English
   names of ISO 639-1 language codes (unknown codes shown as written)
 - **wx_bridge.py** - queue listener and installer-UI bridges to the UI thread, `run_in_background`
+- **steam_games.py** - wx-free: `steam_changes` (the Steam rows a scan adds and removes) and `ScanGate` (one Steam
+  scan at a time)
 
 ## Install service (`install_service.py`)
 `InstallService(manager, listener, installer_ui, ...)` ties together the index (`IndexState`), `InstallEngine`,
 `InstallQueue` (log `install.log`), `manager.records` and the libraries. Main members:
 `installed_ids`, `plan`, `blocked`, `submit(action, entry_id, library_id, library_path, ...)`, `apply_result`,
 `job_failed`, `forget`, `player_files`, `record_for`, `entry_for`, `statuses`, `ensure_library`, `library_games`,
-`check_library_removable`, `remove_library`, `adopt_launch_paths`.
+`check_library_removable`, `remove_library`, `adopt_launch_paths`, and for Steam `take_steam_scan`, `match_steam`,
+`steam_sent`, `steam_folder_of`, `also_on_steam` (Installed Steam games, below).
 
 Which thread each member runs on: see CLAUDE.md (Threading).
 
@@ -64,7 +69,8 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   nothing). The app's place opens the install confirmation; a store opens its page in the browser; Steam is
   reached only through `MainFrame.steam_send(steam.GET_ACTION, app id)`. When Steam is absent (not installed,
   or not Windows: `messages.steam_absent`) the app asks whether to open the full game's Steam page instead, for
-  the demo too; an address Windows refused is told and nothing more opens. "Random Game to Install" picks by
+  the demo too; an address Windows refused is told and nothing more opens. A Get Steam took ("sent") makes its
+  id pending (Installed Steam games, below). "Random Game to Install" picks by
   `catalog_view.app_action` (the app installs it), so a game that also has a store is still offered. It asks
   "Install now?", not the row's Get, and Yes opens the install confirmation. Each store's page is also a link
   ("<store> store page"), from `entry_links`, after the entry's own links and before the pricing pages.
@@ -102,6 +108,7 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   Uninstall, and Delete opens it. Shared runtimes' records (kind "runtime") are never Library games: plan-2 code
   reads records through `RecordStore.game_records` / `load_game` / `delete_game`. Removing a library with installs is
   **Remove library**. **Edit is only for games added by hand** (`is_editable`: no `catalog_id`, no `library_id`).
+  A Steam row's menu and Delete are Steam's (Installed Steam games, below).
 
 ## Launching
 - Web games open the URL in the browser. Desktop games resolve the library-relative path through the library, run
@@ -126,3 +133,58 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   games.json name one anyway, the launch is refused ("Failed to launch game: " then `messages.HTA_NOT_ALLOWED`) and
   nothing is run.
 - Platform compatibility is checked against the user's OS first; web games are compatible everywhere.
+- A Steam row has no launch file: Steam starts it (Installed Steam games, below).
+
+## Installed Steam games
+A catalog game the player installed through Steam shows in the Library as a **Steam row** (`Game.is_steam`; the
+data model and the address rule are in CLAUDE.md). The app never installs, updates or repairs its files, and never
+writes in Steam's folders.
+
+- **The scan** (`engine.steam_scan.scan`, on a worker; what it reads is in `.claude/rules/engine.md`) has three
+  outcomes (`Scan.state`):
+  - `found`: `apps` holds each installed app by id, and `unsure` the ids whose manifest could not be read.
+    `complete` is false when a listed library could not be reached, or a library list entry could not be read
+    (no usable absolute path).
+  - `absent`: Steam is not installed, or this is not Windows.
+  - `unknown`: could not tell. The library list could not be read, or holds no `libraryfolders` object. It
+    changes nothing.
+
+  A manifest whose folder name is not one plain name (empty, `.`, `..`, or holding `/`, `\`, `:` or a NUL) is not
+  trusted: its id is `unsure`. No row is added for it, and a row it already has stays.
+- **When it runs**: see `.claude/rules/ui-main-window.md` (Steam scan).
+- **Its rules** (`steam_games.steam_changes(entries, scan, games, platform)`, wx-free; `tests/test_steam_games.py`)
+  give the rows to add and the Steam rows to remove. Only ids in the index count, matched exactly.
+  - No index, or a scan that could not tell: nothing changes.
+  - A Steam row leaves when its entry is gone or is no longer a game (`kind` "game"), when its id is no longer
+    the entry's Steam game or demo, when Steam is absent, when the app's own copy of that entry is in the Library,
+    or when it is a second Steam row for one catalog id.
+  - A row whose game is not seen installed leaves only when the scan is sure: the scan is `complete` and the id
+    is not `unsure`.
+  - A stale row is replaced in the same pass. A demo row gives way to the full game's once the full game is
+    installed. A full game's row that is surely gone gives way to the demo's when the demo is installed.
+  - On a `found` scan, an entry with no row gets one: its full game when installed, else its demo. The row takes
+    the entry's fields, the current platform and that id.
+- **The kept scan** (`InstallService.take_steam_scan`, on the UI thread, through `run_when_no_dialog`): a scan
+  that could tell is kept (`steam_scan`) and matched (`match_steam`). `match_steam` saves games.json once when
+  rows changed. It runs again on every index take (`take_index`) and job result (`apply_result`: an uninstall of
+  the app's copy may leave the entry's Steam copy to show).
+- **Pending ids** (`steam_pending`, set by `steam_sent`): an id the app sent Steam a get (the Catalog's Get) or an
+  uninstall for, when `steam_send` answered "sent". A refused or absent send makes nothing pending. An id is
+  settled only by a scan that could tell: one not installed when sent, once a scan sees it installed; one
+  installed when sent, once a scan is sure it is gone. An `absent` scan settles them all. While any is pending,
+  the window coming forward scans.
+- **Status** is always `Ready` (`statuses`): Steam keeps its files. On the Catalog tab the entry counts as
+  installed (`installed_ids`).
+- **Menu**: "Uninstall through Steam" (`messages.MENU_UNINSTALL_STEAM`) and the entry's links
+  (`catalog_menu_items`). No Update, Undo, Extras or Repair. Edit is refused, as for every catalog game.
+- **Enter** (`launch_game`): handed to Steam (`steam_send(steam.LAUNCH_ACTION, id)`) before anything else. No
+  platform check, no launch observer, and the window is not minimized.
+- **Delete** (`delete_kind` "uninstall", then `uninstall_game`): Steam's uninstall (`steam_send("uninstall", id)`)
+  before anything else. No file count and no dialog of the app's own: Steam asks. "sent" makes the id pending.
+  It ends with `focus_active_list()`.
+- **Steam absent** on Enter or Delete: the app says so (`messages.steam_absent`, inside `modal_dialog()`) and
+  scans, so the row leaves. An address Windows refused has been told by `steam_send`; nothing more happens.
+- **Open folder** (Ctrl+Enter): the folder the kept scan found (`steam_folder_of`), opened itself in Explorer.
+  No folder, or one that is no longer a folder: "Game folder not found."
+- **Description**: the app's own copy of a game whose Steam game or demo the scan found installed reads "Also
+  installed through Steam." (`messages.ALSO_ON_STEAM`, from `also_on_steam`).

@@ -3,8 +3,9 @@
 Documentation for Game Chooser - a wxPython desktop app for managing and launching games, and for installing
 them from a curated catalog (`https://catalog.accessiblegames.net/`).
 
-The app does not scan folders. A **library** is a folder that catalog installs go into. Games come from the
-catalog (installed into a library) or are added by hand.
+The app does not scan folders for games. A **library** is a folder that catalog installs go into. Games come
+from the catalog (installed into a library), from Steam (a catalog game installed through Steam) or are added by
+hand.
 
 ## Development Commands
 
@@ -21,17 +22,18 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 
 ### Testing Strategy
 - Logic lives in wx-free modules so it is unit-tested: `catalog_view.py`, `install_choices.py`, `install_prefs.py`,
-  `library_actions.py`, `install_service.py`, `library_manager.py`, `engine/`.
+  `library_actions.py`, `install_service.py`, `library_manager.py`, `steam_games.py`, `engine/`.
   `wx_bridge.py` takes injectable `post` functions so its threading is tested without a running wx app (the test
   skips when wxPython is not installed).
 - Of the UI files, `install_dialogs.py`, `progress_area.py` and `description_field.py` are not unit-tested.
   Four are tested in part, on a frame that is never shown or a stand-in for the main window (these tests skip
   when wxPython is not installed or there is no display): `games_panel.py`, the games view both tabs are built
   from (`tests/test_games_panel.py`); in `catalog_panel.py`, what its action button does while a job runs, Get,
-  the choice of places, Steam being absent, how its columns sort and an "&" in its labels
-  (`tests/test_catalog_panel.py`); in `main_window.py`, the Library list's own key (Del), four message boxes of
-  `launch_game` and `on_open_folder`, Locate's file check, a games.json save that fails, `steam_send` and
-  `choose_place` (`tests/test_main_window.py`); in `dialogs.py`, that `GameDialog` saves the year
+  the choice of places, Steam being absent, a Get Steam took being pending, how its columns sort and an "&" in
+  its labels (`tests/test_catalog_panel.py`); in `main_window.py`, the Library list's own key (Del), four message
+  boxes of `launch_game` and `on_open_folder`, Locate's file check, a games.json save that fails, `steam_send`,
+  `choose_place`, when the Steam scan runs, and a Steam row's launch, uninstall and Open folder
+  (`tests/test_main_window.py`); in `dialogs.py`, that `GameDialog` saves the year
   2000 and keeps a typed path when Platform becomes Web Game, and that Add/Save and Preferences' OK are the
   default buttons (`tests/test_dialogs.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two
@@ -39,7 +41,7 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
   (`game-chooser.py` excepted; the `tests` and `scripts` folders are not checked).
 - Layout: `tests/engine/` (engine; fakes in `tests/engine/fakes.py`) and `tests/test_*.py` (catalog view, catalog
   panel, dialogs, games panel, main window, install choices, install prefs, install service, library actions,
-  library integration, library manager, validation service, wx bridge, catalog fixtures).
+  library integration, library manager, steam games, validation service, wx bridge, catalog fixtures).
 - `tests/tracing/test_*.py` (tests for the `tracing/` modules, no admin rights, Process Monitor or network; no wx
   except `test_app_glue.py`, which skips when wxPython is not installed) and `tests/test_check_no_tracing.py` (the
   build check) cover the tracing build. `tests/test_collect_licenses.py` covers `scripts/collect_licenses.py`.
@@ -54,17 +56,17 @@ too. Install records are the exception: a queued or running job owns its game's 
 leaves a game with a job (`queue.job_for`) alone: `adopt_launch_paths` skips it, Delete refuses to forget it while
 it is busy (`MainFrame._game_busy`), and `remove_library` is refused while one of the library's games has a job.
 Background threads: index fetch, status computation, the player-file counts, `GameDialog`'s duplicate check, the
-install queue's worker and notifier.
+install queue's worker and notifier, and the Steam scan (`engine.steam_scan.scan`, which only reads).
 
 **`InstallService` threading rule.** Three members change no games, records or libraries, and the code runs them
 on worker threads: `fetch_index()` (it also saves the fetched index in the cache folder), `statuses()` and
 `player_files()` (both only read). Every member that changes games, libraries or records runs on the **UI thread
 only**: `take_index`, `load_cached_index`, `adopt_launch_paths`, `refresh_catalog_genres`, `apply_result`,
-`job_failed`, `submit`, `forget`, `ensure_library`, `remove_library`. Pattern: fetch on a worker, then `take_index`
-on the UI thread.
+`job_failed`, `submit`, `forget`, `ensure_library`, `remove_library`, `take_steam_scan`, `match_steam`,
+`steam_sent`. Pattern: fetch on a worker, then `take_index` on the UI thread; a Steam scan, then `take_steam_scan`.
 What starts each worker: `MainFrame.start_index_fetch` and `MainFrame.refresh_statuses` each start their own
-daemon thread, and the player-file counts and `GameDialog`'s duplicate check go through
-`wx_bridge.run_in_background`.
+daemon thread, and the player-file counts, `GameDialog`'s duplicate check and the Steam scan
+(`MainFrame.start_steam_scan`) go through `wx_bridge.run_in_background`.
 
 ### Modal safety
 wx runs `CallAfter` events inside a modal loop, so work that replaces games must not run under a dialog that
@@ -96,12 +98,18 @@ own `mshta.exe`, taken from the system folder Windows reports (never PATH, never
 file's full path as its one argument. It starts only when the catalog's launch path names it: it is never guessed,
 and `library_actions.may_start_hta` allows only the file that is exactly the install record's own launch file
 (`launch_from_catalog`), whatever path games.json holds. A game added by hand never gets the host. `MainFrame`
-launches through `library_actions.start_launch_file`, never `start_game` directly.
+launches through `library_actions.start_launch_file`, never `start_game` directly. A Steam row has no launch file:
+it is launched through `MainFrame.steam_send`.
 
 ### Steam
 A Steam address is built only by `engine.steam.address`, from a whole number (the app id). No text from the
 catalog, the saved index, games.json or Steam's files is ever handed to Windows as an address. The app sends one
 only through `MainFrame.steam_send`, which first checks that Steam is installed. Steam is opened on Windows only.
+
+Installed Steam games are found only from Steam's own files (`engine.steam_scan`), and matched by exact app id
+against the index: an id the index does not list is never shown. The app never writes in Steam's folders, and
+never installs, updates or repairs a Steam game's files. The detail is in `.claude/rules/catalog-install.md`
+(Installed Steam games).
 
 ### Tracing
 Nothing outside `tracing/` and its tests (`tests/tracing/`) imports it; the one exception in app code is
@@ -126,10 +134,12 @@ No migration (alpha): write no migration code.
 
 ## Data model
 **Game** (`models.py`): `title, genre, developer, year, platforms, launch_path, library_id, catalog_id,
-installed_source, installed_extras`. `to_dict()` writes `catalog_id`, `installed_source`, `installed_extras` only
-when set. `launch_path` is library-relative (forward slashes) for a desktop game in a library, an absolute path for
+installed_source, installed_extras, steam_app_id`. `to_dict()` writes `catalog_id`, `installed_source`,
+`installed_extras`, `steam_app_id` only when set. `launch_path` is library-relative (forward slashes) for a desktop game in a library, an absolute path for
 a desktop game with no `library_id` (one added by hand, or a catalog game an installer put outside every library),
-or an `http://` or `https://` URL (any case) for web games: `is_web`, the one test of that.
+or an `http://` or `https://` URL (any case) for web games: `is_web`, the one test of that. A **Steam row** has a
+`steam_app_id` (a whole number, never a `steam://` address), a `catalog_id`, an empty `launch_path`, no
+`library_id` and no install record: `is_steam`, the one test of that.
 
 ## Where data lives
 - `games.json` - on Windows next to the app (the `sys.argv[0]` directory; git-ignored), elsewhere in the config dir
@@ -152,7 +162,7 @@ Each file loads when a file it covers is read or edited.
 - `tracing.md` - the tracing build (`tracing/`, `tests/tracing/`, `game-chooser.py`): commands, where logs go,
   attribution, the capture filter, modules.
 - `catalog-install.md` - the install service, queue and installer bridges, the Catalog tab, catalog schema v2,
-  install confirmation, progress area, Library catalog actions and launching.
+  install confirmation, progress area, Library catalog actions, launching and installed Steam games.
 - `ui-main-window.md` - the main window and Library tab, the games view both tabs are built from (`GamesPanel`),
   the rest of modal safety, the quit sequence, keyboard shortcuts, accessibility and focus, the Preferences dialog.
 - `libraries-and-config.md` - libraries (install folders), `reconcile_catalog_records`, `config.json`, a damaged
