@@ -19,6 +19,8 @@ uv run python scripts/fetch_tools.py   # fetch 7z.exe, 7z.dll, innoextract.exe (
 
 Markers (`pyproject.toml`): `tools` tests need `bin/7z.exe` and skip when it is absent; `windows` tests touch the
 real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-only behavior and skip elsewhere.
+Tests that make symbolic links (`tests/engine/test_mac_links.py`, one disk image test in `test_extract.py`) skip
+where a trial link fails (Windows without Developer Mode or an elevated shell).
 
 ### Testing Strategy
 - Logic lives in wx-free modules so it is unit-tested: `catalog_view.py`, `install_choices.py`, `install_prefs.py`,

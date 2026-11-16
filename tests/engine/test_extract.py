@@ -1,7 +1,9 @@
+import os
 import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 from pathlib import Path
@@ -508,6 +510,16 @@ def _hdiutil(run, verb):
     return [argv for argv in run.calls if argv[:2] == ["/usr/bin/hdiutil", verb]]
 
 
+def _can_link():
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            os.symlink("target", os.path.join(folder, "link"))
+        except OSError:
+            return False
+    return True
+
+
+@pytest.mark.skipif(not _can_link(), reason="this shell may not create symbolic links")
 def test_mac_disk_image_is_copied_without_finder_files_or_links(tmp_path):
     run = _disk_image_run({"Game.app/Contents/MacOS/Game": b"program", "sounds/a.ogg": b"a", ".DS_Store": b"d",
                            ".fseventsd/x": b"f", "Applications": None})

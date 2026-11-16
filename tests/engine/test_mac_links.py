@@ -1,5 +1,6 @@
 """Links a Mac app ships (a framework's Versions/Current) are game files on a Mac, and the player's elsewhere."""
 import os
+import tempfile
 import zipfile
 from pathlib import Path
 
@@ -12,6 +13,18 @@ from engine.jobs import InstallRequest
 from engine.records import hash_tree
 from engine.sources import hash_file
 from tests.engine.fakes import MIRROR, FakeFetcher, ZipExtractor, make_engine, never, served_source, zip_bytes
+
+def _can_link():
+    with tempfile.TemporaryDirectory() as folder:
+        try:
+            os.symlink("target", os.path.join(folder, "link"))
+        except OSError:
+            return False
+    return True
+
+
+# every test here makes a link (Windows needs Developer Mode or an elevated shell for one)
+pytestmark = pytest.mark.skipif(not _can_link(), reason="this shell may not create symbolic links")
 
 LINK = b"LINK:"
 FW = "Game.app/Contents/Frameworks/S.framework"
