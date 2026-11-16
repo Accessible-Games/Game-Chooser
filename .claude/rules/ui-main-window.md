@@ -39,7 +39,8 @@ description. The Catalog tab has its status line and Retry above these.
   `MainFrame.selected_game()` is the selected row's `Game`.
   `MainFrame.games_changed()` is the one call after every change to a game, to `manager.games`, to a library or
   to what is installed (Add, Edit, Delete, Locate, a job that ended, an index take, Preferences, F5, a web game
-  added from the Catalog, a Steam scan that changed rows): it rebuilds both tabs' rows, the Libraries menu and the statuses. Add, Edit, Delete
+  added from the Catalog, a Steam scan that changed rows, or changed what Steam has installed while an index is
+  loaded): it rebuilds both tabs' rows, the Libraries menu and the statuses. Add, Edit, Delete
   and Locate write games.json through `_save_games`, and the Catalog's Add of a web game through `save_or_keep`
   too: a save that fails says so (`messages.GAMES_NOT_SAVED`), and the change stays in memory and still shows.
   Status values (`engine/status.py`): `Ready`, `Update available`, `Executable not found`, `Library not found`.
@@ -55,7 +56,9 @@ description. The Catalog tab has its status line and Retry above these.
   - when the window comes forward (`EVT_ACTIVATE`, `on_activate`) while an id is pending;
   - when Enter or Delete on a Steam row finds Steam absent.
   One runs at a time (`steam_games.ScanGate`); one asked for meanwhile follows it. Its result is taken through
-  `run_when_no_dialog`, and `games_changed()` runs only when rows changed. It never moves focus.
+  `run_when_no_dialog`, and `games_changed()` runs only when `take_steam_scan` returns True: rows changed, or what
+  Steam has installed changed while an index is loaded (so "Also installed through Steam." is right). It never
+  moves focus.
 - **A Steam row**: Enter launches it through Steam and the window is not minimized; Del is Steam's uninstall,
   with no dialog of the app's own; Ctrl+Enter opens the folder the scan found.
 - **Preferences** (`PreferencesDialog`): tabs Library Paths and Installing (`install_prefs.py`: catalog address,

@@ -34,6 +34,13 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   name: no `/`, `\`, `:` or NUL, not empty, `.` or `..`, on every system; the folder must sit directly in `common`). Three outcomes: `absent` (no Steam), `unknown`
   (the library list can't be read, parsed, or has no `libraryfolders` object), `found`. `unsure` holds ids whose manifest can't be read or trusted;
   `complete` is false when a listed library's `steamapps` is unreachable, or a numbered entry has no usable absolute path. Only `steamapps` itself is read.
+  A manifest whose folder is there but whose bit 4 is clear is a game Steam is updating or downloading: its id is
+  `unsure`. A value of the wrong type (an object for `appid`, `StateFlags` or `installdir`) makes that manifest
+  `unsure` too. `unread` holds the ids that the libraries not read say they hold (the keys of their entry's `apps`
+  object). It is `None` when one of them does not say: an old-form entry, no `apps` object, or a key that is not
+  a whole number. An empty `apps` object says the library holds nothing. `Scan.gone(id)` is the one test of "this
+  scan can tell the game is not installed": true for `absent`, false for `unknown`; for `found`, the id is not in
+  `apps` or `unsure`, and the scan is `complete` or `unread` says no unread library holds it.
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
   An HTTP 404 or 410 is `DownloadGone` ("no longer available"), never "couldn't be reached"; `NoVerifiedSource.gone`

@@ -39,7 +39,7 @@ class Game:
 
     def __post_init__(self):
         self.platforms = self.platforms or []
-        if not is_app_id(self.steam_app_id):
+        if not is_app_id(self.steam_app_id) or not self.catalog_id:  # a Steam row is always a catalog game
             self.steam_app_id = 0
 
     @property

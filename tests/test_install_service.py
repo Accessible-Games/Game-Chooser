@@ -826,6 +826,38 @@ def test_an_id_stays_pending_until_a_scan_sees_it_change(rig):
     assert service.steam_pending == {}
 
 
+def test_a_scan_that_changes_what_steam_has_asks_for_a_refresh(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    own = Game(title="Dugout Dice", catalog_id="dice", library_id="lib", launch_path="Dice/dice.exe")
+    service.manager.games.append(own)
+    assert service.take_steam_scan(found(FULL)) is True          # no row changes, but the note does
+    assert service.also_on_steam(own) is True and steam_ids(rig) == []
+    assert service.take_steam_scan(found(FULL)) is False         # the same again
+    assert service.take_steam_scan(found()) is True and service.also_on_steam(own) is False
+
+
+def test_a_malformed_entry_cannot_stop_an_index_take(rig):
+    service = rig.service
+    service.take_steam_scan(found(FULL))                         # kept; no index yet
+    bad = dict(ENTRY, developer=[None, 3])
+    service.take_index(index(bad))                               # must not raise
+    assert service.entries == {"dice": bad} and steam_ids(rig) == []
+
+
+def test_a_finished_uninstall_settles_its_pending_id(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    for after in (found(), Scan("found", {}, frozenset(), False, frozenset({7}))):
+        service.take_steam_scan(found(FULL))
+        service.steam_sent(FULL)                                 # an uninstall: installed when sent
+        service.take_steam_scan(found(FULL))                     # still installed
+        service.take_steam_scan(found(unsure=[FULL]))            # its manifest is being rewritten
+        assert service.steam_pending == {FULL: True}
+        service.take_steam_scan(after)                           # gone, by a scan that can tell
+        assert service.steam_pending == {} and steam_ids(rig) == []
+
+
 def test_matching_with_no_scan_kept_writes_nothing(rig):
     service = rig.service
     service.take_index(index(ENTRY))

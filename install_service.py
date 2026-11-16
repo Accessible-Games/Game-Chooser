@@ -93,7 +93,10 @@ class InstallService:
         self.index_state = state  # one assignment: a reader on the worker thread sees the old or the new
         self.adopt_launch_paths()
         self.refresh_catalog_genres()
-        self.match_steam()
+        try:
+            self.match_steam()
+        except Exception:  # a malformed entry never stops the take
+            log.warning("Couldn't match the Steam games to the index", exc_info=True)
 
     def load_cached_index(self):
         """Use the saved copy of the index. UI thread only."""
@@ -156,19 +159,20 @@ class InstallService:
     # ---- Steam ----------------------------------------------------------------------------------------------
 
     def take_steam_scan(self, scan: Scan) -> bool:
-        """Keep a scan that could tell, settle the pending ids it can tell about, and match it. True when the games
-        changed. A scan that could not tell changes nothing."""
+        """Keep a scan that could tell, settle the pending ids it can tell about, and match it. True when the Library
+        needs refreshing: rows changed, or an index is loaded and what Steam has installed changed. A scan that
+        could not tell changes nothing."""
         if scan.state == "unknown":
             return False
-        self.steam_scan = scan
+        before, self.steam_scan = self.steam_scan, scan
         if scan.state == "absent":
             self.steam_pending.clear()
-        else:  # settled only when the scan saw it installed, or saw it surely gone
+        else:  # settled only when the scan saw it installed, or can tell it is gone
             def settled(i, was):
-                gone = i not in scan.apps and scan.complete and i not in scan.unsure
-                return (i in scan.apps and not was) or (gone and was)
+                return (i in scan.apps and not was) or (scan.gone(i) and was)
             self.steam_pending = {i: was for i, was in self.steam_pending.items() if not settled(i, was)}
-        return self.match_steam()
+        has = lambda s: None if s is None else (s.state, set(s.apps))
+        return self.match_steam() or (bool(self.entries) and has(before) != has(scan))
 
     def match_steam(self) -> bool:
         """Add and remove Steam rows by the kept scan and the index; save once. True when the games changed."""

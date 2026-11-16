@@ -62,8 +62,9 @@ install queue's worker and notifier, and the Steam scan (`engine.steam_scan.scan
 on worker threads: `fetch_index()` (it also saves the fetched index in the cache folder), `statuses()` and
 `player_files()` (both only read). Every member that changes games, libraries or records runs on the **UI thread
 only**: `take_index`, `load_cached_index`, `adopt_launch_paths`, `refresh_catalog_genres`, `apply_result`,
-`job_failed`, `submit`, `forget`, `ensure_library`, `remove_library`, `take_steam_scan`, `match_steam`,
-`steam_sent`. Pattern: fetch on a worker, then `take_index` on the UI thread; a Steam scan, then `take_steam_scan`.
+`job_failed`, `submit`, `forget`, `ensure_library`, `remove_library`, `take_steam_scan`, `match_steam`.
+`steam_sent` changes only the pending Steam ids, and runs on the UI thread too. Pattern: fetch on a worker, then
+`take_index` on the UI thread; a Steam scan, then `take_steam_scan`.
 What starts each worker: `MainFrame.start_index_fetch` and `MainFrame.refresh_statuses` each start their own
 daemon thread, and the player-file counts, `GameDialog`'s duplicate check and the Steam scan
 (`MainFrame.start_steam_scan`) go through `wx_bridge.run_in_background`.
@@ -139,7 +140,8 @@ installed_source, installed_extras, steam_app_id`. `to_dict()` writes `catalog_i
 a desktop game with no `library_id` (one added by hand, or a catalog game an installer put outside every library),
 or an `http://` or `https://` URL (any case) for web games: `is_web`, the one test of that. A **Steam row** has a
 `steam_app_id` (a whole number, never a `steam://` address), a `catalog_id`, an empty `launch_path`, no
-`library_id` and no install record: `is_steam`, the one test of that.
+`library_id` and no install record: `is_steam`, the one test of that. A Game made with no `catalog_id` gets
+`steam_app_id` 0.
 
 ## Where data lives
 - `games.json` - on Windows next to the app (the `sys.argv[0]` directory; git-ignored), elsewhere in the config dir

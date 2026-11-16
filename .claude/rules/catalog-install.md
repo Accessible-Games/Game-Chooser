@@ -142,9 +142,9 @@ writes in Steam's folders.
 
 - **The scan** (`engine.steam_scan.scan`, on a worker; what it reads is in `.claude/rules/engine.md`) has three
   outcomes (`Scan.state`):
-  - `found`: `apps` holds each installed app by id, and `unsure` the ids whose manifest could not be read.
-    `complete` is false when a listed library could not be reached, or a library list entry could not be read
-    (no usable absolute path).
+  - `found`: `apps` holds each installed app by id, and `unsure` the ids whose manifest could not be read, or
+    whose game Steam is updating. `complete` is false when a listed library could not be reached, or a library
+    list entry could not be read (no usable absolute path). `unread` holds the ids those libraries say they hold.
   - `absent`: Steam is not installed, or this is not Windows.
   - `unknown`: could not tell. The library list could not be read, or holds no `libraryfolders` object. It
     changes nothing.
@@ -158,8 +158,9 @@ writes in Steam's folders.
   - A Steam row leaves when its entry is gone or is no longer a game (`kind` "game"), when its id is no longer
     the entry's Steam game or demo, when Steam is absent, when the app's own copy of that entry is in the Library,
     or when it is a second Steam row for one catalog id.
-  - A row whose game is not seen installed leaves only when the scan is sure: the scan is `complete` and the id
-    is not `unsure`.
+  - A row whose game is not seen installed leaves only when the scan can tell its game is gone (`Scan.gone`, the
+    one definition): the id is not `unsure`, and the scan is `complete` or no library it did not read holds the
+    id. Rows are still added when a library was not read.
   - A stale row is replaced in the same pass. A demo row gives way to the full game's once the full game is
     installed. A full game's row that is surely gone gives way to the demo's when the demo is installed.
   - On a `found` scan, an entry with no row gets one: its full game when installed, else its demo. The row takes
@@ -167,11 +168,14 @@ writes in Steam's folders.
 - **The kept scan** (`InstallService.take_steam_scan`, on the UI thread, through `run_when_no_dialog`): a scan
   that could tell is kept (`steam_scan`) and matched (`match_steam`). `match_steam` saves games.json once when
   rows changed. It runs again on every index take (`take_index`) and job result (`apply_result`: an uninstall of
-  the app's copy may leave the entry's Steam copy to show).
+  the app's copy may leave the entry's Steam copy to show). In an index take it is guarded: an error is logged
+  and the take completes. `take_steam_scan` returns True, so the Library is refreshed, when rows changed, or when
+  an index is loaded and the scan's state or its set of installed ids differs from the scan kept before (the
+  "Also installed through Steam." note may change).
 - **Pending ids** (`steam_pending`, set by `steam_sent`): an id the app sent Steam a get (the Catalog's Get) or an
   uninstall for, when `steam_send` answered "sent". A refused or absent send makes nothing pending. An id is
   settled only by a scan that could tell: one not installed when sent, once a scan sees it installed; one
-  installed when sent, once a scan is sure it is gone. An `absent` scan settles them all. While any is pending,
+  installed when sent, once a scan can tell it is gone (`Scan.gone`). An `absent` scan settles them all. While any is pending,
   the window coming forward scans.
 - **Status** is always `Ready` (`statuses`): Steam keeps its files. On the Catalog tab the entry counts as
   installed (`installed_ids`).

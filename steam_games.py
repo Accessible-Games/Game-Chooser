@@ -17,9 +17,6 @@ def steam_changes(entries: dict, scan, games: list, platform: str) -> tuple[list
         return [], []
     add, remove = [], []
 
-    def surely_gone(i):
-        return scan.complete and i not in scan.unsure
-
     def new_row(entry, app_id):
         return {**game_fields(entry), "platforms": [platform_label(platform)], "launch_path": "",
                 "library_id": "", "catalog_id": entry["id"], "steam_app_id": app_id}
@@ -44,11 +41,11 @@ def steam_changes(entries: dict, scan, games: list, platform: str) -> tuple[list
             continue
         want = wanted(ids)
         if not want:
-            if surely_gone(g.steam_app_id):
+            if scan.gone(g.steam_app_id):
                 remove.append(g)
         elif want == ids[0] and g.steam_app_id != want:
             remove.append(g)  # rule 3 adds the full game's row
-        elif want != ids[0] and g.steam_app_id == ids[0] and surely_gone(ids[0]):
+        elif want != ids[0] and g.steam_app_id == ids[0] and scan.gone(ids[0]):
             remove.append(g)  # rule 3 adds the demo's row
 
     if scan.state == "found":

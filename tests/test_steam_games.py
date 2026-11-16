@@ -45,6 +45,14 @@ def test_a_row_leaves_only_when_the_scan_could_tell():
     assert change(Scan("unknown"), [row()]) == ([], [])
     assert change(None, [row()]) == ([], [])                           # no scan yet
     assert change(Scan("absent"), [row(), row(7, "other")]) == ([], [FULL, 7])
+    assert change(found(FULL, complete=False)) == ([("dice", FULL)], [])    # rows are still added
+
+
+def test_a_row_leaves_when_the_unread_libraries_do_not_hold_it():
+    elsewhere = Scan("found", {}, frozenset(), False, frozenset({7}))    # the unplugged library holds only app 7
+    assert change(elsewhere, [row()]) == ([], [FULL])
+    holds_it = Scan("found", {}, frozenset(), False, frozenset({FULL}))
+    assert change(holds_it, [row()]) == ([], [])
 
 
 def test_the_row_follows_the_full_game_and_the_demo():

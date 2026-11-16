@@ -246,6 +246,8 @@ def test_a_steam_row_is_a_whole_number_in_games_json():
     assert not plain.is_steam and plain.row_key == ("lib", "P/p.exe") and "steam_app_id" not in plain.to_dict()
     for bad in (True, "5054570", -1, 1.5, None, [5054570]):
         assert not Game.from_dict(dict(STEAM_ROW, steam_app_id=bad)).is_steam
+    by_hand = Game(title="X", launch_path="C:/x/x.exe", steam_app_id=5054570)
+    assert not by_hand.is_steam and by_hand.steam_app_id == 0 and "steam_app_id" not in by_hand.to_dict()
 
 
 def test_a_steam_row_survives_the_startup_reconcile(isolated_manager_factory, tmp_path):
