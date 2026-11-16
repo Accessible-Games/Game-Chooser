@@ -212,6 +212,17 @@ def test_statuses_for_mixed_library(rig):
     }
 
 
+def test_steam_rows_are_ready_installed_and_keyed_by_their_own_id(rig):
+    manager = rig.service.manager
+    manager.games += [Game(title="A", catalog_id="a", platforms=["Windows"], steam_app_id=11),
+                      Game(title="B", catalog_id="b", platforms=["Windows"], steam_app_id=22)]
+    statuses = rig.service.statuses()
+    assert statuses[("steam", 11)] == statuses[("steam", 22)] == "Ready"
+    assert {"a", "b"} <= rig.service.installed_ids()
+    rig.service.adopt_launch_paths()                       # leaves them alone
+    assert [g.steam_app_id for g in manager.games if g.is_steam] == [11, 22]
+
+
 def test_a_web_game_is_told_by_its_scheme_in_any_case(rig):
     lib = rig.library()
     rig.manager.games += [Game(title="Loud", launch_path="HTTP://example.com/game"),  # Add Game accepts it

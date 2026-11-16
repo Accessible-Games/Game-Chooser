@@ -82,7 +82,7 @@ class MainFrame(wx.Frame):
         self.job_done_hooks = []
         self._index_fetching = False  # a catalog index fetch is running or waiting for a dialog to close
         self._index_refetch = False  # the catalog address changed during a fetch: fetch again after it
-        self.statuses = {}  # (library_id, launch_path) -> Status text, filled by refresh_statuses()
+        self.statuses = {}  # Game.row_key -> Status text, filled by refresh_statuses()
         self._status_generation = 0  # only the newest status computation is shown
         # Before the list is first filled: using the saved index may adopt catalog launch paths
         self.service.load_cached_index()
@@ -270,7 +270,7 @@ class MainFrame(wx.Frame):
 
     def status_lookup(self, game):
         """The Status column's text for a game"""
-        return self.statuses.get((game.library_id, game.launch_path), "")
+        return self.statuses.get(game.row_key, "")
 
     def refresh_statuses(self):
         """Work out every game's Status in the background (statuses() only reads), then show it"""
@@ -431,7 +431,7 @@ class MainFrame(wx.Frame):
             if game.catalog_id and g.catalog_id == game.catalog_id:
                 return g
         for g in games:
-            if (g.library_id, g.launch_path) == (game.library_id, game.launch_path):
+            if g.row_key == game.row_key:
                 return g
         return None
 

@@ -41,7 +41,7 @@ from engine.records import InstallRecord, record_folder
 from engine.registry import RegistryAccess
 from engine.runtimes import WindowsSecurity, default_runtimes_root
 from engine.safety import count_player_files
-from engine.status import game_status
+from engine.status import READY, game_status
 from install_prefs import current_catalog_url, register_shared_components
 from library_actions import is_uninstall_unfinished, is_uninstallable
 from library_manager import LibraryError
@@ -95,7 +95,7 @@ class InstallService:
 
         UI thread only. A game with a queued or running job is left alone: the job owns its record."""
         for game in list(self.manager.games):
-            if not game.catalog_id or game.is_web or self.queue.job_for(game.catalog_id) is not None:
+            if not game.catalog_id or game.is_web or game.is_steam or self.queue.job_for(game.catalog_id) is not None:
                 continue
             try:
                 self._adopt(game.catalog_id)
@@ -138,9 +138,9 @@ class InstallService:
         return True
 
     def installed_ids(self) -> set[str]:
-        """Catalog ids shown as installed: a game's install record that isn't uninstalled, or a catalog web game.
-        A shared runtime's record is never a game's."""
-        ids = {g.catalog_id for g in self.manager.games if g.catalog_id and g.is_web}
+        """Catalog ids shown as installed: a game's install record that isn't uninstalled, a catalog web game or a
+        Steam row. A shared runtime's record is never a game's."""
+        ids = {g.catalog_id for g in self.manager.games if g.catalog_id and (g.is_web or g.is_steam)}
         ids |= {cid for cid, rec in self.manager.records.game_records().items() if not rec.uninstalled}
         return ids
 
@@ -252,16 +252,19 @@ class InstallService:
     def entry_for(self, game) -> dict | None:
         return self.entries.get(game.catalog_id) if game.catalog_id else None
 
-    def statuses(self) -> dict[tuple[str, str], str]:
-        """Each game's status, keyed by (library_id, launch_path)."""
+    def statuses(self) -> dict[tuple, str]:
+        """Each game's status, keyed by its row_key. A Steam row is Ready: Steam keeps its files."""
         platform = current_platform()
         records = self.manager.records.game_records()
         result = {}
         for game in self.manager.games:
+            if game.is_steam:
+                result[game.row_key] = READY
+                continue
             full_path = self.manager.get_full_path(game)
             reachable = self.manager.library_reachable(game.library_id) if game.library_id else True
             record = records.get(game.catalog_id) if game.catalog_id else None
-            result[(game.library_id, game.launch_path)] = game_status(
+            result[game.row_key] = game_status(
                 str(full_path) if full_path else None, game.is_web, record, self.entry_for(game), platform,
                 library_reachable=reachable)
         return result

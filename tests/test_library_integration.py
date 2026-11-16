@@ -234,6 +234,32 @@ def test_web_catalog_game_without_record_keeps_its_link(isolated_manager_factory
     assert m.games[0].launch_path == "https://example.com/play"
 
 
+STEAM_ROW = {"title": "Dugout Dice", "platforms": ["Windows"], "launch_path": "", "library_id": "",
+             "catalog_id": "dugout-dice", "steam_app_id": 5054570}
+
+
+def test_a_steam_row_is_a_whole_number_in_games_json():
+    game = Game.from_dict(STEAM_ROW)
+    assert game.is_steam and game.row_key == ("steam", 5054570) and not game.is_web
+    assert game.to_dict()["steam_app_id"] == 5054570 and Game.from_dict(game.to_dict()).steam_app_id == 5054570
+    plain = Game(title="P", library_id="lib", launch_path="P/p.exe")
+    assert not plain.is_steam and plain.row_key == ("lib", "P/p.exe") and "steam_app_id" not in plain.to_dict()
+    for bad in (True, "5054570", -1, 1.5, None, [5054570]):
+        assert not Game.from_dict(dict(STEAM_ROW, steam_app_id=bad)).is_steam
+
+
+def test_a_steam_row_survives_the_startup_reconcile(isolated_manager_factory, tmp_path):
+    manager = _restart(isolated_manager_factory, tmp_path, games=[STEAM_ROW])
+    game = manager.catalog_game("dugout-dice")
+    assert game.is_steam and game.launch_path == "" and len(manager.games) == 1
+    assert _games_json(manager)[0]["steam_app_id"] == 5054570
+
+
+def test_the_apps_own_copy_wins_over_a_steam_row_at_startup(isolated_manager_factory, tmp_path):
+    manager = _restart(isolated_manager_factory, tmp_path, _record("dugout-dice"), games=[STEAM_ROW])
+    assert [(g.catalog_id, g.is_steam) for g in manager.games] == [("dugout-dice", False)]
+
+
 def _runtime(catalog_id="dx8vb", folder="C:/ProgramData/GameChooser/runtimes/dx8vb", **kw):
     return _record(catalog_id=catalog_id, kind="runtime", library_id="", folder=folder, launch_path="", extras={},
                    method="zip", **kw)
