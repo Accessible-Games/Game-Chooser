@@ -31,9 +31,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   `ValueError` on anything malformed or nested deeper than 64). **steam_scan.py** - `scan` / `scan_folder` read
   Steam's `libraryfolders.vdf` and each library's `appmanifest_<id>.acf` (read only, never written). Installed
   means `StateFlags` has bit 4 and `steamapps/common/<installdir>` is a folder (`installdir` must be one plain
-  name: no `/` or `\`, not empty, `.` or `..`, on every system). Three outcomes: `absent` (no Steam), `unknown`
-  (the library list can't be read or parsed), `found`. `unsure` holds ids whose manifest can't be read or trusted;
-  `complete` is false when a listed library's `steamapps` is unreachable. Only `steamapps` itself is read.
+  name: no `/`, `\`, `:` or NUL, not empty, `.` or `..`, on every system; the folder must sit directly in `common`). Three outcomes: `absent` (no Steam), `unknown`
+  (the library list can't be read, parsed, or has no `libraryfolders` object), `found`. `unsure` holds ids whose manifest can't be read or trusted;
+  `complete` is false when a listed library's `steamapps` is unreachable, or a numbered entry has no usable absolute path. Only `steamapps` itself is read.
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
   An HTTP 404 or 410 is `DownloadGone` ("no longer available"), never "couldn't be reached"; `NoVerifiedSource.gone`

@@ -1,5 +1,3 @@
-import pytest
-
 from engine.steam_scan import Scan, SteamApp, scan, scan_folder
 
 
@@ -69,9 +67,11 @@ def test_a_manifest_that_cannot_be_read_makes_that_app_unsure(tmp_path):
     manifest(steam, 23, text='"AppState" { "appid" "23" "StateFlags" "four" "installdir" "Game" }')
     for app_id, bad_dir in ((30, ""), (31, ".."), (32, "a/b"), (33, "a\\\\b")):   # the last reads a\b once parsed
         manifest(steam, app_id, installdir=bad_dir)                           # not one plain folder name
+    for app_id, bad_dir in ((34, "D:"), (35, "D:foo"), (36, "a:b"), (37, "a\x00b")):
+        manifest(steam, app_id, installdir=bad_dir, folder=False)
     result = scan_folder(steam)
     assert sorted(result.apps) == [10]
-    assert result.unsure == frozenset({20, 21, 22, 23, 30, 31, 32, 33})
+    assert result.unsure == frozenset({20, 21, 22, 23, 30, 31, 32, 33, 34, 35, 36, 37})
 
 
 def test_only_manifests_in_steamapps_itself_are_read(tmp_path):
@@ -98,3 +98,24 @@ def test_the_three_outcomes(tmp_path):
     library(bare)
     manifest(bare, 10)
     assert sorted(scan(reads, platform="win32").apps) == [10]
+
+
+def test_a_library_entry_that_cannot_be_read_is_not_complete(tmp_path):
+    steam = library(tmp_path / "Steam")
+    manifest(steam, 10)
+    listing = steam / "steamapps" / "libraryfolders.vdf"
+    for entry in ('"1" { "path" { "x" "y" } }', '"1" { }', '"1" ""', '"1" { "path" "relative/folder" }',
+                  '"1" { "path" "a\x00b" }'):
+        listing.write_text('"libraryfolders"\n{\n"0" { "path" "%s" }\n%s\n}\n' % (kv(steam), entry),
+                           encoding="utf-8")
+        result = scan_folder(steam)
+        assert (result.state, sorted(result.apps), result.complete) == ("found", [10], False), entry
+
+
+def test_a_library_list_that_is_not_one_is_unknown(tmp_path):
+    steam = library(tmp_path / "Steam")
+    manifest(steam, 10)
+    listing = steam / "steamapps" / "libraryfolders.vdf"
+    for text in ('"other" { }', '"libraryfolders" "x"', ""):
+        listing.write_text(text, encoding="utf-8")
+        assert scan_folder(steam) == Scan("unknown"), text

@@ -30,17 +30,22 @@ def _read(path: Path) -> dict:
     return keyvalues.parse(path.read_text(encoding="utf-8", errors="replace"))
 
 
-def _libraries(steam_dir: Path) -> list[Path]:
-    """Steam's own folder, then each folder the list names, once each. Raises OSError or ValueError."""
+def _libraries(steam_dir: Path) -> tuple[list[Path], bool]:
+    """Steam's own folder, then each folder the list names, once each, and whether every entry gave a path.
+    Raises OSError or ValueError when the list can't be read or is not a library list."""
     listed = _read(steam_dir / "steamapps" / "libraryfolders.vdf").get("libraryfolders")
-    found = [steam_dir]
-    for key, value in (listed.items() if isinstance(listed, dict) else ()):
+    if not isinstance(listed, dict):
+        raise ValueError("not a library list")
+    found, complete = [steam_dir], True
+    for key, value in listed.items():
         if not key.isdigit():
             continue
         path = value.get("path") if isinstance(value, dict) else value  # current form, old form
-        if isinstance(path, str) and path and Path(path) not in found:
+        if not isinstance(path, str) or not path or "\0" in path or not Path(path).is_absolute():
+            complete = False
+        elif Path(path) not in found:
             found.append(Path(path))
-    return found
+    return found, complete
 
 
 def _manifest(path: Path, app_id: int, common: Path) -> SteamApp | None:
@@ -50,9 +55,11 @@ def _manifest(path: Path, app_id: int, common: Path) -> SteamApp | None:
         raise ValueError("another app")
     flags = int(state.get("stateflags", ""))
     installdir = state.get("installdir")
-    if not isinstance(installdir, str) or installdir in ("", ".", "..") or "/" in installdir or "\\" in installdir:
+    if not isinstance(installdir, str) or installdir in ("", ".", "..") or any(c in installdir for c in "/\\:\0"):
         raise ValueError("installdir is not a plain folder name")
     folder = common / installdir
+    if folder.parent != common:  # a second guard: the folder must sit directly in common
+        raise ValueError("installdir leaves common")
     if not flags & _INSTALLED_FLAG or not folder.is_dir():
         return None
     name = state.get("name")
@@ -61,17 +68,16 @@ def _manifest(path: Path, app_id: int, common: Path) -> SteamApp | None:
 
 def scan_folder(steam_dir: Path) -> Scan:
     try:
-        libraries = _libraries(steam_dir)
+        libraries, complete = _libraries(steam_dir)
     except (OSError, ValueError):
         return Scan("unknown")
     apps: dict[int, SteamApp] = {}
     unsure: set[int] = set()
-    complete = True
     for lib in libraries:
         steamapps = lib / "steamapps"
         try:
             names = sorted(p.name for p in steamapps.iterdir())
-        except OSError:
+        except (OSError, ValueError):
             complete = False
             continue
         for name in names:
