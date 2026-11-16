@@ -103,6 +103,7 @@ class GameLibraryManager:
         self._uncopied_damage = set()
         self._damage_copies = {}  # damaged file -> the copy kept of it
         self.load_problems = []  # plain words for the player, shown once after startup (then cleared by the UI)
+        self.on_library_added = None  # called with no arguments after add_library saved the config
         self.load_config()
         self.load_games()
         self.config_dir = self.config_file.parent
@@ -372,6 +373,8 @@ class GameLibraryManager:
         lib = {"id": secrets.token_hex(6), "path": path}
         self.config["libraries"].append(lib)
         self.save_config()
+        if self.on_library_added:
+            self.on_library_added()
         return lib
 
     def change_library_folder(self, library_id, path):

@@ -35,12 +35,14 @@ from engine.launch import LaunchCancelled, launch_kind
 from games_panel import GamesPanel
 from catalog_panel import CatalogPanel
 from dialogs import EXECUTABLE_WILDCARD, GameDialog, PreferencesDialog
-from engine import messages, steam
+from engine import messages, steam, steam_scan
 from engine.entries import current_platform as catalog_platform, platform_label
 from engine.records import record_folder
+from engine.steam_scan import Scan
 from engine.status import update_available
 from install_dialogs import InstallConfirmDialog, UninstallDialog
 import library_actions
+from steam_games import ScanGate
 from library_actions import (catalog_menu_items, delete_kind, executable_problem, is_editable, launch_problem,
                              start_launch_file)
 from wx_bridge import JobOutcomes, WxInstallerUI, WxQueueListener, run_in_background
@@ -82,6 +84,8 @@ class MainFrame(wx.Frame):
         self.job_done_hooks = []
         self._index_fetching = False  # a catalog index fetch is running or waiting for a dialog to close
         self._index_refetch = False  # the catalog address changed during a fetch: fetch again after it
+        self._steam_gate = ScanGate()  # one Steam scan at a time, and one more after it when asked meanwhile
+        self.library_manager.on_library_added = self.start_steam_scan
         self.statuses = {}  # Game.row_key -> Status text, filled by refresh_statuses()
         self._status_generation = 0  # only the newest status computation is shown
         # Before the list is first filled: using the saved index may adopt catalog launch paths
@@ -106,11 +110,13 @@ class MainFrame(wx.Frame):
         if self.library_manager.load_problems:
             wx.CallAfter(self.run_when_no_dialog, self._tell_load_problems)
 
-        # Status column, then the catalog index from the network (the saved copy is already in use)
+        # Status column, then the catalog index from the network (the saved copy is already in use), then Steam
         self.refresh_statuses()
         self.start_index_fetch()
+        self.start_steam_scan()
         
         self.Bind(wx.EVT_CLOSE, self.on_close)
+        self.Bind(wx.EVT_ACTIVATE, self.on_activate)
     
     def init_ui(self):
         # Notebook: page 0 Library (the player's games), page 1 Catalog. Both tabs are built from GamesPanel;
@@ -361,6 +367,28 @@ class MainFrame(wx.Frame):
         finally:
             self.catalog_panel.set_checking(False)  # "Checking for catalog updates" never outlives the fetch
         self._run_pending_refetch()
+
+    def start_steam_scan(self):
+        """Look for installed Steam games on a worker (startup, F5, a library added, the window coming forward while
+        a request to Steam is pending). While a scan runs, one more follows it."""
+        if self._steam_gate.request():
+            self._run_steam_scan()
+
+    def _run_steam_scan(self):
+        run_in_background(steam_scan.scan, self._steam_scanned, "steam-scan", default=Scan("unknown"))
+
+    def _steam_scanned(self, scan):
+        """A scan ended (UI thread; a failed one arrives as Scan("unknown")). Using it replaces games, so it waits
+        until no dialog holds a game."""
+        if not self:
+            return
+        self.run_when_no_dialog(self._take_steam_scan, scan)
+        if self._steam_gate.done():  # the gate already counts the one more as running
+            self._run_steam_scan()
+
+    def _take_steam_scan(self, scan):
+        if self.service.take_steam_scan(scan):
+            self.games_changed()
 
     # ---- work that must wait for modal dialogs ----------------------------------------------------------------
 
@@ -1079,11 +1107,18 @@ class MainFrame(wx.Frame):
     
     def on_refresh(self, event):
         """F5: on the Catalog tab check for catalog updates; on Library rebuild the game list and tree and
-        recheck each game's Status"""
+        recheck each game's Status; on both look for Steam games"""
+        self.start_steam_scan()
         if self.active_tab() == "catalog":
             self.start_index_fetch()
             return
         self.games_changed()
+
+    def on_activate(self, event):
+        """The window came forward: a request sent to Steam may have installed or removed a game"""
+        if event.GetActive() and self.service.steam_pending:
+            self.start_steam_scan()
+        event.Skip()
 
     def update_title(self):
         count = len(self.library_manager.games)

@@ -295,3 +295,14 @@ def test_games_json_is_beside_the_app_on_windows_and_with_config_json_elsewhere(
     assert isolated_manager.get_games_path() == isolated_manager.app_dir / "games.json"
     monkeypatch.setattr(library_manager.platform, "system", lambda: "Darwin")
     assert isolated_manager.get_games_path() == isolated_manager.config_file.parent / "games.json"
+
+
+def test_adding_a_library_tells_whoever_asked(isolated_manager, tmp_path):
+    added = []
+    isolated_manager.on_library_added = lambda: added.append(1)
+    folder = tmp_path / "Games"
+    folder.mkdir()
+    isolated_manager.add_library(str(folder))
+    with pytest.raises(LibraryError):
+        isolated_manager.add_library(str(folder))            # a duplicate is refused: no call
+    assert added == [1]
