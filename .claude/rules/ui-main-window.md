@@ -155,8 +155,8 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   it for both views once the window has its size. A sash left to wx stays at the minimum pane size and does not
   follow a resize.
 - `random_game(candidates, none_left, act)` is Ctrl+R and Ctrl+Shift+R on both tabs: with no candidate it says
-  so; else it picks one, asks (`messages.CATALOG_RANDOM_PROMPT`, with the row's own verb) and on Yes selects the
-  row and runs `act(row)`, all inside `modal_dialog()`.
+  so; else it picks one, asks (`messages.CATALOG_RANDOM_PROMPT`, with the row's own verb, or the `verb` given:
+  Ctrl+Shift+R gives "Install") and on Yes selects the row and runs `act(row)`, all inside `modal_dialog()`.
 
 What differs between the tabs, each a setting passed to `GamesPanel`:
 

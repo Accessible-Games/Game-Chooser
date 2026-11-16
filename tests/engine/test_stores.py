@@ -35,3 +35,8 @@ def test_what_is_right_is_kept_beside_what_is_wrong():
     assert stores_of({"stores": [dict(ITCH, platforms=["windows", 3, "windows", "ios"])]})[0].platforms == (
         "windows", "ios")
     assert stores_of(None) == [] and stores_of({}) == []
+
+
+def test_a_store_name_is_one_line():
+    assert stores_of({"stores": [dict(ITCH, store="  itch\n.io\t shop ")]})[0].name == "itch .io shop"
+    assert stores_of({"stores": [dict(ITCH, store="\n\t")]}) == []

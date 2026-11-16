@@ -256,7 +256,7 @@ class CatalogPanel(wx.Panel):
         busy = {r.id for r in self.view.displayed if self.service.queue.job_for(r.id) is not None}
         self.view.random_game(install_candidates(self.view.displayed, busy),
                               (messages.CATALOG_NO_GAMES_TO_INSTALL, "No Games"), self._confirm_install,
-                              caption="Random Game to Install")
+                              caption="Random Game to Install", verb="Install")
 
     def context_menu(self, row):
         """The action, then a link item for each link the game has"""

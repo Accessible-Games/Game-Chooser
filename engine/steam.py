@@ -16,7 +16,8 @@ from . import messages
 GET_ACTION = "run"
 LAUNCH_ACTION = "rungameid"
 
-_ACTIONS = (GET_ACTION, LAUNCH_ACTION, "install", "store", "uninstall")
+# A fixed list, never built from the two choices above: changing one of them must not drop an address
+_ACTIONS = ("run", "rungameid", "install", "store", "uninstall")
 
 # (hive, key, name, view) -> the value, or None. hive is "HKCU" or "HKLM"; view is "", "32" or "64".
 ReadValue = Callable[[str, str, str, str], object]

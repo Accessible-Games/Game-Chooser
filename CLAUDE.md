@@ -27,10 +27,11 @@ real registry (only `HKCU\Software\GameChooserTests\<uuid>`) or other Windows-on
 - Of the UI files, `install_dialogs.py`, `progress_area.py` and `description_field.py` are not unit-tested.
   Four are tested in part, on a frame that is never shown or a stand-in for the main window (these tests skip
   when wxPython is not installed or there is no display): `games_panel.py`, the games view both tabs are built
-  from (`tests/test_games_panel.py`); in `catalog_panel.py`, what its action button does while a job runs, how
-  its columns sort and an "&" in its labels (`tests/test_catalog_panel.py`); in `main_window.py`, the Library
-  list's own key (Del), four message boxes of `launch_game` and `on_open_folder`, Locate's file check and a
-  games.json save that fails (`tests/test_main_window.py`); in `dialogs.py`, that `GameDialog` saves the year
+  from (`tests/test_games_panel.py`); in `catalog_panel.py`, what its action button does while a job runs, Get,
+  the choice of places, Steam being absent, how its columns sort and an "&" in its labels
+  (`tests/test_catalog_panel.py`); in `main_window.py`, the Library list's own key (Del), four message boxes of
+  `launch_game` and `on_open_folder`, Locate's file check, a games.json save that fails, `steam_send` and
+  `choose_place` (`tests/test_main_window.py`); in `dialogs.py`, that `GameDialog` saves the year
   2000 and keeps a typed path when Platform becomes Web Game, and that Add/Save and Preferences' OK are the
   default buttons (`tests/test_dialogs.py`).
 - `tests/engine/test_no_wx.py` enforces that `engine/` and the wx-free modules never import wx, and the two

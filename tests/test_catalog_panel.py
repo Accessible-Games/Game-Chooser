@@ -22,7 +22,7 @@ class Frame(FakeFrame):
         super().__init__(manager)
         self.confirmed, self.launched, self.changes = [], [], 0
         self.choice = SimpleNamespace(library_id="lib", library_path="C:/Games", extras=("manual",))
-        self.picks, self.sent, self.asked = [], [], []
+        self.picks, self.sent, self.asked, self.notified = [], [], [], []
         self.pick = lambda places: None
         self.steam = "sent"
         self.yes = True
@@ -34,6 +34,9 @@ class Frame(FakeFrame):
     def steam_send(self, action, app_id):
         self.sent.append((action, app_id))
         return self.steam
+
+    def notify(self, text):
+        self.notified.append(text)
 
     def _ask(self, text, caption, style=None):
         self.asked.append((text, caption))
@@ -61,10 +64,12 @@ class Service:
 
     def __init__(self, entries, installed=()):
         self.index_state = SimpleNamespace(newer_app_needed=False, error=None, entries=entries)
-        self.jobs, self.submitted = {}, []
+        self.jobs, self.submitted, self.added = {}, [], []
         self.queue = SimpleNamespace(
             job_for=lambda cid: SimpleNamespace(state=self.jobs[cid]) if cid in self.jobs else None)
-        self.manager = SimpleNamespace(catalog_game=lambda cid: SimpleNamespace(title=cid.title()))
+        self.manager = SimpleNamespace(catalog_game=lambda cid: SimpleNamespace(title=cid.title()),
+                                       add_catalog_game=self.added.append,
+                                       save_or_keep=lambda change, what: change() or True)  # saved
         self.entries = {e["id"]: e for e in entries}
         self.installed_ids = lambda: set(installed)
 
@@ -255,3 +260,23 @@ def test_a_random_install_of_a_game_with_a_store_opens_the_install_confirmation(
     panel = make_panel(entries=[store_entry("alpha", ITCH)])
     panel._confirm_install(panel.view.displayed[0])                  # what Ctrl+Shift+R runs on its pick
     assert panel.frame.confirmed == ["alpha"] and panel.frame.picks == []
+
+
+def test_the_apps_place_for_a_web_game_with_a_store_adds_it_and_installs_nothing(make_panel, opened):
+    web = {"platform": "web", "install": {"method": "url"}, "url": "https://play.example/web"}
+    panel = make_panel(entries=[dict(store_entry("web", ITCH), sources=[web])])
+    panel.frame.pick = lambda places: places[0]
+    press_action_button(panel, "Web")
+    assert panel.frame.picks == [("Web", ["Add to Game Chooser", "itch.io"])]
+    assert [(g["title"], g["launch_path"]) for g in panel.service.added] == [("Web", "https://play.example/web")]
+    assert panel.frame.notified == [messages.ADDED.format(title="Web")]
+    assert panel.frame.confirmed == [] and panel.service.submitted == [] and opened == []
+
+
+def test_a_random_install_asks_install_now_not_get_now(make_panel, monkeypatch):
+    """Its row reads Get, but Yes opens the install confirmation: the question names that"""
+    asked = []
+    monkeypatch.setattr(wx, "MessageBox", lambda text, caption, style: (asked.append((text, caption)), wx.NO)[1])
+    panel = make_panel(entries=[store_entry("alpha", ITCH)])
+    panel.on_random_install()
+    assert asked == [("Your game for today is...\n\nAlpha\n\nInstall now?", "Random Game to Install")]

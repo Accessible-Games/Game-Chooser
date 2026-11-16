@@ -33,7 +33,7 @@ def stores_of(entry: dict | None) -> list[Store]:
         if not isinstance(item, dict) or not isinstance(item.get("store"), str):
             continue
         platforms = _platforms(item)
-        name = item["store"].strip()
+        name = " ".join(item["store"].split())
         key = name.casefold()
         if not platforms or not name or key in seen:
             continue
