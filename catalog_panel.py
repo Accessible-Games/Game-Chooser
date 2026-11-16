@@ -182,7 +182,8 @@ class CatalogPanel(wx.Panel):
             webbrowser.open(place.store.url)
         else:  # "steam" or "steam-demo"
             app_id = place.store.app_id if place.kind == "steam" else place.store.demo_app_id
-            sent = self.frame.steam_send(steam.GET_ACTION, app_id)
+            action = steam.GET_ACTION if place.kind == "steam" else steam.GET_DEMO_ACTION
+            sent = self.frame.steam_send(action, app_id)
             if sent == "sent":
                 self.service.steam_sent(app_id)  # the window coming forward scans until Steam has installed it
             elif sent == "absent":

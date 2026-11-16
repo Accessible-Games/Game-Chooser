@@ -67,7 +67,7 @@ Which thread each member runs on: see CLAUDE.md (Threading).
   or the store's name). A row with any place but the app's alone reads Get (`CatalogPanel._get`): one place is
   gone to at once, several open `MainFrame.choose_place` (a list inside `modal_dialog()`; Cancel changes
   nothing). The app's place opens the install confirmation; a store opens its page in the browser; Steam is
-  reached only through `MainFrame.steam_send(steam.GET_ACTION, app id)`. When Steam is absent (not installed,
+  reached only through `MainFrame.steam_send` ("Steam" sends `steam.GET_ACTION`, `steam://store/<id>`, the game's page in Steam; "Steam demo" sends `steam.GET_DEMO_ACTION`, `steam://install/<id>`, an offer to install the demo). When Steam is absent (not installed,
   or not Windows: `messages.steam_absent`) the app asks whether to open the full game's Steam page instead, for
   the demo too; an address Windows refused is told and nothing more opens. A Get Steam took ("sent") makes its
   id pending (Installed Steam games, below). "Random Game to Install" picks by

@@ -21,7 +21,7 @@ def test_addresses_come_from_a_plain_positive_int_only():
             steam.store_page(bad)
     with pytest.raises(ValueError):
         steam.address("open", 1)
-    assert (steam.GET_ACTION, steam.LAUNCH_ACTION) == ("run", "rungameid")
+    assert (steam.GET_ACTION, steam.GET_DEMO_ACTION, steam.LAUNCH_ACTION) == ("store", "install", "rungameid")
 
 
 def test_steam_folder_is_the_first_registry_value_that_names_a_real_folder(tmp_path):

@@ -11,9 +11,12 @@ from pathlib import Path
 
 from . import messages
 
-# The two choices plan 3's Task 0 can change. The spec's facts section says what each address does:
-# `run` is the one that gets a game Steam does not have, `rungameid` starts one it has.
-GET_ACTION = "run"
+# Checked by ear on Windows with Steam installed, Nov 16, 2026, for a game the player does not own and that
+# is not released: `steam://run/<id>` only opened Steam's store home page; `steam://store/<id>` opened the
+# game's own page; `steam://install/<id>` for its free demo offered to install the demo. So "Steam" opens the
+# game's page and "Steam demo" installs the demo. The launch address has not been checked with an update pending.
+GET_ACTION = "store"
+GET_DEMO_ACTION = "install"
 LAUNCH_ACTION = "rungameid"
 
 # A fixed list, never built from the two choices above: changing one of them must not drop an address

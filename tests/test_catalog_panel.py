@@ -231,8 +231,16 @@ def test_more_than_one_place_asks_and_goes_where_the_player_chose(make_panel, op
         press_action_button(panel, "Alpha")
     assert panel.frame.picks == [("Alpha", labels)] * 5
     assert panel.frame.confirmed == ["alpha"]                       # only choice 0 opens the install confirmation
-    assert panel.frame.sent == [(steam.GET_ACTION, 1234560), (steam.GET_ACTION, 1234570)]
+    assert panel.frame.sent == [(steam.GET_ACTION, 1234560), (steam.GET_DEMO_ACTION, 1234570)]
     assert opened == ["https://dev.itch.io/game"]
+
+
+def test_steam_opens_the_games_page_and_steam_demo_installs_the_demo(make_panel, opened):
+    panel = make_panel(entries=[store_entry("alpha", STEAM_DEMO, download=False)])
+    for chosen in (0, 1):                                            # "Steam", then "Steam demo"
+        panel.frame.pick = lambda places, i=chosen: places[i]
+        press_action_button(panel, "Alpha")
+    assert panel.frame.sent == [("store", 1234560), ("install", 1234570)]
 
 
 @pytest.mark.parametrize("platform, why", [("windows", messages.STEAM_NOT_INSTALLED),
