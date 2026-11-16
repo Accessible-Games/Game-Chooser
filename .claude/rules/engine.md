@@ -27,6 +27,13 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   **steam.py** - the only builder of a Steam address (`address`, from a plain positive int), `store_page`, and
   where Steam is installed. **stores.py** - `stores_of(entry)` reads an entry's `stores` into `Store`s (name,
   platforms, page address, Steam's app and demo ids); an item of the wrong shape is skipped.
+  **keyvalues.py** - `parse` reads Steam's KeyValues text (keys lowercased, a value is a str or a dict; raises
+  `ValueError` on anything malformed or nested deeper than 64). **steam_scan.py** - `scan` / `scan_folder` read
+  Steam's `libraryfolders.vdf` and each library's `appmanifest_<id>.acf` (read only, never written). Installed
+  means `StateFlags` has bit 4 and `steamapps/common/<installdir>` is a folder (`installdir` must be one plain
+  name: no `/` or `\`, not empty, `.` or `..`, on every system). Three outcomes: `absent` (no Steam), `unknown`
+  (the library list can't be read or parsed), `found`. `unsure` holds ids whose manifest can't be read or trusted;
+  `complete` is false when a listed library's `steamapps` is unreachable. Only `steamapps` itself is read.
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
   An HTTP 404 or 410 is `DownloadGone` ("no longer available"), never "couldn't be reached"; `NoVerifiedSource.gone`
