@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from . import messages
 from .errors import InstallFailed
+from .stores import Store, stores_of
 
 KNOWN_KINDS = frozenset({"game", "extra", "runtime", "access-mod"})
 KNOWN_METHODS = frozenset({"zip", "7z", "installer", "cab", "tar", "none", "url"})
@@ -209,8 +210,34 @@ def _extras(entry: dict) -> list[dict]:
     return [x for x in extras if isinstance(x, dict)] if isinstance(extras, list) else []
 
 
+@dataclass(frozen=True)
+class Place:
+    kind: str                   # "app", "steam", "steam-demo" or "store"
+    label: str                  # the choice dialog's item
+    store: Store | None = None  # None for "app"
+
+
+def places(entry: dict, entries: dict, platform: str) -> list[Place]:
+    """The ways to get an entry on `platform`: the app's own first, then each store in entry order."""
+    result = []
+    if _game_is_visible(entry, entries, platform):
+        result.append(Place("app", messages.PLACE_ADD if is_web_game(entry, platform) else messages.PLACE_INSTALL))
+    for store in stores_of(entry):
+        if platform not in store.platforms and "web" not in store.platforms:
+            continue
+        if store.is_steam:
+            result.append(Place("steam", messages.PLACE_STEAM, store))
+            if store.demo_app_id:
+                result.append(Place("steam-demo", messages.PLACE_STEAM_DEMO, store))
+        else:
+            result.append(Place("store", store.name, store))
+    return result
+
+
 def visible_games(entries: dict, platform: str) -> list[dict]:
-    return [e for e in entries.values() if _game_is_visible(e, entries, platform)]
+    return [e for e in entries.values()
+            if e.get("kind") == "game" and isinstance(e.get("id"), str) and _ID.fullmatch(e["id"])
+            and places(e, entries, platform)]
 
 
 @dataclass

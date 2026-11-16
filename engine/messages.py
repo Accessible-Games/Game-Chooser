@@ -499,3 +499,8 @@ PREFS_BAD_CATALOG_ADDRESS = "That catalog address isn't valid. Use an https:// a
 PREFS_BAD_ADDRESS_TITLE = "Catalog address"
 
 STEAM_NEEDS_WINDOWS = "Game Chooser can open Steam only on Windows."
+
+PLACE_INSTALL = "Install with Game Chooser"
+PLACE_ADD = "Add to Game Chooser"
+PLACE_STEAM = "Steam"
+PLACE_STEAM_DEMO = "Steam demo"

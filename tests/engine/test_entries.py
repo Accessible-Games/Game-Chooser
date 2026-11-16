@@ -2,8 +2,9 @@ import pytest
 
 from engine.entries import (
     extras_of, game_fields, is_mirror_url, is_web_game, mirror_url_for, platform_sources,
-    dependency_order, visible_games,
+    dependency_order, places, visible_games,
 )
+from engine.stores import stores_of
 from tests.engine.fakes import fails
 
 MIRROR = "https://files.accessiblegames.net/files/" + "a" * 64 + "/g.zip"
@@ -168,3 +169,55 @@ def test_game_fields_main_genre_is_the_first_readable_one():
 def test_is_web_game_takes_an_install_that_is_not_an_object_as_no_link():
     assert is_web_game(entry("w", sources=[src(platform="web", install={"method": "url"})]), "windows")
     assert not is_web_game(entry("w", sources=[src(platform="web", install="url")]), "windows")
+
+
+STEAM = {"store": "steam", "app_id": 1234560, "demo_app_id": 1234570, "platforms": ["windows"]}
+ITCH = {"store": "itch.io", "url": "https://dev.itch.io/game", "platforms": ["windows", "macos"]}
+MAC_ONLY = {"store": "GOG", "url": "https://www.gog.com/game/g", "platforms": ["macos"]}
+ANYWHERE = {"store": "Ko-fi", "url": "https://ko-fi.com/s/1", "platforms": ["web"]}
+
+
+def store_only(id, *stores, **kw):
+    e = entry(id, stores=list(stores), **kw)
+    del e["sources"]
+    return e
+
+
+def kinds(e, entries=None, platform="windows"):
+    return [(p.kind, p.label) for p in places(e, entries or {e["id"]: e}, platform)]
+
+
+def test_places_in_order():
+    both = entry("g", stores=[STEAM, ITCH])
+    assert kinds(both) == [("app", "Install with Game Chooser"), ("steam", "Steam"), ("steam-demo", "Steam demo"),
+                           ("store", "itch.io")]
+    steam_store, itch = stores_of(both)
+    assert [p.store for p in places(both, {"g": both}, "windows")] == [None, steam_store, steam_store, itch]
+    assert kinds(store_only("g", ITCH)) == [("store", "itch.io")]
+    web = entry("g", sources=[src(platform="web", install={"method": "url"}, url="https://play.example/")],
+                stores=[ITCH])
+    assert kinds(web)[0] == ("app", "Add to Game Chooser")
+    assert kinds(store_only("g", dict(STEAM, demo_app_id=None))) == [("steam", "Steam")]
+
+
+def test_a_store_is_a_place_only_on_its_platforms():
+    e = store_only("g", MAC_ONLY, ANYWHERE)
+    assert kinds(e, platform="windows") == [("store", "Ko-fi")]            # "web" counts on every system
+    assert kinds(e, platform="macos") == [("store", "GOG"), ("store", "Ko-fi")]
+    assert kinds(store_only("g", MAC_ONLY), platform="windows") == []
+
+
+def test_an_entry_is_visible_when_it_has_a_place():
+    entries = {e["id"]: e for e in (
+        store_only("mac", MAC_ONLY),                                       # nothing for Windows
+        store_only("dead", dict(STEAM, app_id=True)),                      # its one store does not exist
+        store_only("shop", ITCH),
+        entry("odd", sources=[src(install={"method": "from-the-future"})], stores=[ITCH]),
+        entry("needs", dependencies=["nope"], stores=[STEAM]),             # its download can't install
+        store_only("x", ITCH, kind="extra"),
+        entry("plain"),
+    )}
+    assert [e["id"] for e in visible_games(entries, "windows")] == ["shop", "odd", "needs", "plain"]
+    assert kinds(entries["odd"], entries) == [("store", "itch.io")]
+    assert [kind for kind, _ in kinds(entries["needs"], entries)] == ["steam", "steam-demo"]
+    assert visible_games({"Not An Id": dict(entries["shop"], id="Not An Id")}, "windows") == []
