@@ -28,7 +28,7 @@ def test_parse_unescapes_backslashes_and_skips_comments():
 
 
 @pytest.mark.parametrize("text", [MANIFEST[:-3], MANIFEST[:40], '"a"', '"a" {', '"a" }', 'a "b"', '"a" "b" "c"',
-                                  '"a" { "b" }', '{ "a" "b" }'])
+                                  '"a" { "b" }', '{ "a" "b" }', '"a" {' * 5000, '"a" "b', '"a" "b\\', '"a" { } }'])
 def test_parse_refuses_a_file_that_is_cut_short_or_malformed(text):
     with pytest.raises(ValueError):
         parse(text)

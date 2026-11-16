@@ -23,7 +23,9 @@ def parse(text: str) -> dict:
     """Keys lowercased; a value is a str or a dict. ValueError for anything not well-formed."""
     tokens = iter(_tokens(text))
 
-    def read_object(top: bool) -> dict:
+    def read_object(top: bool, depth: int = 0) -> dict:
+        if depth > 64:  # real files nest a few levels; deeper (even well-formed) is refused
+            raise ValueError("nested too deeply")
         result = {}
         for kind, value in tokens:
             if kind == "}":
@@ -38,7 +40,7 @@ def parse(text: str) -> dict:
             if nxt[0] == "str":
                 result[value.lower()] = nxt[1]
             elif nxt[0] == "{":
-                result[value.lower()] = read_object(False)
+                result[value.lower()] = read_object(False, depth + 1)
             else:
                 raise ValueError("key without a value")
         if not top:
