@@ -446,3 +446,14 @@ def test_store_links_follow_the_entrys_own_and_come_before_the_purchase_page():
     line = "Steam store page: https://store.steampowered.com/app/1234560/"
     assert line in description_text(e).splitlines()
     assert link_at_line(line) == "https://store.steampowered.com/app/1234560/"
+
+
+def test_a_library_rows_note_reads_before_the_links():
+    e = {"id": "g", "description": "A game.", "links": [{"url": "https://h.example", "label": "Homepage"}]}
+    own = Game(title="G", catalog_id="g", library_id="lib", launch_path="G/g.exe")
+    rows = library_rows([own, Game(title="H", launch_path="C:/h.exe")], lambda game: e if game is own else None,
+                        lambda game: "Also installed through Steam." if game is own else "")
+    assert [r.note for r in rows] == ["Also installed through Steam.", ""]
+    assert description_text(e, rows[0].note).split("\n\n") == [
+        "A game.", "Also installed through Steam.", "Homepage: https://h.example"]
+    assert description_text(e) == description_text(e, "") and description_text(None, "x") == ""

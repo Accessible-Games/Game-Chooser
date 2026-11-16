@@ -604,7 +604,9 @@ class MainFrame(wx.Frame):
     def _refresh_library_rows(self):
         """The Library's part of games_changed(): rebuild its rows from the games and their catalog entries.
         The view brings its tree up to date, filters again and keeps the selected game selected."""
-        self.library_view.set_rows(library_rows(self.library_manager.games, self.service.entry_for))
+        self.library_view.set_rows(library_rows(
+            self.library_manager.games, self.service.entry_for,
+            lambda game: messages.ALSO_ON_STEAM if self.service.also_on_steam(game) else ""))
         self.update_title()
 
     def build_list_menu(self, game):

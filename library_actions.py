@@ -75,6 +75,9 @@ def catalog_menu_items(game, record, entry: dict | None, update_available: bool,
     """
     if not game.catalog_id:
         return []
+    if game.is_steam:  # Steam's own uninstall; nothing else is the app's to do
+        return [MenuItem(UNINSTALL, messages.MENU_UNINSTALL_STEAM)] + [
+            MenuItem(LINK, label, url=url) for label, url in link_items(entry)]
     links = [MenuItem(LINK, label, url=url) for label, url in link_items(entry)]
     if not game.is_web and is_uninstall_unfinished(record):
         return [MenuItem(UNINSTALL, messages.UNINSTALL_BUTTON)] + links
@@ -98,6 +101,8 @@ def delete_kind(game, record) -> str:
     """What Delete does with a game: "uninstall" (a tracked catalog install, or one whose uninstall stopped partway:
     the Uninstall dialog), "forget" (an untracked one: remove it from the list and forget its record, files
     untouched) or "delete" (anything else: the usual confirmation, then it leaves the list)."""
+    if game.is_steam:
+        return "uninstall"
     if not game.catalog_id or game.is_web:
         return "delete"
     if is_uninstallable(record):

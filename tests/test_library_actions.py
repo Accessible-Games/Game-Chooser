@@ -263,3 +263,13 @@ def test_a_hand_added_games_file_is_one_add_game_and_locate_both_accept(tmp_path
     gone = str(tmp_path / "gone.exe")
     assert executable_problem(gone, "Windows") == (messages.FILE_MISSING.format(path=gone),
                                                    messages.LAUNCH_NOT_FOUND_TITLE)
+
+
+def test_a_steam_row_is_uninstalled_through_steam():
+    game = Game(title="Dugout Dice", catalog_id="dice", platforms=["Windows"], steam_app_id=5054570)
+    assert delete_kind(game, None) == "uninstall"
+    links_entry = {"id": "dice", "links": [{"url": "https://h.example", "label": "Homepage"}]}
+    items = catalog_menu_items(game, None, links_entry, False, False)
+    assert (items[0].action, items[0].label, items[0].enabled) == (UNINSTALL, "Uninstall through Steam", True)
+    assert [(i.action, i.url) for i in items[1:]] == [(LINK, "https://h.example")]
+    assert [i.label for i in catalog_menu_items(game, None, None, False, False)] == ["Uninstall through Steam"]

@@ -43,6 +43,7 @@ class CatalogRow:
     price_values: set[str]  # the Price branch values this row is under
     game: object = None  # a Library row's Game (library_rows); a Catalog row has none
     places: list[Place] = field(default_factory=list)  # where to get it (Catalog rows built with places_of)
+    note: str = ""  # a line the description adds (a Library row: "Also installed through Steam.")
 
     @property
     def genre(self) -> str:
@@ -148,7 +149,7 @@ def build_rows(entries: list[dict], installed_ids: set[str], places_of=None) -> 
     return rows
 
 
-def library_rows(games, entry_for) -> list[CatalogRow]:
+def library_rows(games, entry_for, note_for=None) -> list[CatalogRow]:
     """The player's games as rows, so the Library tab filters, labels and describes them as the Catalog tab does.
     `entry_for(game)` gives a catalog game's index entry (None for a game added by hand, or one the catalog no
     longer lists).
@@ -179,6 +180,7 @@ def library_rows(games, entry_for) -> list[CatalogRow]:
             entry=entry_for(game),
             tags=[], languages=[], contains=[], unsupported=False, price="", price_values=set(),
             game=game,
+            note=note_for(game) if note_for else "",
         ))
     return rows
 
@@ -417,7 +419,7 @@ def _details_lines(entry: dict) -> list[str]:
     return lines
 
 
-def description_text(entry: dict | None) -> str:
+def description_text(entry: dict | None, note: str = "") -> str:
     """The description field: the entry's description, then its details, then one line per web page
     ("label: url", so Enter on the line opens it)."""
     if not entry:
@@ -426,7 +428,7 @@ def description_text(entry: dict | None) -> str:
     body = markdown_to_text(description) if isinstance(description, str) else ""
     details = "\n".join(_details_lines(entry))
     links = "\n".join(f"{label}: {url}" for label, url in entry_links(entry))
-    return "\n\n".join(part for part in (body, details, links) if part)
+    return "\n\n".join(part for part in (body, details, note, links) if part)
 
 
 _LINK_LINE = re.compile(r"^.+?: (\S+)$")

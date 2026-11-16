@@ -486,6 +486,17 @@ def test_library_rows_launch_describe_and_are_remembered_by_id(make_view):
     assert (view.action_btn.GetLabel(), view.action_btn.IsEnabled()) == ("Launch", False)
 
 
+def test_a_library_rows_note_shows_in_its_description(make_view):
+    games = [Game(title="Alpha", launch_path="Alpha/alpha.exe", library_id="lib", catalog_id="alpha"),
+             Game(title="Beta", launch_path="Beta/beta.exe", library_id="lib", catalog_id="beta")]
+    view = make_view(idle_label="Launch")
+    view.set_rows(library_rows(games, lambda game: ALPHA,
+                               lambda game: "Also installed through Steam." if game is games[0] else ""))
+    assert "Also installed through Steam." in view.description.GetValue()
+    player_selects(view, 1)
+    assert "Also installed through Steam." not in view.description.GetValue()
+
+
 @WIDTHS
 def test_column_widths_are_restored_and_saved(make_view):
     view = make_view({"column_widths": [123, 45]})
