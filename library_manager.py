@@ -103,6 +103,7 @@ class GameLibraryManager:
         self._uncopied_damage = set()
         self._damage_copies = {}  # damaged file -> the copy kept of it
         self.load_problems = []  # plain words for the player, shown once after startup (then cleared by the UI)
+        self.on_library_added = None  # called with no arguments after add_library saved the config
         self.load_config()
         self.load_games()
         self.config_dir = self.config_file.parent
@@ -264,7 +265,8 @@ class GameLibraryManager:
         second one (the first such game, when two launch it); it keeps its title and details until the catalog next
         refreshes them (an index take sets the genre; an Update, Repair or Extras result replaces every field). Only
         games' records count: a shared
-        runtime's record (kind "runtime") is never a game.
+        runtime's record (kind "runtime") is never a game. A Steam row has no record and is kept, unless its catalog
+        id has a record that is not uninstalled: then it leaves the list and the record gets the app's own row.
 
         An uninstalled record: if the uninstall stopped partway (installed files left, or the game's own
         uninstaller still to run), the game stays as it is, so Uninstall can finish it. If it finished but its
@@ -275,8 +277,8 @@ class GameLibraryManager:
         changed = False
         finished = []
         for game in self.games:
-            if not game.catalog_id or game.is_web:
-                continue  # web games have no install record by design
+            if not game.catalog_id or game.is_web or game.is_steam:
+                continue  # web games and Steam rows have no install record by design
             rec = records.get(game.catalog_id)
             if rec is None:
                 if not self._record_unreadable(game.catalog_id):  # an unreadable one may still be the game's
@@ -287,6 +289,10 @@ class GameLibraryManager:
         if finished:
             log.info("Uninstalls finished before the app quit: %s", ", ".join(g.catalog_id for g in finished))
             self.games = [g for g in self.games if not any(g is f for f in finished)]
+            changed = True
+        installed = [g for g in self.games if g.is_steam and (r := records.get(g.catalog_id)) and not r.uninstalled]
+        if installed:  # the app's own copy is installed: its record gets the app's own row below
+            self.games = [g for g in self.games if not any(g is s for s in installed)]
             changed = True
         missing = [r for r in records.values() if not r.uninstalled and self.catalog_game(r.catalog_id) is None]
         if missing:
@@ -367,6 +373,8 @@ class GameLibraryManager:
         lib = {"id": secrets.token_hex(6), "path": path}
         self.config["libraries"].append(lib)
         self.save_config()
+        if self.on_library_added:
+            self.on_library_added()
         return lib
 
     def change_library_folder(self, library_id, path):

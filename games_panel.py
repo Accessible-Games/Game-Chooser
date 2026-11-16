@@ -406,7 +406,7 @@ class GamesPanel(wx.Panel):
             self.focus_list()  # never leave focus on a control that is about to be disabled (not under a dialog)
         self.action_btn.SetLabelText(action_label(row) if row else self.idle_label)
         self.action_btn.Enable(row is not None)
-        self.description.set_text(description_text(row.entry) if row else "")
+        self.description.set_text(description_text(row.entry, row.note) if row else "")
         self.Layout()  # the whole view: the slot alone keeps the width the last label gave it
         if self.on_shown is not None:
             self.on_shown()
@@ -516,18 +516,18 @@ class GamesPanel(wx.Panel):
                 self._show_selection()
                 return
 
-    def random_game(self, candidates, none_left, act, caption="Random Game"):
+    def random_game(self, candidates, none_left, act, caption="Random Game", verb=None):
         """Ctrl+R and Ctrl+Shift+R: pick one of `candidates` (rows of the list as shown) at random and ask. On Yes
         its row is selected and `act(row)` runs. `none_left` is the (text, caption) to show when there is no
-        candidate."""
+        candidate. The question names `verb`, else the row's own verb."""
         if not candidates:
             self.frame._tell(*none_left, wx.ICON_INFORMATION)
             return
         row = random.choice(candidates)
         # The row is held across the prompt and the action, so no refresh may replace it meanwhile
         with self.frame.modal_dialog():
-            answer = wx.MessageBox(messages.CATALOG_RANDOM_PROMPT.format(title=row.title, verb=action_verb(row)),
-                                   caption, wx.YES_NO | wx.ICON_QUESTION)
+            question = messages.CATALOG_RANDOM_PROMPT.format(title=row.title, verb=verb or action_verb(row))
+            answer = wx.MessageBox(question, caption, wx.YES_NO | wx.ICON_QUESTION)
             if answer == wx.YES:
                 self.select_row(row)
                 act(row)

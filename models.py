@@ -16,6 +16,8 @@
 
 from dataclasses import dataclass, fields
 
+from engine.steam import is_app_id
+
 
 def is_web_path(path: str) -> bool:
     return path.lower().startswith(("http://", "https://"))
@@ -33,19 +35,34 @@ class Game:
     catalog_id: str = ""
     installed_source: dict = None
     installed_extras: list = None
+    steam_app_id: int = 0
 
     def __post_init__(self):
         self.platforms = self.platforms or []
+        if not is_app_id(self.steam_app_id) or not self.catalog_id:  # a Steam row is always a catalog game
+            self.steam_app_id = 0
 
     @property
     def is_web(self):
         return is_web_path(self.launch_path)
 
+    @property
+    def is_steam(self):
+        return self.steam_app_id != 0
+
+    @property
+    def row_key(self):
+        """What a Status is keyed by: a Steam row's app id, every other game's library and launch path"""
+        return ("steam", self.steam_app_id) if self.is_steam else (self.library_id, self.launch_path)
+
     def to_dict(self):
-        """Every field, in order; catalog_id only when set, installed_source and installed_extras only when not None"""
+        """Every field, in order; catalog_id and steam_app_id only when set, installed_source and installed_extras
+        only when not None"""
         data = {f.name: getattr(self, f.name) for f in fields(self)}
         if not self.catalog_id:
             del data["catalog_id"]
+        if not self.steam_app_id:
+            del data["steam_app_id"]
         return {k: v for k, v in data.items() if v is not None or not k.startswith("installed_")}
 
     @classmethod

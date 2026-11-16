@@ -39,14 +39,28 @@ description. The Catalog tab has its status line and Retry above these.
   `MainFrame.selected_game()` is the selected row's `Game`.
   `MainFrame.games_changed()` is the one call after every change to a game, to `manager.games`, to a library or
   to what is installed (Add, Edit, Delete, Locate, a job that ended, an index take, Preferences, F5, a web game
-  added from the Catalog): it rebuilds both tabs' rows, the Libraries menu and the statuses. Add, Edit, Delete
+  added from the Catalog, a Steam scan that changed rows, or changed what Steam has installed while an index is
+  loaded): it rebuilds both tabs' rows, the Libraries menu and the statuses. Add, Edit, Delete
   and Locate write games.json through `_save_games`, and the Catalog's Add of a web game through `save_or_keep`
   too: a save that fails says so (`messages.GAMES_NOT_SAVED`), and the change stays in memory and still shows.
   Status values (`engine/status.py`): `Ready`, `Update available`, `Executable not found`, `Library not found`.
-  A `self_updating` entry never shows `Update available`.
+  A `self_updating` entry never shows `Update available`. A Steam row is always `Ready`.
   Statuses are computed on a worker thread (`refresh_statuses`) and applied on the UI thread.
 - **Catalog tab**, **Install confirmation**, **Progress area** and **Library catalog actions**: see
   `.claude/rules/catalog-install.md`.
+- **Steam scan** (`start_steam_scan`; what a Steam row is and does: `.claude/rules/catalog-install.md`, Installed
+  Steam games). It runs at five moments:
+  - at start, after the catalog fetch starts;
+  - on F5, on either tab;
+  - when a library is added (`library_manager.on_library_added`);
+  - when the window comes forward (`EVT_ACTIVATE`, `on_activate`) while an id is pending;
+  - when Enter or Delete on a Steam row finds Steam absent.
+  One runs at a time (`steam_games.ScanGate`); one asked for meanwhile follows it. Its result is taken through
+  `run_when_no_dialog`, and `games_changed()` runs only when `take_steam_scan` returns True: rows changed, or what
+  Steam has installed changed while an index is loaded (so "Also installed through Steam." is right). It never
+  moves focus.
+- **A Steam row**: Enter launches it through Steam and the window is not minimized; Del is Steam's uninstall,
+  with no dialog of the app's own; Ctrl+Enter opens the folder the scan found.
 - **Preferences** (`PreferencesDialog`): tabs Library Paths and Installing (`install_prefs.py`: catalog address,
   "register shared components"). An invalid address saves nothing; a changed address refetches the catalog on close.
 - **Enter in a dialog**: each dialog the app builds has a default button, so Enter in a field presses it: Add or
@@ -155,8 +169,8 @@ Rules it holds for both tabs (pinned by `tests/test_games_panel.py`; the wx-free
   it for both views once the window has its size. A sash left to wx stays at the minimum pane size and does not
   follow a resize.
 - `random_game(candidates, none_left, act)` is Ctrl+R and Ctrl+Shift+R on both tabs: with no candidate it says
-  so; else it picks one, asks (`messages.CATALOG_RANDOM_PROMPT`, with the row's own verb) and on Yes selects the
-  row and runs `act(row)`, all inside `modal_dialog()`.
+  so; else it picks one, asks (`messages.CATALOG_RANDOM_PROMPT`, with the row's own verb, or the `verb` given:
+  Ctrl+Shift+R gives "Install") and on Yes selects the row and runs `act(row)`, all inside `modal_dialog()`.
 
 What differs between the tabs, each a setting passed to `GamesPanel`:
 
@@ -168,8 +182,8 @@ What differs between the tabs, each a setting passed to `GamesPanel`:
 | `row_filter` | View > Libraries (hidden libraries) | none |
 | `on_key` | Del | none |
 | `on_shown` | `update_tab_menus` (Edit Game follows the selection) | none |
-| `on_action`, `context_menu` | launch; `build_list_menu` | install, add or launch; the action and links |
-| `random_game` candidates, and what Yes does | the listed games that run on this system; launch | any listed row, its own action (Ctrl+R); the rows that install, the install confirmation (Ctrl+Shift+R) |
+| `on_action`, `context_menu` | launch; `build_list_menu` | install, add, get or launch; the action and links |
+| `random_game` candidates, and what Yes does | the listed games that run on this system; launch | any listed row, its own action (Ctrl+R); the rows the app installs (not those got only from a store), the install confirmation (Ctrl+Shift+R) |
 
 Each view saves under its own prefix (none for the Library, `catalog_` for the Catalog): the selected row, the
 search, the tree selections, the sort, the column widths and the splitter position. The Catalog's status line and Retry are
@@ -178,7 +192,7 @@ search, the tree selections, the sort, the column widths and the splitter positi
 ## Modal safety
 The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn, *args)` are in CLAUDE.md
 (Modal safety).
-- `run_when_no_dialog` is used for index takes, job outcomes (`_apply_outcome`) and the uninstall
+- `run_when_no_dialog` is used for index takes, job outcomes (`_apply_outcome`), Steam scans and the uninstall
   confirmation.
 - `PreferencesDialog` sets `holds_no_games = True`: it holds library ids only, is **not** opened in
   `modal_dialog()`, and `_modal_open()` ignores it, so job results apply while it is open (through
@@ -190,20 +204,23 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
   can't keep the app alive.
 
 ## Keyboard Shortcuts
-- **F5**: Library: rebuild list, tree and menu and recheck Status. Catalog: check for catalog updates.
+- **F5**: Library: rebuild list, tree and menu and recheck Status. Catalog: check for catalog updates. Both also
+  look for Steam games.
 - **Ctrl+R**: random game from the active tab's filtered list (`GamesPanel.random_game`: it asks with the row's
   own verb, and on Yes selects the row and acts). Library: among the games that run on this system (web games
-  included); Yes launches. Catalog: any listed row; Yes runs that row's action (Install, Add or Launch).
+  included); Yes launches. Catalog: any listed row; Yes runs that row's action (Install, Add, Get or Launch).
 - **Ctrl+Shift+R** (Launch > Random Game to Install): random game from the Catalog tab's filtered list that
-  installs (`catalog_view.install_candidates`: not installed, not a web game, no job queued or running); switches to
+  installs (`catalog_view.install_candidates`: not installed, not a web game, not got only from a store, no job
+  queued or running); switches to
   the Catalog tab first, asks, then opens the install confirmation as the Install button does.
-- **Del**: Library only (Uninstall for a tracked catalog install, forget for an untracked one, else delete).
+- **Del**: Library only (Uninstall for a tracked catalog install, Steam's uninstall for a Steam row, forget for an
+  untracked one, else delete).
 - **Ctrl+E**: Library only; refuses catalog games and says why (its accelerator stays enabled for that, while the
   Edit menu item is disabled). Edit and Delete menu items are disabled on the Catalog tab. AltGr+E (Ctrl and Alt
   both down) is a letter on several layouts and is not Ctrl+E.
 - **Ctrl+N** add game, **Ctrl+F** the active tab's search box, **Ctrl+Enter** open folder, **Ctrl+,** preferences.
 - In a games list (both tabs; the games-view rules above): **Enter** runs the row's action (Launch on the
-  Library; Install, Add or Launch on the Catalog), always. **Space** does too, except for 3 seconds after a typed
+  Library; Install, Add, Get or Launch on the Catalog), always. **Space** does too, except for 3 seconds after a typed
   character, when it belongs to the text. **Typing** jumps to the title that starts with what was typed; Escape,
   Backspace and the navigation keys end the text. A **digit** sorts by that column, with neither Ctrl nor Alt
   held and no text being typed.
@@ -225,9 +242,11 @@ The rule itself, `MainFrame.modal_dialog()` and `MainFrame.run_when_no_dialog(fn
 - After a dialog the code calls `focus_active_list()` only in these places. Startup: in `MainFrame.__init__`,
   once `load_saved_state()` is done. Library: after the message that a
   catalog game can't be edited (Ctrl+E); in the forget flow when nothing was forgotten; after a catalog action
-  from the context menu (Update, Extras, Undo, Repair, Uninstall); when Uninstall is refused, and after its
-  dialog; after the damaged-file message at startup. Catalog: at every exit of Install (already queued, could not
-  be planned, the confirmation confirmed or cancelled) and of adding a web game. Add, Edit, Delete of a game
+  from the context menu (Update, Extras, Undo, Repair, Uninstall); when Uninstall is refused, after its
+  dialog, and after a Steam row's uninstall; after the damaged-file message at startup. Catalog: at every exit of Install (already queued, could not
+  be planned, the confirmation confirmed or cancelled), of adding a web game, and of Get when it showed a dialog
+  (the choice of places, Steam's "couldn't be opened" or the offer of its store page; Get with one place and no
+  dialog makes none). Add, Edit, Delete of a game
   added by hand, a forget that succeeded, Locate, the random-game prompt and the Catalog's "not in the Library"
   message make no focus call. Inside `random_game` the action runs within `modal_dialog()`, so a
   `focus_active_list()` call it makes is refused.

@@ -24,6 +24,23 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   `platform_sources` skips sources whose `arch` this machine can't run (`runs_on`, `current_arch`: x86 runs on x64
   Windows and Linux; Windows on Arm runs x64 and x86; an Apple Silicon Mac runs x64; pass `machine` in tests).
   **pricing.py** - how `pricing` reads, the Price filter values and the install confirmation's price warning.
+  **steam.py** - the only builder of a Steam address (`address`, from a plain positive int), `store_page`, and
+  where Steam is installed. **stores.py** - `stores_of(entry)` reads an entry's `stores` into `Store`s (name,
+  platforms, page address, Steam's app and demo ids); an item of the wrong shape is skipped.
+  **keyvalues.py** - `parse` reads Steam's KeyValues text (keys lowercased, a value is a str or a dict; raises
+  `ValueError` on anything malformed or nested deeper than 64). **steam_scan.py** - `scan` / `scan_folder` read
+  Steam's `libraryfolders.vdf` and each library's `appmanifest_<id>.acf` (read only, never written). Installed
+  means `StateFlags` has bit 4 and `steamapps/common/<installdir>` is a folder (`installdir` must be one plain
+  name: no `/`, `\`, `:` or NUL, not empty, `.` or `..`, on every system; the folder must sit directly in `common`). Three outcomes: `absent` (no Steam), `unknown`
+  (the library list can't be read, parsed, or has no `libraryfolders` object), `found`. `unsure` holds ids whose manifest can't be read or trusted;
+  `complete` is false when a listed library's `steamapps` is unreachable, or a numbered entry has no usable absolute path. Only `steamapps` itself is read.
+  A manifest whose folder is there but whose bit 4 is clear is a game Steam is updating or downloading: its id is
+  `unsure`. A value of the wrong type (an object for `appid`, `StateFlags` or `installdir`) makes that manifest
+  `unsure` too. `unread` holds the ids that the libraries not read say they hold (the keys of their entry's `apps`
+  object). It is `None` when one of them does not say: an old-form entry, no `apps` object, or a key that is not
+  a whole number. An empty `apps` object says the library holds nothing. `Scan.gone(id)` is the one test of "this
+  scan can tell the game is not installed": true for `absent`, false for `unknown`; for `found`, the id is not in
+  `apps` or `unsure`, and the scan is `complete` or `unread` says no unread library holds it.
 - **safety.py** - the three-checksum planner and apply/uninstall rules; **records.py** - per-user install records
   in `%APPDATA%\GameChooser\installs`; **sources.py** / **http.py** - verified downloads (agarchive.net blocked).
   An HTTP 404 or 410 is `DownloadGone` ("no longer available"), never "couldn't be reached"; `NoVerifiedSource.gone`
@@ -73,7 +90,8 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   further requires each runtime to be usable here); `paths.same_folder` and `folder_key` (as text),
   `same_on_disk`, `is_link`, `is_code`, `walk_files` (skips only linked folders and those `skip` names: backups are
   the player's), `write_atomic` (temp file, then replace; the temp file goes if that fails); `pricing.http_url` (an
-  http or https address with a host and no spaces); `safety.plain_file` ("is this still the recorded file", read
+  http or https address with a host and no spaces); `steam.address` (the only builder of a Steam address, from a
+  plain positive int); `stores.stores_of` (the only reader of an entry's `stores`); `safety.plain_file` ("is this still the recorded file", read
   errors raised) and `remove_unchanged`; `runtimes.runtime_route` (shared, private or skipped); `errors.check_cancel`.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan (the price warning on installs, `first_run_download_size` added to the size), and

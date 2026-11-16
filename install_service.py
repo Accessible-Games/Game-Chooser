@@ -18,7 +18,9 @@
 
 wx-free. Every member is for the UI thread except `fetch_index`, `statuses` and `player_files`, which run on worker
 threads and change no games, records or libraries: the UI hands a fetched state to `take_index` on its own thread.
-The UI calls `apply_result` and `job_failed` on its thread when the queue's listener reports a job's end.
+The UI calls `apply_result` and `job_failed` on its thread when the queue's listener reports a job's end. The Steam
+members (`steam_scan`, `steam_pending`, `take_steam_scan`, `match_steam`, `steam_sent`, `steam_folder_of`,
+`also_on_steam`) are UI thread only too: the UI hands a scan made on a worker to `take_steam_scan` on its thread.
 """
 
 import logging
@@ -41,10 +43,14 @@ from engine.records import InstallRecord, record_folder
 from engine.registry import RegistryAccess
 from engine.runtimes import WindowsSecurity, default_runtimes_root
 from engine.safety import count_player_files
-from engine.status import game_status
+from engine.status import READY, game_status
+from engine.steam_scan import Scan
+from engine.stores import stores_of
 from install_prefs import current_catalog_url, register_shared_components
 from library_actions import is_uninstall_unfinished, is_uninstallable
 from library_manager import LibraryError
+from models import Game
+from steam_games import steam_changes
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +69,8 @@ class InstallService:
         self.pending_removal: set[str] = set()  # library ids waiting for their games' uninstalls
         # library id -> catalog ids whose uninstall result hasn't been applied yet (the library goes once none are)
         self._removal_waits: dict[str, set[str]] = {}
+        self.steam_scan: Scan | None = None  # the last scan that could tell
+        self.steam_pending: dict[int, bool] = {}  # id the app sent Steam a get or uninstall for -> installed then
         self.queue = InstallQueue(self._new_engine, listener, manager.config_dir / "install.log")
 
     # ---- the catalog index ----------------------------------------------------------------------------------
@@ -85,6 +93,10 @@ class InstallService:
         self.index_state = state  # one assignment: a reader on the worker thread sees the old or the new
         self.adopt_launch_paths()
         self.refresh_catalog_genres()
+        try:
+            self.match_steam()
+        except Exception:  # a malformed entry never stops the take
+            log.warning("Couldn't match the Steam games to the index", exc_info=True)
 
     def load_cached_index(self):
         """Use the saved copy of the index. UI thread only."""
@@ -95,7 +107,7 @@ class InstallService:
 
         UI thread only. A game with a queued or running job is left alone: the job owns its record."""
         for game in list(self.manager.games):
-            if not game.catalog_id or game.is_web or self.queue.job_for(game.catalog_id) is not None:
+            if not game.catalog_id or game.is_web or game.is_steam or self.queue.job_for(game.catalog_id) is not None:
                 continue
             try:
                 self._adopt(game.catalog_id)
@@ -138,11 +150,55 @@ class InstallService:
         return True
 
     def installed_ids(self) -> set[str]:
-        """Catalog ids shown as installed: a game's install record that isn't uninstalled, or a catalog web game.
-        A shared runtime's record is never a game's."""
-        ids = {g.catalog_id for g in self.manager.games if g.catalog_id and g.is_web}
+        """Catalog ids shown as installed: a game's install record that isn't uninstalled, a catalog web game or a
+        Steam row. A shared runtime's record is never a game's."""
+        ids = {g.catalog_id for g in self.manager.games if g.catalog_id and (g.is_web or g.is_steam)}
         ids |= {cid for cid, rec in self.manager.records.game_records().items() if not rec.uninstalled}
         return ids
+
+    # ---- Steam ----------------------------------------------------------------------------------------------
+
+    def take_steam_scan(self, scan: Scan) -> bool:
+        """Keep a scan that could tell, settle the pending ids it can tell about, and match it. True when the Library
+        needs refreshing: rows changed, or an index is loaded and what Steam has installed changed. A scan that
+        could not tell changes nothing."""
+        if scan.state == "unknown":
+            return False
+        before, self.steam_scan = self.steam_scan, scan
+        if scan.state == "absent":
+            self.steam_pending.clear()
+        else:  # settled only when the scan saw it installed, or can tell it is gone
+            def settled(i, was):
+                return (i in scan.apps and not was) or (scan.gone(i) and was)
+            self.steam_pending = {i: was for i, was in self.steam_pending.items() if not settled(i, was)}
+        has = lambda s: None if s is None else (s.state, set(s.apps))
+        return self.match_steam() or (bool(self.entries) and has(before) != has(scan))
+
+    def match_steam(self) -> bool:
+        """Add and remove Steam rows by the kept scan and the index; save once. True when the games changed."""
+        add, remove = steam_changes(self.entries, self.steam_scan, self.manager.games, current_platform())
+        if not add and not remove:
+            return False
+        kept = [g for g in self.manager.games if not any(g is r for r in remove)]
+        self.manager.games = kept + [Game.from_dict(fields) for fields in add]  # a new list: workers see old or new
+        self.manager.save_or_keep(self.manager.save_games, "games.json")
+        return True
+
+    def steam_sent(self, app_id: int) -> None:
+        """The app sent Steam a get or uninstall address for the id: it is pending until a scan sees it change."""
+        self.steam_pending[app_id] = self.steam_scan is not None and app_id in self.steam_scan.apps
+
+    def steam_folder_of(self, game) -> Path | None:
+        """The folder of a Steam row's game in the kept scan, or None."""
+        app = self.steam_scan.apps.get(game.steam_app_id) if self.steam_scan and game.is_steam else None
+        return app.folder if app else None
+
+    def also_on_steam(self, game) -> bool:
+        """The game is the app's own copy, and the kept scan found its entry's Steam game or demo installed."""
+        if game.is_steam or self.steam_scan is None or self.steam_scan.state != "found":
+            return False
+        store = next((s for s in stores_of(self.entry_for(game)) if s.is_steam), None)
+        return store is not None and any(i and i in self.steam_scan.apps for i in (store.app_id, store.demo_app_id))
 
     # ---- installing -----------------------------------------------------------------------------------------
 
@@ -210,6 +266,7 @@ class InstallService:
                     self._finish_removal(library_id)
                 except LibraryError:
                     pass  # logged; the library stays, and removing it again finishes the job
+        self.match_steam()  # an uninstalled copy may leave its entry's Steam copy to show
 
     def player_files(self, catalog_id: str) -> int:
         """How many files in an installed game's folder are the player's (saves, settings), for the Uninstall and
@@ -252,16 +309,19 @@ class InstallService:
     def entry_for(self, game) -> dict | None:
         return self.entries.get(game.catalog_id) if game.catalog_id else None
 
-    def statuses(self) -> dict[tuple[str, str], str]:
-        """Each game's status, keyed by (library_id, launch_path)."""
+    def statuses(self) -> dict[tuple, str]:
+        """Each game's status, keyed by its row_key. A Steam row is Ready: Steam keeps its files."""
         platform = current_platform()
         records = self.manager.records.game_records()
         result = {}
         for game in self.manager.games:
+            if game.is_steam:
+                result[game.row_key] = READY
+                continue
             full_path = self.manager.get_full_path(game)
             reachable = self.manager.library_reachable(game.library_id) if game.library_id else True
             record = records.get(game.catalog_id) if game.catalog_id else None
-            result[(game.library_id, game.launch_path)] = game_status(
+            result[game.row_key] = game_status(
                 str(full_path) if full_path else None, game.is_web, record, self.entry_for(game), platform,
                 library_reachable=reachable)
         return result

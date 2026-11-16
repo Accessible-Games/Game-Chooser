@@ -22,6 +22,8 @@ paths:
   folder inside or containing another library, or a folder that is, or is inside, a game record's folder, as text
   or on disk (`paths.same_on_disk`) (`LIBRARY_IN_GAME_FOLDER`; the library being moved by Change folder takes its
   own games with it).
+- `add_library` calls `on_library_added` (no arguments) once the config is saved. `MainFrame` sets it to
+  `start_steam_scan`.
 - Preferences > Library Paths: **Add**, **Change folder**, **Remove**. Remove on a library holding catalog
   installs uninstalls them first (`InstallService.remove_library`, `RemoveLibraryDialog`, optional delete of the
   player's files); the library goes when the last uninstall result is applied.
@@ -32,6 +34,8 @@ paths:
   a record with no game gets one; a game whose record is gone (or unsafe id) becomes a game added by hand; a game
   whose uninstall stopped partway stays linked; one whose uninstall finished but never reached games.json leaves
   the list (the record stays).
+  - A Steam row has no install record and is skipped. When its catalog id has a record that is not uninstalled
+    (the app's own copy is installed), the Steam row leaves the list and the record gets the app's own row.
   - A record with no game first looks for a game added by hand (not a web game) that launches the same file: the
     full path, ignoring case and slashes, or the same library id and relative path while that library is unknown.
     That game (the first, when two launch it) is linked again (catalog id, library, relative path, installed

@@ -1,7 +1,8 @@
-from catalog_view import (TypeAhead, action_kind, action_label, build_rows, link_items, description_text, entry_links,
+from catalog_view import (TypeAhead, action_kind, app_action, action_label, build_rows, link_items, description_text, entry_links,
                           filter_rows, type_ahead_index,
                           homepage_item, initial_tab, library_rows, link_at_line, install_candidates,
                           markdown_to_text, pick_index, price_sort_key, tree_categories, tree_values)
+from engine.entries import places
 from models import Game
 
 SRC = [{"platform": "windows", "install": {"method": "zip"}, "url": "https://x/e.zip"}]
@@ -391,3 +392,68 @@ def test_library_rows_label_and_describe_like_any_row():
     _, rows = _library()
     assert [action_label(r, "windows") for r in rows] == ["Launch Alpha", "Launch Bare Web", "Launch Entombed"]
     assert [description_text(r.entry) for r in rows] == ["", "", description_text(entombed)]
+
+
+STEAM = {"store": "steam", "app_id": 1234560, "platforms": ["windows"]}
+STEAM_DEMO = dict(STEAM, demo_app_id=1234570)
+ITCH = {"store": "itch.io", "url": "https://dev.itch.io/game", "platforms": ["windows", "macos"]}
+
+
+def game(id, *stores, sources=SRC):
+    return {"id": id, "kind": "game", "title": id.title(), "sources": sources, "stores": list(stores)}
+
+
+def store_rows(*entries, installed=(), platform="windows"):
+    by_id = {e["id"]: e for e in entries}
+    return build_rows(list(entries), set(installed), lambda e: places(e, by_id, platform))
+
+
+def test_row_platforms_are_the_sources_and_the_stores():
+    row = store_rows(game("a", ITCH, dict(STEAM, platforms=["linux", "windows"])))[0]
+    assert row.platforms == ["Windows", "macOS", "Linux"]
+    assert store_rows(game("b", ITCH, sources=[]))[0].platforms == ["Windows", "macOS"]
+    assert [p.kind for p in row.places] == ["app", "store", "steam"]
+
+
+def test_action_kind_with_stores():
+    rows = store_rows(game("plain"), game("shop", ITCH, sources=[]), game("both", ITCH),
+                      game("steam", STEAM, sources=[]), game("demo", STEAM_DEMO, sources=[]), dict(WEB, stores=[ITCH]))
+    assert [action_kind(r, "windows") for r in rows] == ["install", "get", "get", "get", "get", "get"]
+    assert [app_action(r, "windows") for r in rows] == ["install", None, "install", None, None, "add"]
+    assert action_label(rows[1], "windows") == "Get Shop"
+    assert action_kind(store_rows(game("both", ITCH), installed={"both"})[0], "windows") == "launch"
+    assert action_kind(build_rows([minimal_entry], set())[0], "windows") == "install"   # no places: as before
+
+
+def test_install_candidates_are_the_rows_the_app_itself_installs():
+    rows = store_rows(game("plain"), game("shop", ITCH, sources=[]), game("both", ITCH), game("busy"),
+                      dict(WEB, stores=[ITCH]))
+    assert [r.id for r in install_candidates(rows, {"busy"}, "windows")] == ["plain", "both"]
+    assert install_candidates(store_rows(game("both", ITCH), installed={"both"}), set(), "windows") == []
+
+
+def test_store_links_follow_the_entrys_own_and_come_before_the_purchase_page():
+    e = {"id": "g", "links": [{"url": "https://h.example", "label": "Homepage"}],
+         "stores": [STEAM_DEMO, dict(ITCH, platforms=["macos"]), dict(ITCH, store="GOG", url="https://h.example"),
+                    dict(ITCH, store="Bad", url="steam://run/1")],
+         "pricing": {"model": "one-time", "url": "https://b.example"}}
+    links = entry_links(e)
+    assert [url for _, url in links] == ["https://h.example", "https://store.steampowered.com/app/1234560/",
+                                         "https://dev.itch.io/game", "https://b.example"]
+    assert links[1:3] == [("Steam store page", "https://store.steampowered.com/app/1234560/"),
+                          ("itch.io store page", "https://dev.itch.io/game")]      # one per store, none for the demo
+    assert ("Open Steam store page", "https://store.steampowered.com/app/1234560/") in link_items(e)
+    line = "Steam store page: https://store.steampowered.com/app/1234560/"
+    assert line in description_text(e).splitlines()
+    assert link_at_line(line) == "https://store.steampowered.com/app/1234560/"
+
+
+def test_a_library_rows_note_reads_before_the_links():
+    e = {"id": "g", "description": "A game.", "links": [{"url": "https://h.example", "label": "Homepage"}]}
+    own = Game(title="G", catalog_id="g", library_id="lib", launch_path="G/g.exe")
+    rows = library_rows([own, Game(title="H", launch_path="C:/h.exe")], lambda game: e if game is own else None,
+                        lambda game: "Also installed through Steam." if game is own else "")
+    assert [r.note for r in rows] == ["Also installed through Steam.", ""]
+    assert description_text(e, rows[0].note).split("\n\n") == [
+        "A game.", "Also installed through Steam.", "Homepage: https://h.example"]
+    assert description_text(e) == description_text(e, "") and description_text(None, "x") == ""

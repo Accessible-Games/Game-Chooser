@@ -10,14 +10,17 @@ import library_actions
 from engine import messages
 from engine.entries import current_platform, visible_games
 from engine.errors import InstallFailed
-from engine.index import DEFAULT_CATALOG_URL
+from engine.index import DEFAULT_CATALOG_URL, IndexState
+from engine.jobs import JobResult
 from engine.queue import InstallQueue, Job
 from engine.status import EXE_NOT_FOUND, LIBRARY_NOT_FOUND, READY, UPDATE_AVAILABLE
+from engine.steam_scan import Scan
 from install_service import InstallService
 from library_manager import LibraryError
 from models import Game
 from tests.engine.fakes import (FakeElevator, FakeFetcher, FakeInstallerUI, FakeRegistry, ZipExtractor, publish,
                                 served_source, zip_bytes)
+from tests.test_steam_games import ENTRY, FULL, found
 
 MIRROR = "https://files.accessiblegames.net/files/"
 # The service picks sources and launch paths for the system it runs on: the entries here offer theirs for it
@@ -210,6 +213,17 @@ def test_statuses_for_mixed_library(rig):
         (other["id"], "Away/away.exe"): LIBRARY_NOT_FOUND,
         ("", "https://example.com/play"): READY,
     }
+
+
+def test_steam_rows_are_ready_installed_and_keyed_by_their_own_id(rig):
+    manager = rig.service.manager
+    manager.games += [Game(title="A", catalog_id="a", platforms=["Windows"], steam_app_id=11),
+                      Game(title="B", catalog_id="b", platforms=["Windows"], steam_app_id=22)]
+    statuses = rig.service.statuses()
+    assert statuses[("steam", 11)] == statuses[("steam", 22)] == "Ready"
+    assert {"a", "b"} <= rig.service.installed_ids()
+    rig.service.adopt_launch_paths()                       # leaves them alone
+    assert [g.steam_app_id for g in manager.games if g.is_steam] == [11, 22]
 
 
 def test_a_web_game_is_told_by_its_scheme_in_any_case(rig):
@@ -748,3 +762,107 @@ def test_an_extra_shared_by_two_games_through_the_catalog_and_library(rig):
     assert [x.id for x in rig.service.plan("alpha").extras] == ["series-patch"]  # offered again on reinstall
     rig.manager.reconcile_catalog_records()
     assert [g.catalog_id for g in rig.manager.games if g.catalog_id] == ["bravo"]
+
+
+def index(*entries):
+    return IndexState(entries={e["id"]: e for e in entries}, newer_app_needed=False, error=None)
+
+
+def steam_ids(rig):
+    return [g.steam_app_id for g in rig.service.manager.games if g.is_steam]
+
+
+def test_a_scan_adds_and_removes_rows_and_saves_games_json(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    assert service.take_steam_scan(found(FULL)) is True and steam_ids(rig) == [FULL]
+    assert json.loads(service.manager.games_file.read_text(encoding="utf-8"))[-1]["steam_app_id"] == FULL
+    assert service.take_steam_scan(found(FULL)) is False                       # nothing new
+    game = service.manager.catalog_game("dice")
+    assert service.steam_folder_of(game) == found(FULL).apps[FULL].folder
+    assert service.take_steam_scan(Scan("unknown")) is False
+    assert service.steam_scan.state == "found" and steam_ids(rig) == [FULL]    # the scan that could tell is kept
+    assert service.take_steam_scan(found()) is True and steam_ids(rig) == []
+    assert service.steam_folder_of(game) is None
+
+
+def test_matching_is_redone_when_the_index_arrives(rig):
+    service = rig.service
+    assert service.take_steam_scan(found(FULL)) is False and steam_ids(rig) == []   # no index yet
+    service.take_index(index(ENTRY))
+    assert steam_ids(rig) == [FULL]
+    service.take_index(index(dict(ENTRY, stores=[])))                               # the entry dropped Steam
+    assert steam_ids(rig) == []
+
+
+def test_uninstalling_the_apps_copy_shows_the_steam_copy_at_once(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    own = Game(title="Dugout Dice", catalog_id="dice", library_id="lib", launch_path="Dice/dice.exe")
+    service.manager.games.append(own)
+    service.take_steam_scan(found(FULL))
+    assert steam_ids(rig) == [] and service.also_on_steam(own) is True
+    service.apply_result(JobResult(action="uninstall", catalog_id="dice", title="Dugout Dice", game=None, notes=[]))
+    assert steam_ids(rig) == [FULL]
+    assert service.also_on_steam(service.manager.catalog_game("dice")) is False     # a Steam row is not "also"
+
+
+def test_an_id_stays_pending_until_a_scan_sees_it_change(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    service.take_steam_scan(found())
+    service.steam_sent(FULL)                                   # a get: not installed when sent
+    service.take_steam_scan(found())
+    service.take_steam_scan(found(unsure=[FULL]))
+    service.take_steam_scan(Scan("unknown"))
+    assert service.steam_pending == {FULL: False}              # nothing a scan could tell has changed
+    service.take_steam_scan(found(FULL))
+    assert service.steam_pending == {}
+    service.steam_sent(FULL)                                   # an uninstall: installed when sent
+    assert service.steam_pending == {FULL: True}
+    service.take_steam_scan(found(complete=False))             # a library was not read: it cannot tell
+    assert service.steam_pending == {FULL: True}
+    service.take_steam_scan(Scan("absent"))
+    assert service.steam_pending == {}
+
+
+def test_a_scan_that_changes_what_steam_has_asks_for_a_refresh(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    own = Game(title="Dugout Dice", catalog_id="dice", library_id="lib", launch_path="Dice/dice.exe")
+    service.manager.games.append(own)
+    assert service.take_steam_scan(found(FULL)) is True          # no row changes, but the note does
+    assert service.also_on_steam(own) is True and steam_ids(rig) == []
+    assert service.take_steam_scan(found(FULL)) is False         # the same again
+    assert service.take_steam_scan(found()) is True and service.also_on_steam(own) is False
+
+
+def test_a_malformed_entry_cannot_stop_an_index_take(rig):
+    service = rig.service
+    service.take_steam_scan(found(FULL))                         # kept; no index yet
+    bad = dict(ENTRY, developer=[None, 3])
+    service.take_index(index(bad))                               # must not raise
+    assert service.entries == {"dice": bad} and steam_ids(rig) == []
+
+
+def test_a_finished_uninstall_settles_its_pending_id(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    for after in (found(), Scan("found", {}, frozenset(), False, frozenset({7}))):
+        service.take_steam_scan(found(FULL))
+        service.steam_sent(FULL)                                 # an uninstall: installed when sent
+        service.take_steam_scan(found(FULL))                     # still installed
+        service.take_steam_scan(found(unsure=[FULL]))            # its manifest is being rewritten
+        assert service.steam_pending == {FULL: True}
+        service.take_steam_scan(after)                           # gone, by a scan that can tell
+        assert service.steam_pending == {} and steam_ids(rig) == []
+
+
+def test_matching_with_no_scan_kept_writes_nothing(rig):
+    service = rig.service
+    service.take_index(index(ENTRY))
+    service.manager.games.append(Game(title="Hand", launch_path="C:/hand.exe"))
+    service.manager.save_games()
+    before = service.manager.games_file.read_bytes()
+    assert service.match_steam() is False
+    assert service.manager.games_file.read_bytes() == before

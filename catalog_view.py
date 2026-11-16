@@ -7,11 +7,12 @@ flags) are skipped, never an error.
 """
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urlsplit
 
 from engine import messages
-from engine.entries import _PLATFORM_LABELS, _sources, current_platform, game_fields, is_web_game
+from engine.entries import _PLATFORM_LABELS, _sources, Place, current_platform, game_fields, is_web_game
+from engine.stores import stores_of
 from engine.pricing import (can_play_free, description_lines, donate_link, http_url, price_text, pricing_of,
                             purchase_link, shown_price)
 
@@ -41,6 +42,8 @@ class CatalogRow:
     price: str  # how the price reads; empty when not recorded
     price_values: set[str]  # the Price branch values this row is under
     game: object = None  # a Library row's Game (library_rows); a Catalog row has none
+    places: list[Place] = field(default_factory=list)  # where to get it (Catalog rows built with places_of)
+    note: str = ""  # a line the description adds (a Library row: "Also installed through Steam.")
 
     @property
     def genre(self) -> str:
@@ -115,11 +118,14 @@ def _price_values(pricing: dict | None) -> set[str]:
     return values
 
 
-def build_rows(entries: list[dict], installed_ids: set[str]) -> list[CatalogRow]:
+def build_rows(entries: list[dict], installed_ids: set[str], places_of=None) -> list[CatalogRow]:
+    """`places_of(entry)` gives a row's places; without it rows have none and act as they always did."""
     rows = []
     for entry in entries:
         fields = game_fields(entry)
-        labels = (_PLATFORM_LABELS.get(source.get("platform")) for source in _sources(entry))
+        names = [source.get("platform") for source in _sources(entry)]
+        names += [name for store in stores_of(entry) for name in store.platforms]
+        labels = (_PLATFORM_LABELS.get(name) for name in names)
         platforms = list(dict.fromkeys(label for label in labels if label))
         pricing = pricing_of(entry)
         rows.append(CatalogRow(
@@ -138,11 +144,12 @@ def build_rows(entries: list[dict], installed_ids: set[str]) -> list[CatalogRow]
             unsupported=entry.get("unsupported") is True,
             price=price_text(pricing),
             price_values=_price_values(pricing),
+            places=places_of(entry) if places_of else [],
         ))
     return rows
 
 
-def library_rows(games, entry_for) -> list[CatalogRow]:
+def library_rows(games, entry_for, note_for=None) -> list[CatalogRow]:
     """The player's games as rows, so the Library tab filters, labels and describes them as the Catalog tab does.
     `entry_for(game)` gives a catalog game's index entry (None for a game added by hand, or one the catalog no
     longer lists).
@@ -173,6 +180,7 @@ def library_rows(games, entry_for) -> list[CatalogRow]:
             entry=entry_for(game),
             tags=[], languages=[], contains=[], unsupported=False, price="", price_values=set(),
             game=game,
+            note=note_for(game) if note_for else "",
         ))
     return rows
 
@@ -386,7 +394,9 @@ def entry_links(entry: dict | None) -> list[tuple[str, str]]:
         return []
     pricing = pricing_of(entry)
     unique: dict[str, str] = {}  # url -> its first label
-    for label, url in _own_links(entry) + [link for link in (purchase_link(pricing), donate_link(pricing)) if link]:
+    stores = [(messages.STORE_LINK.format(store=s.name), http_url(s.url)) for s in stores_of(entry)]
+    later = [link for link in (purchase_link(pricing), donate_link(pricing)) if link]
+    for label, url in _own_links(entry) + [link for link in stores if link[1]] + later:
         unique.setdefault(url, label)
     return [(label, url) for url, label in unique.items()]
 
@@ -409,7 +419,7 @@ def _details_lines(entry: dict) -> list[str]:
     return lines
 
 
-def description_text(entry: dict | None) -> str:
+def description_text(entry: dict | None, note: str = "") -> str:
     """The description field: the entry's description, then its details, then one line per web page
     ("label: url", so Enter on the line opens it)."""
     if not entry:
@@ -418,7 +428,7 @@ def description_text(entry: dict | None) -> str:
     body = markdown_to_text(description) if isinstance(description, str) else ""
     details = "\n".join(_details_lines(entry))
     links = "\n".join(f"{label}: {url}" for label, url in entry_links(entry))
-    return "\n\n".join(part for part in (body, details, links) if part)
+    return "\n\n".join(part for part in (body, details, note, links) if part)
 
 
 _LINK_LINE = re.compile(r"^.+?: (\S+)$")
@@ -436,12 +446,21 @@ def initial_tab(saved: str | None, is_first_run: bool) -> str:
     return "catalog" if is_first_run else "library"
 
 
+def app_action(row: CatalogRow, platform: str | None = None) -> str | None:
+    """"install" or "add" when the app has a place of its own for the row (a row with no places counts), else None."""
+    if row.places and not any(p.kind == "app" for p in row.places):
+        return None
+    return "add" if is_web_game(row.entry, platform or current_platform()) else "install"
+
+
 def action_kind(row: CatalogRow, platform: str | None = None) -> str:
-    """What Enter does on a row: "launch" (installed), "add" (a web game: every source for this platform is a
-    link, nothing downloads) or "install"."""
+    """What Enter does on a row: "launch" (installed), "get" (it has a place other than, or besides, the app's
+    own), "add" (a web game: every source for this platform is a link, nothing downloads) or "install"."""
     if row.installed:
         return "launch"
-    return "add" if is_web_game(row.entry, platform or current_platform()) else "install"
+    if len(row.places) > 1 or (row.places and row.places[0].kind != "app"):
+        return "get"
+    return app_action(row, platform)
 
 
 def action_verb(row: CatalogRow, platform: str | None = None) -> str:
@@ -456,9 +475,9 @@ def action_label(row: CatalogRow | None, platform: str | None = None) -> str:
 
 
 def install_candidates(rows: list[CatalogRow], busy_ids, platform: str | None = None) -> list[CatalogRow]:
-    """The rows a random install may pick: games that install (not installed, not web games that are only added)
-    and have no job queued or running."""
-    return [r for r in rows if r.id not in busy_ids and action_kind(r, platform) == "install"]
+    """The rows a random install may pick: games the app itself installs (not installed, not web games that are
+    only added, not store-only) and have no job queued or running."""
+    return [r for r in rows if not r.installed and r.id not in busy_ids and app_action(r, platform) == "install"]
 
 
 def link_items(entry: dict | None) -> list[tuple[str, str]]:
