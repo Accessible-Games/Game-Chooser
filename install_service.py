@@ -18,7 +18,9 @@
 
 wx-free. Every member is for the UI thread except `fetch_index`, `statuses` and `player_files`, which run on worker
 threads and change no games, records or libraries: the UI hands a fetched state to `take_index` on its own thread.
-The UI calls `apply_result` and `job_failed` on its thread when the queue's listener reports a job's end.
+The UI calls `apply_result` and `job_failed` on its thread when the queue's listener reports a job's end. The Steam
+members (`steam_scan`, `steam_pending`, `take_steam_scan`, `match_steam`, `steam_sent`, `steam_folder_of`,
+`also_on_steam`) are UI thread only too: the UI hands a scan made on a worker to `take_steam_scan` on its thread.
 """
 
 import logging
@@ -42,9 +44,13 @@ from engine.registry import RegistryAccess
 from engine.runtimes import WindowsSecurity, default_runtimes_root
 from engine.safety import count_player_files
 from engine.status import READY, game_status
+from engine.steam_scan import Scan
+from engine.stores import stores_of
 from install_prefs import current_catalog_url, register_shared_components
 from library_actions import is_uninstall_unfinished, is_uninstallable
 from library_manager import LibraryError
+from models import Game
+from steam_games import steam_changes
 
 log = logging.getLogger(__name__)
 
@@ -63,6 +69,8 @@ class InstallService:
         self.pending_removal: set[str] = set()  # library ids waiting for their games' uninstalls
         # library id -> catalog ids whose uninstall result hasn't been applied yet (the library goes once none are)
         self._removal_waits: dict[str, set[str]] = {}
+        self.steam_scan: Scan | None = None  # the last scan that could tell
+        self.steam_pending: dict[int, bool] = {}  # id the app sent Steam a get or uninstall for -> installed then
         self.queue = InstallQueue(self._new_engine, listener, manager.config_dir / "install.log")
 
     # ---- the catalog index ----------------------------------------------------------------------------------
@@ -85,6 +93,7 @@ class InstallService:
         self.index_state = state  # one assignment: a reader on the worker thread sees the old or the new
         self.adopt_launch_paths()
         self.refresh_catalog_genres()
+        self.match_steam()
 
     def load_cached_index(self):
         """Use the saved copy of the index. UI thread only."""
@@ -143,6 +152,47 @@ class InstallService:
         ids = {g.catalog_id for g in self.manager.games if g.catalog_id and (g.is_web or g.is_steam)}
         ids |= {cid for cid, rec in self.manager.records.game_records().items() if not rec.uninstalled}
         return ids
+
+    # ---- Steam ----------------------------------------------------------------------------------------------
+
+    def take_steam_scan(self, scan: Scan) -> bool:
+        """Keep a scan that could tell, settle the pending ids it can tell about, and match it. True when the games
+        changed. A scan that could not tell changes nothing."""
+        if scan.state == "unknown":
+            return False
+        self.steam_scan = scan
+        if scan.state == "absent":
+            self.steam_pending.clear()
+        else:
+            self.steam_pending = {i: was for i, was in self.steam_pending.items()
+                                  if i in scan.unsure or (i in scan.apps) == was}
+        return self.match_steam()
+
+    def match_steam(self) -> bool:
+        """Add and remove Steam rows by the kept scan and the index; save once. True when the games changed."""
+        add, remove = steam_changes(self.entries, self.steam_scan, self.manager.games, current_platform())
+        if not add and not remove:
+            return False
+        kept = [g for g in self.manager.games if not any(g is r for r in remove)]
+        self.manager.games = kept + [Game.from_dict(fields) for fields in add]  # a new list: workers see old or new
+        self.manager.save_or_keep(self.manager.save_games, "games.json")
+        return True
+
+    def steam_sent(self, app_id: int) -> None:
+        """The app sent Steam a get or uninstall address for the id: it is pending until a scan sees it change."""
+        self.steam_pending[app_id] = self.steam_scan is not None and app_id in self.steam_scan.apps
+
+    def steam_folder_of(self, game) -> Path | None:
+        """The folder of a Steam row's game in the kept scan, or None."""
+        app = self.steam_scan.apps.get(game.steam_app_id) if self.steam_scan and game.is_steam else None
+        return app.folder if app else None
+
+    def also_on_steam(self, game) -> bool:
+        """The game is the app's own copy, and the kept scan found its entry's Steam game or demo installed."""
+        if game.is_steam or self.steam_scan is None or self.steam_scan.state != "found":
+            return False
+        store = next((s for s in stores_of(self.entry_for(game)) if s.is_steam), None)
+        return store is not None and any(i and i in self.steam_scan.apps for i in (store.app_id, store.demo_app_id))
 
     # ---- installing -----------------------------------------------------------------------------------------
 
@@ -210,6 +260,7 @@ class InstallService:
                     self._finish_removal(library_id)
                 except LibraryError:
                     pass  # logged; the library stays, and removing it again finishes the job
+        self.match_steam()  # an uninstalled copy may leave its entry's Steam copy to show
 
     def player_files(self, catalog_id: str) -> int:
         """How many files in an installed game's folder are the player's (saves, settings), for the Uninstall and
