@@ -497,3 +497,5 @@ PREFS_REGISTER_SHARED = "Register shared components system-wide (needs administr
 PREFS_CATALOG_ADDRESS = "Catalog address:"
 PREFS_BAD_CATALOG_ADDRESS = "That catalog address isn't valid. Use an https:// address."
 PREFS_BAD_ADDRESS_TITLE = "Catalog address"
+
+STEAM_NEEDS_WINDOWS = "Game Chooser can open Steam only on Windows."
