@@ -150,6 +150,31 @@ def test_real_queue_logs_to_config_dir(isolated_manager):
         assert service.queue.shutdown(5)
 
 
+def test_a_game_that_left_the_catalog_is_uninstalled_under_the_title_games_json_holds(rig):
+    """Its folder is named by its id, so the engine is told what the Library calls it."""
+    lib = rig.library()
+    rig.publish(game_entry(rig.routes))
+    rig.run("install", "entombed", library_id=lib["id"])
+    rig.publish()
+    job = rig.service.submit("uninstall", "entombed")
+    assert job.request.title == "Entombed" and rig.listener.result_for(job).title == "Entombed"
+
+
+def test_an_installed_game_whose_entry_arrives_with_a_wrong_type_stays_in_the_library_and_uninstalls(rig):
+    """The index check hides such an entry, which for an installed game is the same as leaving the catalog."""
+    lib = rig.library()
+    entry = game_entry(rig.routes)
+    rig.publish(entry)
+    rig.run("install", "entombed", library_id=lib["id"])
+    rig.publish({**entry, "sources": "https://example.com/entombed.zip"}, {**entry, "id": "other", "year": "x"})
+    assert set(rig.service.entries) == {"other"} and "year" not in rig.service.entries["other"]
+    game = rig.manager.catalog_game("entombed")
+    assert game.title == "Entombed" and rig.service.record_for(game) is not None
+    assert (rig.tmp_path / "Games" / "entombed" / "entombed.exe").exists()
+    rig.run("uninstall", "entombed")
+    assert rig.manager.catalog_game("entombed") is None and not (rig.tmp_path / "Games" / "entombed").exists()
+
+
 def test_load_cached_index_reads_what_refresh_saved(rig):
     rig.publish(game_entry(rig.routes))
     rig.fetcher.routes.clear()
@@ -167,7 +192,7 @@ def test_submit_install_then_apply_result_adds_game(rig):
     assert rig.manager.catalog_game("entombed") is None  # nothing changes until the result is applied
     rig.service.apply_result(rig.listener.result_for(job))
     game = rig.manager.catalog_game("entombed")
-    assert game.library_id == lib["id"] and game.launch_path == "Entombed/entombed.exe"
+    assert game.library_id == lib["id"] and game.launch_path == "entombed/entombed.exe"
     assert [g["catalog_id"] for g in _games_json(rig.manager) if g.get("catalog_id")] == ["entombed"]
     assert rig.service.installed_ids() == {"entombed"}
     assert rig.service.record_for(game).library_id == lib["id"]
@@ -188,7 +213,7 @@ def test_uninstall_result_removes_game(rig):
     assert rig.manager.catalog_game("entombed") is None
     assert not any(g.get("catalog_id") for g in _games_json(rig.manager))
     assert rig.service.installed_ids() == set()
-    assert not (rig.tmp_path / "Games" / "Entombed").exists()
+    assert not (rig.tmp_path / "Games" / "entombed").exists()
 
 
 def test_statuses_for_mixed_library(rig):
@@ -207,7 +232,7 @@ def test_statuses_for_mixed_library(rig):
     shutil.rmtree(rig.tmp_path / "Other")
     rig.publish(game_entry(rig.routes, files={"entombed.exe": b"exe v2"}))  # a newer download
     assert rig.service.statuses() == {
-        (lib["id"], "Entombed/entombed.exe"): UPDATE_AVAILABLE,
+        (lib["id"], "entombed/entombed.exe"): UPDATE_AVAILABLE,
         (lib["id"], "Hand/hand.exe"): READY,
         (lib["id"], "Missing/missing.exe"): EXE_NOT_FOUND,
         (other["id"], "Away/away.exe"): LIBRARY_NOT_FOUND,
@@ -239,14 +264,14 @@ def test_adopt_launch_paths_after_index_load(rig):
     entry = game_entry(rig.routes, files={"entombed.exe": b"exe", "sub/other.exe": b"other"})
     rig.publish(entry)
     rig.run("install", "entombed", library_id=lib["id"])
-    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"  # guessed
+    assert rig.manager.catalog_game("entombed").launch_path == "entombed/entombed.exe"  # guessed
     counts = []  # what each adoption did
     adopt = rig.service._adopt
     rig.service._adopt = lambda catalog_id: counts.append(adopt(catalog_id)) or counts[-1]
     rig.publish({**entry, "launch": {PLATFORM: {"path": "sub/other.exe"}}})
     assert counts == [True]
-    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/sub/other.exe"
-    assert [g["launch_path"] for g in _games_json(rig.manager)] == ["Entombed/sub/other.exe"]
+    assert rig.manager.catalog_game("entombed").launch_path == "entombed/sub/other.exe"
+    assert [g["launch_path"] for g in _games_json(rig.manager)] == ["entombed/sub/other.exe"]
     rec = rig.manager.records.load("entombed")
     assert rec.launch_path == "sub/other.exe" and rec.launch_from_catalog
     assert not adopt("entombed")
@@ -262,7 +287,7 @@ def test_adopt_skips_unreachable_library(rig):
     shutil.rmtree(rig.tmp_path / "Games")
     rig.publish({**entry, "launch": {PLATFORM: {"path": "sub/other.exe"}}})
     rig.service.adopt_launch_paths()
-    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
+    assert rig.manager.catalog_game("entombed").launch_path == "entombed/entombed.exe"
 
 
 def test_engine_context_uses_current_prefs(rig):
@@ -310,9 +335,9 @@ def test_plan_and_blocked(rig):
     plan = rig.service.plan("entombed")
     assert plan.catalog_id == "entombed" and [l["id"] for l in plan.libraries] == [lib["id"]]
     assert rig.service.blocked("entombed", rig.tmp_path / "Games") is None
-    (rig.tmp_path / "Games" / "Entombed").mkdir()
+    (rig.tmp_path / "Games" / "entombed").mkdir()
     assert rig.service.blocked("entombed", rig.tmp_path / "Games") == messages.FOLDER_EXISTS.format(
-        folder="Entombed", library="Games")
+        folder="entombed", library="Games")
 
 
 def test_ensure_library_creates_folder(rig):
@@ -342,7 +367,7 @@ def _installed(rig, *ids):
 
 def test_remove_library_uninstalls_first(rig):
     lib = _installed(rig, "entombed", "pawprints")
-    (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")  # kept, so its record stays
+    (rig.tmp_path / "Games" / "entombed" / "save.dat").write_bytes(b"mine")  # kept, so its record stays
     jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
     assert [(j.request.action, j.request.catalog_id) for j in jobs] == [("uninstall", "entombed"),
                                                                          ("uninstall", "pawprints")]
@@ -353,7 +378,7 @@ def test_remove_library_uninstalls_first(rig):
     rig.service.apply_result(rig.listener.result_for(jobs[1]))
     assert rig.manager.library_by_id(lib["id"]) is None and rig.service.pending_removal == set()
     assert rig.manager.games == [] and not rig.manager.records.exists("entombed")
-    assert (rig.tmp_path / "Games" / "Entombed" / "save.dat").exists()  # the player's file stays on disk
+    assert (rig.tmp_path / "Games" / "entombed" / "save.dat").exists()  # the player's file stays on disk
 
 
 def test_remove_library_failure_keeps_it(rig):
@@ -401,12 +426,12 @@ def test_fetch_index_changes_nothing_until_taken(rig):
     assert state.entries["entombed"]["launch"] and state.error is None
     assert rig.service.entries is before_entries and "launch" not in rig.service.entries["entombed"]
     assert rig.service.index_state is not state
-    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
+    assert rig.manager.catalog_game("entombed").launch_path == "entombed/entombed.exe"
     assert _games_json(rig.manager) == before_json
     assert not rig.manager.records.load("entombed").launch_from_catalog
     rig.service.take_index(state)
     assert rig.service.index_state is state and rig.service.entries is state.entries
-    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/sub/other.exe"
+    assert rig.manager.catalog_game("entombed").launch_path == "entombed/sub/other.exe"
 
 
 def test_adopt_skips_a_game_with_a_job(rig):
@@ -415,7 +440,7 @@ def test_adopt_skips_a_game_with_a_job(rig):
     rig.service.submit("repair", "entombed")
     rig.publish({**entry, "launch": {PLATFORM: {"path": "sub/other.exe"}}})
     rig.service.adopt_launch_paths()
-    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
+    assert rig.manager.catalog_game("entombed").launch_path == "entombed/entombed.exe"
     assert not rig.manager.records.load("entombed").launch_from_catalog
 
 
@@ -423,8 +448,8 @@ def test_malformed_entry_does_not_stop_adoption(rig):
     _, (first, second) = _guessed_install(rig, "entombed", "pawprints")
     rig.publish({**first, "launch": {PLATFORM: "sub/other.exe"}},  # not an object: adopting it raises
                 {**second, "launch": {PLATFORM: {"path": "sub/other.exe"}}})
-    assert rig.manager.catalog_game("entombed").launch_path == "Entombed/entombed.exe"
-    assert rig.manager.catalog_game("pawprints").launch_path == "Pawprints/sub/other.exe"
+    assert rig.manager.catalog_game("entombed").launch_path == "entombed/entombed.exe"
+    assert rig.manager.catalog_game("pawprints").launch_path == "pawprints/sub/other.exe"
 
 
 def test_remove_library_refused_while_a_game_is_busy(rig):
@@ -468,11 +493,11 @@ def test_remove_library_uninstalls_tracked_and_keeps_untracked_as_hand_added(rig
     rig.service.apply_result(rig.listener.result_for(jobs[0]))
     assert rig.manager.library_by_id(lib["id"]) is None and rig.service.pending_removal == set()
     kept = [g for g in rig.manager.games if g.title == "Pawprints"]
-    folder = rig.tmp_path / "Games" / "Pawprints"
+    folder = rig.tmp_path / "Games" / "pawprints"
     assert len(kept) == 1 and kept[0].catalog_id == "" and kept[0].library_id == ""
     assert kept[0].launch_path == str(folder / "pawprints.exe")
     assert not rig.manager.records.exists("pawprints") and (folder / "pawprints.exe").exists()  # files untouched
-    assert not (rig.tmp_path / "Games" / "Entombed").exists()
+    assert not (rig.tmp_path / "Games" / "entombed").exists()
     restarted = isolated_manager_factory()  # still a game added by hand at the next start
     assert [(g.title, g.catalog_id, g.library_id) for g in restarted.games] == [("Pawprints", "", "")]
 
@@ -489,8 +514,8 @@ def test_remove_library_with_only_untracked_games_goes_at_once(rig):
     assert sorted((g.title, g.catalog_id, g.library_id) for g in rig.manager.games) == \
         [("Entombed", "", ""), ("Pawprints", "", "")]
     assert not rig.manager.records.exists("entombed")
-    assert (rig.tmp_path / "Games" / "Entombed" / "entombed.exe").exists()
-    assert (rig.tmp_path / "Games" / "Pawprints" / "pawprints.exe").exists() and rec is not None
+    assert (rig.tmp_path / "Games" / "entombed" / "entombed.exe").exists()
+    assert (rig.tmp_path / "Games" / "pawprints" / "pawprints.exe").exists() and rec is not None
 
 
 def test_remove_library_refused_while_an_untracked_game_is_busy(rig):
@@ -534,8 +559,8 @@ def test_forget_deletes_the_record_first(rig, monkeypatch):
 def test_player_files_counts_what_the_player_added(rig):
     _installed(rig, "entombed", "pawprints")
     assert rig.service.player_files("entombed") == 0
-    (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")
-    (rig.tmp_path / "Games" / "Entombed" / "sounds" / "a.wav").write_bytes(b"changed")  # changed: kept too
+    (rig.tmp_path / "Games" / "entombed" / "save.dat").write_bytes(b"mine")
+    (rig.tmp_path / "Games" / "entombed" / "sounds" / "a.wav").write_bytes(b"changed")  # changed: kept too
     assert rig.service.player_files("entombed") == 2
     assert rig.service.player_files("nothing") == 0
     shutil.rmtree(rig.tmp_path / "Games")  # an unplugged drive: nothing to count
@@ -548,7 +573,7 @@ def test_forget_an_untracked_game_keeps_its_files_and_it_stays_gone(rig, isolate
     rig.service.forget("entombed")
     assert rig.manager.catalog_game("entombed") is None and not rig.manager.records.exists("entombed")
     assert [g["catalog_id"] for g in _games_json(rig.manager) if g.get("catalog_id")] == ["pawprints"]
-    assert (rig.tmp_path / "Games" / "Entombed" / "entombed.exe").exists()  # its files stay where they are
+    assert (rig.tmp_path / "Games" / "entombed" / "entombed.exe").exists()  # its files stay where they are
     assert rig.manager.records.exists("pawprints") and rig.manager.library_by_id(lib["id"]) is not None
     restarted = isolated_manager_factory()  # reconcile at the next start doesn't bring it back
     assert restarted.catalog_game("entombed") is None and restarted.catalog_game("pawprints") is not None
@@ -578,7 +603,7 @@ def test_installed_ids_skip_runtime_records(rig):
     lib = _installed(rig, "entombed")
     _runtime_record(rig)
     assert rig.service.installed_ids() == {"entombed"}
-    assert set(rig.service.statuses()) == {(lib["id"], "Entombed/entombed.exe")}
+    assert set(rig.service.statuses()) == {(lib["id"], "entombed/entombed.exe")}
 
 
 def test_runtime_records_are_never_offered_forgotten_or_deleted(rig):
@@ -604,7 +629,7 @@ def test_runtime_records_are_never_offered_forgotten_or_deleted(rig):
 def _fail_uninstall_partway(rig, monkeypatch, catalog_id="entombed"):
     """Uninstall while the game runs: its exe can't be removed."""
     from pathlib import Path
-    locked = rig.tmp_path / "Games" / "Entombed" / "entombed.exe"
+    locked = rig.tmp_path / "Games" / "entombed" / "entombed.exe"
     real_unlink = Path.unlink
 
     def unlink(self, missing_ok=False):
@@ -622,7 +647,7 @@ def _fail_uninstall_partway(rig, monkeypatch, catalog_id="entombed"):
 def test_a_failed_uninstall_stays_uninstallable_and_finishes(rig, monkeypatch, isolated_manager_factory):
     from library_actions import UNINSTALL, catalog_menu_items, delete_kind
     lib = _installed(rig, "entombed", "pawprints")
-    (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")
+    (rig.tmp_path / "Games" / "entombed" / "save.dat").write_bytes(b"mine")
     locked = _fail_uninstall_partway(rig, monkeypatch)
     game = rig.manager.catalog_game("entombed")
     rec = rig.service.record_for(game)
@@ -635,7 +660,7 @@ def test_a_failed_uninstall_stays_uninstallable_and_finishes(rig, monkeypatch, i
     assert (restarted.catalog_game("entombed").library_id) == lib["id"]
     rig.run("uninstall", "entombed")  # the game was closed: uninstalling again finishes it
     assert rig.manager.catalog_game("entombed") is None and not locked.exists()
-    assert (rig.tmp_path / "Games" / "Entombed" / "save.dat").read_bytes() == b"mine"
+    assert (rig.tmp_path / "Games" / "entombed" / "save.dat").read_bytes() == b"mine"
 
 
 def test_remove_library_finishes_a_failed_uninstall(rig, monkeypatch):
@@ -646,12 +671,12 @@ def test_remove_library_finishes_a_failed_uninstall(rig, monkeypatch):
     for job in jobs:
         rig.service.apply_result(rig.listener.result_for(job))
     assert rig.manager.library_by_id(lib["id"]) is None and rig.manager.games == []
-    assert not (rig.tmp_path / "Games" / "Entombed").exists()
+    assert not (rig.tmp_path / "Games" / "entombed").exists()
 
 
 def test_finish_removal_turns_a_record_delete_failure_into_a_library_error(rig, monkeypatch):
     lib = _installed(rig, "entombed", "pawprints")
-    (rig.tmp_path / "Games" / "Entombed" / "save.dat").write_bytes(b"mine")  # kept, so its record stays
+    (rig.tmp_path / "Games" / "entombed" / "save.dat").write_bytes(b"mine")  # kept, so its record stays
     rig.service.queue.hold.update({"entombed", "pawprints"})
     jobs = rig.service.remove_library(lib["id"], delete_player_data=False)
     rig.service.queue.hold.clear()
@@ -756,7 +781,7 @@ def test_an_extra_shared_by_two_games_through_the_catalog_and_library(rig):
 
     rig.run("uninstall", "alpha")
     assert rig.manager.catalog_game("alpha") is None and rig.service.installed_ids() == {"bravo"}
-    assert (rig.tmp_path / "Games" / "Bravo" / "data" / "bonus.dat").read_bytes() == b"bonus"
+    assert (rig.tmp_path / "Games" / "bravo" / "data" / "bonus.dat").read_bytes() == b"bonus"
     assert set(rig.manager.records.load_game("bravo").extras) == {"series-patch"}
     assert rig.manager.catalog_game("bravo").installed_extras == ["series-patch"]
     assert [x.id for x in rig.service.plan("alpha").extras] == ["series-patch"]  # offered again on reinstall

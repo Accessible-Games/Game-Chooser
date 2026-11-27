@@ -122,16 +122,6 @@ def is_missing_program(command: str) -> bool:
     return bool(program.drive and program.root) and not os.path.lexists(_command_path(command))
 
 
-def _letters(text: str) -> str:
-    return re.sub(r"[\W_]+", "", text.casefold())
-
-
-def names_title(values: dict, title: str) -> bool:
-    """True if the entry's DisplayName is the game's title (or contains it, as "Title 1.0" does)."""
-    name, wanted = _letters(_text(values.get("DisplayName"))), _letters(title)
-    return len(wanted) >= 3 and bool(name) and (wanted in name or name in wanted and len(name) >= 3)
-
-
 def vendor_uninstaller(values: dict) -> str | None:
     """The entry's quiet uninstall command, else its uninstall command."""
     return _text(values.get("QuietUninstallString")) or _text(values.get("UninstallString")) or None

@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 import engine.safety
-from engine import messages
+from engine import jobs, messages
 from engine.entries import mirror_url_for
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord, RecordedFile
@@ -60,7 +60,7 @@ def install_v1(tmp_path, url=None, steps=None, optional=("pawprints-music",), pl
     ]
     eng = make_engine(tmp_path, entries, fetcher=FakeFetcher(routes), **ctx)
     eng.run(InstallRequest("install", "pawprints", "Games", extras=tuple(optional)), quiet, never)
-    game = tmp_path / "Games" / "Pawprints"
+    game = tmp_path / "Games" / "pawprints"
     if play:
         put(game, "pawprints.ini", EDITED_INI)
         put(game, "bass.dll", SELF_UPDATED_DLL)
@@ -128,7 +128,7 @@ def test_update_keeps_saves_backs_up_edited_config_replaces_code_and_drops_remov
     assert set(rec.files) == {"pawprints.exe", "pawprints.ini", "bass.dll", "sounds/b.wav", "data/patch.dat",
                               "music/theme.ogg"}
     assert rec.files["sounds/b.wav"] == RecordedFile("sounds/b.wav", sha(b"b"), "pawprints")
-    assert r.game["launch_path"] == "Pawprints/pawprints.exe" and rec.launch_path == "pawprints.exe"
+    assert r.game["launch_path"] == "pawprints/pawprints.exe" and rec.launch_path == "pawprints.exe"
     assert not (tmp_path / "Games" / ".gamechooser-staging" / "pawprints").exists()
     assert not (eng.ctx.work_root / "pawprints").exists()
 
@@ -229,7 +229,7 @@ def test_failed_apply_keeps_old_version_and_records_backups(tmp_path, monkeypatc
 
 def test_failed_new_step_keeps_old_version_recorded(tmp_path):
     lib = tmp_path / "Games"
-    eng, game = install_v1(tmp_path, elevator=FakeElevator(exit_codes={str(lib / "Pawprints" / "fix.exe"): 2}))
+    eng, game = install_v1(tmp_path, elevator=FakeElevator(exit_codes={str(lib / "pawprints" / "fix.exe"): 2}))
     publish(eng, {**V2, "fix.exe": b"fix"}, steps=[{"action": "run", "path": "fix.exe"}])
     assert fails(run, eng, "update").message == messages.STEP_RUN_FAILED.format(name="fix.exe", code=2)
     rec = record(eng)
@@ -363,7 +363,7 @@ def test_repair_reproduces_file_steps(tmp_path):
     entry["extras"] = []
     eng = make_engine(tmp_path, [entry], fetcher=FakeFetcher(routes))
     run(eng, "install")
-    game = tmp_path / "Games" / "Pawprints"
+    game = tmp_path / "Games" / "pawprints"
     (game / "pawprints.exe").unlink()
     run(eng, "repair")
     assert snapshot(game) == {"pawprints.exe": b"exe"}
@@ -429,7 +429,7 @@ def test_uninstall_with_box_ticked_recycles_and_deletes_record(tmp_path):
 
 def test_uninstall_undoes_system_steps_but_not_runtimes(tmp_path):
     lib = tmp_path / "Games"
-    dll = lib / "Pawprints" / "bass.dll"
+    dll = lib / "pawprints" / "bass.dll"
     present_at_unregister = []
 
     class WatchingElevator(FakeElevator):
@@ -469,8 +469,24 @@ def test_uninstall_undoes_system_steps_but_not_runtimes(tmp_path):
 def test_uninstall_works_after_the_game_left_the_catalog(tmp_path):
     eng, game = install_v1(tmp_path, play=False)
     del eng.ctx.entries["pawprints"]
-    r = run(eng, "uninstall")
+    r = run(eng, "uninstall", title="Pawprints")  # the caller's name for it: its folder is no longer named by title
     assert r.title == "Pawprints" and not game.exists() and record(eng) is None
+
+
+def test_a_game_that_left_the_catalog_is_called_by_its_id_when_the_caller_gives_no_title(tmp_path):
+    eng, game = install_v1(tmp_path, play=False)
+    del eng.ctx.entries["pawprints"]
+    assert run(eng, "uninstall").title == "pawprints"
+
+
+def test_a_file_error_names_a_game_that_left_the_catalog_by_the_callers_title(tmp_path, monkeypatch):
+    eng, game = install_v1(tmp_path, play=False)
+    del eng.ctx.entries["pawprints"]
+
+    def locked(*args, **kwargs):
+        raise PermissionError(13, "Permission denied", str(game / "pawprints.exe"))
+    monkeypatch.setattr(jobs.InstallEngine, "_uninstall", locked)
+    assert fails(run, eng, "uninstall", title="Pawprints").message == messages.FILE_LOCKED.format(title="Pawprints")
 
 
 @pytest.mark.parametrize("delete_player_data", [False, True], ids=["box unticked", "box ticked"])
@@ -744,7 +760,7 @@ def test_undo_rebuilds_the_previous_version_with_its_recorded_spec(tmp_path):
     v1["extras"] = []
     eng = make_engine(tmp_path, [v1], fetcher=FakeFetcher(routes))
     run(eng, "install")
-    game = tmp_path / "Games" / "Pawprints"
+    game = tmp_path / "Games" / "pawprints"
     assert snapshot(game) == {"pawprints.exe": b"exe v1", "tool.dat": b"tool"}
     v2 = publish(eng, {"Pawprints v2/pawprints.exe": b"exe v2", "Pawprints v2/tool.dat": b"tool 2"},
                  install={"extract_dir": "Pawprints v2"})
@@ -796,7 +812,7 @@ def test_repair_prefers_the_catalogs_mirror_copy_of_the_recorded_file(tmp_path):
     entry["sources"].append(served_source(routes, mirror_url, data))
     eng = make_engine(tmp_path, [entry], fetcher=FakeFetcher(routes))
     run(eng, "install")
-    game = tmp_path / "Games" / "Pawprints"
+    game = tmp_path / "Games" / "pawprints"
     assert record(eng).source.url == DEV_URL
     eng.ctx.fetcher.routes[DEV_URL] = b"the developer re-uploaded this"
     (game / "pawprints.exe").unlink()
@@ -820,7 +836,7 @@ def test_fresh_install_when_the_records_library_is_gone_undoes_its_old_steps(tmp
     other = tmp_path / "Other"
     eng.ctx.libraries = [{"id": "Other", "path": str(other)}]
     r = eng.run(InstallRequest("install", "pawprints", "Other"), quiet, never)
-    assert r.game["library_id"] == "Other" and (other / "Pawprints" / "pawprints.exe").exists()
+    assert r.game["library_id"] == "Other" and (other / "pawprints" / "pawprints.exe").exists()
     rec = record(eng)
     assert rec.library_id == "Other"
     assert rec.steps[0]["undo"] == {"existed": False, "previous": None, "previous_type": None}

@@ -3,6 +3,7 @@ import json
 
 import pytest
 
+from engine import messages
 from engine.index import DEFAULT_CATALOG_URL, CatalogIndex, normalize_catalog_url
 from tests.engine.fakes import FakeFetcher, publish, sha
 
@@ -45,6 +46,79 @@ def test_changed_meta_downloads_again(tmp_path):
 def test_entries_without_id_skipped(tmp_path):
     _, idx = make(tmp_path, [{"id": "a"}, {"title": "no id"}, "junk"])
     assert set(idx.refresh().entries) == {"a"}
+
+
+GOOD = {"id": "good", "kind": "game", "title": "Good", "genres": ["Racing"], "version": "1.0",
+        "sources": [{"url": "https://example.com/g.zip", "platform": "windows", "install": {"method": "zip"}}]}
+
+
+def test_types_are_checked_as_the_index_is_read(tmp_path):
+    """A wrong type in an install field hides the entry, one in a display field only drops that field, and an id
+    that could not name a file or folder never gets in."""
+    entries = [GOOD, {**GOOD, "id": "bad-sources", "sources": "https://example.com/g.zip"},
+               {**GOOD, "id": "bad-genres", "genres": "Racing", "title": ["Bad"]},
+               {**GOOD, "id": "con"}, {**GOOD, "id": "a" * 101}, {**GOOD, "id": ["good"]}, {**GOOD, "id": "Bad_ID"}]
+    fetcher, idx = make(tmp_path, entries)
+    loaded = idx.refresh().entries
+    assert set(loaded) == {"good", "bad-genres"} and loaded["good"] == GOOD
+    assert loaded["bad-genres"] == {k: v for k, v in GOOD.items() if k not in ("genres", "title")} | {"id": "bad-genres"}
+    assert idx.load_cached().entries == loaded  # the saved copy is read the same way
+
+
+def _publish_doc(fetcher, doc):
+    gz = gzip.compress(json.dumps(doc).encode("utf-8"), mtime=0)
+    fetcher.routes[GZ] = gz
+    fetcher.routes[META] = json.dumps({"schema_version": 2, "sha256": sha(gz), "index_url": "index.json.gz"}).encode()
+    return gz
+
+
+@pytest.mark.parametrize("entries", [{"good": GOOD}, "good", None, 5], ids=["object", "string", "null", "number"])
+def test_an_index_whose_entries_is_not_a_list_is_a_bad_download(tmp_path, entries):
+    """Never an empty catalog saved over a good one."""
+    fetcher, idx = make(tmp_path)
+    idx.refresh()
+    before = {p.name: p.read_bytes() for p in tmp_path.iterdir()}
+    _publish_doc(fetcher, {"schema_version": 2, "entries": entries})
+    s = idx.refresh()
+    assert s.error == messages.CATALOG_BAD_DOWNLOAD and set(s.entries) == {"a", "b"}
+    assert {p.name: p.read_bytes() for p in tmp_path.iterdir()} == before
+
+
+def test_a_newer_index_is_a_newer_index_whatever_shape_its_entries_have(tmp_path):
+    fetcher, idx = make(tmp_path)
+    idx.refresh()
+    _publish_doc(fetcher, {"schema_version": 3, "entries": {"good": GOOD}})
+    s = idx.refresh()
+    assert s.newer_app_needed and s.error is None and set(s.entries) == {"a", "b"}
+
+
+def test_an_index_with_no_entries_list_and_no_saved_copy(tmp_path):
+    fetcher = FakeFetcher()
+    _publish_doc(fetcher, {"schema_version": 2})
+    s = CatalogIndex(tmp_path, BASE, fetcher).refresh()
+    assert s.error == messages.CATALOG_BAD_DOWNLOAD_EMPTY and s.entries == {}
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("change", [{"sha256": 5}, {"sha256": None}, {"sha256": ["a" * 64]}, {"index_url": ["x"]},
+                                    {"index_url": 5}, {"index_url": {"href": "index.json.gz"}}],
+                         ids=["hash number", "hash null", "hash list", "address list", "address number", "address object"])
+def test_a_meta_value_of_the_wrong_type_is_a_bad_download(tmp_path, change):
+    fetcher, idx = make(tmp_path)
+    idx.refresh()
+    publish(fetcher, BASE, [{"id": "z"}])
+    fetcher.routes[META] = json.dumps({**json.loads(fetcher.routes[META]), **change}).encode()
+    s = idx.refresh()
+    assert s.error == messages.CATALOG_BAD_DOWNLOAD and set(s.entries) == {"a", "b"}
+    assert fetcher.calls[GZ] == 1  # nothing was fetched on the word of such a meta
+
+
+def test_a_saved_copy_whose_entries_is_not_a_list_is_not_used(tmp_path):
+    fetcher, idx = make(tmp_path)
+    idx.refresh()
+    (tmp_path / "index.json.gz").write_bytes(gzip.compress(b'{"schema_version": 2, "entries": {"a": {"id": "a"}}}'))
+    assert idx.load_cached().entries == {}
+    assert set(idx.refresh().entries) == {"a", "b"} and fetcher.calls[GZ] == 2  # fetched again
 
 
 def test_version_one_and_two_indexes_both_load(tmp_path):

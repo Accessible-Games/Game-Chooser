@@ -86,6 +86,7 @@ class InstallRequest:
     library_path: Path | None = None
     extras: tuple[str, ...] = ()
     delete_player_data: bool = False
+    title: str = ""  # what to call a game that is no longer in the catalog (only shown); else its id
 
 
 @dataclass
@@ -140,7 +141,7 @@ def blocked_reason(entry: dict, library_path: Path, records: RecordStore, librar
     A folder already at the target that this game's own record doesn't own belongs to the player,
     and is never installed over.
     """
-    target = target_folder(entry, library_path, records, libraries)
+    target = target_folder(entry, library_path)
     if not os.path.lexists(target):
         return None
     owner = records.owner_of_folder(target, libraries)
@@ -256,10 +257,7 @@ class InstallEngine:
 
     def _title_of(self, req: InstallRequest) -> str:
         entry = self.ctx.entries.get(req.catalog_id)
-        if entry is not None:
-            return title_of(entry)
-        rec = self.ctx.records.load(req.catalog_id)
-        return Path(rec.folder).name if rec is not None else req.catalog_id
+        return title_of(entry) if entry is not None else req.title or req.catalog_id
 
     def _run(self, req: InstallRequest, progress: Callable[[Progress], None],
              cancel: Callable[[], bool]) -> JobResult:
@@ -605,7 +603,7 @@ class InstallEngine:
         reason = blocked_reason(entry, library_path, ctx.records, ctx.libraries)
         if reason:
             raise InstallFailed(reason)
-        target = target_folder(entry, library_path, ctx.records, ctx.libraries)
+        target = target_folder(entry, library_path)
         deps = runtimes.plan_runtimes(entry, ctx)  # refuses a dependency cycle
 
         notes: list[str] = []
@@ -1030,7 +1028,7 @@ class InstallEngine:
         """
         ctx = self.ctx
         rec = ctx.records.load(req.catalog_id)
-        title = title_of(entry) if entry else Path(rec.folder).name if rec else req.catalog_id
+        title = self._title_of(req)
         if rec is None:
             raise InstallFailed(messages.NOT_INSTALLED.format(title=title))
         _require_changeable(rec, title, "uninstall")

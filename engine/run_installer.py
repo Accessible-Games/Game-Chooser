@@ -37,8 +37,8 @@ from .records import InstallRecord, InstalledSource, RecordedFile, hash_tree, is
 from .safety import UninstallPlan, _prune_empty_dirs, _resolve_game_path, is_link, remove_unchanged
 from .sources import hash_file
 from .steps import FILE_ACTIONS, StepContext, run_file_steps, run_system_steps, split_steps, undo_steps
-from .uninstall_keys import (folder_from_uninstall_entry, inside, is_missing_program, names_title,
-                             new_uninstall_entries, snapshot_uninstall_keys, split_command, vendor_uninstaller,
+from .uninstall_keys import (folder_from_uninstall_entry, inside, is_missing_program, new_uninstall_entries,
+                             snapshot_uninstall_keys, split_command, vendor_uninstaller,
                              windows_dir)
 
 DEFAULT_SILENT_ARGS = {
@@ -476,51 +476,60 @@ def install(ctx, item: RunItem, target: Path, library_id: str, library_path: Pat
     return record, [*notes, *_apply_system_steps(ctx, record, item.steps)]
 
 
+def _best_entry(candidates: list[tuple[Path, dict, dict[str, str]]],
+                launch_hint: str | None) -> tuple[Path, dict] | None:
+    """The game's own entry among the new Uninstall entries, as (its folder, its values), or None.
+
+    Each candidate is (the entry's folder, its values, the files the install window left in that folder). The
+    game's is the one whose folder holds the catalog's launch file; when none does, the one whose folder holds a
+    new program. Entries of one rank that name more than one folder can't be told apart, so None: a
+    redistributable the installer chained (VC++, OpenAL) registers itself too. An entry's DisplayName is never
+    read: on the site anyone approved to edit can change a game's title, and it must not choose the folder that
+    is recorded, or the uninstall command that is saved and later run.
+    """
+    hint = norm_key(launch_hint) if launch_hint else None
+    with_launch = [c for c in candidates if hint is not None and hint in c[2]]
+    with_program = [c for c in candidates if any(key.endswith(".exe") for key in c[2])]
+    ranked = with_launch or with_program
+    if not ranked or not all(same_folder(ranked[0][0], other[0]) for other in ranked):
+        return None
+    return ranked[0][0], ranked[0][1]
+
+
 def _find_folder(ctx, item: RunItem, target: Path, before: set[str], start: float, end: float,
                  keys_before: dict) -> tuple[Path, bool, str | None] | None:
     """(the game's folder, whether it is the target, the vendor's uninstall command) or None.
 
-    A new Uninstall entry is only taken as the game's if its folder holds files from the install
-    window, and then by preference: its name is the title, its folder has the launch path, or its
-    folder has a new program. So a redistributable the installer chained (VC++, OpenAL) isn't.
+    The target, if the installer wrote there. Else the folder of the new Uninstall entry that is the game's
+    (`_best_entry`, among those whose folders hold files from the install window). Else the folder the player
+    points to.
     """
     new_entries = new_uninstall_entries(keys_before, snapshot_uninstall_keys(ctx.uninstall_reader))
     if _claimed(target, start, end, before, CLOCK_SLACK):
-        return target, True, _matching_uninstaller(new_entries, target, item.title)
-    ranked = []
-    for index, values in enumerate(new_entries):
+        return target, True, _matching_uninstaller(new_entries, target)
+    candidates = []
+    for values in new_entries:
         folder = folder_from_uninstall_entry(values)
         if folder is None or not folder.is_dir() or _unsafe_game_folder(folder, ctx, item.catalog_id):
             continue
         claimed = _claimed(folder, start, end, None, CLOCK_SLACK)
-        if not claimed:
-            continue
-        if names_title(values, item.title):
-            rank = 0
-        elif item.launch_hint and norm_key(item.launch_hint) in claimed:
-            rank = 1
-        elif any(key.endswith(".exe") for key in claimed):
-            rank = 2
-        else:
-            continue
-        ranked.append((rank, index, folder, values))
-    if ranked:
-        _, _, folder, values = min(ranked, key=lambda r: r[:2])
-        return folder, False, vendor_uninstaller(values)
+        if claimed:
+            candidates.append((folder, values, claimed))
+    best = _best_entry(candidates, item.launch_hint)
+    if best is not None:
+        return best[0], False, vendor_uninstaller(best[1])
     folder = ctx.installer_ui.locate_folder(item.title)
     if folder is None or not Path(folder).is_dir() or _unsafe_game_folder(Path(folder), ctx, item.catalog_id):
         return None
-    return Path(folder), False, _matching_uninstaller(new_entries, Path(folder), item.title)
+    return Path(folder), False, _matching_uninstaller(new_entries, Path(folder))
 
 
-def _matching_uninstaller(new_entries: list[dict], folder: Path, title: str) -> str | None:
-    """The uninstaller of the new entry for `folder`, or of the new entry named like the game."""
+def _matching_uninstaller(new_entries: list[dict], folder: Path) -> str | None:
+    """The uninstaller of the new entry that names `folder`. An entry that names no folder (`MsiExec.exe /X{...}`
+    with no InstallLocation) is never taken: only its name could say whose it is."""
     for values in new_entries:
         named = folder_from_uninstall_entry(values)
         if named is not None and same_folder(named, folder):
-            return vendor_uninstaller(values)
-    for values in new_entries:
-        if folder_from_uninstall_entry(values) is None and names_title(values, title):
             return vendor_uninstaller(values)
     return None
 
@@ -830,7 +839,7 @@ def update(ctx, item: RunItem, record: InstallRecord, game_dir: Path, progress, 
         fallback = undo_of["vendor_uninstaller"]
     else:
         fallback = record.vendor_uninstaller
-    record.vendor_uninstaller = _matching_uninstaller(new_entries, game_dir, title) or fallback
+    record.vendor_uninstaller = _matching_uninstaller(new_entries, game_dir) or fallback
     if previous is not KEEP_UNDO_POINT:
         record.previous = previous
         record.previous_unavailable = None

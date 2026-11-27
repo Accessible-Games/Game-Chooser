@@ -50,7 +50,7 @@ def install_both(tmp_path):
     eng = catalog(tmp_path)
     run(eng, "install", "alpha", extras=("series-patch",))
     run(eng, "install", "bravo", extras=("series-patch",))
-    return eng, tmp_path / "Games" / "Alpha", tmp_path / "Games" / "Bravo"
+    return eng, tmp_path / "Games" / "alpha", tmp_path / "Games" / "bravo"
 
 
 def state(eng, folder: Path, id: str):
@@ -80,14 +80,14 @@ def test_installing_with_each_game_gives_two_independent_copies(tmp_path):
         assert rec.extras["series-patch"].sha256 == eng.ctx.entries["series-patch"]["sources"][0]["sha256"]
         assert rec.files["data/patch.dat"].owner == rec.files["data/bonus.dat"].owner == "series-patch"
         assert rec.files[f"{id}.exe"].owner == id
-    assert records.load("alpha").folder == "Alpha" and records.load("bravo").folder == "Bravo"
+    assert records.load("alpha").folder == "alpha" and records.load("bravo").folder == "bravo"
     assert leftovers(eng, tmp_path / "Games") == []
 
 
 def test_installing_the_second_game_leaves_the_first_alone(tmp_path):
     eng = catalog(tmp_path)
     run(eng, "install", "alpha", extras=("series-patch",))
-    alpha = tmp_path / "Games" / "Alpha"
+    alpha = tmp_path / "Games" / "alpha"
     before = state(eng, alpha, "alpha")
     run(eng, "install", "bravo", extras=("series-patch",))
     assert state(eng, alpha, "alpha") == before
@@ -97,7 +97,7 @@ def test_adding_it_later_to_the_second_game_leaves_the_first_alone(tmp_path):
     eng = catalog(tmp_path)
     run(eng, "install", "alpha", extras=("series-patch",))
     run(eng, "install", "bravo")
-    alpha, bravo = tmp_path / "Games" / "Alpha", tmp_path / "Games" / "Bravo"
+    alpha, bravo = tmp_path / "Games" / "alpha", tmp_path / "Games" / "bravo"
     assert not (bravo / "data" / "bonus.dat").exists()
     before = state(eng, alpha, "alpha")
     r = run(eng, "extras", "bravo", extras=("series-patch",))

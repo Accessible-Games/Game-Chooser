@@ -21,6 +21,18 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   The Windows Defender advice (`messages.DEFENDER_PARAGRAPH`, on "no program found" and "executable not
   found") is added on Windows only.
 - **index.py**, **entries.py** - catalog index fetch/cache (`CatalogIndex`, `IndexState`) and entry helpers.
+  **entry_types.py** - the types of the entry fields the app reads, in two tables, checked once for every entry
+  as the index is read (the download and the saved copy alike, `index._entries_by_id`), so the rest of the app
+  reads an entry without asking what type a value is. `checked(entry)`: a wrong type in an install field
+  (`INSTALL_FIELDS`: `kind`, `version`, `self_updating`, `sources` with `install` and `steps`, `launch`,
+  `dependencies`, `extras`, `persist`, `detect`), or a member the code reads without asking that is missing (a
+  source's `url`, a step's `path`), hides the entry; a wrong type in a display field (`DISPLAY_FIELDS`: `title`,
+  `developer`, `genres`, `tags`, `languages`, `contains`, `year`, `description`, `unsupported`, `links`,
+  `pricing`) only leaves that field out, so one slip in how the site writes a display field can't empty the
+  Catalog tab. JSON `null` fits nothing. `wrong_fields(entry)` names what failed. A field the app starts to read
+  goes into one of the two tables. The loader also leaves out an entry whose id fails `entries.is_id`, and an
+  index whose `entries` is not a list, or a meta whose `sha256` or `index_url` is not text, is a bad download
+  (the saved copy is kept), never an empty catalog.
   `platform_sources` skips sources whose `arch` this machine can't run (`runs_on`, `current_arch`: x86 runs on x64
   Windows and Linux; Windows on Arm runs x64 and x86; an Apple Silicon Mac runs x64; pass `machine` in tests).
   **pricing.py** - how `pricing` reads, the Price filter values and the install confirmation's price warning.
@@ -65,7 +77,14 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   work through such a link, changing only the game's own files.
 - **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
   refused; on a Mac other archives keep links that stay inside, see below); **run_installer.py** /
-  **run_actions.py** / **installer_watch.py** - installers that run.
+  **run_actions.py** / **installer_watch.py** - installers that run. When the installer did not write to the
+  target, the game's folder is that of the new Windows uninstall entry `run_installer._best_entry` picks, among
+  the entries whose folders hold files from the install window: the one whose folder holds the catalog's launch
+  file, else the one whose folder holds a new `.exe`. Entries of one rank that name more than one folder are not
+  told apart (an installer may chain a redistributable that registers itself): the player is asked for the folder
+  (`InstallerUI.locate_folder`). An entry's DisplayName is never read, and the saved uninstall command is only
+  ever that of the entry naming the game's folder (`_matching_uninstaller`), because on the site a game's title
+  is an open field.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain
   when the runtime has an elevated step, marker `.gamechooser-runtime.json`), or private COM copies
   (`comfree.py`). By default every runtime the game depends on that has a folder (not an installer that runs)
@@ -86,7 +105,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
 - **Rules written once in `engine/`** (use these, in `engine/` and outside it; never write another copy. Left on
   purpose: `library_actions._same_file` follows links for the `.hta` check, and a Game's "title, else catalog id"
   in `dialogs.py` and `install_service.py` is a game's, not an entry's): `entries.title_of` (an entry's title,
-  else its id), `runs_installer`, `is_web_game`, `dependency_order` (also used for the catalog's visibility, which
+  else its id), `entries.is_id` (the one test of an id the app takes: the catalog's pattern, at most
+  `MAX_ID_LENGTH` characters, and not a name Windows keeps for a device, `paths.is_device_name`; an id names the
+  install folder, the record file and the work folders), `runs_installer`, `is_web_game`, `dependency_order` (also used for the catalog's visibility, which
   further requires each runtime to be usable here); `paths.same_folder` and `folder_key` (as text),
   `same_on_disk`, `is_link`, `is_code`, `walk_files` (skips only linked folders and those `skip` names: backups are
   the player's), `write_atomic` (temp file, then replace; the temp file goes if that fails); `pricing.http_url` (an
@@ -95,7 +116,11 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   errors raised) and `remove_unchanged`; `runtimes.runtime_route` (shared, private or skipped); `errors.check_cancel`.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan (the price warning on installs, `first_run_download_size` added to the size), and
-  target-folder naming (`<library>/<Title>`).
+  target-folder naming: `folders.target_folder` is `<library>/<id>`, always. On the site the title and the
+  developer are open fields, so neither names anything on the player's disk; a folder already there that the
+  game's own record does not own is refused (`jobs.blocked_reason`). A game installed before this keeps the
+  folder its record holds. For a game that is no longer in the catalog the engine has no title: it shows
+  `InstallRequest.title` (the Library's title, set by `InstallService.submit`), else the id.
 
 ## Bundled tools requirement
 

@@ -245,8 +245,9 @@ class InstallService:
 
     def submit(self, action: str, entry_id: str, library_id: str = "", library_path: Path | None = None,
                extras=(), delete_player_data: bool = False) -> Job:
-        request = InstallRequest(action, entry_id, library_id, library_path, tuple(extras), delete_player_data)
-        job = self.queue.submit(request, self._title(entry_id))
+        title = self._title(entry_id)
+        request = InstallRequest(action, entry_id, library_id, library_path, tuple(extras), delete_player_data, title)
+        job = self.queue.submit(request, title)
         if library_id:  # remembered only once the job is queued (submit raises after shutdown)
             self.manager.config["install"]["last_library"] = library_id
             self.manager.save_or_keep(self.manager.save_config, "the last library in config.json")

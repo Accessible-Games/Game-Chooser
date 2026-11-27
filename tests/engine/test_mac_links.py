@@ -67,7 +67,7 @@ def catalog(tmp_path, files=V1):
     routes = {}
     e = mac_game(routes, files)
     engine = make_engine(tmp_path, [e], extractor=LinkExtractor(), fetcher=FakeFetcher(routes))
-    return engine, tmp_path / "Games" / "Game"
+    return engine, tmp_path / "Games" / "game"
 
 
 def mac_game(routes, files, version="1.0"):
