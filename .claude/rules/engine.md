@@ -65,7 +65,14 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   work through such a link, changing only the game's own files.
 - **extract.py** - unpacks with the bundled tools (tar.gz/xz/bz2 with Python's `tarfile`, "data" filter, links
   refused; on a Mac other archives keep links that stay inside, see below); **run_installer.py** /
-  **run_actions.py** / **installer_watch.py** - installers that run.
+  **run_actions.py** / **installer_watch.py** - installers that run. When the installer did not write to the
+  target, the game's folder is that of the new Windows uninstall entry `run_installer._best_entry` picks, among
+  the entries whose folders hold files from the install window: the one whose folder holds the catalog's launch
+  file, else the one whose folder holds a new `.exe`. Entries of one rank that name more than one folder are not
+  told apart (an installer may chain a redistributable that registers itself): the player is asked for the folder
+  (`InstallerUI.locate_folder`). An entry's DisplayName is never read, and the saved uninstall command is only
+  ever that of the entry naming the game's folder (`_matching_uninstaller`), because on the site a game's title
+  is an open field.
 - **runtimes.py** - shared runtimes under `%ProgramData%\GameChooser\runtimes\<id>` (sealed by an elevated chain
   when the runtime has an elevated step, marker `.gamechooser-runtime.json`), or private COM copies
   (`comfree.py`). By default every runtime the game depends on that has a folder (not an installer that runs)

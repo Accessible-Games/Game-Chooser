@@ -13,8 +13,8 @@ from engine.errors import Cancelled, StepError
 from engine.installer_watch import watch_process
 from engine.jobs import InstallRequest
 from engine.records import InstalledSource, InstallRecord
-from engine.run_installer import (_claimed, folder_from_uninstall_entry, installer_command, new_uninstall_entries,
-                                  silent_args_for, snapshot_folder, snapshot_uninstall_keys)
+from engine.run_installer import (_best_entry, _claimed, folder_from_uninstall_entry, installer_command,
+                                  new_uninstall_entries, silent_args_for, snapshot_folder, snapshot_uninstall_keys)
 from engine.uninstall_keys import UNINSTALL_KEYS
 from tests.engine.fakes import (MIRROR, FakeElevator, FakeFetcher, FakeInstallerUI, FakeUninstallKeys, fails,
                                 make_engine, never, put, quiet, reg_step, served_source, sha, snapshot, watch_with,
@@ -855,10 +855,59 @@ def test_shared_folder_with_other_content_is_untracked(tmp_path, monkeypatch):
     assert messages.UNTRACKED_NOTE.format(title="Light Cars") in r.notes
 
 
+# ---- which new Windows entry is the game's: by the catalog's launch file, never by its name -----------------
+
+
+def candidate(folder, *files, name="Something"):
+    """A new uninstall entry for `folder` whose install wrote `files` there."""
+    return Path(folder), {"DisplayName": name}, {f.lower(): f for f in files}
+
+
+def test_the_entry_whose_folder_holds_the_launch_file_is_the_games():
+    redist = candidate("/pf/OpenAL", "oalinst.exe", "OpenAL32.dll", name="Light Cars")
+    game = candidate("/pf/Draconis/LC", "bin/LC.exe", "readme.txt", name="OpenAL")
+    assert _best_entry([redist, game], "bin\\lc.exe") == (game[0], game[1])
+    assert _best_entry([game, redist], "bin/lc.exe") == (game[0], game[1])
+
+
+def test_with_no_launch_file_to_go_by_a_single_folder_with_a_new_program_is_taken():
+    game = candidate("/pf/LC", "lc.exe")
+    assert _best_entry([game], None) == (game[0], game[1])
+    assert _best_entry([game], "gone.exe") == (game[0], game[1])  # the launch path names nothing that was written
+    assert _best_entry([candidate("/pf/Docs", "manual.pdf"), game], None) == (game[0], game[1])
+
+
+def test_two_folders_with_new_programs_are_never_told_apart_by_name():
+    """A chained redistributable (OpenAL, VC++) registers itself too. The title is an open field on the site, so a
+    DisplayName that matches it decides nothing: the player is asked instead."""
+    redist = candidate("/pf/OpenAL", "oalinst.exe", name="OpenAL")
+    game = candidate("/pf/LC", "lc.exe", name="Light Cars")
+    assert _best_entry([redist, game], None) is None
+    assert _best_entry([game, redist], "gone.exe") is None
+
+
+def test_two_entries_for_one_folder_are_one_choice():
+    first = candidate("/pf/LC", "lc.exe", name="Light Cars")
+    second = candidate("/pf/LC/", "lc.exe", name="Light Cars (32-bit)")
+    assert _best_entry([first, second], None) == (first[0], first[1])
+    assert _best_entry([first, second], "lc.exe") == (first[0], first[1])
+
+
+def test_two_folders_that_both_hold_the_launch_file_are_not_told_apart():
+    assert _best_entry([candidate("/pf/A", "game.exe"), candidate("/pf/B", "game.exe")], "game.exe") is None
+
+
+def test_an_entry_with_no_new_program_and_no_launch_file_is_never_the_games():
+    assert _best_entry([candidate("/pf/Docs", "manual.pdf", name="Light Cars")], None) is None
+    assert _best_entry([], "lc.exe") is None
+
+
 # Finding 3: a chained redistributable is neither the game's folder nor its uninstaller.
 
-@pytest.mark.windows
-def test_registry_prefers_the_games_entry_over_a_chained_redistributable(tmp_path):
+
+def chained_redistributable(tmp_path, ui=None, **fields):
+    """An installer that puts OpenAL and the game in Program Files and registers both, OpenAL first, under a
+    DisplayName that is the game's title. Returns (the engine, the game's folder, OpenAL's folder)."""
     routes = {}
     redist = tmp_path / "Program Files" / "OpenAL"
     game = tmp_path / "Program Files" / "Draconis" / "Light Cars"
@@ -869,15 +918,39 @@ def test_registry_prefers_the_games_entry_over_a_chained_redistributable(tmp_pat
     def on_start(exe, args, elevated):
         place_redist(exe, args, elevated)
         place_game(exe, args, elevated)
-        keys.add("AAA OpenAL", {"DisplayName": "OpenAL", "InstallLocation": str(redist),
+        keys.add("AAA OpenAL", {"DisplayName": "Light Cars", "InstallLocation": str(redist),
                                 "UninstallString": f'"{redist}\\oalinst.exe" /U'})
-        keys.add("Light Cars_is1", {"DisplayName": "Light Cars 1.0", "InstallLocation": str(game),
+        keys.add("Light Cars_is1", {"DisplayName": "Draconis game", "InstallLocation": str(game),
                                     "QuietUninstallString": f'"{game}\\unins000.exe" /SILENT'})
-    eng, lib = setup_engine(tmp_path, [run_game(routes, installer={"type": "inno"})], routes,
-                            on_start=on_start, uninstall_reader=keys)
+    eng, lib = setup_engine(tmp_path, [run_game(routes, installer={"type": "inno"}, **fields)], routes,
+                            on_start=on_start, ui=ui, uninstall_reader=keys)
+    return eng, game, redist
+
+
+@pytest.mark.windows
+def test_registry_takes_the_entry_with_the_launch_file_over_a_chained_redistributable(tmp_path):
+    eng, game, redist = chained_redistributable(tmp_path, launch={"windows": {"path": "lc.exe"}})
     install(eng)
     rec = eng.ctx.records.load("lightcars")
     assert Path(rec.folder) == game and rec.vendor_uninstaller == f'"{game}\\unins000.exe" /SILENT'
+
+
+@pytest.mark.windows
+def test_with_no_launch_path_the_player_says_which_of_two_registered_folders_is_the_games(tmp_path):
+    ui = FakeInstallerUI(locate=tmp_path / "Program Files" / "Draconis" / "Light Cars")
+    eng, game, redist = chained_redistributable(tmp_path, ui=ui)
+    install(eng)
+    rec = eng.ctx.records.load("lightcars")
+    assert "locate" in ui.events
+    assert Path(rec.folder) == game and rec.vendor_uninstaller == f'"{game}\\unins000.exe" /SILENT'
+
+
+@pytest.mark.windows
+def test_with_no_launch_path_and_no_answer_a_chained_redistributable_is_never_recorded(tmp_path):
+    ui = FakeInstallerUI(locate=None)
+    eng, game, redist = chained_redistributable(tmp_path, ui=ui)
+    assert fails(install, eng).message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
+    assert eng.ctx.records.load("lightcars") is None and (redist / "oalinst.exe").exists()
 
 
 def test_a_lone_redistributable_entry_is_not_the_games_uninstaller(tmp_path):
