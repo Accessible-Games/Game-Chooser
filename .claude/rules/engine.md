@@ -21,6 +21,18 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   The Windows Defender advice (`messages.DEFENDER_PARAGRAPH`, on "no program found" and "executable not
   found") is added on Windows only.
 - **index.py**, **entries.py** - catalog index fetch/cache (`CatalogIndex`, `IndexState`) and entry helpers.
+  **entry_types.py** - the types of the entry fields the app reads, in two tables, checked once for every entry
+  as the index is read (the download and the saved copy alike, `index._entries_by_id`), so the rest of the app
+  reads an entry without asking what type a value is. `checked(entry)`: a wrong type in an install field
+  (`INSTALL_FIELDS`: `kind`, `version`, `self_updating`, `sources` with `install` and `steps`, `launch`,
+  `dependencies`, `extras`, `persist`, `detect`), or a member the code reads without asking that is missing (a
+  source's `url`, a step's `path`), hides the entry; a wrong type in a display field (`DISPLAY_FIELDS`: `title`,
+  `developer`, `genres`, `tags`, `languages`, `contains`, `year`, `description`, `unsupported`, `links`,
+  `pricing`) only leaves that field out, so one slip in how the site writes a display field can't empty the
+  Catalog tab. JSON `null` fits nothing. `wrong_fields(entry)` names what failed. A field the app starts to read
+  goes into one of the two tables. The loader also leaves out an entry whose id fails `entries.is_id`, and an
+  index whose `entries` is not a list, or a meta whose `sha256` or `index_url` is not text, is a bad download
+  (the saved copy is kept), never an empty catalog.
   `platform_sources` skips sources whose `arch` this machine can't run (`runs_on`, `current_arch`: x86 runs on x64
   Windows and Linux; Windows on Arm runs x64 and x86; an Apple Silicon Mac runs x64; pass `machine` in tests).
   **pricing.py** - how `pricing` reads, the Price filter values and the install confirmation's price warning.

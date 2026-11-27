@@ -1,4 +1,4 @@
-"""Catalog index: fetch, verify, and cache for offline use."""
+"""Catalog index: fetch, verify, check the types of what it holds, and cache for offline use."""
 
 import gzip
 import hashlib
@@ -9,6 +9,8 @@ from pathlib import Path
 from urllib.parse import urljoin, urlsplit
 
 from engine import messages
+from engine.entries import is_id
+from engine.entry_types import checked
 from engine.errors import DownloadError
 from engine.paths import write_atomic
 
@@ -57,10 +59,16 @@ def _decode(gz: bytes) -> dict:
 
 
 def _entries_by_id(doc: dict) -> dict[str, dict]:
+    """The index's entries as the app may read them (`entry_types.checked`), by id. An entry that is not an
+    object, has no id the app takes (`entries.is_id`) or has an install field of the wrong type is left out.
+    Raises ValueError when `entries` is not a list: that is no index, not an empty one."""
     entries = doc.get("entries")
+    if not isinstance(entries, list):
+        raise ValueError("index has no list of entries")
     out: dict[str, dict] = {}
-    for entry in entries if isinstance(entries, list) else []:
-        if isinstance(entry, dict) and isinstance(entry.get("id"), str) and entry["id"]:
+    for entry in entries:
+        entry = checked(entry)
+        if entry is not None and is_id(entry.get("id")):
             out[entry["id"]] = entry
     return out
 
@@ -81,7 +89,10 @@ class CatalogIndex:
             return None
         if _schema_of(doc) > SUPPORTED_SCHEMA_VERSION:
             return None
-        state = IndexState(_entries_by_id(doc))
+        try:
+            state = IndexState(_entries_by_id(doc))
+        except ValueError:
+            return None
         return state, hashlib.sha256(gz).hexdigest()
 
     def load_cached(self) -> IndexState:
@@ -107,8 +118,11 @@ class CatalogIndex:
             meta = json.loads(self.fetcher.get_bytes(urljoin(self.base_url, META_NAME), max_bytes=1_000_000))
             if not isinstance(meta, dict):
                 raise ValueError("meta is not an object")
-            wanted = str(meta["sha256"]).lower()
-            gz_url = urljoin(self.base_url, str(meta.get("index_url") or GZ_NAME))
+            wanted, index_url = meta["sha256"], meta.get("index_url", GZ_NAME)
+            if not isinstance(wanted, str) or not isinstance(index_url, str):
+                raise ValueError("meta's sha256 or index_url is not text")
+            wanted = wanted.lower()
+            gz_url = urljoin(self.base_url, index_url or GZ_NAME)
         except DownloadError:
             return self._fallback(messages.CATALOG_OFFLINE, messages.CATALOG_OFFLINE_EMPTY)
         except (ValueError, KeyError):
@@ -134,7 +148,10 @@ class CatalogIndex:
         if _schema_of(doc) > SUPPORTED_SCHEMA_VERSION:
             return self._fallback(messages.CATALOG_NEWER_APP, messages.CATALOG_NEWER_APP, newer=True)
 
-        state = IndexState(_entries_by_id(doc))
+        try:
+            state = IndexState(_entries_by_id(doc))
+        except ValueError:
+            return self._fallback(messages.CATALOG_BAD_DOWNLOAD, messages.CATALOG_BAD_DOWNLOAD_EMPTY)
         try:
             self._write_cache(gz, json.dumps(meta).encode("utf-8"))
         except OSError:

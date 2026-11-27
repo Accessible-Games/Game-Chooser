@@ -160,6 +160,21 @@ def test_a_game_that_left_the_catalog_is_uninstalled_under_the_title_games_json_
     assert job.request.title == "Entombed" and rig.listener.result_for(job).title == "Entombed"
 
 
+def test_an_installed_game_whose_entry_arrives_with_a_wrong_type_stays_in_the_library_and_uninstalls(rig):
+    """The index check hides such an entry, which for an installed game is the same as leaving the catalog."""
+    lib = rig.library()
+    entry = game_entry(rig.routes)
+    rig.publish(entry)
+    rig.run("install", "entombed", library_id=lib["id"])
+    rig.publish({**entry, "sources": "https://example.com/entombed.zip"}, {**entry, "id": "other", "year": "x"})
+    assert set(rig.service.entries) == {"other"} and "year" not in rig.service.entries["other"]
+    game = rig.manager.catalog_game("entombed")
+    assert game.title == "Entombed" and rig.service.record_for(game) is not None
+    assert (rig.tmp_path / "Games" / "entombed" / "entombed.exe").exists()
+    rig.run("uninstall", "entombed")
+    assert rig.manager.catalog_game("entombed") is None and not (rig.tmp_path / "Games" / "entombed").exists()
+
+
 def test_load_cached_index_reads_what_refresh_saved(rig):
     rig.publish(game_entry(rig.routes))
     rig.fetcher.routes.clear()
