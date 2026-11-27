@@ -176,7 +176,7 @@ def test_undo_whose_previous_download_is_gone_changes_nothing(tmp_path, kind, se
 def test_repair_runs_the_recorded_system_steps_under_the_update_rules(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"}, steps=[reg_step("Path", "{dir}", r"Software\LightCars")])
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, V1))
     install(eng)
     applied = record(eng).steps
@@ -318,7 +318,7 @@ def test_undo_of_a_run_update_over_an_archive_install_rebuilds_the_archive(tmp_p
     data = zip_bytes(V1)
     e = run_game(routes)
     e["sources"] = [served_source(routes, f"{MIRROR}{sha(data)}/lc.zip", data)]
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e], routes)
     install(eng)
     put(target, "cfg.ini", b"volume=9 mine")
@@ -379,7 +379,7 @@ def test_archive_update_of_an_unwritable_folder_outside_the_libraries_refuses_pl
 def run_game_with_music(tmp_path, steps=None):
     routes = {}
     e = run_game(routes, installer={"type": "inno"}, extras=[{"id": "lc-music", "required": False}])
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e, music_extra(routes, steps)], routes, on_start=writes(target, V1))
     install(eng)
     put(target, "cfg.ini", b"volume=9 mine")
@@ -416,7 +416,7 @@ def test_extra_with_its_own_installer_is_refused_on_a_run_record_as_on_any_game(
     e = run_game(routes, installer={"type": "inno"}, extras=[{"id": "lc-patch", "required": False}])
     x = run_game(routes, id="lc-patch", title="Patch", setup=b"patch setup", installer={"type": "inno"},
                  kind="extra", extends=["lightcars"])
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, V1))
     install(eng)
     assert fails(run, eng, "extras", extras=("lc-patch",)).message == messages.EXTRA_NOT_SUPPORTED.format(extra="Patch")
@@ -680,7 +680,7 @@ def test_undo_keeps_a_path_the_older_version_also_had_and_records_what_it_holds(
 def test_a_fresh_install_whose_extras_made_a_backup_has_no_undo_point(tmp_path, monkeypatch):
     routes = {}
     e, x = run_game_with_patch(routes)
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, {"lc.exe": b"exe"}))
     real = run_actions.copy_installed_files
 

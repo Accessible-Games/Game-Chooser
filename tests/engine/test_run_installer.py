@@ -153,17 +153,17 @@ def test_before_snapshot_claims_new_files_whatever_their_times(tmp_path):
 def test_silent_install_into_target_is_tracked(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"})
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.exe": b"exe", "sfx/a.wav": b"a"}))
     r = install(eng)
     exe, args, elevated = eng.ctx.elevator.calls[0]
     assert Path(exe).name == "setup.exe" and args.endswith(f'/DIR="{target}"') and elevated is False
     rec = eng.ctx.records.load("lightcars")
-    assert rec.method == "run" and rec.tracked and rec.library_id == "Games" and rec.folder == "Light Cars"
+    assert rec.method == "run" and rec.tracked and rec.library_id == "Games" and rec.folder == "lightcars"
     assert set(rec.files) == {"lc.exe", "sfx/a.wav"} and rec.files["lc.exe"].sha256 == sha(b"exe")
     assert rec.launch_path == "lc.exe" and rec.vendor_uninstaller is None
     assert rec.source.install["installer"]["type"] == "inno"
-    assert r.game["launch_path"] == "Light Cars/lc.exe" and r.game["library_id"] == "Games"
+    assert r.game["launch_path"] == "lightcars/lc.exe" and r.game["library_id"] == "Games"
     assert r.notes == []
     assert not any(eng.ctx.work_root.rglob("setup.exe"))  # the downloaded installer is not kept
 
@@ -171,7 +171,7 @@ def test_silent_install_into_target_is_tracked(tmp_path):
 def test_interactive_announces_before_launch(tmp_path):
     routes = {}
     e = run_game(routes)  # type "other", no silent_args: the player drives the installer
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     ui = FakeInstallerUI()
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.exe": b"exe"}, ui.events), ui=ui)
     install(eng)
@@ -185,7 +185,7 @@ def test_located_in_target_claims_only_new_files(tmp_path, monkeypatch):
     monkeypatch.setattr(run_installer, "CLOCK_SLACK", 0.0)
     routes = {}
     e = run_game(routes, installer={"type": "nsis"})
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.exe": b"exe", "data/x.dat": b"x"}))
     put(target, "readme.txt", b"the player's notes")
     time.sleep(0.05)
@@ -217,7 +217,7 @@ def test_registry_diff_locates_and_records_vendor_uninstaller(tmp_path):
     rec = eng.ctx.records.load("lightcars")
     assert rec.vendor_uninstaller == f'"{program}\\unins000.exe" /SILENT'
     assert Path(rec.folder) == program and rec.tracked and set(rec.files) == {"lightcars.exe", "unins000.exe"}
-    assert not (lib / "Light Cars").exists()
+    assert not (lib / "lightcars").exists()
     assert r.game["launch_path"] == str(program / "lightcars.exe")
 
 
@@ -281,7 +281,7 @@ def test_nothing_found_and_player_gives_up_fails_plainly(tmp_path):
     ui = FakeInstallerUI(locate=None)
     eng, lib = setup_engine(tmp_path, [run_game(routes)], routes, ui=ui)
     assert fails(install, eng).message == messages.INSTALL_FOLDER_NOT_FOUND.format(title="Light Cars")
-    assert eng.ctx.records.load("lightcars") is None and not (lib / "Light Cars").exists()
+    assert eng.ctx.records.load("lightcars") is None and not (lib / "lightcars").exists()
 
 
 def test_player_located_drive_root_is_not_accepted(tmp_path):
@@ -294,7 +294,7 @@ def test_player_located_drive_root_is_not_accepted(tmp_path):
 def test_silent_installer_error_code_fails_and_removes_its_files(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"})
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     elevator = FakeElevator()
     place = writes(target, {"lc.exe": b"half"})
 
@@ -310,7 +310,7 @@ def test_silent_installer_error_code_fails_and_removes_its_files(tmp_path):
 
 def test_interactive_error_code_after_done_is_a_note(tmp_path):
     routes = {}
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     elevator = FakeElevator()
     place = writes(target, {"lc.exe": b"exe"})
 
@@ -327,7 +327,7 @@ def test_interactive_error_code_after_done_is_a_note(tmp_path):
 def test_cancel_while_waiting_removes_only_new_target_files(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"})
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e], routes, process_watch=watch_with())
     cancel = hangs_once_started(eng, writes(target, {"lc.exe": b"exe", "data/a.dat": b"a"}))
     with pytest.raises(Cancelled):
@@ -338,7 +338,7 @@ def test_cancel_while_waiting_removes_only_new_target_files(tmp_path):
 
 def test_cancel_by_the_player_in_the_installer_ui(tmp_path):
     routes = {}
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [run_game(routes)], routes, ui=FakeInstallerUI(done=False))
     hangs_once_started(eng, writes(target, {"lc.exe": b"exe"}))
     with pytest.raises(Cancelled):
@@ -349,7 +349,7 @@ def test_cancel_by_the_player_in_the_installer_ui(tmp_path):
 def test_elevated_installer_requested_when_flagged(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno", "elevation": True})
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.exe": b"exe"}),
                             process_watch=watch_with())
     install(eng)
@@ -359,7 +359,7 @@ def test_elevated_installer_requested_when_flagged(tmp_path):
 def test_system_steps_of_a_run_source_are_applied_and_recorded(tmp_path):
     routes = {}
     e = run_game(routes, installer={"type": "inno"}, steps=[reg_step("Path", "{dir}", r"Software\LightCars")])
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.exe": b"exe"}))
     install(eng)
     rec = eng.ctx.records.load("lightcars")
@@ -379,7 +379,7 @@ def test_routes_on_the_source_that_was_fetched(tmp_path):
     eng, lib = setup_engine(tmp_path, [e], routes)
     install(eng)
     rec = eng.ctx.records.load("lightcars")
-    assert rec.method == "zip" and (lib / "Light Cars" / "lc.exe").read_bytes() == b"zip exe"
+    assert rec.method == "zip" and (lib / "lightcars" / "lc.exe").read_bytes() == b"zip exe"
     assert eng.ctx.elevator.calls == []
 
 
@@ -407,7 +407,7 @@ def run_game_with_patch(routes, patch_route=True):
 def test_run_mode_game_gets_its_required_archive_extra_after_the_installer(tmp_path):
     routes = {}
     e, x = run_game_with_patch(routes)
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, {"lc.exe": b"exe", "data.dat": b"d"}))
     r = install(eng)
     assert (target / "lc.exe").read_bytes() == b"exe patched" and (target / "patch.dat").read_bytes() == b"p"
@@ -425,7 +425,7 @@ def test_run_mode_game_gets_its_required_archive_extra_after_the_installer(tmp_p
 def test_a_bad_extra_download_fails_before_the_installer_starts(tmp_path):
     routes = {}
     e, x = run_game_with_patch(routes, patch_route=False)
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [e, x], routes, on_start=writes(target, {"lc.exe": b"exe"}))
     assert fails(install, eng).message.startswith(messages.NO_SOURCE.format(title="Patch", reasons="").strip())
     assert eng.ctx.elevator.calls == [] and not target.exists() and eng.ctx.records.load("lightcars") is None
@@ -454,7 +454,7 @@ def installed_run_game(tmp_path, files=None, vendor=None, elevation=False):
     """Light Cars installed by a run-mode installer and then played."""
     routes = {}
     e = run_game(routes, installer={"type": "inno", "elevation": elevation})
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     files = files or {"lc.exe": b"exe v1", "cfg.ini": b"volume=5", "sfx/a.wav": b"a"}
     if vendor is True:  # the installer also wrote its uninstaller and registered it
         files = {**files, "unins000.exe": b"uninstaller"}
@@ -498,7 +498,7 @@ def test_run_mode_update_restores_player_files_keeps_new(tmp_path):
     rec = eng.ctx.records.load("lightcars")
     assert set(rec.files) == {"lc.exe", "cfg.ini.new", "sfx/a.wav", "sfx/b.wav"}
     assert rec.files["lc.exe"].sha256 == sha(b"exe v2") and rec.source.version == "2.0" and rec.method == "run"
-    assert r.action == "update" and r.game["launch_path"] == "Light Cars/lc.exe"
+    assert r.action == "update" and r.game["launch_path"] == "lightcars/lc.exe"
     assert not (eng.ctx.work_root / ".setaside" / "lightcars").exists()
 
 
@@ -574,7 +574,7 @@ def test_failed_update_sets_new_files_aside_and_a_retry_neither_clears_nor_refus
     eng.ctx.elevator.exit_codes.clear()
     eng.ctx.elevator.on_start = writes(target, {"lc.exe": b"exe v2"})
     r = eng.run(InstallRequest("update", "lightcars"), quiet, never)
-    assert r.game["launch_path"] == "Light Cars/lc.exe" and len(snapshot(aside)) == 2
+    assert r.game["launch_path"] == "lightcars/lc.exe" and len(snapshot(aside)) == 2
 
 
 def test_failed_restore_keeps_set_aside_copies(tmp_path, monkeypatch):
@@ -665,7 +665,7 @@ def test_vendor_uninstall_refuses_before_undoing_anything_while_set_aside_files_
 
 @pytest.mark.windows
 def test_missing_vendor_uninstaller_falls_back_to_the_record(tmp_path):
-    gone = tmp_path / "Games" / "Light Cars" / "unins000.exe"
+    gone = tmp_path / "Games" / "lightcars" / "unins000.exe"
     eng, routes, target = installed_run_game(tmp_path, vendor=f'"{gone}" /SILENT')
     r = eng.run(InstallRequest("uninstall", "lightcars"), quiet, never)
     assert messages.VENDOR_UNINSTALLER_MISSING.format(title="Light Cars") in r.notes
@@ -882,7 +882,7 @@ def test_registry_prefers_the_games_entry_over_a_chained_redistributable(tmp_pat
 
 def test_a_lone_redistributable_entry_is_not_the_games_uninstaller(tmp_path):
     routes = {}
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     keys = FakeUninstallKeys()
     place = writes(target, {"lc.exe": b"exe"})
 
@@ -951,7 +951,7 @@ def test_update_replaces_a_players_changed_exe_without_a_copy(tmp_path):
 
 def test_silent_installer_offers_done_when_there_is_a_ui(tmp_path):
     routes = {}
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     ui = FakeInstallerUI(early=True)
     eng, lib = setup_engine(tmp_path, [run_game(routes, installer={"type": "inno"})], routes,
                             on_start=writes(target, {"lc.exe": b"exe"}), ui=ui,
@@ -965,7 +965,7 @@ def test_silent_installer_offers_done_when_there_is_a_ui(tmp_path):
 def test_cancel_of_an_installer_that_wont_stop_cleans_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(run_installer, "STOP_SECONDS", 0.2)
     routes = {}
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     eng, lib = setup_engine(tmp_path, [run_game(routes, installer={"type": "inno", "elevation": True})], routes,
                             process_watch=watch_with(unstoppable=True))
     error = fails(install, eng, cancel=hangs_once_started(eng, writes(target, {"lc.exe": b"exe"})))
@@ -999,7 +999,7 @@ def test_update_file_step_that_would_delete_a_players_file_is_refused(tmp_path):
 
 def test_install_file_steps_run_on_the_installs_files(tmp_path):
     routes = {}
-    target = tmp_path / "Games" / "Light Cars"
+    target = tmp_path / "Games" / "lightcars"
     e = run_game(routes, installer={"type": "inno"}, steps=[{"action": "move", "from": "lc.ex_", "to": "lc.exe"}])
     eng, lib = setup_engine(tmp_path, [e], routes, on_start=writes(target, {"lc.ex_": b"exe"}))
     install(eng)
@@ -1224,7 +1224,7 @@ def test_cancel_at_the_announce_never_starts_the_installer(tmp_path):
     with pytest.raises(Cancelled):
         install(eng, cancel=ui.cancel)
     assert ui.events == ["announce"] and eng.ctx.elevator.calls == []
-    assert eng.ctx.records.load("lightcars") is None and not (lib / "Light Cars").exists()
+    assert eng.ctx.records.load("lightcars") is None and not (lib / "lightcars").exists()
 
 
 def test_cancel_at_the_announce_of_an_update_puts_the_players_files_back(tmp_path):

@@ -282,11 +282,6 @@ def runs_installer(source: dict) -> bool:
     return install.get("method") == "installer" and (install.get("installer") or {}).get("mode") == "run"
 
 
-def first_developer(entry: dict) -> str:
-    developers = entry.get("developer") or []
-    return developers[0] if developers else ""
-
-
 def is_mirror_url(url: str) -> bool:
     return url.startswith(_MIRROR_PREFIX)
 

@@ -86,7 +86,9 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
 - **Rules written once in `engine/`** (use these, in `engine/` and outside it; never write another copy. Left on
   purpose: `library_actions._same_file` follows links for the `.hta` check, and a Game's "title, else catalog id"
   in `dialogs.py` and `install_service.py` is a game's, not an entry's): `entries.title_of` (an entry's title,
-  else its id), `runs_installer`, `is_web_game`, `dependency_order` (also used for the catalog's visibility, which
+  else its id), `entries.is_id` (the one test of an id the app takes: the catalog's pattern, at most
+  `MAX_ID_LENGTH` characters, and not a name Windows keeps for a device, `paths.is_device_name`; an id names the
+  install folder, the record file and the work folders), `runs_installer`, `is_web_game`, `dependency_order` (also used for the catalog's visibility, which
   further requires each runtime to be usable here); `paths.same_folder` and `folder_key` (as text),
   `same_on_disk`, `is_link`, `is_code`, `walk_files` (skips only linked folders and those `skip` names: backups are
   the player's), `write_atomic` (temp file, then replace; the temp file goes if that fails); `pricing.http_url` (an
@@ -95,7 +97,11 @@ Installs are Windows-focused (registry, UAC, `bin/*.exe`).
   errors raised) and `remove_unchanged`; `runtimes.runtime_route` (shared, private or skipped); `errors.check_cancel`.
 - **queue.py**, **status.py**, **plan.py**, **folders.py** - the job queue, library status, the install
   confirmation plan (the price warning on installs, `first_run_download_size` added to the size), and
-  target-folder naming (`<library>/<Title>`).
+  target-folder naming: `folders.target_folder` is `<library>/<id>`, always. On the site the title and the
+  developer are open fields, so neither names anything on the player's disk; a folder already there that the
+  game's own record does not own is refused (`jobs.blocked_reason`). A game installed before this keeps the
+  folder its record holds. For a game that is no longer in the catalog the engine has no title: it shows
+  `InstallRequest.title` (the Library's title, set by `InstallService.submit`), else the id.
 
 ## Bundled tools requirement
 
