@@ -1,8 +1,8 @@
 import pytest
 
 from engine.entries import (
-    extras_of, game_fields, is_mirror_url, is_web_game, mirror_url_for, platform_sources,
-    dependency_order, places, visible_games,
+    MAX_ID_LENGTH, extras_of, game_fields, is_id, is_mirror_url, is_readable, is_web_game, mirror_url_for,
+    platform_sources, dependency_order, places, visible_games,
 )
 from engine.stores import stores_of
 from tests.engine.fakes import fails
@@ -48,6 +48,24 @@ def test_id_outside_the_catalogs_pattern_hides_the_entry(bad_id):
     """M9: ids become folder names and appear in elevated command lines; only ^[a-z0-9]+(-[a-z0-9]+)*$ is read."""
     assert visible_games({bad_id: entry(bad_id)}, "windows") == []
     assert visible_games({"ok-id-2": entry("ok-id-2")}, "windows")
+
+
+@pytest.mark.parametrize("good", ["a", "a" * MAX_ID_LENGTH, "con-quest", "com10", "lpt", "1812-heart-of-winter"])
+def test_an_id_the_app_takes(good):
+    assert MAX_ID_LENGTH == 100 and is_id(good)
+
+
+@pytest.mark.parametrize("bad", ["con", "prn", "aux", "nul", "com0", "com1", "com9", "lpt0", "lpt9",
+                                 "a" * (MAX_ID_LENGTH + 1), "Bad_ID", "CON", "a--b", "", 5, None, ["a"], True])
+def test_an_id_the_app_refuses(bad):
+    """An id names the install folder, the record file and the work folders: never a Windows device name, never
+    longer than the site allows, never anything but a string."""
+    assert not is_id(bad)
+
+
+def test_a_device_name_id_hides_the_entry():
+    assert not is_readable(entry("aux"))
+    assert visible_games({"aux": entry("aux"), "auxiliary": entry("auxiliary")}, "windows") == [entry("auxiliary")]
 
 
 def test_malformed_sources_steps_and_extras_hide_or_skip_never_raise():

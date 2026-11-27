@@ -13,6 +13,7 @@ from urllib.parse import quote
 
 from . import messages
 from .errors import InstallFailed
+from .paths import is_device_name
 from .stores import Store, stores_of
 
 KNOWN_KINDS = frozenset({"game", "extra", "runtime", "access-mod"})
@@ -23,8 +24,10 @@ KNOWN_STEP_ACTIONS = frozenset({"copy", "move", "delete", "registry", "register"
 KNOWN_ARCHS = frozenset({"x64", "x86", "arm64", "universal"})
 
 _MIRROR_PREFIX = "https://files.accessiblegames.net/files/"
-# The catalog schema's id pattern. Ids become folder names and appear in elevated command lines.
+# The catalog's id pattern. An id names the game's install folder, its record file and its work folders, and
+# appears in elevated command lines.
 _ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
+MAX_ID_LENGTH = 100  # the site's limit
 _PLATFORM_LABELS = {"windows": "Windows", "macos": "macOS", "linux": "Linux", "web": "Web"}
 
 
@@ -148,10 +151,17 @@ def _source_is_readable(source: object) -> bool:
                                            for step in steps)
 
 
+def is_id(value: object) -> bool:
+    """The one test of an id this app takes: the catalog's pattern, no longer than the site allows, and not a name
+    Windows keeps for a device."""
+    return (isinstance(value, str) and len(value) <= MAX_ID_LENGTH and _ID.fullmatch(value) is not None
+            and not is_device_name(value))
+
+
 def is_readable(entry: dict) -> bool:
     if entry.get("kind") not in KNOWN_KINDS:
         return False
-    if not isinstance(entry.get("id"), str) or not _ID.fullmatch(entry["id"]):
+    if not is_id(entry.get("id")):
         return False
     sources = entry.get("sources") or []
     return isinstance(sources, list) and all(_source_is_readable(s) for s in sources)
@@ -236,7 +246,7 @@ def places(entry: dict, entries: dict, platform: str) -> list[Place]:
 
 def visible_games(entries: dict, platform: str) -> list[dict]:
     return [e for e in entries.values()
-            if e.get("kind") == "game" and isinstance(e.get("id"), str) and _ID.fullmatch(e["id"])
+            if e.get("kind") == "game" and is_id(e.get("id"))
             and places(e, entries, platform)]
 
 

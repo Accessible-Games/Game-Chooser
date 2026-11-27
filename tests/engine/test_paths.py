@@ -3,7 +3,7 @@ from datetime import date
 import pytest
 
 from engine.errors import UnsafePath
-from engine.paths import (backup_dir_name, is_engine_dir, norm_key, walk_files,
+from engine.paths import (backup_dir_name, is_device_name, is_engine_dir, norm_key, walk_files,
                           safe_join, sanitize_title, unique_path)
 
 
@@ -12,6 +12,12 @@ def test_sanitize_title():
     assert sanitize_title("con") == "con_"
     assert sanitize_title("  Game.  ") == "Game"
     assert sanitize_title("///") == "Game"
+    assert sanitize_title("lpt0") == "lpt0_"
+
+
+def test_is_device_name():
+    assert all(is_device_name(name) for name in ("con", "PRN", "Aux", "nul", "COM0", "com9", "lpt0", "LPT9"))
+    assert not any(is_device_name(name) for name in ("com10", "lpt", "console", "con-quest", ""))
 
 
 def test_safe_join_rejects_escapes(tmp_path):

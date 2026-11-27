@@ -18,8 +18,13 @@ EXECUTABLE_CODE_SUFFIXES = frozenset({".exe", ".dll", ".ocx"})
 KEEPS_LINKS = sys.platform == "darwin"
 LINK_PREFIX = "link:"
 
-_RESERVED = {"CON", "PRN", "AUX", "NUL"} | {f"{p}{i}" for p in ("COM", "LPT") for i in range(1, 10)}
+_RESERVED = {"CON", "PRN", "AUX", "NUL"} | {f"{p}{i}" for p in ("COM", "LPT") for i in range(10)}
 _ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def is_device_name(name: str) -> bool:
+    """True for a name Windows keeps for a device (CON, NUL, COM1...), which can't name a file or folder there."""
+    return name.upper() in _RESERVED
 
 
 def sanitize_title(title: str) -> str:
@@ -27,7 +32,7 @@ def sanitize_title(title: str) -> str:
     name = re.sub(r"\s+", " ", name).strip().rstrip(". ")
     if not name:
         return "Game"
-    if name.upper() in _RESERVED:
+    if is_device_name(name):
         name += "_"
     return name
 
